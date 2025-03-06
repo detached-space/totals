@@ -65,7 +65,10 @@ class BanksSummaryList extends StatelessWidget {
                               color: Colors.grey,
                             ),
                           ),
-                          Text(bank.totalCredit.toStringAsFixed(2) + " ETB",
+                          Text(
+                              (bank.totalCredit - bank.totalDebit)
+                                      .toStringAsFixed(2) +
+                                  " ETB",
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,

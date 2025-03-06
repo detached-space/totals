@@ -21,7 +21,6 @@ class _BankDetailState extends State<BankDetail> {
   @override
   Widget build(BuildContext context) {
     // Replace with your actual data fetching logic
-
     return Column(
       children: [
         Card(
@@ -103,8 +102,13 @@ class _BankDetailState extends State<BankDetail> {
                     ),
                     Container(
                       width: double.infinity,
-                      child: const Text(
-                        "1,345,234,312.93 ETB*",
+                      child: Text(
+                        widget.accountSummaries
+                            .fold(
+                                0.0,
+                                (sum, bank) =>
+                                    sum + bank.totalCredit - bank.totalDebit)
+                            .toString(),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 20,

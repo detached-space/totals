@@ -404,7 +404,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.reload();
     List<String>? transactionExists = prefs.getStringList('transactions');
-    print(transactionExists);
+    print(transactionExists?.length);
     List<String>? allAccounts = prefs.getStringList('accounts');
     List<String>? allTransactions = prefs.getStringList('transactions');
 
@@ -422,16 +422,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       List<BankSummary> tempBankSummaries =
           groupedAccounts.entries.map((entry) {
         int bankId = entry.key;
+        // find all the transactions for this bankId only
+        List<Map<String, dynamic>> bankTransactions = allTransactions
+                ?.map((transaction) =>
+                    jsonDecode(transaction) as Map<String, dynamic>)
+                .where((transaction) => transaction['bankId'] == bankId)
+                .toList() ??
+            [];
         List<Map<String, dynamic>> accounts = entry.value;
-        double totalCredit = accounts.fold(
-            0.0, (sum, account) => sum + (account['credit'] ?? 0.0));
-        double totalDebit = accounts.fold(
-            0.0, (sum, account) => sum + (account['debit'] ?? 0.0));
+        double totalDebit = 0.0;
+        double totalCredit = 0.0;
+
+        for (var transaction in bankTransactions) {
+          if (transaction["type"] == "DEBIT") {
+            totalDebit +=
+                double.tryParse(transaction["amount"].toString()) ?? 0.0;
+          } else if (transaction["type"] == "CREDIT") {
+            double creditAmount =
+                double.tryParse(transaction["amount"].toString()) ?? 0.0;
+            totalCredit += creditAmount;
+          }
+        }
+
         double settledBalance = accounts.fold(
             0.0, (sum, account) => sum + (account['settledBalance'] ?? 0.0));
         double pendingCredit = accounts.fold(
             0.0, (sum, account) => sum + (account['pendingCredit'] ?? 0.0));
         int accountCount = accounts.length;
+
+        print("total credit: $totalCredit total debit: $totalDebit");
 
         return BankSummary(
           bankId: bankId,
@@ -447,13 +466,46 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
       List<AccountSummary> tempAccountSummary = allAccounts.map((account) {
         var accountData = jsonDecode(account);
+        double totalDebit = 0.0;
+        double totalCredit = 0.0;
+        List<Map<String, dynamic>> accountTransactions =
+            accountData['bank'] == 1
+                ? allTransactions
+                        ?.map((transaction) =>
+                            jsonDecode(transaction) as Map<String, dynamic>)
+                        .where((transaction) =>
+                            transaction['bankId'] == 1 &&
+                            transaction['accountNumber'] ==
+                                accountData['accountNumber'].substring(
+                                    accountData['accountNumber'].length - 4))
+                        .toList() ??
+                    []
+                : allTransactions
+                        ?.map((transaction) =>
+                            jsonDecode(transaction) as Map<String, dynamic>)
+                        .where((transaction) =>
+                            transaction['bankId'] == accountData['bank'] &&
+                            transaction['accountNumber'] ==
+                                accountData['accountNumber'])
+                        .toList() ??
+                    [];
+        for (var transaction in accountTransactions) {
+          if (transaction["type"] == "DEBIT") {
+            totalDebit +=
+                double.tryParse(transaction["amount"].toString()) ?? 0.0;
+          } else if (transaction["type"] == "CREDIT") {
+            double creditAmount =
+                double.tryParse(transaction["amount"].toString()) ?? 0.0;
+            totalCredit += creditAmount;
+          }
+        }
         return AccountSummary(
           accountNumber: accountData['accountNumber'],
           bankId: accountData['bank'],
           accountHolderName: accountData['accountHolderName'],
           totalTransactions: accountData['totalTransactions'] ?? 0.00,
-          totalCredit: accountData['credit'] ?? 0.00,
-          totalDebit: accountData['debit'] ?? 0.00,
+          totalCredit: totalCredit,
+          totalDebit: totalDebit,
           settledBalance: accountData['settledBalance'] ?? 0.00,
           pendingCredit: accountData['pendingCredit'] ?? 0.00,
         );
@@ -464,15 +516,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         tabs = [0, ...bankIds];
         accountSummaries = tempAccountSummary;
         // total credit is the sum of all transaction amount with the type CREDIT
-        double tempTotalCredit = allTransactions?.fold(
-                0.0,
-                (sum, transaction) =>
-                    (sum ?? 0.0) +
-                    (jsonDecode(transaction)['type'] == 'CREDIT'
-                        ? double.parse(
-                            jsonDecode(transaction)['creditedAmount'] ?? "0.0")
-                        : 0.0)) ??
-            0.0;
+        double tempTotalCredit = bankSummaries.fold(
+            0.0, (sum, bank) => sum + bank.totalCredit - bank.totalDebit);
         summary = AllSummary(
             totalCredit: tempTotalCredit,
             totalDebit: 0,
