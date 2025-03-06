@@ -121,7 +121,9 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                                       ),
                                     ),
                                     Text(
-                                        account.totalCredit.toStringAsFixed(2) +
+                                        (account.totalCredit -
+                                                    account.totalDebit)
+                                                .toStringAsFixed(2) +
                                             " ETB",
                                         style: const TextStyle(
                                           fontSize: 14,
@@ -175,7 +177,10 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                                       fontSize: 13,
                                     ),
                                   ),
-                                  Text(account.totalTransactions.toString(),
+                                  Text(
+                                      account.totalTransactions
+                                          .toInt()
+                                          .toString(),
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 13,

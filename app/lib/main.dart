@@ -503,7 +503,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           accountNumber: accountData['accountNumber'],
           bankId: accountData['bank'],
           accountHolderName: accountData['accountHolderName'],
-          totalTransactions: accountData['totalTransactions'] ?? 0.00,
+          totalTransactions: accountTransactions.length.toDouble() ?? 0,
           totalCredit: totalCredit,
           totalDebit: totalDebit,
           settledBalance: accountData['settledBalance'] ?? 0.00,
