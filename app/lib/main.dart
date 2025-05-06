@@ -377,9 +377,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     updateOutput("Server stopped");
   }
 
+  late List<String> _demoData;
+  ScrollController _scrollController = ScrollController();
+
+  double _scrollPosition = 0.0;
+
   @override
   void initState() {
+    _demoData = [
+      "Flutter",
+      "React Native",
+      "Cordova/ PhoneGap",
+      "Native Script",
+    ];
     super.initState();
+    _scrollController.addListener(() {
+      // Get the current horizontal scroll position
+      setState(() {
+        _scrollPosition = _scrollController.position.pixels;
+      });
+
+      // You can perform any action based on the scroll position
+      if (_scrollPosition > 100) {
+        // Do something when the scroll position goes beyond 100
+        print("Scrolled past 100");
+      }
+    });
     // _authenticate();
     WidgetsBinding.instance.addObserver(this); // Add observer
     startServer();
@@ -390,6 +413,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this); // Remove observer
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -879,278 +903,310 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ),
                   ],
                 )),
-            body: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: const BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(color: Colors.grey, width: 0.5),
-                    ),
-                  ),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Container(
-                        child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: List.generate(tabs.length, (index) {
-                        return Container(
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                    color: activeTab == tabs[index]
-                                        ? Color(0xFF294EC3)
-                                        : Colors.transparent,
-                                    width: activeTab == tabs[index] ? 2 : 0),
-                              ),
-                            ),
-                            child: TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  activeTab = tabs[index];
-                                });
-                              },
-                              style: TextButton.styleFrom(
-                                foregroundColor: activeTab == tabs[index]
-                                    ? Color(0xFF294EC3)
-                                    : Color(0xFF444750),
-                                textStyle: TextStyle(fontSize: 14),
-                              ),
-                              child: Text(tabs[index] == 0
-                                  ? "Summary"
-                                  : AppConstants.banks
-                                      .firstWhere((element) =>
-                                          element.id == tabs[index])
-                                      .shortName),
-                            ));
-                      }),
-                    )),
-                  ),
-                ),
-                const SizedBox(
-                  height: 12,
-                ),
-                activeTab == 0
-                    ? Expanded(
-                        child: Column(
-                        children: [
-                          SummaryContent(),
-                          GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  allSummaryDetailExpanded =
-                                      !allSummaryDetailExpanded;
-                                });
-                              },
-                              child: Card(
-                                  margin: const EdgeInsets.symmetric(
-                                      horizontal: 16.0, vertical: 8.0),
-                                  color: Colors.blueAccent,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20.0),
+            body: RefreshIndicator(
+              notificationPredicate: (ScrollNotification notification) {
+                return true;
+              },
+              onRefresh: () {
+                return Future.delayed(Duration(seconds: 1), () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: const Text('Page Refreshed')));
+                });
+              },
+              child: SingleChildScrollView(
+                physics: AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Colors.grey, width: 0.5),
+                        ),
+                      ),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Container(
+                            child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: List.generate(tabs.length, (index) {
+                            return Container(
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(
+                                        color: activeTab == tabs[index]
+                                            ? Color(0xFF294EC3)
+                                            : Colors.transparent,
+                                        width:
+                                            activeTab == tabs[index] ? 2 : 0),
                                   ),
-                                  elevation: 1,
-                                  child: Container(
-                                      decoration: BoxDecoration(
-                                        gradient: const LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: [
-                                            Color(0xFF172B6D),
-                                            Color(0xFF274AB9),
-                                          ],
+                                ),
+                                child: TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      activeTab = tabs[index];
+                                    });
+                                  },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: activeTab == tabs[index]
+                                        ? Color(0xFF294EC3)
+                                        : Color(0xFF444750),
+                                    textStyle: TextStyle(fontSize: 14),
+                                  ),
+                                  child: Text(tabs[index] == 0
+                                      ? "Summary"
+                                      : AppConstants.banks
+                                          .firstWhere((element) =>
+                                              element.id == tabs[index])
+                                          .shortName),
+                                ));
+                          }),
+                        )),
+                      ),
+                    ),
+                    const SizedBox(
+                      height: 12,
+                    ),
+                    activeTab == 0
+                        ? SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.8,
+                            child: Column(
+                              children: [
+                                // SummaryContent(),
+                                GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        allSummaryDetailExpanded =
+                                            !allSummaryDetailExpanded;
+                                      });
+                                    },
+                                    child: Card(
+                                        margin: const EdgeInsets.symmetric(
+                                            horizontal: 16.0, vertical: 8.0),
+                                        color: Colors.blueAccent,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(20.0),
                                         ),
-                                        borderRadius:
-                                            BorderRadius.circular(20.0),
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                                16.0, 28.0, 16.0, 28.0),
+                                        elevation: 1,
+                                        child: Container(
+                                            decoration: BoxDecoration(
+                                              gradient: const LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  Color(0xFF172B6D),
+                                                  Color(0xFF274AB9),
+                                                ],
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(20.0),
+                                            ),
                                             child: Column(
                                               children: [
-                                                Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    const Text(
-                                                      'TOTAL BALANCE',
-                                                      style: TextStyle(
-                                                        fontSize: 14,
-                                                        color:
-                                                            Color(0xFF9FABD2),
-                                                        fontWeight:
-                                                            FontWeight.w500,
-                                                      ),
-                                                    ),
-                                                    SizedBox(width: 8),
-                                                    GestureDetector(
-                                                        onTap: () {
-                                                          setState(() {
-                                                            showTotalBalance =
-                                                                !showTotalBalance;
-                                                            visibleTotalBalancesForSubCards = visibleTotalBalancesForSubCards
-                                                                        .length ==
-                                                                    0
-                                                                ? bankSummaries
-                                                                    .map((e) => e
-                                                                        .bankId
-                                                                        .toString())
-                                                                    .toList()
-                                                                : [];
-                                                          });
-                                                        },
-                                                        child: Icon(
-                                                            showTotalBalance ==
-                                                                    true
-                                                                ? Icons
-                                                                    .visibility_off
-                                                                : Icons
-                                                                    .remove_red_eye_outlined,
-                                                            color: Colors
-                                                                .grey[400],
-                                                            size: 20)),
-                                                    SizedBox(width: 8),
-                                                  ],
-                                                ),
-                                                const SizedBox(
-                                                  height: 4,
-                                                ),
-                                                Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Text(
-                                                      "${showTotalBalance ? (formatNumberWithComma(summary?.totalBalance) ?? 0.0) : "*" * (summary?.totalBalance.toString().length ?? 3)} ETB",
-                                                      style: const TextStyle(
-                                                          fontSize: 22,
-                                                          color: Colors.white,
-                                                          fontWeight:
-                                                              FontWeight.bold
-                                                          // Subtle text color
-                                                          ),
-                                                    ),
-                                                    SizedBox(width: 8),
-                                                    Icon(
-                                                      allSummaryDetailExpanded
-                                                          ? Icons
-                                                              .keyboard_arrow_up
-                                                          : Icons
-                                                              .keyboard_arrow_down,
-                                                      color: Colors.white,
-                                                    ),
-                                                    SizedBox(width: 8),
-                                                  ],
-                                                ),
-                                                const SizedBox(
-                                                  height: 4,
-                                                ),
-                                                Container(
-                                                  width: double.infinity,
-                                                  child: Text(
-                                                    "4 Banks | $totalAccounts Accounts",
-                                                    textAlign: TextAlign.center,
-                                                    style: const TextStyle(
-                                                      fontSize: 14,
-                                                      color: Color(0xFFF7F8FB),
-                                                      // Subtle text color
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          allSummaryDetailExpanded
-                                              ? Padding(
+                                                Padding(
                                                   padding:
                                                       const EdgeInsets.fromLTRB(
-                                                          16.0, 0, 16.0, 28.0),
+                                                          16.0,
+                                                          28.0,
+                                                          16.0,
+                                                          28.0),
                                                   child: Column(
                                                     children: [
                                                       Row(
                                                         mainAxisAlignment:
                                                             MainAxisAlignment
-                                                                .spaceBetween, // Centers horizontally
+                                                                .center,
                                                         children: [
-                                                          Text(
-                                                            "Total Credit",
+                                                          const Text(
+                                                            'TOTAL BALANCE',
                                                             style: TextStyle(
-                                                              color:
-                                                                  Colors.white,
-                                                              fontSize: 13,
+                                                              fontSize: 14,
+                                                              color: Color(
+                                                                  0xFF9FABD2),
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
                                                             ),
                                                           ),
-                                                          Text(
-                                                              formatNumberWithComma(summary
-                                                                              ?.totalCredit)
-                                                                          .toString() +
-                                                                      " ETB" ??
-                                                                  "",
-                                                              style: const TextStyle(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  fontSize: 13,
+                                                          SizedBox(width: 8),
+                                                          GestureDetector(
+                                                              onTap: () {
+                                                                setState(() {
+                                                                  showTotalBalance =
+                                                                      !showTotalBalance;
+                                                                  visibleTotalBalancesForSubCards = visibleTotalBalancesForSubCards
+                                                                              .length ==
+                                                                          0
+                                                                      ? bankSummaries
+                                                                          .map((e) => e
+                                                                              .bankId
+                                                                              .toString())
+                                                                          .toList()
+                                                                      : [];
+                                                                });
+                                                              },
+                                                              child: Icon(
+                                                                  showTotalBalance ==
+                                                                          true
+                                                                      ? Icons
+                                                                          .visibility_off
+                                                                      : Icons
+                                                                          .remove_red_eye_outlined,
                                                                   color: Colors
-                                                                      .white)),
+                                                                          .grey[
+                                                                      400],
+                                                                  size: 20)),
+                                                          SizedBox(width: 8),
                                                         ],
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 4,
                                                       ),
                                                       Row(
                                                         mainAxisAlignment:
                                                             MainAxisAlignment
-                                                                .spaceBetween, // Centers horizontally
+                                                                .center,
                                                         children: [
                                                           Text(
-                                                            "Total Debit",
-                                                            style: TextStyle(
-                                                              color:
-                                                                  Colors.white,
-                                                              fontSize: 13,
-                                                            ),
+                                                            "${showTotalBalance ? (formatNumberWithComma(summary?.totalBalance) ?? 0.0) : "*" * (summary?.totalBalance.toString().length ?? 3)} ETB",
+                                                            style: const TextStyle(
+                                                                fontSize: 22,
+                                                                color: Colors
+                                                                    .white,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold
+                                                                // Subtle text color
+                                                                ),
                                                           ),
-                                                          Text(
-                                                              formatNumberWithComma(summary
-                                                                              ?.totalDebit)
-                                                                          .toString() +
-                                                                      " ETB" ??
-                                                                  "",
-                                                              style: const TextStyle(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  fontSize: 13,
-                                                                  color: Colors
-                                                                      .white)),
+                                                          SizedBox(width: 8),
+                                                          Icon(
+                                                            allSummaryDetailExpanded
+                                                                ? Icons
+                                                                    .keyboard_arrow_up
+                                                                : Icons
+                                                                    .keyboard_arrow_down,
+                                                            color: Colors.white,
+                                                          ),
+                                                          SizedBox(width: 8),
                                                         ],
                                                       ),
+                                                      const SizedBox(
+                                                        height: 4,
+                                                      ),
+                                                      Container(
+                                                        width: double.infinity,
+                                                        child: Text(
+                                                          "4 Banks | $totalAccounts Accounts",
+                                                          textAlign:
+                                                              TextAlign.center,
+                                                          style:
+                                                              const TextStyle(
+                                                            fontSize: 14,
+                                                            color: Color(
+                                                                0xFFF7F8FB),
+                                                            // Subtle text color
+                                                          ),
+                                                        ),
+                                                      ),
                                                     ],
-                                                  ))
-                                              : Container()
-                                        ],
-                                      )))),
-                          const SizedBox(
-                            height: 12,
+                                                  ),
+                                                ),
+                                                allSummaryDetailExpanded
+                                                    ? Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .fromLTRB(16.0,
+                                                                0, 16.0, 28.0),
+                                                        child: Column(
+                                                          children: [
+                                                            Row(
+                                                              mainAxisAlignment:
+                                                                  MainAxisAlignment
+                                                                      .spaceBetween, // Centers horizontally
+                                                              children: [
+                                                                Text(
+                                                                  "Total Credit",
+                                                                  style:
+                                                                      TextStyle(
+                                                                    color: Colors
+                                                                        .white,
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                                ),
+                                                                Text(
+                                                                    formatNumberWithComma(summary?.totalCredit).toString() +
+                                                                            " ETB" ??
+                                                                        "",
+                                                                    style: const TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight
+                                                                                .bold,
+                                                                        fontSize:
+                                                                            13,
+                                                                        color: Colors
+                                                                            .white)),
+                                                              ],
+                                                            ),
+                                                            Row(
+                                                              mainAxisAlignment:
+                                                                  MainAxisAlignment
+                                                                      .spaceBetween, // Centers horizontally
+                                                              children: [
+                                                                Text(
+                                                                  "Total Debit",
+                                                                  style:
+                                                                      TextStyle(
+                                                                    color: Colors
+                                                                        .white,
+                                                                    fontSize:
+                                                                        13,
+                                                                  ),
+                                                                ),
+                                                                Text(
+                                                                    formatNumberWithComma(summary?.totalDebit).toString() +
+                                                                            " ETB" ??
+                                                                        "",
+                                                                    style: const TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight
+                                                                                .bold,
+                                                                        fontSize:
+                                                                            13,
+                                                                        color: Colors
+                                                                            .white)),
+                                                              ],
+                                                            ),
+                                                          ],
+                                                        ))
+                                                    : Container()
+                                              ],
+                                            )))),
+                                const SizedBox(
+                                  height: 12,
+                                ),
+                                Flexible(
+                                  child: BanksSummaryList(
+                                      banks: bankSummaries,
+                                      visibleTotalBalancesForSubCards:
+                                          visibleTotalBalancesForSubCards),
+                                )
+                              ],
+                            ))
+                        : BankDetail(
+                            bankId: activeTab,
+                            accountSummaries: accountSummaries
+                                .where((e) => e.bankId == activeTab)
+                                .toList(),
                           ),
-                          Expanded(
-                            child: BanksSummaryList(
-                                banks: bankSummaries,
-                                visibleTotalBalancesForSubCards:
-                                    visibleTotalBalancesForSubCards),
-                          )
-                        ],
-                      ))
-                    : BankDetail(
-                        bankId: activeTab,
-                        accountSummaries: accountSummaries
-                            .where((e) => e.bankId == activeTab)
-                            .toList(),
-                      ),
-              ],
-            ),
-          );
+                  ],
+                ),
+              ),
+            ));
   }
 
   Widget _authButton() {
