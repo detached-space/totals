@@ -1,5 +1,3 @@
-// stateful widget
-
 import 'package:flutter/material.dart';
 
 class AuthPage extends StatelessWidget {

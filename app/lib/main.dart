@@ -25,6 +25,7 @@ import 'package:totals/widgets/auth_page.dart';
 import 'package:totals/widgets/bank_detail.dart';
 import 'package:totals/widgets/banks_summary_list.dart';
 import 'package:totals/auth-service.dart';
+import 'package:totals/widgets/home_tabs.dart';
 
 @pragma('vm:entry-point')
 onBackgroundMessage(SmsMessage message) async {
@@ -328,6 +329,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } else {
       _isAuthenticated = false;
     }
+  }
+
+  void changeTab(int tabId) {
+    setState(() {
+      activeTab = tabId;
+    });
   }
 
   onMessage(SmsMessage message) async {
@@ -834,11 +841,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             });
                           },
                         ),
-                        // IconButton(
-                        //   icon: const Icon(Icons.calendar_month_outlined,
-                        //       color: Color(0xFF8DA1E1), size: 25),
-                        //   onPressed: () => _selectDate(context),
-                        // ),
                       ],
                     ),
                   ],
@@ -858,54 +860,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: Colors.grey, width: 0.5),
-                        ),
-                      ),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Container(
-                            child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: List.generate(tabs.length, (index) {
-                            return Container(
-                                decoration: BoxDecoration(
-                                  border: Border(
-                                    bottom: BorderSide(
-                                        color: activeTab == tabs[index]
-                                            ? Color(0xFF294EC3)
-                                            : Colors.transparent,
-                                        width:
-                                            activeTab == tabs[index] ? 2 : 0),
-                                  ),
-                                ),
-                                child: TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      activeTab = tabs[index];
-                                    });
-                                  },
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: activeTab == tabs[index]
-                                        ? Color(0xFF294EC3)
-                                        : Color(0xFF444750),
-                                    textStyle: TextStyle(fontSize: 14),
-                                  ),
-                                  child: Text(tabs[index] == 0
-                                      ? "Summary"
-                                      : AppConstants.banks
-                                          .firstWhere((element) =>
-                                              element.id == tabs[index])
-                                          .shortName),
-                                ));
-                          }),
-                        )),
-                      ),
-                    ),
+                    HomeTabs(
+                        tabs: tabs,
+                        activeTab: activeTab,
+                        onChangeTab: changeTab),
                     const SizedBox(
                       height: 12,
                     ),
