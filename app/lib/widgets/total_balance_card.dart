@@ -84,7 +84,7 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          "${widget.showBalance ? (formatNumberWithComma(widget.summary?.totalBalance) ?? 0.0) : "*" * (widget.summary != null ? widget.summary!.totalBalance.toString().length : 3)} ETB",
+                          "${widget.showBalance ? (formatNumberWithComma(widget.summary?.totalBalance) ?? 0.0) : "******"} ETB",
                           style: const TextStyle(
                             fontSize: 22,
                             color: Colors.white,

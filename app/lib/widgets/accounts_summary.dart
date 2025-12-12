@@ -140,10 +140,7 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                                                   ? formatNumberWithComma(
                                                           account.balance) +
                                                       " ETB"
-                                                  : "*" *
-                                                      formatNumberWithComma(
-                                                              account.balance)
-                                                          .length,
+                                                  : "******",
                                               style: const TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.bold,
@@ -282,50 +279,6 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                                           fontWeight: FontWeight.bold,
                                           color: Color(0xFF181F2A),
                                           fontSize: 13,
-                                        )),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment
-                                      .spaceBetween, // Centers horizontally
-                                  children: [
-                                    Text(
-                                      "Pending Credit",
-                                      style: TextStyle(
-                                        color: Color(0xFF181F2A),
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    Text(
-                                        account.pendingCredit.toString() +
-                                            " ETB",
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                          color: Color(0xFF181F2A),
-                                        )),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment
-                                      .spaceBetween, // Centers horizontally
-                                  children: [
-                                    Text(
-                                      "Settled Balance",
-                                      style: TextStyle(
-                                        color: Color(0xFF181F2A),
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    Text(
-                                        account.settledBalance.toString() +
-                                            " ETB",
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                          color: Color(0xFF181F2A),
                                         )),
                                   ],
                                 ),

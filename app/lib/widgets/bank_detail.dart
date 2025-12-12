@@ -153,19 +153,10 @@ class _BankDetailState extends State<BankDetail> {
                                           0.0,
                                           (sum, bank) =>
                                               sum +
-                                              bank
-                                                  .balance) // Replace with your actual balance calculation logic
+                                              bank.balance) // Replace with your actual balance calculation logic
                                       .toString())) +
                                   " ETB"
-                              : "*" *
-                                  widget.accountSummaries
-                                      .fold(
-                                          0.0,
-                                          (sum, bank) =>
-                                              sum +
-                                              bank.balance) // Replace with your actual balance calculation logic
-                                      .toString()
-                                      .length,
+                              : "******",
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               fontSize: 20,
