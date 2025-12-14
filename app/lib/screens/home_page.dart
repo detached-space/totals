@@ -514,9 +514,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         borderRadius: BorderRadius.circular(8),
                         child: Image.asset(
                           "assets/images/logo-text.png",
-                          fit: BoxFit.cover,
-                          width: 110,
-                          height: 32,
+                          fit: BoxFit.contain,
+                          width: 80,
+                          height: 24,
                         ),
                       ),
                       Flexible(
