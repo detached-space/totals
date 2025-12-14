@@ -13,13 +13,153 @@ class AnalyticsPage extends StatefulWidget {
   State<AnalyticsPage> createState() => _AnalyticsPageState();
 }
 
-class _AnalyticsPageState extends State<AnalyticsPage> {
+class _AnalyticsPageState extends State<AnalyticsPage> with SingleTickerProviderStateMixin {
   String? _selectedCard; // null, 'Income', or 'Expense'
   String _selectedPeriod = 'Month'; // 'Week', 'Month', 'Year'
   int? _selectedBankFilter; // null for 'All', or bankId
   String? _selectedAccountFilter; // null for 'All', or accountNumber
   String _sortBy = 'Date'; // 'Date', 'Amount', 'Reference'
   String _chartType = 'P&L Calendar'; // 'Line Chart', 'Bar Chart', 'Pie Chart', 'P&L Calendar'
+  int _timeFrameOffset = 0; // 0 = current, -1 = previous, +1 = next
+  
+  late AnimationController _slideAnimationController;
+  late Animation<Offset> _slideAnimation;
+  bool _isNavigating = false;
+  bool _leftButtonPressed = false;
+  bool _rightButtonPressed = false;
+  double _dragOffset = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _slideAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideAnimationController,
+      curve: Curves.easeInOut,
+    ));
+    // Initialize animation at zero
+    _slideAnimationController.value = 0.0;
+    _dragOffset = 0.0;
+  }
+
+  @override
+  void dispose() {
+    _slideAnimationController.dispose();
+    super.dispose();
+  }
+
+  DateTime _getBaseDate() {
+    final now = DateTime.now();
+    if (_timeFrameOffset == 0) return now;
+    
+    if (_selectedPeriod == 'Week') {
+      return now.add(Duration(days: _timeFrameOffset * 7));
+    } else if (_selectedPeriod == 'Month') {
+      return DateTime(now.year, now.month + _timeFrameOffset, now.day);
+    } else { // Year
+      return DateTime(now.year + _timeFrameOffset, now.month, now.day);
+    }
+  }
+
+  Future<void> _navigateTimeFrame(bool forward) async {
+    if (_isNavigating) return;
+    
+    setState(() {
+      _isNavigating = true;
+      _dragOffset = 0.0; // Reset drag offset
+    });
+
+    // Set animation direction
+    _slideAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset(forward ? -1.0 : 1.0, 0),
+    ).animate(CurvedAnimation(
+      parent: _slideAnimationController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Start slide out animation
+    await _slideAnimationController.forward();
+
+    // Update the offset
+    setState(() {
+      if (forward) {
+        _timeFrameOffset++;
+      } else {
+        _timeFrameOffset--;
+      }
+    });
+
+    // Reset animation for slide in
+    _slideAnimation = Tween<Offset>(
+      begin: Offset(forward ? 1.0 : -1.0, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideAnimationController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Reset controller and slide in
+    _slideAnimationController.reset();
+    await _slideAnimationController.forward();
+
+    setState(() {
+      _isNavigating = false;
+      _dragOffset = 0.0; // Ensure drag offset is reset
+    });
+  }
+
+  Future<void> _resetTimeFrame() async {
+    if (_isNavigating || _timeFrameOffset == 0) return;
+    
+    final offsetDirection = _timeFrameOffset > 0 ? 1.0 : -1.0;
+    
+    setState(() {
+      _isNavigating = true;
+      _dragOffset = 0.0; // Reset drag offset
+    });
+
+    // Set animation direction
+    _slideAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset(-offsetDirection, 0),
+    ).animate(CurvedAnimation(
+      parent: _slideAnimationController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Start slide out animation
+    await _slideAnimationController.forward();
+
+    // Update the offset
+    setState(() {
+      _timeFrameOffset = 0;
+    });
+
+    // Reset animation for slide in
+    _slideAnimation = Tween<Offset>(
+      begin: Offset(offsetDirection, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideAnimationController,
+      curve: Curves.easeInOut,
+    ));
+
+    // Reset controller and slide in
+    _slideAnimationController.reset();
+    await _slideAnimationController.forward();
+
+    setState(() {
+      _isNavigating = false;
+      _dragOffset = 0.0; // Ensure drag offset is reset
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +170,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         final accounts = provider.accountSummaries;
         
         // Filter transactions based on selected card, period, and bank
-        final now = DateTime.now();
+        final now = _getBaseDate();
         final filteredTransactions = allTransactions.where((t) {
           // Filter by selected card (Income/Expense)
           bool matchesCard = true;
@@ -183,7 +323,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final allTransactions = Provider.of<TransactionProvider>(context, listen: false).allTransactions;
     
     // Filter by period
-    final now = DateTime.now();
+    final now = _getBaseDate();
     List<Transaction> periodFiltered = [];
     
     if (_selectedPeriod == 'Week') {
@@ -354,7 +494,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           final isSelected = _selectedPeriod == period;
           return GestureDetector(
             onTap: () {
-              setState(() => _selectedPeriod = period);
+              setState(() {
+                _selectedPeriod = period;
+                _timeFrameOffset = 0; // Reset to current time frame when period changes
+              });
             },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
@@ -520,17 +663,206 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       );
     }
 
+    Widget chartWidget;
     switch (_chartType) {
       case 'Bar Chart':
-        return _buildBarChart(data, maxValue);
+        chartWidget = _buildBarChart(data, maxValue);
+        break;
       case 'Pie Chart':
-        return _buildPieChart(data);
+        chartWidget = _buildPieChart(data);
+        break;
       case 'P&L Calendar':
-        return _buildTradingPnL(data, maxValue);
+        chartWidget = _buildTradingPnL(data, maxValue);
+        break;
       case 'Line Chart':
       default:
-        return _buildLineChart(data, maxValue);
+        chartWidget = _buildLineChart(data, maxValue);
+        break;
     }
+
+    return Column(
+      children: [
+        // Navigation buttons at the top
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            // Row with buttons at each end
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Left navigation button
+                GestureDetector(
+                  onTapDown: (_) {
+                    setState(() => _leftButtonPressed = true);
+                  },
+                  onTapUp: (_) {
+                    setState(() => _leftButtonPressed = false);
+                    _navigateTimeFrame(false);
+                  },
+                  onTapCancel: () {
+                    setState(() => _leftButtonPressed = false);
+                  },
+                  child: AnimatedScale(
+                    scale: _leftButtonPressed ? 0.9 : 1.0,
+                    duration: const Duration(milliseconds: 100),
+                    curve: Curves.easeInOut,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      curve: Curves.easeInOut,
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.chevron_left,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+                // Right navigation button
+                GestureDetector(
+                  onTapDown: (_) {
+                    setState(() => _rightButtonPressed = true);
+                  },
+                  onTapUp: (_) {
+                    setState(() => _rightButtonPressed = false);
+                    _navigateTimeFrame(true);
+                  },
+                  onTapCancel: () {
+                    setState(() => _rightButtonPressed = false);
+                  },
+                  child: AnimatedScale(
+                    scale: _rightButtonPressed ? 0.9 : 1.0,
+                    duration: const Duration(milliseconds: 100),
+                    curve: Curves.easeInOut,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      curve: Curves.easeInOut,
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.chevron_right,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            // Today button (centered)
+            if (_timeFrameOffset != 0)
+              GestureDetector(
+                onTap: _resetTimeFrame,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.today,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Today',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // Chart widget with swipe gesture and slide animation
+        GestureDetector(
+          onHorizontalDragStart: (details) {
+            if (_isNavigating) return;
+            _dragOffset = 0.0;
+            setState(() {});
+          },
+          onHorizontalDragUpdate: (details) {
+            if (_isNavigating) return;
+            final screenWidth = MediaQuery.of(context).size.width;
+            _dragOffset = details.primaryDelta! / screenWidth;
+            setState(() {});
+          },
+          onHorizontalDragEnd: (details) {
+            if (_isNavigating) return;
+            final velocity = details.primaryVelocity;
+            if (velocity != null) {
+              // Swipe right (drag left, positive velocity) = go to previous time frame
+              if (velocity > 200) {
+                _navigateTimeFrame(false);
+              }
+              // Swipe left (drag right, negative velocity) = go to next time frame
+              else if (velocity < -200) {
+                _navigateTimeFrame(true);
+              } else {
+                // Reset drag offset if swipe wasn't strong enough
+                _dragOffset = 0.0;
+                setState(() {});
+              }
+            } else {
+              _dragOffset = 0.0;
+              setState(() {});
+            }
+          },
+          onHorizontalDragCancel: () {
+            _dragOffset = 0.0;
+            setState(() {});
+          },
+          child: ClipRect(
+            child: SlideTransition(
+              position: _dragOffset != 0.0
+                  ? AlwaysStoppedAnimation(Offset(_dragOffset, 0))
+                  : _slideAnimation,
+              child: chartWidget,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildLineChart(List<ChartDataPoint> data, double maxValue) {
@@ -583,7 +915,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 getTitlesWidget: (value, meta) {
                   final index = value.toInt();
                   if (index >= 0 && index < data.length) {
-                    final isCurrentDay = index == currentDayIndex;
+                    final isCurrentDay = _timeFrameOffset == 0 && index == currentDayIndex;
                     return Padding(
                       padding: const EdgeInsets.only(top: 8),
                         child: Container(
@@ -785,7 +1117,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 getTitlesWidget: (value, meta) {
                   final index = value.toInt();
                   if (index >= 0 && index < data.length) {
-                    final isCurrentDay = index == currentDayIndex;
+                    final isCurrentDay = _timeFrameOffset == 0 && index == currentDayIndex;
                     return Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Container(
@@ -837,7 +1169,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           borderData: FlBorderData(show: false),
           barGroups: data.asMap().entries.map((entry) {
             final index = entry.key;
-            final isCurrentDay = index == currentDayIndex;
+            final isCurrentDay = _timeFrameOffset == 0 && index == currentDayIndex;
             return BarChartGroupData(
               x: index,
               barRods: [
@@ -917,7 +1249,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Widget _buildTradingPnL(List<ChartDataPoint> data, double maxValue) {
     final allTransactions = Provider.of<TransactionProvider>(context, listen: false).allTransactions;
-    final now = DateTime.now();
+    final now = _getBaseDate();
     
     // Filter by bank, account, and income/expense card
     var filtered = allTransactions;
@@ -1152,7 +1484,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                         final date = dates[cellIndex];
                         final monthName = DateFormat('MMM').format(date);
                         final pnl = dailyPnL[date] ?? 0.0;
-                        final isCurrentMonth = date.year == now.year && date.month == now.month;
+                        final isCurrentMonth = _timeFrameOffset == 0 && date.year == DateTime.now().year && date.month == DateTime.now().month;
                         final intensity = maxPnL > 0 ? (pnl.abs() / maxPnL).clamp(0.0, 1.0) : 0.0;
                         final isPositive = pnl >= 0;
                         final bgOpacity = 0.2 + intensity * 0.6;
@@ -1216,9 +1548,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                           final date = dates[cellIndexWithOffset];
                           final dayNumber = date.day;
                           final pnl = dailyPnL[date] ?? 0.0;
-                          final isToday = date.year == now.year &&
-                                         date.month == now.month &&
-                                         date.day == now.day;
+                          final isToday = _timeFrameOffset == 0 && 
+                                         date.year == DateTime.now().year &&
+                                         date.month == DateTime.now().month &&
+                                         date.day == DateTime.now().day;
                           final intensity = maxPnL > 0 ? (pnl.abs() / maxPnL).clamp(0.0, 1.0) : 0.0;
                           final isPositive = pnl >= 0;
                           final bgOpacity = 0.2 + intensity * 0.6;
@@ -1278,9 +1611,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                           
                           final date = dates[dayNumber - 1];
                           final pnl = dailyPnL[date] ?? 0.0;
-                          final isToday = date.year == now.year &&
-                                         date.month == now.month &&
-                                         date.day == now.day;
+                          final isToday = _timeFrameOffset == 0 && 
+                                         date.year == DateTime.now().year &&
+                                         date.month == DateTime.now().month &&
+                                         date.day == DateTime.now().day;
                           final intensity = maxPnL > 0 ? (pnl.abs() / maxPnL).clamp(0.0, 1.0) : 0.0;
                           final isPositive = pnl >= 0;
                           final bgOpacity = 0.2 + intensity * 0.6;
@@ -1716,7 +2050,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   List<ChartDataPoint> _getWeeklyData(List<Transaction> transactions) {
-    final now = DateTime.now();
+    final now = _getBaseDate();
     // Get the start of the week (Monday)
     int daysSinceMonday = (now.weekday - 1) % 7;
     final weekStart = DateTime(now.year, now.month, now.day).subtract(Duration(days: daysSinceMonday));
@@ -1746,7 +2080,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   List<ChartDataPoint> _getMonthlyData(List<Transaction> transactions) {
-    final now = DateTime.now();
+    final now = _getBaseDate();
     final monthStart = DateTime(now.year, now.month, 1);
     final weeksInMonth = ((now.difference(monthStart).inDays) / 7).ceil();
     
@@ -1775,7 +2109,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   List<ChartDataPoint> _getYearlyData(List<Transaction> transactions) {
-    final now = DateTime.now();
+    final now = _getBaseDate();
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
     return List.generate(12, (index) {
@@ -1803,7 +2137,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   int _getCurrentDayIndex(List<ChartDataPoint> data) {
-    final now = DateTime.now();
+    final now = _getBaseDate();
     
     if (_selectedPeriod == 'Week') {
       // Find the index that matches today's date
