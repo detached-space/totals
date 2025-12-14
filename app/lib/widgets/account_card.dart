@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart'; 
 import 'package:totals/data/consts.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/utils/gradients.dart';
@@ -58,16 +57,15 @@ class _AccountCardState extends State<AccountCard> {
               name: "Unknown",
               shortName: "?",
               codes: [],
-              image: "assets/images/cbe.png"), 
+              image: "assets/images/cbe.png"),
     );
 
     final displayBalance = isHidden
         ? "*****"
         : "${formatNumberWithComma(widget.account.balance)} ETB";
-    final displayAccount = isHidden
-        ? "**** **** **** ****"
-        : widget.account.accountNumber;
-    
+    final displayAccount =
+        isHidden ? "**** **** **** ****" : widget.account.accountNumber;
+
     final isExpanded = widget.expandedContent != null;
 
     return GestureDetector(
@@ -112,7 +110,7 @@ class _AccountCardState extends State<AccountCard> {
                         ),
                       ),
                     ),
-          
+
                     // Content
                     Padding(
                       padding: const EdgeInsets.all(24),
@@ -148,16 +146,15 @@ class _AccountCardState extends State<AccountCard> {
                               Opacity(
                                 opacity: 0.7,
                                 // TOP LOGO IS TOTALS LOGO
-                                child: SvgPicture.asset(
-                                  'assets/images/logo.svg',
-                                  width: 24, 
-                                  height: 24,
-                                  colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                                child: const Icon(
+                                  Icons.account_balance,
+                                  color: Colors.white,
+                                  size: 24,
                                 ),
                               ),
                             ],
                           ),
-          
+
                           // Chip
                           Container(
                             width: 44,
@@ -171,25 +168,45 @@ class _AccountCardState extends State<AccountCard> {
                             child: Stack(
                               children: [
                                 Positioned(
-                                  top: 0, bottom: 0, left: 14,
-                                  child: Container(width: 1, color: Colors.yellow[500]!.withOpacity(0.1)),
+                                  top: 0,
+                                  bottom: 0,
+                                  left: 14,
+                                  child: Container(
+                                      width: 1,
+                                      color:
+                                          Colors.yellow[500]!.withOpacity(0.1)),
                                 ),
                                 Positioned(
-                                  top: 0, bottom: 0, right: 14,
-                                  child: Container(width: 1, color: Colors.yellow[500]!.withOpacity(0.1)),
+                                  top: 0,
+                                  bottom: 0,
+                                  right: 14,
+                                  child: Container(
+                                      width: 1,
+                                      color:
+                                          Colors.yellow[500]!.withOpacity(0.1)),
                                 ),
                                 Positioned(
-                                  left: 0, right: 0, top: 10,
-                                  child: Container(height: 1, color: Colors.yellow[500]!.withOpacity(0.1)),
+                                  left: 0,
+                                  right: 0,
+                                  top: 10,
+                                  child: Container(
+                                      height: 1,
+                                      color:
+                                          Colors.yellow[500]!.withOpacity(0.1)),
                                 ),
                                 Positioned(
-                                  left: 0, right: 0, bottom: 10,
-                                  child: Container(height: 1, color: Colors.yellow[500]!.withOpacity(0.1)),
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 10,
+                                  child: Container(
+                                      height: 1,
+                                      color:
+                                          Colors.yellow[500]!.withOpacity(0.1)),
                                 ),
                               ],
                             ),
                           ),
-          
+
                           // Bottom Section
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -221,22 +238,24 @@ class _AccountCardState extends State<AccountCard> {
                                   const SizedBox(width: 4),
                                   // Expansion chevron
                                   Icon(
-                                      isExpanded
-                                          ? Icons.keyboard_arrow_up
-                                          : Icons.keyboard_arrow_down,
-                                      color: Colors.white.withOpacity(0.7),
-                                      size: 20,
+                                    isExpanded
+                                        ? Icons.keyboard_arrow_up
+                                        : Icons.keyboard_arrow_down,
+                                    color: Colors.white.withOpacity(0.7),
+                                    size: 20,
                                   )
                                 ],
                               ),
                               const SizedBox(height: 16),
                               // Account # & Copy & Bank Logo (Bottom)
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         "ACCOUNT NUMBER",
@@ -252,7 +271,7 @@ class _AccountCardState extends State<AccountCard> {
                                           Text(
                                             displayAccount,
                                             style: TextStyle(
-                                              fontFamily: 'Courier', 
+                                              fontFamily: 'Courier',
                                               color: Colors.white,
                                               fontSize: 14,
                                               letterSpacing: 1,
@@ -262,10 +281,12 @@ class _AccountCardState extends State<AccountCard> {
                                           GestureDetector(
                                             onTap: _copyAccountNumber,
                                             child: Container(
-                                                padding: const EdgeInsets.all(4),
+                                                padding:
+                                                    const EdgeInsets.all(4),
                                                 child: copied
                                                     ? const Icon(Icons.check,
-                                                        color: Colors.greenAccent,
+                                                        color:
+                                                            Colors.greenAccent,
                                                         size: 16)
                                                     : Icon(Icons.copy,
                                                         color: Colors.white
@@ -292,14 +313,14 @@ class _AccountCardState extends State<AccountCard> {
                   ],
                 ),
               ),
-              
+
               // --- Expanded Content ---
               if (isExpanded && widget.expandedContent != null)
-                 Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                    child: widget.expandedContent!,
-                 )
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  child: widget.expandedContent!,
+                )
             ],
           ),
         ),

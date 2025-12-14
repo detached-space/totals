@@ -13,7 +13,6 @@ import 'package:totals/widgets/total_balance_card.dart';
 import 'package:totals/widgets/debug_sms_dialog.dart';
 import 'package:totals/widgets/debug_transactions_dialog.dart';
 import 'package:totals/widgets/failed_parse_dialog.dart';
-import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/widgets/custom_bottom_nav.dart';
 import 'package:totals/screens/analytics_page.dart';
@@ -49,14 +48,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     // Initialize services
     _smsService.init();
+
+    // Set up callback with mounted check
     _smsService.onMessageReceived = () {
-      // Reload data on new SMS
-      Provider.of<TransactionProvider>(context, listen: false).loadData();
+      // Reload data on new SMS - check if widget is still mounted
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Provider.of<TransactionProvider>(context, listen: false).loadData();
+          }
+        });
+      }
     };
 
     // Initial Load
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<TransactionProvider>(context, listen: false).loadData();
+      if (mounted) {
+        Provider.of<TransactionProvider>(context, listen: false).loadData();
+      }
     });
   }
 
@@ -178,12 +187,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildHomeContent(TransactionProvider provider) {
     final tabs = _getTabs();
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        HomeTabs(
-            tabs: tabs, activeTab: activeTab, onChangeTab: changeTab),
+        HomeTabs(tabs: tabs, activeTab: activeTab, onChangeTab: changeTab),
         Expanded(
           child: PageView.builder(
             controller: _pageController,
@@ -213,8 +221,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     SnackBar(
                       content: const Text(
                         'Sweet!',
-                        style:
-                            TextStyle(fontSize: 16, color: Colors.white),
+                        style: TextStyle(fontSize: 16, color: Colors.white),
                       ),
                       backgroundColor: Colors.blue[200],
                       duration: Duration(seconds: 2),
@@ -229,8 +236,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       const SizedBox(height: 12),
                       tabId == 0
                           ? SizedBox(
-                              height: MediaQuery.of(context).size.height *
-                                  0.8,
+                              height: MediaQuery.of(context).size.height * 0.8,
                               child: Column(
                                 children: [
                                   TotalBalanceCard(
@@ -238,14 +244,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     showBalance: showTotalBalance,
                                     onToggleBalance: () {
                                       setState(() {
-                                        showTotalBalance =
-                                            !showTotalBalance;
+                                        showTotalBalance = !showTotalBalance;
                                         visibleTotalBalancesForSubCards =
                                             visibleTotalBalancesForSubCards
                                                     .isEmpty
                                                 ? provider.bankSummaries
-                                                    .map((e) => e.bankId
-                                                        .toString())
+                                                    .map((e) =>
+                                                        e.bankId.toString())
                                                     .toList()
                                                 : [];
                                       });
@@ -257,12 +262,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                           child: Center(
                                             child: Padding(
                                               padding:
-                                                  const EdgeInsets.all(
-                                                      24.0),
+                                                  const EdgeInsets.all(24.0),
                                               child: Column(
                                                 mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .center,
+                                                    MainAxisAlignment.center,
                                                 children: [
                                                   Icon(
                                                     Icons
@@ -272,8 +275,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                         .colorScheme
                                                         .onSurfaceVariant,
                                                   ),
-                                                  const SizedBox(
-                                                      height: 24),
+                                                  const SizedBox(height: 24),
                                                   Text(
                                                     "No Bank Accounts Yet",
                                                     style: TextStyle(
@@ -285,12 +287,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                           .onSurface,
                                                     ),
                                                   ),
-                                                  const SizedBox(
-                                                      height: 8),
+                                                  const SizedBox(height: 8),
                                                   Text(
                                                     "Get started by adding your first bank account",
-                                                    textAlign:
-                                                        TextAlign.center,
+                                                    textAlign: TextAlign.center,
                                                     style: TextStyle(
                                                       fontSize: 14,
                                                       color: Theme.of(context)
@@ -298,26 +298,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                           .onSurfaceVariant,
                                                     ),
                                                   ),
-                                                  const SizedBox(
-                                                      height: 32),
+                                                  const SizedBox(height: 32),
                                                   SizedBox(
                                                     width: 200,
                                                     child: GestureDetector(
                                                       onTap: () {
                                                         showModalBottomSheet(
-                                                          isScrollControlled: true,
+                                                          isScrollControlled:
+                                                              true,
                                                           context: context,
                                                           builder: (context) {
                                                             return ClipRRect(
-                                                              borderRadius: BorderRadius.circular(15),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          15),
                                                               child: Container(
-                                                                padding: const EdgeInsets.symmetric(
-                                                                    vertical: 20, horizontal: 20),
-                                                                height: MediaQuery.of(context).size.height * 0.83,
-                                                                child: SingleChildScrollView(
-                                                                  child: RegisterAccountForm(
-                                                                    onSubmit: () {
-                                                                      provider.loadData();
+                                                                padding: const EdgeInsets
+                                                                    .symmetric(
+                                                                    vertical:
+                                                                        20,
+                                                                    horizontal:
+                                                                        20),
+                                                                height: MediaQuery.of(
+                                                                            context)
+                                                                        .size
+                                                                        .height *
+                                                                    0.83,
+                                                                child:
+                                                                    SingleChildScrollView(
+                                                                  child:
+                                                                      RegisterAccountForm(
+                                                                    onSubmit:
+                                                                        () {
+                                                                      provider
+                                                                          .loadData();
                                                                     },
                                                                   ),
                                                                 ),
@@ -327,35 +342,59 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                         );
                                                       },
                                                       child: Container(
-                                                        padding: const EdgeInsets.symmetric(
-                                                            vertical: 16, horizontal: 24),
-                                                        decoration: BoxDecoration(
-                                                          borderRadius: BorderRadius.circular(16),
-                                                          color: Theme.of(context).colorScheme.primary,
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                vertical: 16,
+                                                                horizontal: 24),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(16),
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .primary,
                                                           boxShadow: [
                                                             BoxShadow(
-                                                              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                                                              color: Theme.of(
+                                                                      context)
+                                                                  .colorScheme
+                                                                  .primary
+                                                                  .withOpacity(
+                                                                      0.3),
                                                               blurRadius: 12,
-                                                              offset: const Offset(0, 4),
+                                                              offset:
+                                                                  const Offset(
+                                                                      0, 4),
                                                             )
                                                           ],
                                                         ),
                                                         child: Row(
-                                                          mainAxisAlignment: MainAxisAlignment.center,
-                                                          mainAxisSize: MainAxisSize.min,
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .center,
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
                                                           children: [
                                                             Icon(
                                                               Icons.add_rounded,
-                                                              color: Colors.white,
+                                                              color:
+                                                                  Colors.white,
                                                               size: 24,
                                                             ),
-                                                            const SizedBox(width: 8),
+                                                            const SizedBox(
+                                                                width: 8),
                                                             Text(
                                                               "Add Account",
                                                               style: TextStyle(
                                                                 fontSize: 16,
-                                                                fontWeight: FontWeight.w600,
-                                                                color: Colors.white,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                color: Colors
+                                                                    .white,
                                                               ),
                                                             ),
                                                           ],
@@ -370,8 +409,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                         )
                                       : Flexible(
                                           child: BanksSummaryList(
-                                              banks:
-                                                  provider.bankSummaries,
+                                              banks: provider.bankSummaries,
                                               visibleTotalBalancesForSubCards:
                                                   visibleTotalBalancesForSubCards,
                                               onAddAccount: () {
@@ -380,15 +418,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                                   context: context,
                                                   builder: (context) {
                                                     return ClipRRect(
-                                                      borderRadius: BorderRadius.circular(15),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              15),
                                                       child: Container(
-                                                        padding: const EdgeInsets.symmetric(
-                                                            vertical: 20, horizontal: 20),
-                                                        height: MediaQuery.of(context).size.height * 0.83,
-                                                        child: SingleChildScrollView(
-                                                          child: RegisterAccountForm(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                vertical: 20,
+                                                                horizontal: 20),
+                                                        height: MediaQuery.of(
+                                                                    context)
+                                                                .size
+                                                                .height *
+                                                            0.83,
+                                                        child:
+                                                            SingleChildScrollView(
+                                                          child:
+                                                              RegisterAccountForm(
                                                             onSubmit: () {
-                                                              provider.loadData();
+                                                              provider
+                                                                  .loadData();
                                                             },
                                                           ),
                                                         ),
@@ -469,92 +519,132 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           height: 32,
                         ),
                       ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Debug buttons grouped in a container
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(Icons.list_alt,
-                                      color: Theme.of(context).iconTheme.color, size: 22),
-                                  onPressed: () => showDebugTransactionsDialog(context),
-                                  padding: const EdgeInsets.all(8),
-                                  constraints: const BoxConstraints(),
-                                ),
-                                IconButton(
-                                  icon: Icon(Icons.message_outlined,
-                                      color: Theme.of(context).iconTheme.color, size: 22),
-                                  onPressed: () => showDebugSmsDialog(context),
-                                  padding: const EdgeInsets.all(8),
-                                  constraints: const BoxConstraints(),
-                                ),
-                                IconButton(
-                                  icon: Icon(Icons.error_outline,
-                                      color: Theme.of(context).iconTheme.color, size: 22),
-                                  onPressed: () => showFailedParseDialog(context),
-                                  tooltip: "View Failed Parsings",
-                                  padding: const EdgeInsets.all(8),
-                                  constraints: const BoxConstraints(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          // Theme switcher - icon only
-                          Consumer<ThemeProvider>(
-                            builder: (context, themeProvider, child) {
-                              return Container(
+                      Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Debug buttons grouped in a container
+                            Flexible(
+                              child: Container(
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceVariant
+                                      .withOpacity(0.5),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: IconButton(
-                                  icon: Icon(
-                                    themeProvider.themeMode == ThemeMode.dark
-                                        ? Icons.light_mode_rounded
-                                        : Icons.dark_mode_rounded,
-                                    color: Theme.of(context).iconTheme.color,
-                                    size: 22,
-                                  ),
-                                  onPressed: () {
-                                    themeProvider.toggleTheme();
-                                  },
-                                  tooltip: themeProvider.themeMode == ThemeMode.dark
-                                      ? "Switch to Light Mode"
-                                      : "Switch to Dark Mode",
-                                  padding: const EdgeInsets.all(8),
-                                  constraints: const BoxConstraints(),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    InkWell(
+                                      onTap: () =>
+                                          showDebugTransactionsDialog(context),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Container(
+                                        width: 40,
+                                        height: 40,
+                                        padding: const EdgeInsets.all(8),
+                                        child: Icon(Icons.list_alt,
+                                            color: Theme.of(context)
+                                                .iconTheme
+                                                .color,
+                                            size: 20),
+                                      ),
+                                    ),
+                                    InkWell(
+                                      onTap: () => showDebugSmsDialog(context),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Container(
+                                        width: 40,
+                                        height: 40,
+                                        padding: const EdgeInsets.all(8),
+                                        child: Icon(Icons.message_outlined,
+                                            color: Theme.of(context)
+                                                .iconTheme
+                                                .color,
+                                            size: 20),
+                                      ),
+                                    ),
+                                    InkWell(
+                                      onTap: () =>
+                                          showFailedParseDialog(context),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Tooltip(
+                                        message: "View Failed Parsings",
+                                        child: Container(
+                                          width: 40,
+                                          height: 40,
+                                          padding: const EdgeInsets.all(8),
+                                          child: Icon(Icons.error_outline,
+                                              color: Theme.of(context)
+                                                  .iconTheme
+                                                  .color,
+                                              size: 20),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              );
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          // Lock button
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
-                              borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
-                            child: IconButton(
-                              icon: Icon(Icons.lock_outline,
-                                  color: Theme.of(context).iconTheme.color, size: 22),
-                              onPressed: () {
-                                setState(() {
-                                  _isAuthenticated = false;
-                                });
+                            const SizedBox(width: 4),
+                            // Theme switcher - icon only
+                            Consumer<ThemeProvider>(
+                              builder: (context, themeProvider, child) {
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceVariant
+                                        .withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: IconButton(
+                                    icon: Icon(
+                                      themeProvider.themeMode == ThemeMode.dark
+                                          ? Icons.light_mode_rounded
+                                          : Icons.dark_mode_rounded,
+                                      color: Theme.of(context).iconTheme.color,
+                                      size: 22,
+                                    ),
+                                    onPressed: () {
+                                      themeProvider.toggleTheme();
+                                    },
+                                    tooltip: themeProvider.themeMode ==
+                                            ThemeMode.dark
+                                        ? "Switch to Light Mode"
+                                        : "Switch to Dark Mode",
+                                    padding: const EdgeInsets.all(8),
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                );
                               },
-                              padding: const EdgeInsets.all(8),
-                              constraints: const BoxConstraints(),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            // Lock button
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceVariant
+                                    .withOpacity(0.5),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: IconButton(
+                                icon: Icon(Icons.lock_outline,
+                                    color: Theme.of(context).iconTheme.color,
+                                    size: 22),
+                                onPressed: () {
+                                  setState(() {
+                                    _isAuthenticated = false;
+                                  });
+                                },
+                                padding: const EdgeInsets.all(8),
+                                constraints: const BoxConstraints(),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ))

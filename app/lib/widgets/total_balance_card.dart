@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/utils/gradients.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -93,7 +92,7 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                             Text(
+                            Text(
                               widget.title,
                               style: const TextStyle(
                                 color: Colors.white,
@@ -104,19 +103,25 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                             ),
                             Opacity(
                               opacity: 0.8,
-                              child: widget.logoAsset.endsWith('.svg') 
-                                ? SvgPicture.asset(
-                                    widget.logoAsset,
-                                    width: 24,
-                                    height: 24,
-                                    colorFilter: const ColorFilter.mode(
-                                        Colors.white, BlendMode.srcIn),
-                                  )
-                                : Image.asset(
-                                    widget.logoAsset,
-                                    width: 32,
-                                    height: 32,
-                                  ),
+                              child: widget.logoAsset.endsWith('.svg')
+                                  ? const Icon(
+                                      Icons.account_balance,
+                                      color: Colors.white,
+                                      size: 24,
+                                    )
+                                  : Image.asset(
+                                      widget.logoAsset,
+                                      width: 32,
+                                      height: 32,
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                        return const Icon(
+                                          Icons.account_balance,
+                                          color: Colors.white,
+                                          size: 24,
+                                        );
+                                      },
+                                    ),
                             )
                           ],
                         ),
@@ -141,7 +146,8 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                                 left: 14,
                                 child: Container(
                                     width: 1,
-                                    color: Colors.yellow[500]!.withOpacity(0.1)),
+                                    color:
+                                        Colors.yellow[500]!.withOpacity(0.1)),
                               ),
                               Positioned(
                                 top: 0,
@@ -149,7 +155,8 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                                 right: 14,
                                 child: Container(
                                     width: 1,
-                                    color: Colors.yellow[500]!.withOpacity(0.1)),
+                                    color:
+                                        Colors.yellow[500]!.withOpacity(0.1)),
                               ),
                               Positioned(
                                 left: 0,
@@ -157,7 +164,8 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                                 top: 10,
                                 child: Container(
                                     height: 1,
-                                    color: Colors.yellow[500]!.withOpacity(0.1)),
+                                    color:
+                                        Colors.yellow[500]!.withOpacity(0.1)),
                               ),
                               Positioned(
                                 left: 0,
@@ -165,7 +173,8 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                                 bottom: 10,
                                 child: Container(
                                     height: 1,
-                                    color: Colors.yellow[500]!.withOpacity(0.1)),
+                                    color:
+                                        Colors.yellow[500]!.withOpacity(0.1)),
                               ),
                             ],
                           ),
@@ -209,7 +218,8 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
 
                         // Stats / Info
                         Text(
-                          widget.subtitle ?? "${widget.summary?.banks ?? 0} Banks | ${widget.summary?.accounts ?? 0} Accounts",
+                          widget.subtitle ??
+                              "${widget.summary?.banks ?? 0} Banks | ${widget.summary?.accounts ?? 0} Accounts",
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.7),
                             fontSize: 13,
