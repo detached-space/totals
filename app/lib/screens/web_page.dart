@@ -668,7 +668,10 @@ class _WebPageState extends State<WebPage> {
         onTap: _isLoading ? null : _toggleServer,
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: isRunning ? 8 : 12,
+            vertical: 8,
+          ),
           decoration: BoxDecoration(
             color: isRunning
                 ? Colors.red.withOpacity(0.2)
@@ -689,25 +692,31 @@ class _WebPageState extends State<WebPage> {
                     color: isRunning ? Colors.red : Colors.greenAccent,
                   ),
                 )
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isRunning ? Icons.stop : Icons.play_arrow,
-                      color: isRunning ? Colors.red : Colors.greenAccent,
+              : isRunning
+                  ? Icon(
+                      Icons.stop,
+                      color: Colors.red,
                       size: 18,
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.play_arrow,
+                          color: Colors.greenAccent,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Start',
+                          style: TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      isRunning ? 'Stop' : 'Start',
-                      style: TextStyle(
-                        color: isRunning ? Colors.red : Colors.greenAccent,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
         ),
       ),
     );
@@ -868,61 +877,96 @@ class _WebPageState extends State<WebPage> {
         ),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // Connection Status Indicator
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color:
-                  _serverService.isRunning ? Colors.greenAccent : Colors.grey,
-              boxShadow: _serverService.isRunning
-                  ? [
-                      BoxShadow(
-                        color: Colors.greenAccent.withOpacity(0.5),
-                        blurRadius: 6,
-                        spreadRadius: 1,
-                      )
-                    ]
-                  : null,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _serverService.isRunning
+                      ? Colors.greenAccent
+                      : Colors.grey,
+                  boxShadow: _serverService.isRunning
+                      ? [
+                          BoxShadow(
+                            color: Colors.greenAccent.withOpacity(0.5),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          )
+                        ]
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _serverService.isRunning ? 'ONLINE' : 'OFFLINE',
+                style: TextStyle(
+                  color: _serverService.isRunning
+                      ? Colors.greenAccent
+                      : Colors.grey,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Text(
-            _serverService.isRunning ? 'ONLINE' : 'OFFLINE',
-            style: TextStyle(
-              color:
-                  _serverService.isRunning ? Colors.greenAccent : Colors.grey,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1,
-            ),
-          ),
-
-          const SizedBox(width: 24),
 
           // IP Address
-          if (_networkIp != null) ...[
-            Icon(
-              Icons.wifi,
-              color: Colors.white.withOpacity(0.4),
-              size: 14,
+          if (_networkIp != null)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.wifi,
+                  color: Colors.white.withOpacity(0.4),
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _networkIp!,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(
-              _networkIp!,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.5),
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
 
-          const Spacer(),
+          // URL in the middle (tappable to copy)
+          // if (_serverService.isRunning) ...[
+          //   const SizedBox(width: 16),
+          //   GestureDetector(
+          //     onTap: _copyUrl,
+          //     child: Row(
+          //       children: [
+          //         Icon(
+          //           Icons.link,
+          //           color: Colors.blue.withOpacity(0.7),
+          //           size: 14,
+          //         ),
+          //         const SizedBox(width: 6),
+          //         Text(
+          //           _serverService.serverUrl ?? '',
+          //           style: TextStyle(
+          //             color: Colors.blue.withOpacity(0.8),
+          //             fontSize: 12,
+          //             fontFamily: 'monospace',
+          //             decoration: TextDecoration.underline,
+          //           ),
+          //         ),
+          //       ],
+          //     ),
+          //   ),
+          // ],
 
-          // Log count
+          // Log count (last item)
           Text(
             '${_consoleEntries.length} logs',
             style: TextStyle(
@@ -930,33 +974,6 @@ class _WebPageState extends State<WebPage> {
               fontSize: 11,
             ),
           ),
-
-          if (_serverService.isRunning) ...[
-            const SizedBox(width: 16),
-            // URL (tappable to copy)
-            GestureDetector(
-              onTap: _copyUrl,
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.link,
-                    color: Colors.blue.withOpacity(0.7),
-                    size: 14,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _serverService.serverUrl ?? '',
-                    style: TextStyle(
-                      color: Colors.blue.withOpacity(0.8),
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
