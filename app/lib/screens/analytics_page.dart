@@ -310,6 +310,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           body: SafeArea(
+            bottom: false,
             child: SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
