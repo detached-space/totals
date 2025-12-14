@@ -4,252 +4,303 @@ import 'package:totals/data/consts.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/gradients.dart';
 
 class BanksSummaryList extends StatefulWidget {
   final List<BankSummary> banks;
   List<String> visibleTotalBalancesForSubCards;
+  final VoidCallback onAddAccount;
 
-  BanksSummaryList(
-      {required this.banks, required this.visibleTotalBalancesForSubCards});
+  BanksSummaryList({
+    required this.banks,
+    required this.visibleTotalBalancesForSubCards,
+    required this.onAddAccount,
+  });
 
   @override
   State<BanksSummaryList> createState() => _BanksSummaryListState();
 }
 
 class _BanksSummaryListState extends State<BanksSummaryList> {
-  int? isExpanded;
-
   @override
   Widget build(BuildContext context) {
     return Consumer<AccountSyncStatusService>(
       builder: (context, syncStatusService, child) {
-        return ListView.builder(
+        return GridView.builder(
           padding: const EdgeInsets.all(16),
-          itemCount: widget.banks.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 0.85,
+          ),
+          itemCount: widget.banks.length + 1,
           itemBuilder: (context, index) {
+            // Show add account button as the last item
+            if (index == widget.banks.length) {
+              return GestureDetector(
+                onTap: widget.onAddAccount,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: Theme.of(context).colorScheme.surfaceVariant,
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                      width: 2,
+                      style: BorderStyle.solid,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: widget.onAddAccount,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 56,
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                Icons.add_rounded,
+                                color: Theme.of(context).colorScheme.primary,
+                                size: 32,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              "Add Account",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              "Register new bank",
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+            
             final bank = widget.banks[index];
             final isSyncing =
                 syncStatusService.hasAnyAccountSyncing(bank.bankId);
             final syncStatus =
                 syncStatusService.getSyncStatusForBank(bank.bankId);
-            return Column(
-              children: [
-                GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        if (isExpanded == null) {
-                          isExpanded = bank.bankId;
-                        } else if (isExpanded == bank.bankId) {
-                          isExpanded = null;
-                        } else {
-                          isExpanded = bank.bankId;
-                        }
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        color: Colors.white,
-                        border: Border.all(color: const Color(0xFFEEEEEE)),
+            final bankInfo = AppConstants.banks
+                .firstWhere((element) => element.id == bank.bankId);
+            final gradient = GradientUtils.getGradient(bank.bankId);
+            
+            return Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  gradient: gradient,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Stack(
+                    children: [
+                      // Glossy overlay
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.white.withOpacity(0.1),
+                                Colors.white.withOpacity(0.0),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                      child: Column(children: [
-                        Row(
+                      // Content
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            SizedBox(
-                              width: 60,
-                              height: 60,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.asset(
-                                  AppConstants.banks
-                                      .firstWhere((element) =>
-                                          element.id == bank.bankId)
-                                      .image,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(
-                              width: 16,
-                            ),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      mainAxisSize: MainAxisSize.max,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            AppConstants.banks
-                                                .firstWhere((element) =>
-                                                    element.id == bank.bankId)
-                                                .name,
-                                            style: const TextStyle(
-                                              fontSize: 14,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(
-                                          width: 10,
-                                        ),
-                                        Icon(
-                                          isExpanded == bank.bankId
-                                              ? Icons.keyboard_arrow_up
-                                              : Icons.keyboard_arrow_down,
-                                        )
-                                      ]),
-                                  Text(
-                                    bank.accountCount.toString() + ' accounts',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey,
+                            // Bank logo and name
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 50,
+                                  height: 50,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Image.asset(
+                                      bankInfo.image,
+                                      fit: BoxFit.cover,
                                     ),
                                   ),
-                                  if (isSyncing && syncStatus != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4.0),
-                                      child: Row(
-                                        children: [
-                                          SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              valueColor:
-                                                  AlwaysStoppedAnimation<Color>(
-                                                Color(0xFF294EC3),
-                                              ),
-                                            ),
-                                          ),
-                                          SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              syncStatus,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: Color(0xFF294EC3),
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  bankInfo.shortName,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black26,
+                                        offset: Offset(0, 1),
+                                        blurRadius: 2,
+                                      )
+                                    ],
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                            
+                            // Balance and details
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  bank.accountCount.toString() + ' accounts',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white.withOpacity(0.9),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        widget.visibleTotalBalancesForSubCards
+                                                .contains(bank.bankId.toString())
+                                            ? formatNumberWithComma(bank.totalBalance) + " ETB"
+                                            : "*" * 5,
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                          shadows: [
+                                            Shadow(
+                                              color: Colors.black26,
+                                              offset: Offset(0, 1),
+                                              blurRadius: 2,
+                                            )
+                                          ],
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
+                                    GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          if (widget.visibleTotalBalancesForSubCards
+                                              .contains(bank.bankId.toString())) {
                                             widget.visibleTotalBalancesForSubCards
-                                                    .contains(
-                                                        bank.bankId.toString())
-                                                ? (formatNumberWithComma(
-                                                        bank.totalBalance)) +
-                                                    " ETB"
-                                                : "*" * 5,
-                                            style: const TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.bold,
+                                                .remove(bank.bankId.toString());
+                                          } else {
+                                            widget.visibleTotalBalancesForSubCards
+                                                .add(bank.bankId.toString());
+                                          }
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(
+                                          widget.visibleTotalBalancesForSubCards
+                                                  .contains(bank.bankId.toString())
+                                              ? Icons.visibility_off
+                                              : Icons.remove_red_eye_outlined,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (isSyncing && syncStatus != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Row(
+                                      children: [
+                                        SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                const AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
                                             ),
-                                            overflow: TextOverflow.ellipsis),
-                                      ),
-                                      SizedBox(
-                                        width: 20,
-                                      ),
-                                      GestureDetector(
-                                          onTap: () {
-                                            setState(() {
-                                              if (widget
-                                                  .visibleTotalBalancesForSubCards
-                                                  .contains(
-                                                      bank.bankId.toString())) {
-                                                widget
-                                                    .visibleTotalBalancesForSubCards
-                                                    .remove(
-                                                        bank.bankId.toString());
-                                              } else {
-                                                widget
-                                                    .visibleTotalBalancesForSubCards
-                                                    .add(
-                                                        bank.bankId.toString());
-                                              }
-                                            });
-                                          },
-                                          child: Icon(
-                                            widget.visibleTotalBalancesForSubCards
-                                                    .contains(
-                                                        bank.bankId.toString())
-                                                ? Icons.visibility_off
-                                                : Icons.remove_red_eye_outlined,
-                                            color: Color(0xFFBDC0CA),
-                                          ))
-                                    ],
-                                  )
-                                ],
-                              ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            syncStatus,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.white.withOpacity(0.9),
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
-                        isExpanded == bank.bankId
-                            ? Column(
-                                children: [
-                                  const SizedBox(
-                                    height: 15,
-                                  ),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        "Total Credit",
-                                        style: TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      Text(
-                                          "${formatNumberWithComma(bank.totalCredit).toString()} ETB",
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                          )),
-                                    ],
-                                  ),
-                                  const SizedBox(
-                                    height: 5,
-                                  ),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      const Text(
-                                        "Total Debit",
-                                        style: TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      Text(
-                                          "${formatNumberWithComma(bank.totalDebit).toString()} ETB",
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                          )),
-                                    ],
-                                  ),
-                                ],
-                              )
-                            : Container()
-                      ]),
-                    )),
-                const SizedBox(
-                  height: 13,
-                )
-              ],
+                      ),
+                    ],
+                  ),
+                ),
             );
           },
         );

@@ -178,24 +178,24 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
               .compareTo(DateTime.tryParse(a.time ?? "") ?? DateTime(0)));
 
       return Scaffold(
-          backgroundColor: const Color(0xffF1F4FF),
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
-            backgroundColor: const Color(0xffF1F4FF),
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             scrolledUnderElevation: 0,
             leading: IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.arrow_back,
-                color: Color(0xFF294EC3),
+                color: Theme.of(context).colorScheme.primary,
               ),
               onPressed: () {
                 Navigator.pop(context);
               },
             ),
-            title: const Text('Transaction History',
+            title: Text('Transaction History',
                 style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF294EC3))),
+                    color: Theme.of(context).colorScheme.primary)),
           ),
           body: SingleChildScrollView(
               child: Column(
@@ -204,7 +204,8 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                   decoration: BoxDecoration(
                     border: Border(
-                      bottom: BorderSide(color: Colors.grey[500]!, width: .2),
+                      bottom: BorderSide(
+                          color: Theme.of(context).dividerColor, width: .2),
                     ),
                   ),
                   child: Row(
@@ -215,7 +216,7 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                             border: Border(
                               bottom: BorderSide(
                                   color: activeTab == tabs[index]
-                                      ? Color(0xFF294EC3)
+                                      ? Theme.of(context).colorScheme.primary
                                       : Colors.transparent,
                                   width: activeTab == tabs[index] ? 2 : 0),
                             ),
@@ -229,9 +230,9 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                             },
                             style: TextButton.styleFrom(
                               foregroundColor: activeTab == tabs[index]
-                                  ? Color(0xFF294EC3)
-                                  : Color(0xFF444750),
-                              textStyle: TextStyle(fontSize: 14),
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                              textStyle: const TextStyle(fontSize: 14),
                             ),
                             child: Text(tabs[index]),
                           ));
@@ -446,21 +447,22 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                       decoration: InputDecoration(
                         hintText: 'Search for Transactions',
                         hintStyle: TextStyle(
-                          color: Colors.grey.shade400,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w300,
                         ),
                         contentPadding: const EdgeInsets.symmetric(vertical: 6),
                         border: UnderlineInputBorder(
-                          borderSide:
-                              BorderSide(color: Colors.grey.shade400, width: 1),
+                          borderSide: BorderSide(
+                              color: Theme.of(context).dividerColor, width: 1),
                         ),
                         enabledBorder: UnderlineInputBorder(
-                          borderSide:
-                              BorderSide(color: Colors.grey.shade400, width: 1),
+                          borderSide: BorderSide(
+                              color: Theme.of(context).dividerColor, width: 1),
                         ),
-                        focusedBorder: const UnderlineInputBorder(
-                          borderSide:
-                              BorderSide(color: Colors.blue, width: 1.5),
+                        focusedBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 1.5),
                         ),
                       ),
                     ),
@@ -526,6 +528,7 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                           Transaction transaction = visibleTransaction[index];
                           return Card(
                             margin: const EdgeInsets.symmetric(vertical: 8.0),
+                            color: Theme.of(context).cardColor,
                             child: ListTile(
                               subtitle: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,

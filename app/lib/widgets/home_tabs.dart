@@ -16,44 +16,70 @@ class HomeTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
         border: Border(
-          bottom: BorderSide(color: Colors.grey, width: 0.5),
+          bottom: BorderSide(
+              color: Theme.of(context).dividerColor, width: 0.5),
         ),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: Container(
-            child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Row(
           children: List.generate(tabs.length, (index) {
-            return Container(
+            final isActive = activeTab == tabs[index];
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
                 decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                        color: activeTab == tabs[index]
-                            ? Color(0xFF294EC3)
-                            : Colors.transparent,
-                        width: activeTab == tabs[index] ? 2 : 0),
+                  color: isActive
+                      ? Theme.of(context).colorScheme.primary.withOpacity(0.15)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  border: isActive
+                      ? Border.all(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          width: 1,
+                        )
+                      : null,
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => onChangeTab(tabs[index]),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            tabs[index] == 0
+                                ? "Summary"
+                                : AppConstants.banks
+                                    .firstWhere((element) => element.id == tabs[index])
+                                    .shortName,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                              color: isActive
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                child: TextButton(
-                  onPressed: () => onChangeTab(tabs[index]),
-                  style: TextButton.styleFrom(
-                    foregroundColor: activeTab == tabs[index]
-                        ? Color(0xFF294EC3)
-                        : Color(0xFF444750),
-                    textStyle: TextStyle(fontSize: 14),
-                  ),
-                  child: Text(tabs[index] == 0
-                      ? "Summary"
-                      : AppConstants.banks
-                          .firstWhere((element) => element.id == tabs[index])
-                          .shortName),
-                ));
+              ),
+            );
           }),
-        )),
+        ),
       ),
     );
   }
