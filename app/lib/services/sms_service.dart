@@ -182,7 +182,7 @@ class SmsService {
     // We need to match the Bank ID from the pattern, not just assume 1 (CBE)
     int bankId = details['bankId'] ?? bank.id;
 
-    if (bankId == 6) {
+    if (bankId == 6 || bankId == 2) {
       AccountRepository accRepo = AccountRepository();
       List<Account> accounts = await accRepo.getAccounts();
       int index = accounts.indexWhere((a) {

@@ -101,6 +101,8 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
               t.accountNumber!.substring(t.accountNumber!.length - 3));
         } else if (widget.bankId == 6) {
           return t.bankId == 6;
+        } else if (widget.bankId == 2) {
+          return t.bankId == 2;
         }
 
         return t.accountNumber == widget.accountNumber;
@@ -231,7 +233,9 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                             style: TextButton.styleFrom(
                               foregroundColor: activeTab == tabs[index]
                                   ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                               textStyle: const TextStyle(fontSize: 14),
                             ),
                             child: Text(tabs[index]),

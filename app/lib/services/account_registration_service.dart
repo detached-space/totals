@@ -274,8 +274,8 @@ class AccountRegistrationService {
       int bankIdFromDetails = details['bankId'] ?? bankId;
 
       // Use the same logic as SmsService for matching accounts
-      if (bankIdFromDetails == 6) {
-        // For bank 6 (Telebirr), match by bank only
+      if (bankIdFromDetails == 6 || bankIdFromDetails == 2) {
+        // For bank 6 (Telebirr) and 2 (Awash), match by bank only
         final index = accounts.indexWhere((a) => a.bank == bankIdFromDetails);
         if (index != -1) {
           final account = accounts[index];
