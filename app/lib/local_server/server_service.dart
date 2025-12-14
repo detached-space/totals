@@ -14,10 +14,64 @@ import 'handlers/transactions_handler.dart';
 import 'handlers/summary_handler.dart';
 import 'handlers/banks_handler.dart';
 
+/// Log entry for request logging
+class ServerLogEntry {
+  final DateTime timestamp;
+  final String method;
+  final String path;
+  final int statusCode;
+  final String? message;
+  final Duration? duration;
+
+  ServerLogEntry({
+    required this.timestamp,
+    required this.method,
+    required this.path,
+    required this.statusCode,
+    this.message,
+    this.duration,
+  });
+
+  @override
+  String toString() {
+    final time =
+        '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}';
+    final durationStr =
+        duration != null ? ' (${duration!.inMilliseconds}ms)' : '';
+    return '[$time] $method $path → $statusCode$durationStr';
+  }
+}
+
 class ServerService {
   HttpServer? _server;
   String? _localIp;
   Directory? _webappDir;
+
+  // Request logging
+  final StreamController<ServerLogEntry> _logController =
+      StreamController<ServerLogEntry>.broadcast();
+  final List<ServerLogEntry> _logs = [];
+  static const int _maxLogs = 100;
+
+  /// Stream of log entries
+  Stream<ServerLogEntry> get logStream => _logController.stream;
+
+  /// Get all logs
+  List<ServerLogEntry> get logs => List.unmodifiable(_logs);
+
+  /// Add a log entry
+  void _addLog(ServerLogEntry entry) {
+    _logs.add(entry);
+    if (_logs.length > _maxLogs) {
+      _logs.removeAt(0);
+    }
+    _logController.add(entry);
+  }
+
+  /// Clear all logs
+  void clearLogs() {
+    _logs.clear();
+  }
 
   // Shared random number state
   int _currentRandomNumber = 0;
@@ -132,7 +186,7 @@ class ServerService {
         .add(_spaFallbackHandler); // SPA fallback for client-side routing
 
     final handler = const Pipeline()
-        .addMiddleware(logRequests())
+        .addMiddleware(_loggingMiddleware())
         .addMiddleware(_corsMiddleware())
         .addHandler(cascade.handler);
 
@@ -210,6 +264,44 @@ class ServerService {
     }
   }
 
+  /// Logging middleware that emits to the log stream
+  Middleware _loggingMiddleware() {
+    return (Handler handler) {
+      return (Request request) async {
+        final stopwatch = Stopwatch()..start();
+
+        try {
+          final response = await handler(request);
+          stopwatch.stop();
+
+          // Log the request
+          _addLog(ServerLogEntry(
+            timestamp: DateTime.now(),
+            method: request.method,
+            path: '/${request.url.path}',
+            statusCode: response.statusCode,
+            duration: stopwatch.elapsed,
+          ));
+
+          return response;
+        } catch (e) {
+          stopwatch.stop();
+
+          _addLog(ServerLogEntry(
+            timestamp: DateTime.now(),
+            method: request.method,
+            path: '/${request.url.path}',
+            statusCode: 500,
+            message: e.toString(),
+            duration: stopwatch.elapsed,
+          ));
+
+          rethrow;
+        }
+      };
+    };
+  }
+
   /// CORS middleware for development
   Middleware _corsMiddleware() {
     return (Handler handler) {
@@ -258,5 +350,6 @@ class ServerService {
 
   void dispose() {
     _randomNumberController.close();
+    _logController.close();
   }
 }
