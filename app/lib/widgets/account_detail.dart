@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/data/consts.dart';
+import 'package:intl/intl.dart';
 
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
@@ -24,10 +25,45 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
   bool showTotalBalance = false;
   bool isExpanded = false;
 
+  // Date filter - default to last 30 days
+  late DateTime _startDate;
+  late DateTime _endDate;
+
   @override
   void initState() {
     super.initState();
-    // No manual get data needed, rely on Provider
+    // Default to last 30 days
+    _endDate = DateTime.now();
+    _startDate = _endDate.subtract(const Duration(days: 30));
+  }
+
+  Future<void> _selectDateRange() async {
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: Color(0xFF294EC3),
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Color(0xFF444750),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _startDate = picked.start;
+        _endDate = picked.end;
+      });
+    }
   }
 
   @override
@@ -53,29 +89,69 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
       // Use helper logic similar to provider to match account
       List<Transaction> transactions = provider.allTransactions.where((t) {
         if (t.bankId != widget.bankId) return false;
-
-        // Simple match or suffix match for CBE
-        // Assuming widget.accountNumber is the full number from the summary
+        // CBE check: last 4 digits
         if (widget.bankId == 1 && widget.accountNumber.length >= 4) {
-          // If transaction account number is short (suffix), match suffix
-          // If transaction account number is full, match full
-          // The provider logic was: t.accountNumber == account.accountNumber.substring(...)
-          // Let's replicate or simplify.
-          // If t.accountNumber is "5345" and widget.accountNumber is "1000...5345", matches.
-          if (t.accountNumber != null &&
-              t.accountNumber!.length < widget.accountNumber.length) {
-            return widget.accountNumber.endsWith(t.accountNumber!);
-          }
-        }
-
-        if (widget.bankId == 6) {
+          return widget.accountNumber.endsWith(
+              t.accountNumber!.substring(t.accountNumber!.length - 4));
+        } else if (widget.bankId == 3 && widget.accountNumber.length >= 2) {
+          return widget.accountNumber.endsWith(
+              t.accountNumber!.substring(t.accountNumber!.length - 2));
+        } else if (widget.bankId == 4 && widget.accountNumber.length >= 3) {
+          return widget.accountNumber.endsWith(
+              t.accountNumber!.substring(t.accountNumber!.length - 3));
+        } else if (widget.bankId == 6) {
           return t.bankId == 6;
         }
+
         return t.accountNumber == widget.accountNumber;
       }).toList();
 
-      // 3. Local Search & Tab Filter
-      List<Transaction> visibleTransaction = transactions;
+      // 3. Filter by Date Range
+      List<Transaction> dateFilteredTransactions = transactions.where((t) {
+        if (t.time == null) return false;
+
+        try {
+          DateTime? transactionDate;
+          if (t.time!.contains('T')) {
+            transactionDate = DateTime.parse(t.time!);
+          } else {
+            transactionDate = DateTime.tryParse(t.time!);
+          }
+
+          if (transactionDate == null) return false;
+
+          // Normalize to start of day for comparison
+          DateTime transactionDateStart = DateTime(
+            transactionDate.year,
+            transactionDate.month,
+            transactionDate.day,
+          );
+
+          DateTime startDateNormalized = DateTime(
+            _startDate.year,
+            _startDate.month,
+            _startDate.day,
+          );
+
+          DateTime endDateNormalized = DateTime(
+            _endDate.year,
+            _endDate.month,
+            _endDate.day,
+          );
+
+          // Check if transaction date is within range (inclusive)
+          return transactionDateStart.compareTo(startDateNormalized) >= 0 &&
+              transactionDateStart.compareTo(endDateNormalized) <= 0;
+        } catch (e) {
+          print("debug: Error parsing transaction date: ${t.time}, error: $e");
+          return false;
+        }
+      }).toList();
+
+      // 4. Local Search & Tab Filter
+      List<Transaction> visibleTransaction = dateFilteredTransactions;
+
+      print("debug: Visible transactions: ${visibleTransaction.length}");
 
       // Apply Search
       if (searchTerm.isNotEmpty) {
@@ -83,10 +159,7 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
             .where((t) =>
                 (t.creditor?.toLowerCase().contains(searchTerm.toLowerCase()) ??
                     false) ||
-                (t.reference
-                        ?.toLowerCase()
-                        .contains(searchTerm.toLowerCase()) ??
-                    false))
+                (t.reference.toLowerCase().contains(searchTerm.toLowerCase())))
             .toList();
       }
 
@@ -392,6 +465,56 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    // Date Filter Button
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Filter by Date',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF444750),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _selectDateRange,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Color(0xFF294EC3),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.calendar_today,
+                                    size: 16,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${DateFormat('MMM dd').format(_startDate)} - ${DateFormat('MMM dd, yyyy').format(_endDate)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
                     SizedBox(
                       height: MediaQuery.of(context).size.height *
                           0.5, // ✅ Give height
@@ -407,29 +530,51 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                               subtitle: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  if (transaction.creditor != null &&
+                                      transaction.creditor!.isNotEmpty)
+                                    Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 4.0),
+                                      child: Text(
+                                        transaction.creditor!.toUpperCase(),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                          color: Color(0xFF444750),
+                                        ),
+                                      ),
+                                    ),
                                   Text(
-                                    transaction.creditor?.toUpperCase() ?? '',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.w600),
+                                    formatTime(transaction.time.toString()),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
                                   ),
-                                  Text(
-                                      '${formatTime(transaction.time.toString())}'),
+                                  const SizedBox(height: 4),
                                   Row(
                                     mainAxisAlignment:
                                         MainAxisAlignment.spaceBetween,
                                     children: [
                                       Expanded(
-                                          child: Text(
-                                        '${transaction.reference}',
-                                        overflow: TextOverflow.ellipsis,
-                                      )),
+                                        child: Text(
+                                          transaction.reference,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ),
                                       Text(
                                         '${transaction.type == 'CREDIT' ? "+" : "-"} ${formatNumberWithComma(transaction.amount)} ETB',
                                         style: TextStyle(
-                                            fontWeight: FontWeight.w500,
-                                            color: transaction.type == 'CREDIT'
-                                                ? Colors.green
-                                                : Colors.red),
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                          color: transaction.type == 'CREDIT'
+                                              ? Colors.green
+                                              : Colors.red,
+                                        ),
                                       ),
                                     ],
                                   )

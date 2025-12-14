@@ -2,6 +2,7 @@ class Transaction {
   final double amount; // required
   final String reference; // required
   final String? creditor;
+  final String? receiver;
   final String? time; // ISO string
   final String? status; // PENDING, CLEARED, SYNCED
   final String? currentBalance;
@@ -14,6 +15,7 @@ class Transaction {
     required this.amount,
     required this.reference,
     this.creditor,
+    this.receiver,
     this.time,
     this.status,
     this.currentBalance,
@@ -34,6 +36,7 @@ class Transaction {
       amount: json['amount'],
       reference: json['reference'] ?? '',
       creditor: json['creditor'],
+      receiver: json['receiver'],
       time: json['time'],
       status: json['status'],
       currentBalance: json['currentBalance']?.toString(),
@@ -48,6 +51,7 @@ class Transaction {
         'amount': amount,
         'reference': reference,
         'creditor': creditor,
+        'receiver': receiver,
         'time': time,
         'status': status,
         'currentBalance': currentBalance,

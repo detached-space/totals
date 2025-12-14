@@ -296,11 +296,26 @@ class AccountRegistrationService {
               "debug: Account balance updated from latest message: $newBalance");
         }
       } else if (extractedAccountNumber != null) {
-        // For other banks, match by bank and account number
-        final index = accounts.indexWhere((a) {
-          if (a.bank != bankIdFromDetails) return false;
-          return a.accountNumber.endsWith(extractedAccountNumber);
-        });
+        int index = -1;
+        if (bankId == 1) {
+          index = accounts.indexWhere((a) {
+            if (a.bank != bankId) return false;
+            return a.accountNumber.endsWith(extractedAccountNumber
+                .substring(extractedAccountNumber.length - 4));
+          });
+        } else if (bankId == 3) {
+          index = accounts.indexWhere((a) {
+            if (a.bank != bankId) return false;
+            return a.accountNumber.endsWith(extractedAccountNumber
+                .substring(extractedAccountNumber.length - 2));
+          });
+        } else if (bankId == 4) {
+          index = accounts.indexWhere((a) {
+            if (a.bank != bankId) return false;
+            return a.accountNumber.endsWith(extractedAccountNumber
+                .substring(extractedAccountNumber.length - 3));
+          });
+        }
 
         if (index != -1) {
           final account = accounts[index];

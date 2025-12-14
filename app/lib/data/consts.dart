@@ -59,8 +59,6 @@ class AppConstants {
       name: "Telebirr",
       shortName: "Telebirr",
       codes: [
-        "Telebirr",
-        "telebirr",
         "127",
       ],
       image: "assets/images/telebirr.png",

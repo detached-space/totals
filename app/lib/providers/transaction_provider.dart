@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:intl/intl.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
@@ -40,7 +39,10 @@ class TransactionProvider with ChangeNotifier {
 
     try {
       _accounts = await _accountRepo.getAccounts();
+      // print all the accounts
+      print("debug: Accounts: ${_accounts.map((a) => a.balance).join(', ')}");
       _allTransactions = await _transactionRepo.getTransactions();
+      print("debug: Transactions: ${_allTransactions.length}");
 
       _calculateSummaries(_allTransactions);
       _filterTransactions(_allTransactions);
@@ -122,12 +124,34 @@ class TransactionProvider with ChangeNotifier {
             t.accountNumber != null &&
             account.accountNumber.length >= 4) {
           // CBE check: last 4 digits
-          return t.accountNumber ==
+          print(
+              "debug: CBE check: ${t.accountNumber} == ${account.accountNumber.substring(account.accountNumber.length - 4)}");
+          return t.accountNumber?.substring(t.accountNumber!.length - 4) ==
               account.accountNumber.substring(account.accountNumber.length - 4);
+        }
+        if (account.bank == 4 &&
+            t.accountNumber != null &&
+            account.accountNumber.length >= 3) {
+          // Dashen check: last 3 digits
+          print(
+              "debug: CBE check: ${t.accountNumber} == ${account.accountNumber.substring(account.accountNumber.length - 3)}");
+          return t.accountNumber?.substring(t.accountNumber!.length - 3) ==
+              account.accountNumber.substring(account.accountNumber.length - 3);
+        }
+        if (account.bank == 3 &&
+            t.accountNumber != null &&
+            account.accountNumber.length >= 2) {
+          // Bank of Abyssinia check: last 2 digits
+          print(
+              "debug: CBE check: ${t.accountNumber} == ${account.accountNumber.substring(account.accountNumber.length - 2)}");
+          return t.accountNumber?.substring(t.accountNumber!.length - 2) ==
+              account.accountNumber.substring(account.accountNumber.length - 2);
         } else {
           return t.accountNumber == account.accountNumber;
         }
       }).toList();
+
+      print("debug: Account Transactions: ${accountTransactions.length}");
 
       // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
       // This handles legacy data or parsing failures where account wasn't captured.
@@ -183,20 +207,50 @@ class TransactionProvider with ChangeNotifier {
 
   void _filterTransactions(List<Transaction> allTransactions) {
     // Filter by date and search key
-    String dateStr =
-        DateFormat('dd MMM yyyy').format(_selectedDate).toUpperCase();
+    // Normalize selected date to start of day for comparison
+    DateTime selectedDateStart = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
 
     _transactions = allTransactions.where((t) {
       if (t.time == null) return false;
-      bool dateMatch = t.time!.toUpperCase().contains(dateStr);
-      if (!dateMatch) return false;
+
+      // Parse ISO8601 date string
+      try {
+        DateTime? transactionDate;
+        if (t.time!.contains('T')) {
+          // ISO8601 format: "2024-01-15T10:30:00.000Z"
+          transactionDate = DateTime.parse(t.time!);
+        } else {
+          // Try other formats if needed
+          transactionDate = DateTime.tryParse(t.time!);
+        }
+
+        if (transactionDate == null) return false;
+
+        // Normalize transaction date to start of day for comparison
+        DateTime transactionDateStart = DateTime(
+          transactionDate.year,
+          transactionDate.month,
+          transactionDate.day,
+        );
+
+        // Compare dates (ignoring time)
+        bool dateMatch =
+            transactionDateStart.isAtSameMomentAs(selectedDateStart);
+        if (!dateMatch) return false;
+      } catch (e) {
+        print("debug: Error parsing transaction date: ${t.time}, error: $e");
+        return false;
+      }
 
       if (_searchKey.isEmpty) return true;
 
       return (t.creditor?.toLowerCase().contains(_searchKey.toLowerCase()) ??
               false) ||
-          (t.reference?.toLowerCase().contains(_searchKey.toLowerCase()) ??
-              false);
+          (t.reference.toLowerCase().contains(_searchKey.toLowerCase()));
     }).toList();
   }
 

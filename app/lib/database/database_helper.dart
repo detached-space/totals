@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -33,6 +33,7 @@ class DatabaseHelper {
         amount REAL NOT NULL,
         reference TEXT NOT NULL UNIQUE,
         creditor TEXT,
+        receiver TEXT,
         time TEXT,
         status TEXT,
         currentBalance TEXT,
@@ -115,6 +116,16 @@ class DatabaseHelper {
           'CREATE INDEX IF NOT EXISTS idx_accounts_bank ON accounts(bank)');
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_accounts_accountNumber ON accounts(accountNumber)');
+    }
+
+    if (oldVersion < 3) {
+      // Add receiver column to transactions table for version 3
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN receiver TEXT');
+        print("debug: Added receiver column to transactions table");
+      } catch (e) {
+        print("debug: Error adding receiver column (might already exist): $e");
+      }
     }
   }
 

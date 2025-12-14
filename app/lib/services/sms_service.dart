@@ -202,17 +202,32 @@ class SmsService {
           pendingCredit: old.pendingCredit);
       await accRepo.saveAccount(updated);
       print("debug: Account balance updated for ${old.accountHolderName}");
-    }
-
-    if (details['accountNumber'] != null) {
+    } else if (details['accountNumber'] != null) {
       AccountRepository accRepo = AccountRepository();
       List<Account> accounts = await accRepo.getAccounts();
 
       String extractedAccount = details['accountNumber'];
-      int index = accounts.indexWhere((a) {
-        if (a.bank != bankId) return false;
-        return a.accountNumber.endsWith(extractedAccount);
-      });
+
+      int index = -1;
+      if (bankId == 1) {
+        index = accounts.indexWhere((a) {
+          if (a.bank != bankId) return false;
+          return a.accountNumber.endsWith(
+              extractedAccount.substring(extractedAccount.length - 4));
+        });
+      } else if (bankId == 3) {
+        index = accounts.indexWhere((a) {
+          if (a.bank != bankId) return false;
+          return a.accountNumber.endsWith(
+              extractedAccount.substring(extractedAccount.length - 2));
+        });
+      } else if (bankId == 4) {
+        index = accounts.indexWhere((a) {
+          if (a.bank != bankId) return false;
+          return a.accountNumber.endsWith(
+              extractedAccount.substring(extractedAccount.length - 4));
+        });
+      }
 
       if (index != -1) {
         Account old = accounts[index];

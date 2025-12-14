@@ -128,11 +128,6 @@ class SmsConfigService {
 
     // Optionally show code units for each character
     print("Code units: ${smsText.codeUnits}");
-
-    // For more detailed view
-    for (int i = 0; i < smsText.length; i++) {
-      print("Char $i: '${smsText[i]}' -> ${smsText.codeUnitAt(i)}");
-    }
   }
 
   String cleanSmsText(String text) {
