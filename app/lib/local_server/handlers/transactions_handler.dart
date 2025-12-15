@@ -4,10 +4,12 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:totals/data/consts.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/repositories/account_repository.dart';
 
 /// Handler for transaction-related API endpoints
 class TransactionsHandler {
   final TransactionRepository _transactionRepo = TransactionRepository();
+  final AccountRepository _accountRepo = AccountRepository();
 
   /// Returns a configured router with all transaction routes
   Router get router {
@@ -39,6 +41,7 @@ class TransactionsHandler {
 
       // Parse query parameters
       final bankId = int.tryParse(queryParams['bankId'] ?? '');
+      final accountNumber = queryParams['accountNumber'];
       final type = queryParams['type'];
       final status = queryParams['status'];
       final limit = int.tryParse(queryParams['limit'] ?? '20') ?? 20;
@@ -46,13 +49,26 @@ class TransactionsHandler {
       final fromDate = queryParams['from'];
       final toDate = queryParams['to'];
 
+      // If accountNumber is provided, validate that the account exists
+      if (accountNumber != null && bankId != null) {
+        final accountExists =
+            await _accountRepo.accountExists(accountNumber, bankId);
+        if (!accountExists) {
+          return _errorResponse('Account not found', 404);
+        }
+      }
+
       // Fetch all transactions from database
       List<Transaction> transactions = await _transactionRepo.getTransactions();
+
+      // Filter out orphaned transactions (transactions without matching accounts)
+      transactions = await _filterOrphanedTransactions(transactions);
 
       // Apply filters
       transactions = _applyFilters(
         transactions,
         bankId: bankId,
+        accountNumber: accountNumber,
         type: type,
         status: status,
         fromDate: fromDate,
@@ -142,10 +158,56 @@ class TransactionsHandler {
     }
   }
 
+  /// Filter out orphaned transactions (transactions without matching accounts)
+  Future<List<Transaction>> _filterOrphanedTransactions(
+      List<Transaction> transactions) async {
+    final accounts = await _accountRepo.getAccounts();
+
+    return transactions.where((t) {
+      if (t.bankId == null) return false;
+
+      final bankAccounts = accounts.where((a) => a.bank == t.bankId).toList();
+      if (bankAccounts.isEmpty) return false;
+
+      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
+        for (var account in bankAccounts) {
+          bool matches = false;
+
+          if (account.bank == 1 && account.accountNumber.length >= 4) {
+            matches = t.accountNumber!.length >= 4 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 4);
+          } else if (account.bank == 4 && account.accountNumber.length >= 3) {
+            matches = t.accountNumber!.length >= 3 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 3);
+          } else if (account.bank == 3 && account.accountNumber.length >= 2) {
+            matches = t.accountNumber!.length >= 2 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 2);
+          } else if (account.bank == 2 || account.bank == 6) {
+            matches = true;
+          } else {
+            matches = t.accountNumber == account.accountNumber;
+          }
+
+          if (matches) return true;
+        }
+        return false;
+      } else {
+        return bankAccounts.length == 1;
+      }
+    }).toList();
+  }
+
   /// Apply filters to the transaction list
   List<Transaction> _applyFilters(
     List<Transaction> transactions, {
     int? bankId,
+    String? accountNumber,
     String? type,
     String? status,
     String? fromDate,
@@ -155,6 +217,38 @@ class TransactionsHandler {
       // Filter by bankId
       if (bankId != null && t.bankId != bankId) {
         return false;
+      }
+
+      // Filter by accountNumber if provided
+      if (accountNumber != null && bankId != null) {
+        bool matchesAccount = false;
+        // This will be validated against accounts, so we can use simple matching here
+        if (t.accountNumber != null) {
+          if (bankId == 1 &&
+              accountNumber.length >= 4 &&
+              t.accountNumber!.length >= 4) {
+            matchesAccount =
+                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
+                    accountNumber.substring(accountNumber.length - 4);
+          } else if (bankId == 4 &&
+              accountNumber.length >= 3 &&
+              t.accountNumber!.length >= 3) {
+            matchesAccount =
+                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
+                    accountNumber.substring(accountNumber.length - 3);
+          } else if (bankId == 3 &&
+              accountNumber.length >= 2 &&
+              t.accountNumber!.length >= 2) {
+            matchesAccount =
+                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
+                    accountNumber.substring(accountNumber.length - 2);
+          } else if (bankId == 2 || bankId == 6) {
+            matchesAccount = true; // Match by bankId only
+          } else {
+            matchesAccount = t.accountNumber == accountNumber;
+          }
+        }
+        if (!matchesAccount) return false;
       }
 
       // Filter by type (CREDIT/DEBIT)

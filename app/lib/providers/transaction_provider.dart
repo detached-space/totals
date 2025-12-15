@@ -65,6 +65,54 @@ class TransactionProvider with ChangeNotifier {
   }
 
   void _calculateSummaries(List<Transaction> allTransactions) {
+    // Filter out transactions that don't have a matching account (orphaned transactions)
+    final validTransactions = allTransactions.where((t) {
+      if (t.bankId == null) return false;
+
+      // Check if there's an account for this transaction's bank
+      final bankAccounts = _accounts.where((a) => a.bank == t.bankId).toList();
+      if (bankAccounts.isEmpty) return false;
+
+      // If transaction has accountNumber, verify it matches an account
+      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
+        for (var account in bankAccounts) {
+          bool matches = false;
+
+          if (account.bank == 1 && account.accountNumber.length >= 4) {
+            // CBE: match last 4 digits
+            matches = t.accountNumber!.length >= 4 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 4);
+          } else if (account.bank == 4 && account.accountNumber.length >= 3) {
+            // Dashen: match last 3 digits
+            matches = t.accountNumber!.length >= 3 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 3);
+          } else if (account.bank == 3 && account.accountNumber.length >= 2) {
+            // Bank of Abyssinia: match last 2 digits
+            matches = t.accountNumber!.length >= 2 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 2);
+          } else if (account.bank == 2 || account.bank == 6) {
+            // Awash/Telebirr: match by bankId only
+            matches = true;
+          } else {
+            // Other banks: exact match
+            matches = t.accountNumber == account.accountNumber;
+          }
+
+          if (matches) return true;
+        }
+        return false; // No matching account found
+      } else {
+        // NULL accountNumber - include only if single account for bank (legacy data)
+        return bankAccounts.length == 1;
+      }
+    }).toList();
+
     // Group accounts by bank
     Map<int, List<Account>> groupedAccounts = {};
     for (var account in _accounts) {
@@ -79,9 +127,9 @@ class TransactionProvider with ChangeNotifier {
       int bankId = entry.key;
       List<Account> accounts = entry.value;
 
-      // Filter transactions for this bank
+      // Filter transactions for this bank (using valid transactions only)
       var bankTransactions =
-          allTransactions.where((t) => t.bankId == bankId).toList();
+          validTransactions.where((t) => t.bankId == bankId).toList();
 
       double totalDebit = 0.0;
       double totalCredit = 0.0;
@@ -142,7 +190,8 @@ class TransactionProvider with ChangeNotifier {
     _accountSummaries = _accounts.map((account) {
       // Logic for specific account transactions
       // Note: original logic had a specific condition for bankId == 1 handling substrings
-      var accountTransactions = allTransactions.where((t) {
+      // Use validTransactions to ensure we only include transactions with matching accounts
+      var accountTransactions = validTransactions.where((t) {
         bool bankMatch = t.bankId == account.bank;
         if (!bankMatch) return false;
 
@@ -187,7 +236,7 @@ class TransactionProvider with ChangeNotifier {
         var bankAccounts =
             _accounts.where((a) => a.bank == account.bank).toList();
         if (bankAccounts.length == 1 && bankAccounts.first == account) {
-          var orphanedTransactions = allTransactions
+          var orphanedTransactions = validTransactions
               .where((t) =>
                   t.bankId == account.bank &&
                   (t.accountNumber == null || t.accountNumber!.isEmpty))
@@ -202,38 +251,6 @@ class TransactionProvider with ChangeNotifier {
         double amount = t.amount;
         if (t.type == "DEBIT") totalDebit += amount;
         if (t.type == "CREDIT") totalCredit += amount;
-      }
-
-      // Log Telebirr (bankId 6) account data
-      if (account.bank == 6) {
-        // Count transactions before and after orphaned transactions
-        var beforeOrphaned = allTransactions.where((t) {
-          bool bankMatch = t.bankId == account.bank;
-          if (!bankMatch) return false;
-          if (account.bank == 1 &&
-              t.accountNumber != null &&
-              account.accountNumber.length >= 4) {
-            return t.accountNumber?.substring(t.accountNumber!.length - 4) ==
-                account.accountNumber
-                    .substring(account.accountNumber.length - 4);
-          }
-          if (account.bank == 4 &&
-              t.accountNumber != null &&
-              account.accountNumber.length >= 3) {
-            return t.accountNumber?.substring(t.accountNumber!.length - 3) ==
-                account.accountNumber
-                    .substring(account.accountNumber.length - 3);
-          }
-          if (account.bank == 3 &&
-              t.accountNumber != null &&
-              account.accountNumber.length >= 2) {
-            return t.accountNumber?.substring(t.accountNumber!.length - 2) ==
-                account.accountNumber
-                    .substring(account.accountNumber.length - 2);
-          } else {
-            return t.bankId == account.bank;
-          }
-        }).length;
       }
 
       return AccountSummary(

@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -40,7 +40,11 @@ class DatabaseHelper {
         bankId INTEGER,
         type TEXT,
         transactionLink TEXT,
-        accountNumber TEXT
+        accountNumber TEXT,
+        year INTEGER,
+        month INTEGER,
+        day INTEGER,
+        week INTEGER
       )
     ''');
 
@@ -87,6 +91,14 @@ class DatabaseHelper {
     await db.execute(
         'CREATE INDEX idx_transactions_bankId ON transactions(bankId)');
     await db.execute(
+        'CREATE INDEX idx_transactions_time ON transactions(time)');
+    await db.execute(
+        'CREATE INDEX idx_transactions_year_month ON transactions(year, month)');
+    await db.execute(
+        'CREATE INDEX idx_transactions_year_month_day ON transactions(year, month, day)');
+    await db.execute(
+        'CREATE INDEX idx_transactions_bank_year_month ON transactions(bankId, year, month)');
+    await db.execute(
         'CREATE INDEX idx_failed_parses_timestamp ON failed_parses(timestamp)');
     await db.execute(
         'CREATE INDEX idx_sms_patterns_bankId ON sms_patterns(bankId)');
@@ -125,6 +137,58 @@ class DatabaseHelper {
         print("debug: Added receiver column to transactions table");
       } catch (e) {
         print("debug: Error adding receiver column (might already exist): $e");
+      }
+    }
+
+    if (oldVersion < 4) {
+      // Add date columns and indexes for version 4
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN year INTEGER');
+        await db.execute('ALTER TABLE transactions ADD COLUMN month INTEGER');
+        await db.execute('ALTER TABLE transactions ADD COLUMN day INTEGER');
+        await db.execute('ALTER TABLE transactions ADD COLUMN week INTEGER');
+        
+        // Create indexes for date queries
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_transactions_time ON transactions(time)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_transactions_year_month ON transactions(year, month)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_transactions_year_month_day ON transactions(year, month, day)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_transactions_bank_year_month ON transactions(bankId, year, month)');
+        
+        print("debug: Added date columns and indexes to transactions table");
+        
+        // Populate date columns for existing transactions
+        final transactions = await db.query('transactions', columns: ['id', 'time']);
+        final batch = db.batch();
+        
+        for (var tx in transactions) {
+          if (tx['time'] != null) {
+            try {
+              final date = DateTime.parse(tx['time'] as String);
+              batch.update(
+                'transactions',
+                {
+                  'year': date.year,
+                  'month': date.month,
+                  'day': date.day,
+                  'week': ((date.day - 1) ~/ 7) + 1,
+                },
+                where: 'id = ?',
+                whereArgs: [tx['id']],
+              );
+            } catch (e) {
+              print("debug: Error parsing date for transaction ${tx['id']}: $e");
+            }
+          }
+        }
+        
+        await batch.commit(noResult: true);
+        print("debug: Populated date columns for existing transactions");
+      } catch (e) {
+        print("debug: Error adding date columns (might already exist): $e");
       }
     }
   }

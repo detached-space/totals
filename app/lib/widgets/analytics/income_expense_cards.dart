@@ -256,12 +256,18 @@ class _IncomeExpenseCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              'ETB ${_formatCurrency(amount)}',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : color,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'ETB ${_formatCurrency(amount)}',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? Colors.white : color,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],

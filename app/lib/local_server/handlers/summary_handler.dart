@@ -28,12 +28,58 @@ class SummaryHandler {
     return router;
   }
 
+  /// Filter out orphaned transactions (transactions without matching accounts)
+  Future<List<Transaction>> _filterOrphanedTransactions(
+      List<Transaction> transactions) async {
+    final accounts = await _accountRepo.getAccounts();
+
+    return transactions.where((t) {
+      if (t.bankId == null) return false;
+
+      final bankAccounts = accounts.where((a) => a.bank == t.bankId).toList();
+      if (bankAccounts.isEmpty) return false;
+
+      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
+        for (var account in bankAccounts) {
+          bool matches = false;
+
+          if (account.bank == 1 && account.accountNumber.length >= 4) {
+            matches = t.accountNumber!.length >= 4 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 4);
+          } else if (account.bank == 4 && account.accountNumber.length >= 3) {
+            matches = t.accountNumber!.length >= 3 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 3);
+          } else if (account.bank == 3 && account.accountNumber.length >= 2) {
+            matches = t.accountNumber!.length >= 2 &&
+                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
+                    account.accountNumber
+                        .substring(account.accountNumber.length - 2);
+          } else if (account.bank == 2 || account.bank == 6) {
+            matches = true;
+          } else {
+            matches = t.accountNumber == account.accountNumber;
+          }
+
+          if (matches) return true;
+        }
+        return false;
+      } else {
+        return bankAccounts.length == 1;
+      }
+    }).toList();
+  }
+
   /// GET /api/summary
   /// Returns aggregated summary across all accounts
   Future<Response> _getSummary(Request request) async {
     try {
       final accounts = await _accountRepo.getAccounts();
-      final transactions = await _transactionRepo.getTransactions();
+      final allTransactions = await _transactionRepo.getTransactions();
+      final transactions = await _filterOrphanedTransactions(allTransactions);
 
       // Calculate totals
       double totalBalance = 0;
@@ -84,7 +130,8 @@ class SummaryHandler {
   Future<Response> _getSummaryByBank(Request request) async {
     try {
       final accounts = await _accountRepo.getAccounts();
-      final transactions = await _transactionRepo.getTransactions();
+      final allTransactions = await _transactionRepo.getTransactions();
+      final transactions = await _filterOrphanedTransactions(allTransactions);
 
       // Group accounts by bank
       final Map<int, List<Account>> accountsByBank = {};
@@ -161,7 +208,8 @@ class SummaryHandler {
   Future<Response> _getSummaryByAccount(Request request) async {
     try {
       final accounts = await _accountRepo.getAccounts();
-      final transactions = await _transactionRepo.getTransactions();
+      final allTransactions = await _transactionRepo.getTransactions();
+      final transactions = await _filterOrphanedTransactions(allTransactions);
 
       final accountSummaries = accounts.map((account) {
         final bank = _getBankById(account.bank);
