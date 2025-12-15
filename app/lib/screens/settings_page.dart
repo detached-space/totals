@@ -328,11 +328,11 @@ class _SettingsPageState extends State<SettingsPage>
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Icon(
-                    Icons.arrow_forward_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
+                  // const Icon(
+                  //   Icons.arrow_forward_rounded,
+                  //   color: Colors.white,
+                  //   size: 20,
+                  // ),
                 ],
               ),
             );

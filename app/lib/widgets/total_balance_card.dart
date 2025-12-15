@@ -213,14 +213,20 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
                                 widget.accountNumber!.isNotEmpty) ...[
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Text(
-                                  _formatCardNumber(widget.accountNumber!),
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.9),
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 1.5,
-                                    fontFamily: 'monospace',
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    _formatCardNumber(widget.accountNumber!),
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.9),
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 1.5,
+                                      fontFamily: 'monospace',
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ),
