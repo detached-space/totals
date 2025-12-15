@@ -35,8 +35,6 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
   }
 
   void _submitForm() async {
-    Navigator.pop(context);
-
     if (_formKey.currentState!.validate()) {
       try {
         final service = AccountRegistrationService();
