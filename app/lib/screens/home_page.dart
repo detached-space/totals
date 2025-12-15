@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:totals/providers/transaction_provider.dart';
-import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/widgets/auth_page.dart';
 import 'package:totals/widgets/home_tabs.dart';
@@ -16,6 +15,7 @@ import 'package:totals/widgets/failed_parse_dialog.dart';
 import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/widgets/custom_bottom_nav.dart';
+import 'package:totals/widgets/detected_banks_widget.dart';
 import 'package:totals/screens/analytics_page.dart';
 import 'package:totals/screens/web_page.dart';
 import 'package:totals/screens/settings_page.dart';
@@ -78,9 +78,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          title: const Text("No Internet Connection"),
+          title: const Text("Pattern Matching Setup"),
           content: const Text(
-              "An internet connection is needed just once for the first setup. Please reconnect and try again."),
+              "Would you like to fetch the latest pattern matching rules from the internet, or continue with the built-in patterns?"),
           actions: [
             TextButton(
               onPressed: () async {
@@ -93,13 +93,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   _showInternetDialog();
                 }
               },
-              child: const Text("Retry"),
+              child: const Text("Fetch from Internet"),
             ),
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
               },
-              child: const Text("Continue Offline"),
+              child: const Text("Use Built-in Patterns"),
             ),
           ],
         ),
@@ -252,132 +252,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           const SizedBox(height: 12),
                           Expanded(
                             child: provider.accountSummaries.isEmpty
-                                ? Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(24.0),
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.account_balance_outlined,
-                                            size: 64,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurfaceVariant,
-                                          ),
-                                          const SizedBox(height: 24),
-                                          Text(
-                                            "No Bank Accounts Yet",
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.bold,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurface,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            "Get started by adding your first bank account",
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 32),
-                                          SizedBox(
-                                            width: 200,
-                                            child: GestureDetector(
-                                              onTap: () {
-                                                showModalBottomSheet(
-                                                  isScrollControlled: true,
-                                                  context: context,
-                                                  builder: (context) {
-                                                    return ClipRRect(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              15),
-                                                      child: Container(
-                                                        padding: const EdgeInsets
-                                                            .symmetric(
-                                                            vertical: 20,
-                                                            horizontal: 20),
-                                                        height: MediaQuery.of(
-                                                                    context)
-                                                                .size
-                                                                .height *
-                                                            0.83,
-                                                        child:
-                                                            SingleChildScrollView(
-                                                          child:
-                                                              RegisterAccountForm(
-                                                            onSubmit: () {
-                                                              provider
-                                                                  .loadData();
-                                                            },
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
-                                                );
-                                              },
-                                              child: Container(
-                                                padding: const EdgeInsets
-                                                    .symmetric(
-                                                    vertical: 16,
-                                                    horizontal: 24),
-                                                decoration: BoxDecoration(
-                                                  borderRadius:
-                                                      BorderRadius.circular(16),
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .primary,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .primary
-                                                          .withOpacity(0.3),
-                                                      blurRadius: 12,
-                                                      offset:
-                                                          const Offset(0, 4),
-                                                    )
-                                                  ],
-                                                ),
-                                                child: Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.add_rounded,
-                                                      color: Colors.white,
-                                                      size: 24,
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Text(
-                                                      "Add Account",
-                                                      style: TextStyle(
-                                                        fontSize: 16,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        color: Colors.white,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
+                                ? DetectedBanksWidget(
+                                    onAccountAdded: () {
+                                      provider.loadData();
+                                    },
                                   )
                                 : BanksSummaryList(
                                     banks: provider.bankSummaries,
@@ -393,10 +271,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                             borderRadius:
                                                 BorderRadius.circular(15),
                                             child: Container(
-                                              padding: const EdgeInsets
-                                                  .symmetric(
-                                                  vertical: 20,
-                                                  horizontal: 20),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 20,
+                                                      horizontal: 20),
                                               height: MediaQuery.of(context)
                                                       .size
                                                       .height *
@@ -415,7 +293,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     },
                                   ),
                           ),
-                          const SizedBox(height: 100), // Padding for floating nav
+                          const SizedBox(
+                              height: 100), // Padding for floating nav
                         ],
                       )
                     : BankDetail(

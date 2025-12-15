@@ -7,8 +7,13 @@ import 'package:totals/providers/transaction_provider.dart';
 
 class RegisterAccountForm extends StatefulWidget {
   final void Function() onSubmit;
+  final int? initialBankId;
 
-  const RegisterAccountForm({required this.onSubmit, super.key});
+  const RegisterAccountForm({
+    required this.onSubmit,
+    this.initialBankId,
+    super.key,
+  });
 
   @override
   State<RegisterAccountForm> createState() => _RegisterAccountFormState();
@@ -18,9 +23,16 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _accountNumber = TextEditingController();
   final TextEditingController _accountHolderName = TextEditingController();
-  int selected_bank = 1;
+  late int selected_bank;
   bool isFormValid = false;
   bool syncPreviousSms = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Use initial bank ID if provided, otherwise default to 1 (CBE)
+    selected_bank = widget.initialBankId ?? 1;
+  }
 
   void _submitForm() async {
     if (_formKey.currentState!.validate()) {
@@ -93,7 +105,10 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.3),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withOpacity(0.3),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -132,13 +147,19 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                       child: Container(
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? Theme.of(context).colorScheme.primary.withOpacity(0.1)
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withOpacity(0.1)
                               : Theme.of(context).colorScheme.surface,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: isSelected
                                 ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .outline
+                                    .withOpacity(0.2),
                             width: 2,
                           ),
                         ),
@@ -171,7 +192,9 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
                                 color: isSelected
                                     ? Theme.of(context).colorScheme.primary
                                     : Theme.of(context).colorScheme.onSurface,
@@ -195,8 +218,8 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedBankData = AppConstants.banks
-        .firstWhere((element) => element.id == selected_bank);
+    final selectedBankData =
+        AppConstants.banks.firstWhere((element) => element.id == selected_bank);
 
     return Form(
       key: _formKey,
@@ -235,14 +258,17 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 style: IconButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                  backgroundColor: Theme.of(context)
+                      .colorScheme
+                      .surfaceVariant
+                      .withOpacity(0.3),
                   shape: const CircleBorder(),
                 ),
               )
             ],
           ),
           const SizedBox(height: 32),
-          
+
           // Bank Selector
           Text(
             "Bank",
@@ -301,7 +327,7 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
           ),
 
           const SizedBox(height: 24),
-          
+
           CustomTextField(
             controller: _accountNumber,
             labelText: "Account Number",
@@ -317,14 +343,15 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                 ? "Enter account holder name"
                 : null,
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Sync Switch
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.2),
+              color:
+                  Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.2),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
@@ -370,8 +397,10 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
             ),
           ),
 
-          const SizedBox(height: 32), // Push buttons down with fixed spacing instead of Spacer
-          
+          const SizedBox(
+              height:
+                  32), // Push buttons down with fixed spacing instead of Spacer
+
           // Action Buttons
           Row(
             children: [
@@ -380,7 +409,8 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                   onPressed: () => Navigator.pop(context),
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   child: const Text("Cancel"),
                 ),
@@ -399,8 +429,10 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    disabledBackgroundColor: Theme.of(context).colorScheme.surfaceVariant,
-                    disabledForegroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                    disabledBackgroundColor:
+                        Theme.of(context).colorScheme.surfaceVariant,
+                    disabledForegroundColor:
+                        Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   child: const Text(
                     "Save Account",
