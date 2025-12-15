@@ -331,6 +331,7 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
           CustomTextField(
             controller: _accountNumber,
             labelText: "Account Number",
+            keyboardType: TextInputType.number,
             validator: (value) => (value == null || value.isEmpty)
                 ? "Enter account number"
                 : null,
