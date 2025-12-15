@@ -106,9 +106,73 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     }
   }
 
+  /// Check if a transaction belongs to any existing account
+  bool _transactionBelongsToAccount(Transaction t, List accounts) {
+    if (t.bankId == null) return false;
+
+    // Find accounts for this bank
+    final bankAccounts = accounts.where((a) => a.bankId == t.bankId).toList();
+    if (bankAccounts.isEmpty) return false;
+
+    // For banks that match by bankId only (Awash=2, Telebirr=6)
+    if (t.bankId == 2 || t.bankId == 6) {
+      return true; // All transactions for these banks belong to the account
+    }
+
+    // For other banks, check account number matching
+    if (t.accountNumber == null || t.accountNumber!.isEmpty) {
+      // NULL account number transactions belong only if there's a single account for this bank
+      return bankAccounts.length == 1;
+    }
+
+    // Check if transaction matches any account using bank-specific logic
+    for (var account in bankAccounts) {
+      if (account.bankId == 1 && account.accountNumber.length >= 4) {
+        // CBE: match last 4 digits
+        if (t.accountNumber!.length >= 4) {
+          if (t.accountNumber!.substring(t.accountNumber!.length - 4) ==
+              account.accountNumber
+                  .substring(account.accountNumber.length - 4)) {
+            return true;
+          }
+        }
+      } else if (account.bankId == 4 && account.accountNumber.length >= 3) {
+        // Dashen: match last 3 digits
+        if (t.accountNumber!.length >= 3) {
+          if (t.accountNumber!.substring(t.accountNumber!.length - 3) ==
+              account.accountNumber
+                  .substring(account.accountNumber.length - 3)) {
+            return true;
+          }
+        }
+      } else if (account.bankId == 3 && account.accountNumber.length >= 2) {
+        // Bank of Abyssinia: match last 2 digits
+        if (t.accountNumber!.length >= 2) {
+          if (t.accountNumber!.substring(t.accountNumber!.length - 2) ==
+              account.accountNumber
+                  .substring(account.accountNumber.length - 2)) {
+            return true;
+          }
+        }
+      } else {
+        // Other banks: exact match
+        if (t.accountNumber == account.accountNumber) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   List<Transaction> _filterTransactions(
       List<Transaction> allTransactions, List accounts, DateTime now) {
     return allTransactions.where((t) {
+      // First, exclude transactions that don't belong to any existing account
+      if (!_transactionBelongsToAccount(t, accounts)) {
+        return false;
+      }
+
       bool matchesCard = true;
       if (_selectedCard == 'Income') {
         matchesCard = t.type == 'CREDIT';
@@ -209,6 +273,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         .accountSummaries;
 
     final filteredTransactions = allTransactions.where((t) {
+      // First, exclude transactions that don't belong to any existing account
+      if (!_transactionBelongsToAccount(t, accounts)) {
+        return false;
+      }
+
       bool matchesCard = true;
       if (_selectedCard == 'Income') {
         matchesCard = t.type == 'CREDIT';

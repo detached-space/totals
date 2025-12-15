@@ -300,7 +300,7 @@ class _WebPageState extends State<WebPage> {
                               color: Colors.white,
                             ),
                           )
-                        : Icon(isRunning ? Icons.stop : Icons.play_arrow),
+                        : SizedBox(),
                     label: Text(
                       _isLoading
                           ? (isRunning ? 'Stopping...' : 'Starting...')
@@ -399,24 +399,6 @@ class _WebPageState extends State<WebPage> {
                                       const EdgeInsets.symmetric(vertical: 12),
                                   side: BorderSide(
                                       color: primaryColor.withOpacity(0.5)),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: _openDashboard,
-                                icon:
-                                    const Icon(Icons.open_in_browser, size: 18),
-                                label: const Text('Open'),
-                                style: ElevatedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  backgroundColor: primaryColor,
-                                  foregroundColor: colorScheme.onPrimary,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
