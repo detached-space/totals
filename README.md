@@ -2,6 +2,20 @@
 
 **Totals** is a Flutter mobile application that automatically tracks your bank transactions by parsing SMS messages from Ethiopian banks. It provides real-time balance updates, transaction history, analytics, and comprehensive financial insights—all stored securely on your device.
 
+## Screenshots
+
+<div align="center">
+  <img src="screenshots/1.jpg" alt="Screenshot 1" width="200"/>
+  <img src="screenshots/2.jpg" alt="Screenshot 2" width="200"/>
+  <img src="screenshots/3.jpg" alt="Screenshot 3" width="200"/>
+</div>
+
+<div align="center">
+  <img src="screenshots/4.jpg" alt="Screenshot 4" width="200"/>
+  <img src="screenshots/5.jpg" alt="Screenshot 5" width="200"/>
+  <img src="screenshots/6.jpg" alt="Screenshot 6" width="200"/>
+</div>
+
 ## Features
 
 ### 🏦 Multi-Bank Support
