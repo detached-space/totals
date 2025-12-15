@@ -101,6 +101,32 @@ class TransactionProvider with ChangeNotifier {
           accounts.fold(0.0, (sum, a) => sum + (a.pendingCredit ?? 0.0));
       double totalBalance = accounts.fold(0.0, (sum, a) => sum + a.balance);
 
+      // Log Telebirr (bankId 6) data
+      if (bankId == 6) {
+        var creditCount =
+            bankTransactions.where((t) => t.type == "CREDIT").length;
+        var debitCount =
+            bankTransactions.where((t) => t.type == "DEBIT").length;
+        var refs = bankTransactions.map((t) => t.reference).toList();
+        var uniqueRefs = refs.toSet();
+
+        print("debug: [TELEBIRR] Bank Summary:");
+        print(
+            "debug: [TELEBIRR]   Total Transactions count: ${bankTransactions.length}");
+        print("debug: [TELEBIRR]   Credit transactions: $creditCount");
+        print("debug: [TELEBIRR]   Debit transactions: $debitCount");
+        print("debug: [TELEBIRR]   Total Credit: $totalCredit");
+        print("debug: [TELEBIRR]   Total Debit: $totalDebit");
+        print("debug: [TELEBIRR]   Total Balance: $totalBalance");
+        print("debug: [TELEBIRR]   Account count: ${accounts.length}");
+        if (refs.length != uniqueRefs.length) {
+          print(
+              "debug: [TELEBIRR]   WARNING: Duplicate references in bank transactions!");
+          print(
+              "debug: [TELEBIRR]   Total refs: ${refs.length}, Unique refs: ${uniqueRefs.length}");
+        }
+      }
+
       return BankSummary(
         bankId: bankId,
         totalCredit: totalCredit,
@@ -147,7 +173,7 @@ class TransactionProvider with ChangeNotifier {
           return t.accountNumber?.substring(t.accountNumber!.length - 2) ==
               account.accountNumber.substring(account.accountNumber.length - 2);
         } else {
-          return t.accountNumber == account.accountNumber;
+          return t.bankId == account.bank;
         }
       }).toList();
 
@@ -155,15 +181,19 @@ class TransactionProvider with ChangeNotifier {
 
       // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
       // This handles legacy data or parsing failures where account wasn't captured.
-      var bankAccounts =
-          _accounts.where((a) => a.bank == account.bank).toList();
-      if (bankAccounts.length == 1 && bankAccounts.first == account) {
-        var orphanedTransactions = allTransactions
-            .where((t) =>
-                t.bankId == account.bank &&
-                (t.accountNumber == null || t.accountNumber!.isEmpty))
-            .toList();
-        accountTransactions.addAll(orphanedTransactions);
+      // NOTE: Skip this for banks that match by bankId only (2=Awash, 6=Telebirr)
+      // because they already get all transactions via the else clause above
+      if (account.bank != 2 && account.bank != 6) {
+        var bankAccounts =
+            _accounts.where((a) => a.bank == account.bank).toList();
+        if (bankAccounts.length == 1 && bankAccounts.first == account) {
+          var orphanedTransactions = allTransactions
+              .where((t) =>
+                  t.bankId == account.bank &&
+                  (t.accountNumber == null || t.accountNumber!.isEmpty))
+              .toList();
+          accountTransactions.addAll(orphanedTransactions);
+        }
       }
 
       double totalDebit = 0.0;
@@ -172,6 +202,38 @@ class TransactionProvider with ChangeNotifier {
         double amount = t.amount;
         if (t.type == "DEBIT") totalDebit += amount;
         if (t.type == "CREDIT") totalCredit += amount;
+      }
+
+      // Log Telebirr (bankId 6) account data
+      if (account.bank == 6) {
+        // Count transactions before and after orphaned transactions
+        var beforeOrphaned = allTransactions.where((t) {
+          bool bankMatch = t.bankId == account.bank;
+          if (!bankMatch) return false;
+          if (account.bank == 1 &&
+              t.accountNumber != null &&
+              account.accountNumber.length >= 4) {
+            return t.accountNumber?.substring(t.accountNumber!.length - 4) ==
+                account.accountNumber
+                    .substring(account.accountNumber.length - 4);
+          }
+          if (account.bank == 4 &&
+              t.accountNumber != null &&
+              account.accountNumber.length >= 3) {
+            return t.accountNumber?.substring(t.accountNumber!.length - 3) ==
+                account.accountNumber
+                    .substring(account.accountNumber.length - 3);
+          }
+          if (account.bank == 3 &&
+              t.accountNumber != null &&
+              account.accountNumber.length >= 2) {
+            return t.accountNumber?.substring(t.accountNumber!.length - 2) ==
+                account.accountNumber
+                    .substring(account.accountNumber.length - 2);
+          } else {
+            return t.bankId == account.bank;
+          }
+        }).length;
       }
 
       return AccountSummary(
@@ -194,6 +256,25 @@ class TransactionProvider with ChangeNotifier {
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalDebit);
     double grandTotalBalance =
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalBalance);
+
+    // Log Telebirr summary in grand totals
+    var telebirrSummary = _bankSummaries.firstWhere(
+      (b) => b.bankId == 6,
+      orElse: () => BankSummary(
+        bankId: 6,
+        totalCredit: 0.0,
+        totalDebit: 0.0,
+        settledBalance: 0.0,
+        pendingCredit: 0.0,
+        totalBalance: 0.0,
+        accountCount: 0,
+      ),
+    );
+    print("debug: [TELEBIRR] Final Summary:");
+    print("debug: [TELEBIRR]   Bank Credit: ${telebirrSummary.totalCredit}");
+    print("debug: [TELEBIRR]   Bank Debit: ${telebirrSummary.totalDebit}");
+    print("debug: [TELEBIRR]   Grand Total Credit: $grandTotalCredit");
+    print("debug: [TELEBIRR]   Grand Total Debit: $grandTotalDebit");
 
     _summary = AllSummary(
       totalCredit: grandTotalCredit,

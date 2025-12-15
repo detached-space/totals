@@ -24,22 +24,27 @@ class IncomeExpenseCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allTransactions = Provider.of<TransactionProvider>(context, listen: false).allTransactions;
-    final accounts = Provider.of<TransactionProvider>(context, listen: false).accountSummaries;
-    
+    final allTransactions =
+        Provider.of<TransactionProvider>(context, listen: false)
+            .allTransactions;
+    final accounts = Provider.of<TransactionProvider>(context, listen: false)
+        .accountSummaries;
+
     // Filter by period
     final now = getBaseDate();
     List<Transaction> periodFiltered = [];
-    
+
     if (selectedPeriod == 'Week') {
       int daysSinceMonday = (now.weekday - 1) % 7;
-      final weekStart = DateTime(now.year, now.month, now.day).subtract(Duration(days: daysSinceMonday));
+      final weekStart = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: daysSinceMonday));
       periodFiltered = allTransactions.where((t) {
         if (t.time == null) return false;
         try {
           final transactionDate = DateTime.parse(t.time!);
-          return transactionDate.isAfter(weekStart.subtract(const Duration(days: 1))) &&
-                 transactionDate.isBefore(now.add(const Duration(days: 1)));
+          return transactionDate
+                  .isAfter(weekStart.subtract(const Duration(days: 1))) &&
+              transactionDate.isBefore(now.add(const Duration(days: 1)));
         } catch (e) {
           return false;
         }
@@ -50,12 +55,14 @@ class IncomeExpenseCards extends StatelessWidget {
         if (t.time == null) return false;
         try {
           final transactionDate = DateTime.parse(t.time!);
-          return transactionDate.year == now.year && transactionDate.month == now.month;
+          return transactionDate.year == now.year &&
+              transactionDate.month == now.month;
         } catch (e) {
           return false;
         }
       }).toList();
-    } else { // Year
+    } else {
+      // Year
       periodFiltered = allTransactions.where((t) {
         if (t.time == null) return false;
         try {
@@ -66,35 +73,45 @@ class IncomeExpenseCards extends StatelessWidget {
         }
       }).toList();
     }
-    
+
     // Filter by bank if selected
     if (selectedBankFilter != null) {
-      periodFiltered = periodFiltered.where((t) => t.bankId == selectedBankFilter).toList();
+      periodFiltered =
+          periodFiltered.where((t) => t.bankId == selectedBankFilter).toList();
     }
-    
+
     // Filter by account if selected
     if (selectedAccountFilter != null && selectedBankFilter != null) {
       final account = accounts.firstWhere(
-        (a) => a.accountNumber == selectedAccountFilter && a.bankId == selectedBankFilter,
-        orElse: () => accounts.firstWhere((a) => a.bankId == selectedBankFilter, orElse: () => accounts.first),
+        (a) =>
+            a.accountNumber == selectedAccountFilter &&
+            a.bankId == selectedBankFilter,
+        orElse: () => accounts.firstWhere((a) => a.bankId == selectedBankFilter,
+            orElse: () => accounts.first),
       );
-      
+
       periodFiltered = periodFiltered.where((t) {
-        if (account.bankId == 1 && t.accountNumber != null && account.accountNumber.length >= 4) {
+        if (account.bankId == 1 &&
+            t.accountNumber != null &&
+            account.accountNumber.length >= 4) {
           return t.accountNumber!.substring(t.accountNumber!.length - 4) ==
               account.accountNumber.substring(account.accountNumber.length - 4);
-        } else if (account.bankId == 4 && t.accountNumber != null && account.accountNumber.length >= 3) {
+        } else if (account.bankId == 4 &&
+            t.accountNumber != null &&
+            account.accountNumber.length >= 3) {
           return t.accountNumber!.substring(t.accountNumber!.length - 3) ==
               account.accountNumber.substring(account.accountNumber.length - 3);
-        } else if (account.bankId == 3 && t.accountNumber != null && account.accountNumber.length >= 2) {
+        } else if (account.bankId == 3 &&
+            t.accountNumber != null &&
+            account.accountNumber.length >= 2) {
           return t.accountNumber!.substring(t.accountNumber!.length - 2) ==
               account.accountNumber.substring(account.accountNumber.length - 2);
         } else {
-          return t.accountNumber == account.accountNumber;
+          return t.bankId == account.bankId;
         }
       }).toList();
     }
-    
+
     // Calculate income and expenses for the period
     final periodIncome = periodFiltered
         .where((t) => t.type == 'CREDIT')
@@ -102,7 +119,7 @@ class IncomeExpenseCards extends StatelessWidget {
     final periodExpenses = periodFiltered
         .where((t) => t.type == 'DEBIT')
         .fold(0.0, (sum, t) => sum + t.amount);
-    
+
     return Row(
       children: [
         Expanded(
@@ -112,7 +129,8 @@ class IncomeExpenseCards extends StatelessWidget {
             color: Colors.green,
             cardType: 'Income',
             isSelected: selectedCard == 'Income',
-            onTap: () => onCardSelected(selectedCard == 'Income' ? null : 'Income'),
+            onTap: () =>
+                onCardSelected(selectedCard == 'Income' ? null : 'Income'),
           ),
         ),
         const SizedBox(width: 12),
@@ -123,7 +141,8 @@ class IncomeExpenseCards extends StatelessWidget {
             color: Theme.of(context).colorScheme.error,
             cardType: 'Expense',
             isSelected: selectedCard == 'Expense',
-            onTap: () => onCardSelected(selectedCard == 'Expense' ? null : 'Expense'),
+            onTap: () =>
+                onCardSelected(selectedCard == 'Expense' ? null : 'Expense'),
           ),
         ),
       ],
@@ -155,7 +174,7 @@ class _IncomeExpenseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isIncome = cardType == 'Income';
-    
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -181,22 +200,28 @@ class _IncomeExpenseCard extends StatelessWidget {
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
-                    Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.2),
+                    Theme.of(context)
+                        .colorScheme
+                        .surfaceVariant
+                        .withOpacity(0.4),
+                    Theme.of(context)
+                        .colorScheme
+                        .surfaceVariant
+                        .withOpacity(0.2),
                   ],
                 ),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected
-                ? Colors.transparent
-                : color.withOpacity(0.3),
+            color: isSelected ? Colors.transparent : color.withOpacity(0.3),
             width: isSelected ? 0 : 1,
           ),
           boxShadow: [
             // Main shadow for depth
             BoxShadow(
               color: isSelected
-                  ? (isIncome ? Colors.green.withOpacity(0.4) : Theme.of(context).colorScheme.error.withOpacity(0.4))
+                  ? (isIncome
+                      ? Colors.green.withOpacity(0.4)
+                      : Theme.of(context).colorScheme.error.withOpacity(0.4))
                   : Colors.black.withOpacity(0.1),
               blurRadius: isSelected ? 12 : 8,
               offset: Offset(0, isSelected ? 6 : 4),
@@ -236,9 +261,7 @@ class _IncomeExpenseCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: isSelected
-                    ? Colors.white
-                    : color,
+                color: isSelected ? Colors.white : color,
               ),
             ),
           ],
@@ -247,3 +270,4 @@ class _IncomeExpenseCard extends StatelessWidget {
     );
   }
 }
+

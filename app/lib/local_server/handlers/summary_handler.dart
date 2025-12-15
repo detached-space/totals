@@ -208,10 +208,10 @@ class SummaryHandler {
               }
               break;
             default:
-              return t.accountNumber == account.accountNumber;
+              return t.bankId == account.bank;
           }
 
-          return t.accountNumber == account.accountNumber;
+          return t.bankId == account.bank;
         }).toList();
 
         // Calculate transaction totals

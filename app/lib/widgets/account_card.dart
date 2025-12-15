@@ -300,8 +300,10 @@ class _AccountCardState extends State<AccountCard> {
                                   Opacity(
                                     opacity: 0.7,
                                     // BOTTOM LOGO IS BANK LOGO
-                                    child: Image.asset(bank.image,
-                                        width: 32, height: 32),
+                                    child: ClipOval(
+                                      child: Image.asset(bank.image,
+                                          width: 32, height: 32, fit: BoxFit.cover),
+                                    ),
                                   ),
                                 ],
                               )

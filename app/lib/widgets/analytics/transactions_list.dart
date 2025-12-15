@@ -247,3 +247,4 @@ class _TransactionItem extends StatelessWidget {
     );
   }
 }
+

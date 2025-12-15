@@ -287,3 +287,4 @@ class _ChartContainerState extends State<ChartContainer> {
     );
   }
 }
+

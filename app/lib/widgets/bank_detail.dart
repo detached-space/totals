@@ -55,6 +55,7 @@ class _BankDetailState extends State<BankDetail> {
 
     return Column(
       children: [
+        const SizedBox(height: 12),
         // Replaced custom Card with TotalBalanceCard (Blue Gradient ID 99)
         TotalBalanceCard(
           summary: bankSummary,
@@ -76,10 +77,13 @@ class _BankDetailState extends State<BankDetail> {
             });
           },
         ),
-        
-        AccountsSummaryList(
-            accountSummaries: widget.accountSummaries,
-            visibleTotalBalancesForSubCards: visibleTotalBalancesForSubCards),
+        const SizedBox(height: 12),
+        Expanded(
+          child: AccountsSummaryList(
+              accountSummaries: widget.accountSummaries,
+              visibleTotalBalancesForSubCards: visibleTotalBalancesForSubCards),
+        ),
+        const SizedBox(height: 100), // Padding for floating nav
       ],
     );
   }

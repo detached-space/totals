@@ -158,3 +158,4 @@ class LoadingTransactionsList extends StatelessWidget {
     );
   }
 }
+

@@ -10,11 +10,13 @@ class BanksSummaryList extends StatefulWidget {
   final List<BankSummary> banks;
   List<String> visibleTotalBalancesForSubCards;
   final VoidCallback onAddAccount;
+  final Function(int) onBankTap;
 
   BanksSummaryList({
     required this.banks,
     required this.visibleTotalBalancesForSubCards,
     required this.onAddAccount,
+    required this.onBankTap,
   });
 
   @override
@@ -147,155 +149,161 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
                           ),
                         ),
                       ),
-                      // Content
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            // Bank logo and name
-                            Column(
+                      // Content - Wrapped in Material for transparency with InkWell
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => widget.onBankTap(bank.bankId),
+                          borderRadius: BorderRadius.circular(16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Container(
-                                  width: 50,
-                                  height: 50,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(10),
-                                    child: Image.asset(
-                                      bankInfo.image,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  bankInfo.shortName,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.black26,
-                                        offset: Offset(0, 1),
-                                        blurRadius: 2,
-                                      )
-                                    ],
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                            
-                            // Balance and details
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  bank.accountCount.toString() + ' accounts',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.white.withOpacity(0.9),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                // Bank logo and name
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Expanded(
-                                      child: Text(
-                                        widget.visibleTotalBalancesForSubCards
-                                                .contains(bank.bankId.toString())
-                                            ? formatNumberWithComma(bank.totalBalance) + " ETB"
-                                            : "*" * 5,
-                                        style: const TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                          shadows: [
-                                            Shadow(
-                                              color: Colors.black26,
-                                              offset: Offset(0, 1),
-                                              blurRadius: 2,
-                                            )
-                                          ],
+                                    Container(
+                                      width: 50,
+                                      height: 50,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.2),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: ClipOval(
+                                        child: Image.asset(
+                                          bankInfo.image,
+                                          fit: BoxFit.cover,
                                         ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
-                                    GestureDetector(
-                                      onTap: () {
-                                        setState(() {
-                                          if (widget.visibleTotalBalancesForSubCards
-                                              .contains(bank.bankId.toString())) {
-                                            widget.visibleTotalBalancesForSubCards
-                                                .remove(bank.bankId.toString());
-                                          } else {
-                                            widget.visibleTotalBalancesForSubCards
-                                                .add(bank.bankId.toString());
-                                          }
-                                        });
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.all(6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.2),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Icon(
-                                          widget.visibleTotalBalancesForSubCards
-                                                  .contains(bank.bankId.toString())
-                                              ? Icons.visibility_off
-                                              : Icons.remove_red_eye_outlined,
-                                          color: Colors.white,
-                                          size: 18,
-                                        ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      bankInfo.shortName,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                        shadows: [
+                                          Shadow(
+                                            color: Colors.black26,
+                                            offset: Offset(0, 1),
+                                            blurRadius: 2,
+                                          )
+                                        ],
                                       ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ],
                                 ),
-                                if (isSyncing && syncStatus != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8.0),
-                                    child: Row(
+                                
+                                // Balance and details
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      bank.accountCount.toString() + ' accounts',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white.withOpacity(0.9),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
-                                        SizedBox(
-                                          width: 12,
-                                          height: 12,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor:
-                                                const AlwaysStoppedAnimation<Color>(
-                                              Colors.white,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
                                         Expanded(
                                           child: Text(
-                                            syncStatus,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.white.withOpacity(0.9),
+                                            widget.visibleTotalBalancesForSubCards
+                                                    .contains(bank.bankId.toString())
+                                                ? formatNumberWithComma((bank.totalBalance * 100).ceil() / 100.0) + " ETB"
+                                                : "*" * 5,
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              shadows: [
+                                                Shadow(
+                                                  color: Colors.black26,
+                                                  offset: Offset(0, 1),
+                                                  blurRadius: 2,
+                                                )
+                                              ],
                                             ),
+                                            maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              if (widget.visibleTotalBalancesForSubCards
+                                                  .contains(bank.bankId.toString())) {
+                                                widget.visibleTotalBalancesForSubCards
+                                                    .remove(bank.bankId.toString());
+                                              } else {
+                                                widget.visibleTotalBalancesForSubCards
+                                                    .add(bank.bankId.toString());
+                                              }
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.2),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              widget.visibleTotalBalancesForSubCards
+                                                      .contains(bank.bankId.toString())
+                                                  ? Icons.visibility_off
+                                                  : Icons.remove_red_eye_outlined,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ),
+                                    if (isSyncing && syncStatus != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 8.0),
+                                        child: Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                valueColor:
+                                                    const AlwaysStoppedAnimation<Color>(
+                                                  Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                syncStatus,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.white.withOpacity(0.9),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ],

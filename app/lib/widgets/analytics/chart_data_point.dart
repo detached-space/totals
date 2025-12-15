@@ -5,3 +5,4 @@ class ChartDataPoint {
 
   ChartDataPoint({required this.label, required this.value, this.date});
 }
+

@@ -153,3 +153,4 @@ class LineChartWidget extends StatelessWidget {
     );
   }
 }
+

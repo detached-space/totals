@@ -35,10 +35,7 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
   Widget build(BuildContext context) {
     return Consumer<AccountSyncStatusService>(
       builder: (context, syncStatusService, _) {
-        return SizedBox(
-          height: MediaQuery.of(context).size.height * 0.5, // ✅ Give height
-          // Add Expanded to give ListView a defined size
-          child: ListView.builder(
+        return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: widget.accountSummaries.length,
             itemBuilder: (context, index) {
@@ -462,7 +459,6 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                 ],
               );
             },
-          ),
         );
       },
     );

@@ -225,7 +225,7 @@ class SmsService {
         index = accounts.indexWhere((a) {
           if (a.bank != bankId) return false;
           return a.accountNumber.endsWith(
-              extractedAccount.substring(extractedAccount.length - 4));
+              extractedAccount.substring(extractedAccount.length - 3));
         });
       }
 

@@ -10,6 +10,7 @@
 - **Bank of Abyssinia (BOA)**
 - **Dashen Bank**
 - **Telebirr**
+- **more coming soon....**
 
 ### 📱 Core Functionality
 

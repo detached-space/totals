@@ -8,7 +8,7 @@ class PatternParser {
     String cleanBody = messageBody.trim();
 
     for (var pattern in patterns) {
-      print("debug: Pattern Regex: ${pattern.regex}");
+      print("debug: Pattern Regex: ${[pattern.bankId]} ${pattern.regex}");
 
       // 2. Try to match regex
       try {
@@ -98,6 +98,9 @@ class PatternParser {
           print("debug: reference ${extracted["reference"]}");
           print("debug: receiver ${extracted["receiver"]}");
 
+          if (pattern.bankId == 4 && extracted["reference"] == null) {
+            extracted["reference"] = DateTime.now().toIso8601String();
+          }
           // Validate required fields
           if ((pattern.bankId == 1 ||
                   pattern.bankId == 3 ||
