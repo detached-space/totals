@@ -35,7 +35,7 @@ Thank you for your interest in contributing to Totals! This document provides gu
 
 1. **Fork and Clone the Repository**
    ```bash
-   git clone https://github.com/your-username/totals.git
+   git clone https://github.com/detached-space/totals.git
    cd totals/app
    ```
 
