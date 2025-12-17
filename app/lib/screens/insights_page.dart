@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:totals/data/consts.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/services/financial_insights.dart';
 
@@ -20,6 +21,23 @@ class InsightsPage extends StatelessWidget {
     return 0.0;
   }
 
+  String _bankLabel(int? bankId) {
+    if (bankId == null) return 'Unknown bank';
+    for (final bank in AppConstants.banks) {
+      if (bank.id == bankId) return bank.shortName;
+    }
+    return 'Bank($bankId)';
+  }
+
+  String _dateLabel(String? isoTime) {
+    if (isoTime == null) return 'Unknown date';
+    try {
+      return DateFormat('MMM d').format(DateTime.parse(isoTime));
+    } catch (_) {
+      return 'Unknown date';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final insightsService = InsightsService(() => transactions);
@@ -31,6 +49,7 @@ class InsightsPage extends StatelessWidget {
     final patterns = insights['patterns'] as Map<String, dynamic>;
     final recurring = insights['recurring'] as List<dynamic>;
     final anomalies = insights['anomalies'] as List<Transaction>;
+    final incomeAnomalies = insights['incomeAnomalies'] as List<Transaction>;
     final totalIncome = _toDouble(insights['totalIncome']);
     final totalExpense = _toDouble(insights['totalExpense']);
 
@@ -248,7 +267,23 @@ class InsightsPage extends StatelessWidget {
                     anomalies.take(5).map((t) {
                       return _buildInfoRow(
                         context,
-                        t.reference.isNotEmpty ? t.reference : 'Unknown',
+                        '${_bankLabel(t.bankId)} • ${_dateLabel(t.time)}',
+                        formatter.format(t.amount),
+                        isHighlight: true,
+                      );
+                    }).toList(),
+                  ),
+                ],
+                if (incomeAnomalies.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _buildSectionCard(
+                    context,
+                    'Unusual Income',
+                    Icons.trending_up,
+                    incomeAnomalies.take(5).map((t) {
+                      return _buildInfoRow(
+                        context,
+                        '${_bankLabel(t.bankId)} • ${_dateLabel(t.time)}',
                         formatter.format(t.amount),
                         isHighlight: true,
                       );

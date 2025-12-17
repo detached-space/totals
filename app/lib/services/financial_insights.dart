@@ -30,6 +30,7 @@ class InsightsService {
     final patterns = _spendingPatterns(transactions);
     final recurring = _recurring(expenses);
     final anomalies = _anomalies(expenses);
+    final incomeAnomalies = _anomalies(income);
     final projections = _projections(income, expenses);
 
     final score = _healthScore(
@@ -52,6 +53,7 @@ class InsightsService {
       "patterns": patterns,
       "recurring": recurring,
       "anomalies": anomalies,
+      "incomeAnomalies": incomeAnomalies,
       "projections": projections,
       "score": score,
       "budget": budget,
