@@ -98,7 +98,8 @@ class PatternParser {
           print("debug: reference ${extracted["reference"]}");
           print("debug: receiver ${extracted["receiver"]}");
 
-          if (pattern.bankId == 4 && extracted["reference"] == null) {
+          if ((pattern.bankId == 4 || pattern.bankId == 2) &&
+              extracted["reference"] == null) {
             extracted["reference"] = DateTime.now().toIso8601String();
           }
           // Validate required fields
