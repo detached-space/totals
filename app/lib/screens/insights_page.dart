@@ -142,12 +142,11 @@ class InsightsPage extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'This is still experimental and insights might not be accurate.',
+                          'This is still experimental, financial score might not be accurate.',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -297,15 +296,16 @@ class InsightsPage extends StatelessWidget {
                     'Spending Patterns',
                     Icons.insights,
                     [
-                      _buildInfoRow(
-                        context,
-                        'Spending Variance',
-                        _toDouble(patterns['spendVariance']).toStringAsFixed(2),
-                      ),
-                      _buildInfoRow(
-                        context,
-                        'Essentials Ratio',
-                        '${(_toDouble(patterns['essentialsRatio']) * 100).toStringAsFixed(1)}%',
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'Coming soon.',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
                     ],
                   ),
