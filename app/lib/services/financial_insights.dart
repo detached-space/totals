@@ -36,8 +36,8 @@ class InsightsService {
       income: totalIncome,
       expense: totalExpense,
       savingsRate: _savingsRate(totalIncome, totalExpense),
-      variance: patterns["spendVariance"] as double,
-      essentialsRatio: patterns["essentialsRatio"] as double,
+      variance: patterns["spendVariance"].toDouble(),
+      essentialsRatio: patterns["essentialsRatio"].toDouble(),
     );
 
     final budget = _budgetSuggestions(
@@ -162,7 +162,7 @@ class InsightsService {
 
   bool _isExpense(Transaction t) {
     return (t.type?.toUpperCase().contains("DEBIT") ?? false);
-    
+
   }
 
   Map<String, dynamic> _projections(
