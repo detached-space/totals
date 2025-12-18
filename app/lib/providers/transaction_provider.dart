@@ -402,12 +402,16 @@ class TransactionProvider with ChangeNotifier {
     required bool essential,
     String? iconKey,
     String? description,
+    String flow = 'expense',
+    bool recurring = false,
   }) async {
     await _categoryRepo.createCategory(
       name: name,
       essential: essential,
       iconKey: iconKey,
       description: description,
+      flow: flow,
+      recurring: recurring,
     );
     await loadData();
   }

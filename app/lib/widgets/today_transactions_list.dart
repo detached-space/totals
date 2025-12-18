@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:totals/data/consts.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/category_icons.dart';
@@ -89,6 +90,14 @@ class _TodayTransactionItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isCredit = transaction.type == 'CREDIT';
+    final bankLabel = (() {
+      final bankId = transaction.bankId;
+      if (bankId == null) return 'Unknown bank';
+      for (final b in AppConstants.banks) {
+        if (b.id == bankId) return b.shortName;
+      }
+      return 'Unknown bank';
+    })();
     final dateTime = transaction.time != null
         ? (() {
             try {
@@ -105,6 +114,7 @@ class _TodayTransactionItem extends StatelessWidget {
         dateTime != null ? DateFormat('hh:mm a').format(dateTime) : '';
 
     final category = provider.getCategoryById(transaction.categoryId);
+    final isIncomeCategory = category?.flow.toLowerCase() == 'income';
 
     return Material(
       color: Colors.transparent,
@@ -136,7 +146,7 @@ class _TodayTransactionItem extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          transaction.reference,
+                          bankLabel,
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
@@ -184,9 +194,13 @@ class _TodayTransactionItem extends StatelessWidget {
                                   ? Theme.of(context)
                                       .colorScheme
                                       .onSurfaceVariant
-                                  : (category.essential
-                                      ? Colors.blue
-                                      : Colors.orange),
+                                  : (isIncomeCategory
+                                      ? (category.essential
+                                          ? Colors.green
+                                          : Colors.teal)
+                                      : (category.essential
+                                          ? Colors.blue
+                                          : Colors.orange)),
                             ),
                           ],
                         ),

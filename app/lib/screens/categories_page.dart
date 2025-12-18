@@ -9,78 +9,73 @@ class CategoriesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Categories'),
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_rounded),
-            onPressed: () => _openEditor(context),
-            tooltip: 'Add category',
-          ),
-        ],
-      ),
-      body: Consumer<TransactionProvider>(
-        builder: (context, provider, _) {
-          final categories = provider.categories;
-          final essentialCategories =
-              categories.where((c) => c.essential).toList(growable: false);
-          final nonEssentialCategories =
-              categories.where((c) => !c.essential).toList(growable: false);
-
-          if (categories.isEmpty) {
-            return Center(
-              child: Text(
-                'No categories yet',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            );
+    return DefaultTabController(
+      length: 2,
+      child: Builder(
+        builder: (context) {
+          String currentFlow() {
+            final controller = DefaultTabController.of(context);
+            final index = controller?.index ?? 0;
+            return index == 1 ? 'income' : 'expense';
           }
 
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-            children: [
-              if (essentialCategories.isNotEmpty) ...[
-                _SectionHeader(
-                  title: 'Essential',
-                  count: essentialCategories.length,
-                ),
-                const SizedBox(height: 8),
-                for (final c in essentialCategories) ...[
-                  _CategoryTile(
-                    category: c,
-                    onEdit: () => _openEditor(context, existing: c),
-                  ),
-                  const SizedBox(height: 8),
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Categories'),
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              elevation: 0,
+              bottom: const TabBar(
+                tabs: [
+                  Tab(text: 'Expenses'),
+                  Tab(text: 'Income'),
                 ],
-                const SizedBox(height: 12),
-              ],
-              if (nonEssentialCategories.isNotEmpty) ...[
-                _SectionHeader(
-                  title: 'Non-essential',
-                  count: nonEssentialCategories.length,
-                ),
-                const SizedBox(height: 8),
-                for (final c in nonEssentialCategories) ...[
-                  _CategoryTile(
-                    category: c,
-                    onEdit: () => _openEditor(context, existing: c),
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: () => _openEditor(
+                    context,
+                    initialFlow: currentFlow(),
                   ),
-                  const SizedBox(height: 8),
-                ],
+                  tooltip: 'Add category',
+                ),
               ],
-            ],
+            ),
+            body: Consumer<TransactionProvider>(
+              builder: (context, provider, _) {
+                final categories = provider.categories;
+                final expenseCategories = categories
+                    .where((c) => c.flow.toLowerCase() != 'income')
+                    .toList(growable: false);
+                final incomeCategories = categories
+                    .where((c) => c.flow.toLowerCase() == 'income')
+                    .toList(growable: false);
+
+                return TabBarView(
+                  children: [
+                    _ExpensesTab(
+                      categories: expenseCategories,
+                      onEdit: (c) => _openEditor(context, existing: c),
+                    ),
+                    _IncomeTab(
+                      categories: incomeCategories,
+                      onEdit: (c) => _openEditor(context, existing: c),
+                    ),
+                  ],
+                );
+              },
+            ),
           );
         },
       ),
     );
   }
 
-  Future<void> _openEditor(BuildContext context, {Category? existing}) async {
+  Future<void> _openEditor(
+    BuildContext context, {
+    Category? existing,
+    String initialFlow = 'expense',
+  }) async {
     final provider = Provider.of<TransactionProvider>(context, listen: false);
 
     final result = await showModalBottomSheet<_CategoryEditorResult>(
@@ -88,7 +83,7 @@ class CategoriesPage extends StatelessWidget {
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) {
-        return _CategoryEditorSheet(existing: existing);
+        return _CategoryEditorSheet(existing: existing, initialFlow: initialFlow);
       },
     );
 
@@ -102,6 +97,8 @@ class CategoriesPage extends StatelessWidget {
           essential: result.essential,
           iconKey: result.iconKey,
           description: result.description,
+          flow: result.flow,
+          recurring: result.recurring,
         );
       } else {
         await provider.updateCategory(
@@ -110,6 +107,8 @@ class CategoriesPage extends StatelessWidget {
             essential: result.essential,
             iconKey: result.iconKey,
             description: result.description,
+            flow: result.flow,
+            recurring: result.recurring,
           ),
         );
       }
@@ -128,19 +127,27 @@ class _CategoryEditorResult {
   final bool essential;
   final String? iconKey;
   final String? description;
+  final String flow;
+  final bool recurring;
 
   const _CategoryEditorResult({
     required this.name,
     required this.essential,
     required this.iconKey,
     required this.description,
+    required this.flow,
+    required this.recurring,
   });
 }
 
 class _CategoryEditorSheet extends StatefulWidget {
   final Category? existing;
+  final String initialFlow;
 
-  const _CategoryEditorSheet({required this.existing});
+  const _CategoryEditorSheet({
+    required this.existing,
+    required this.initialFlow,
+  });
 
   @override
   State<_CategoryEditorSheet> createState() => _CategoryEditorSheetState();
@@ -151,6 +158,8 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
   late final TextEditingController _descriptionController;
   late bool _essential;
   String? _iconKey;
+  late String _flow;
+  late bool _recurring;
 
   @override
   void initState() {
@@ -160,6 +169,10 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
         TextEditingController(text: widget.existing?.description ?? '');
     _essential = widget.existing?.essential ?? false;
     _iconKey = widget.existing?.iconKey ?? 'more_horiz';
+    _flow = (widget.existing?.flow ?? widget.initialFlow).toLowerCase() == 'income'
+        ? 'income'
+        : 'expense';
+    _recurring = widget.existing?.recurring ?? false;
   }
 
   @override
@@ -204,6 +217,8 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                           essential: _essential,
                           iconKey: _iconKey,
                           description: _descriptionController.text,
+                          flow: _flow,
+                          recurring: _recurring,
                         ),
                       );
                     },
@@ -229,12 +244,33 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                 maxLines: 2,
               ),
               const SizedBox(height: 12),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'expense', label: Text('Expense')),
+                  ButtonSegment(value: 'income', label: Text('Income')),
+                ],
+                selected: {_flow},
+                onSelectionChanged: (s) => setState(() => _flow = s.first),
+                showSelectedIcon: false,
+              ),
+              const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: _essential,
                 onChanged: (v) => setState(() => _essential = v),
-                title: const Text('Essential'),
-                subtitle: const Text('Used for spending insights'),
+                title: Text(_flow == 'income' ? 'Main income' : 'Essential'),
+                subtitle: Text(
+                  _flow == 'income'
+                      ? 'Turn on for your primary income sources'
+                      : 'Used for spending insights',
+                ),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _recurring,
+                onChanged: (v) => setState(() => _recurring = v),
+                title: const Text('Recurring'),
+                subtitle: const Text('Repeats (monthly/weekly) vs one-time'),
               ),
               const SizedBox(height: 12),
               Text(
@@ -384,7 +420,10 @@ class _CategoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = category.essential ? Colors.blue : Colors.orange;
+    final isIncome = category.flow.toLowerCase() == 'income';
+    final color = isIncome
+        ? (category.essential ? Colors.green : Colors.teal)
+        : (category.essential ? Colors.blue : Colors.orange);
     final description = (category.description ?? '').trim();
     return Card(
       elevation: 0,
@@ -416,6 +455,107 @@ class _CategoryTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
       ),
+    );
+  }
+}
+
+class _ExpensesTab extends StatelessWidget {
+  final List<Category> categories;
+  final ValueChanged<Category> onEdit;
+
+  const _ExpensesTab({
+    required this.categories,
+    required this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (categories.isEmpty) {
+      return Center(
+        child: Text(
+          'No expense categories yet',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+
+    final essential = categories.where((c) => c.essential).toList(growable: false);
+    final nonEssential =
+        categories.where((c) => !c.essential).toList(growable: false);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+      children: [
+        if (essential.isNotEmpty) ...[
+          _SectionHeader(title: 'Essential', count: essential.length),
+          const SizedBox(height: 8),
+          for (final c in essential) ...[
+            _CategoryTile(category: c, onEdit: () => onEdit(c)),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 12),
+        ],
+        if (nonEssential.isNotEmpty) ...[
+          _SectionHeader(title: 'Non-essential', count: nonEssential.length),
+          const SizedBox(height: 8),
+          for (final c in nonEssential) ...[
+            _CategoryTile(category: c, onEdit: () => onEdit(c)),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _IncomeTab extends StatelessWidget {
+  final List<Category> categories;
+  final ValueChanged<Category> onEdit;
+
+  const _IncomeTab({
+    required this.categories,
+    required this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (categories.isEmpty) {
+      return Center(
+        child: Text(
+          'No income categories yet',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+
+    final main = categories.where((c) => c.essential).toList(growable: false);
+    final side = categories.where((c) => !c.essential).toList(growable: false);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+      children: [
+        if (main.isNotEmpty) ...[
+          _SectionHeader(title: 'Main income', count: main.length),
+          const SizedBox(height: 8),
+          for (final c in main) ...[
+            _CategoryTile(category: c, onEdit: () => onEdit(c)),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 12),
+        ],
+        if (side.isNotEmpty) ...[
+          _SectionHeader(title: 'Side income', count: side.length),
+          const SizedBox(height: 8),
+          for (final c in side) ...[
+            _CategoryTile(category: c, onEdit: () => onEdit(c)),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ],
     );
   }
 }

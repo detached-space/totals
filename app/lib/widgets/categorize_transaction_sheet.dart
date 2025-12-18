@@ -9,7 +9,11 @@ Future<void> showCategorizeTransactionSheet({
   required TransactionProvider provider,
   required Transaction transaction,
 }) async {
-  final categories = provider.categories;
+  final desiredFlow = transaction.type == 'CREDIT' ? 'income' : 'expense';
+  final filtered = provider.categories
+      .where((c) => c.flow.toLowerCase() == desiredFlow)
+      .toList(growable: false);
+  final categories = filtered.isEmpty ? provider.categories : filtered;
   final current = provider.getCategoryById(transaction.categoryId);
 
   if (categories.isEmpty) {

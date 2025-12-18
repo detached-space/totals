@@ -14,6 +14,8 @@ class CategoryRepository {
           'essential': category.essential ? 1 : 0,
           'iconKey': category.iconKey,
           'description': category.description,
+          'flow': category.flow,
+          'recurring': category.recurring ? 1 : 0,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
@@ -33,6 +35,22 @@ class CategoryRepository {
         where: "name = ? AND (description IS NULL OR description = '')",
         whereArgs: [category.name],
       );
+      batch.update(
+        'categories',
+        {
+          'flow': category.flow,
+        },
+        where: "name = ? AND (flow IS NULL OR flow = '')",
+        whereArgs: [category.name],
+      );
+      batch.update(
+        'categories',
+        {
+          'recurring': category.recurring ? 1 : 0,
+        },
+        where: "name = ? AND recurring IS NULL",
+        whereArgs: [category.name],
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -41,7 +59,7 @@ class CategoryRepository {
     final db = await DatabaseHelper.instance.database;
     final rows = await db.query(
       'categories',
-      orderBy: 'essential DESC, name COLLATE NOCASE ASC',
+      orderBy: "flow ASC, essential DESC, name COLLATE NOCASE ASC",
     );
     return rows.map(Category.fromDb).toList();
   }
@@ -51,6 +69,8 @@ class CategoryRepository {
     required bool essential,
     String? iconKey,
     String? description,
+    String flow = 'expense',
+    bool recurring = false,
   }) async {
     final db = await DatabaseHelper.instance.database;
     final trimmed = name.trim();
@@ -59,6 +79,8 @@ class CategoryRepository {
       'essential': essential ? 1 : 0,
       'iconKey': iconKey,
       'description': description,
+      'flow': flow,
+      'recurring': recurring ? 1 : 0,
     });
     return Category(
       id: id,
@@ -66,6 +88,8 @@ class CategoryRepository {
       essential: essential,
       iconKey: iconKey,
       description: description,
+      flow: flow,
+      recurring: recurring,
     );
   }
 
@@ -79,6 +103,8 @@ class CategoryRepository {
         'essential': category.essential ? 1 : 0,
         'iconKey': category.iconKey,
         'description': category.description,
+        'flow': category.flow,
+        'recurring': category.recurring ? 1 : 0,
       },
       where: 'id = ?',
       whereArgs: [category.id],
