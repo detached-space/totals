@@ -420,4 +420,9 @@ class TransactionProvider with ChangeNotifier {
     await _categoryRepo.updateCategory(category);
     await loadData();
   }
+
+  Future<void> deleteCategory(Category category) async {
+    await _categoryRepo.deleteCategory(category);
+    await loadData();
+  }
 }

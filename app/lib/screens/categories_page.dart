@@ -185,6 +185,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
+    final canDelete = isEdit && (widget.existing?.builtIn != true);
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
@@ -321,6 +322,71 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                 },
               ),
               const SizedBox(height: 8),
+              if (canDelete) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text('Delete category'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    onPressed: () async {
+                      final existing = widget.existing;
+                      if (existing == null) return;
+
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) {
+                          return AlertDialog(
+                            title: const Text('Delete category?'),
+                            content: Text(
+                              'This will remove "${existing.name}" and uncategorize any transactions using it.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(context, false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(context, true),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                      if (confirm != true) return;
+
+                      try {
+                        final provider = Provider.of<TransactionProvider>(
+                          context,
+                          listen: false,
+                        );
+                        await provider.deleteCategory(existing);
+                        if (!context.mounted) return;
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Category deleted')),
+                        );
+                      } catch (e) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to delete category: $e'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
             ],
           ),
         ),
