@@ -13,12 +13,14 @@ class BanksSummaryList extends StatefulWidget {
   final List<BankSummary> banks;
   final List<String> visibleTotalBalancesForSubCards;
   final VoidCallback onAddAccount;
+  final VoidCallback onAccountAdded;
   final Function(int) onBankTap;
 
   BanksSummaryList({
     required this.banks,
     required this.visibleTotalBalancesForSubCards,
     required this.onAddAccount,
+    required this.onAccountAdded,
     required this.onBankTap,
   });
 
@@ -92,7 +94,7 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
                 onSubmit: () {
                   // Clear cache and force refresh after adding account
                   _detectionService.clearCache();
-                  widget.onAddAccount();
+                  widget.onAccountAdded();
                   _loadUnregisteredBanks(forceRefresh: true);
                 },
               ),
