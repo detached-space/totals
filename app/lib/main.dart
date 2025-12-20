@@ -1,16 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/screens/home_page.dart';
 import 'package:totals/database/migration_helper.dart';
+import 'package:workmanager/workmanager.dart';
+import 'package:totals/background/daily_spending_worker.dart';
+import 'package:totals/services/notification_scheduler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize database and migrate if needed
   // await MigrationHelper.migrateIfNeeded();
+
+  if (!kIsWeb) {
+    try {
+      await Workmanager().initialize(
+        callbackDispatcher,
+        isInDebugMode: kDebugMode,
+      );
+      await NotificationScheduler.syncDailySummarySchedule();
+    } catch (e) {
+      // Ignore if not supported on the current platform.
+      if (kDebugMode) {
+        print('debug: Workmanager init failed: $e');
+      }
+    }
+  }
 
   runApp(MyApp());
 }

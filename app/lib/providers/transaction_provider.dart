@@ -1,16 +1,21 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' hide Category;
 import 'package:totals/models/account.dart';
+import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 
 class TransactionProvider with ChangeNotifier {
   final TransactionRepository _transactionRepo = TransactionRepository();
   final AccountRepository _accountRepo = AccountRepository();
+  final CategoryRepository _categoryRepo = CategoryRepository();
 
   List<Transaction> _transactions = [];
   List<Account> _accounts = [];
+  List<Category> _categories = [];
+  Map<int, Category> _categoryById = {};
 
   // Summaries
   AllSummary? _summary;
@@ -27,11 +32,17 @@ class TransactionProvider with ChangeNotifier {
   // Getters
   List<Transaction> get transactions => _transactions;
   List<Transaction> get allTransactions => _allTransactions;
+  List<Category> get categories => _categories;
   bool get isLoading => _isLoading;
   AllSummary? get summary => _summary;
   List<BankSummary> get bankSummaries => _bankSummaries;
   List<AccountSummary> get accountSummaries => _accountSummaries;
   DateTime get selectedDate => _selectedDate;
+
+  Category? getCategoryById(int? id) {
+    if (id == null) return null;
+    return _categoryById[id];
+  }
 
   Future<void> loadData() async {
     _isLoading = true;
@@ -41,6 +52,13 @@ class TransactionProvider with ChangeNotifier {
       _accounts = await _accountRepo.getAccounts();
       // print all the accounts
       print("debug: Accounts: ${_accounts.map((a) => a.balance).join(', ')}");
+
+      _categories = await _categoryRepo.getCategories();
+      _categoryById = {
+        for (final c in _categories)
+          if (c.id != null) c.id!: c,
+      };
+
       _allTransactions = await _transactionRepo.getTransactions();
       print("debug: Transactions: ${_allTransactions.length}");
 
@@ -358,6 +376,53 @@ class TransactionProvider with ChangeNotifier {
     // Update account balance if match found
     // This logic was in onBackgroundMessage, we should probably centralize it here or in a Service
     // For now, simpler to just reload everything
+    await loadData();
+  }
+
+  Future<void> setCategoryForTransaction(
+    Transaction transaction,
+    Category category,
+  ) async {
+    if (category.id == null) return;
+    await _transactionRepo.saveTransaction(
+      transaction.copyWith(categoryId: category.id),
+    );
+    await loadData();
+  }
+
+  Future<void> clearCategoryForTransaction(Transaction transaction) async {
+    await _transactionRepo.saveTransaction(
+      transaction.copyWith(categoryId: null),
+    );
+    await loadData();
+  }
+
+  Future<void> createCategory({
+    required String name,
+    required bool essential,
+    String? iconKey,
+    String? description,
+    String flow = 'expense',
+    bool recurring = false,
+  }) async {
+    await _categoryRepo.createCategory(
+      name: name,
+      essential: essential,
+      iconKey: iconKey,
+      description: description,
+      flow: flow,
+      recurring: recurring,
+    );
+    await loadData();
+  }
+
+  Future<void> updateCategory(Category category) async {
+    await _categoryRepo.updateCategory(category);
+    await loadData();
+  }
+
+  Future<void> deleteCategory(Category category) async {
+    await _categoryRepo.deleteCategory(category);
     await loadData();
   }
 }

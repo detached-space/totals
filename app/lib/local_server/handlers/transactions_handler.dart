@@ -307,6 +307,7 @@ class TransactionsHandler {
       'type': transaction.type,
       'transactionLink': transaction.transactionLink,
       'accountNumber': transaction.accountNumber,
+      'categoryId': transaction.categoryId,
     };
   }
 

@@ -56,6 +56,8 @@ dependencies:
   share_plus: ^9.0.0
   path_provider: ^2.1.4
   url_launcher: ^6.3.1
+  flutter_local_notifications: ^17.2.2
+  permission_handler: ^11.3.1
     # background_sms: ^0.0.4
   # background_sms:
   #   git:

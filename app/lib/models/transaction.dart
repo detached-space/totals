@@ -10,6 +10,7 @@ class Transaction {
   final String? type; // CREDIT or DEBIT
   final String? transactionLink;
   final String? accountNumber; // Last 4 digits
+  final int? categoryId;
 
   Transaction({
     required this.amount,
@@ -23,6 +24,7 @@ class Transaction {
     this.type,
     this.transactionLink,
     this.accountNumber,
+    this.categoryId,
   });
 
   factory Transaction.fromJson(Map<String, dynamic> json) {
@@ -33,7 +35,7 @@ class Transaction {
     }
 
     return Transaction(
-      amount: json['amount'],
+      amount: toDouble(json['amount']),
       reference: json['reference'] ?? '',
       creditor: json['creditor'],
       receiver: json['receiver'],
@@ -44,6 +46,7 @@ class Transaction {
       type: json['type'],
       transactionLink: json['transactionLink'],
       accountNumber: json['accountNumber'],
+      categoryId: json['categoryId'],
     );
   }
 
@@ -59,5 +62,36 @@ class Transaction {
         'type': type,
         'transactionLink': transactionLink,
         'accountNumber': accountNumber,
+        'categoryId': categoryId,
       };
+
+  Transaction copyWith({
+    double? amount,
+    String? reference,
+    String? creditor,
+    String? receiver,
+    String? time,
+    String? status,
+    String? currentBalance,
+    int? bankId,
+    String? type,
+    String? transactionLink,
+    String? accountNumber,
+    int? categoryId,
+  }) {
+    return Transaction(
+      amount: amount ?? this.amount,
+      reference: reference ?? this.reference,
+      creditor: creditor ?? this.creditor,
+      receiver: receiver ?? this.receiver,
+      time: time ?? this.time,
+      status: status ?? this.status,
+      currentBalance: currentBalance ?? this.currentBalance,
+      bankId: bankId ?? this.bankId,
+      type: type ?? this.type,
+      transactionLink: transactionLink ?? this.transactionLink,
+      accountNumber: accountNumber ?? this.accountNumber,
+      categoryId: categoryId ?? this.categoryId,
+    );
+  }
 }

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:totals/data/consts.dart';
 
 class HomeTabs extends StatelessWidget {
+  static const int recentTabId = -1;
+
   final void Function(int tabId) onChangeTab;
   final int activeTab;
   final List<int> tabs;
@@ -59,9 +61,12 @@ class HomeTabs extends StatelessWidget {
                           Text(
                             tabs[index] == 0
                                 ? "Summary"
-                                : AppConstants.banks
-                                    .firstWhere((element) => element.id == tabs[index])
-                                    .shortName,
+                                : (tabs[index] == recentTabId
+                                    ? "Today"
+                                    : AppConstants.banks
+                                        .firstWhere((element) =>
+                                            element.id == tabs[index])
+                                        .shortName),
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,

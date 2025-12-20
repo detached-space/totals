@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:another_telephony/telephony.dart';
 import 'package:totals/data/consts.dart';
 import 'package:totals/services/sms_config_service.dart';
@@ -8,11 +10,16 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
+import 'package:flutter/widgets.dart';
+import 'package:totals/services/notification_service.dart';
 
 // Top-level function for background execution
 @pragma('vm:entry-point')
 onBackgroundMessage(SmsMessage message) async {
   try {
+    WidgetsFlutterBinding.ensureInitialized();
+    DartPluginRegistrant.ensureInitialized();
+
     print("debug: BG: Handler started.");
 
     final String? address = message.address;
@@ -27,7 +34,7 @@ onBackgroundMessage(SmsMessage message) async {
     print("debug: BG: Checking if relevant...");
     if (SmsService.isRelevantMessage(address)) {
       print("debug: BG: Message IS relevant. Processing...");
-      await SmsService.processMessage(body, address!);
+      await SmsService.processMessage(body, address!, notifyUser: true);
       print("debug: BG: Processing finished.");
     } else {
       print("debug: BG: Message NOT relevant.");
@@ -41,8 +48,8 @@ onBackgroundMessage(SmsMessage message) async {
 class SmsService {
   final Telephony _telephony = Telephony.instance;
 
-  // Callback to notify UI to refresh
-  Function()? onMessageReceived;
+  // Callback for foreground-only UI updates.
+  ValueChanged<Transaction>? onTransactionSaved;
 
   Future<void> init() async {
     final bool? result = await _telephony.requestSmsPermissions;
@@ -62,9 +69,13 @@ class SmsService {
 
     try {
       if (SmsService.isRelevantMessage(message.address)) {
-        await SmsService.processMessage(message.body!, message.address!);
-        if (onMessageReceived != null) {
-          onMessageReceived!();
+        final tx = await SmsService.processMessage(
+          message.body!,
+          message.address!,
+          notifyUser: true,
+        );
+        if (tx != null && onTransactionSaved != null) {
+          onTransactionSaved!(tx);
         }
       }
     } catch (e) {
@@ -120,15 +131,19 @@ class SmsService {
   }
 
   // Static processing logic so it can be used by background handler too.
-  static Future<void> processMessage(String messageBody, String senderAddress,
-      {DateTime? messageDate}) async {
+  static Future<Transaction?> processMessage(
+    String messageBody,
+    String senderAddress, {
+    DateTime? messageDate,
+    bool notifyUser = false,
+  }) async {
     print("debug: Processing message: $messageBody");
 
     Bank? bank = getRelevantBank(senderAddress);
     if (bank == null) {
       print(
           "dubg: No bank found for address $senderAddress - skipping processing.");
-      return;
+      return null;
     }
 
     // 1. Load Patterns
@@ -150,7 +165,7 @@ class SmsService {
           body: messageBody,
           reason: "No matching pattern",
           timestamp: DateTime.now().toIso8601String()));
-      return;
+      return null;
     }
 
     print("debug: Extracted details: $details");
@@ -175,7 +190,7 @@ class SmsService {
           body: messageBody,
           reason: "Duplicate transaction $newRef",
           timestamp: DateTime.now().toIso8601String()));
-      return;
+      return null;
     }
 
     // 4. Update Account Balance
@@ -258,5 +273,14 @@ class SmsService {
     await txRepo.saveTransaction(newTx);
 
     print("debug: New transaction saved: ${newTx.reference}");
+
+    if (notifyUser) {
+      await NotificationService.instance.showTransactionNotification(
+        transaction: newTx,
+        bankId: bankId,
+      );
+    }
+
+    return newTx;
   }
 }

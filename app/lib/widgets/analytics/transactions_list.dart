@@ -5,13 +5,19 @@ import 'package:intl/intl.dart';
 class TransactionsList extends StatefulWidget {
   final List<Transaction> transactions;
   final String sortBy;
-  final ValueChanged<String> onSortChanged;
+  final ValueChanged<String>? onSortChanged;
+  final bool showHeader;
+  final bool includeBottomPadding;
+  final ValueChanged<Transaction>? onTransactionTap;
 
   const TransactionsList({
     super.key,
     required this.transactions,
     required this.sortBy,
-    required this.onSortChanged,
+    this.onSortChanged,
+    this.showHeader = true,
+    this.includeBottomPadding = true,
+    this.onTransactionTap,
   });
 
   @override
@@ -86,77 +92,82 @@ class _TransactionsListState extends State<TransactionsList> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Transactions',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color:
-                        Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '${sortedTransactions.length}',
+        if (widget.showHeader) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Transactions',
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
-                ),
-              ],
-            ),
-            PopupMenuButton<String>(
-              icon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.sort,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Sort by',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${sortedTransactions.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                     ),
                   ),
                 ],
               ),
-              onSelected: widget.onSortChanged,
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'Date',
-                  child: Text('Date'),
+              PopupMenuButton<String>(
+                enabled: widget.onSortChanged != null,
+                icon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.sort,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Sort by',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-                const PopupMenuItem(
-                  value: 'Amount',
-                  child: Text('Amount'),
-                ),
-                const PopupMenuItem(
-                  value: 'Reference',
-                  child: Text('Reference'),
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
+                onSelected: widget.onSortChanged,
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'Date',
+                    child: Text('Date'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'Amount',
+                    child: Text('Amount'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'Reference',
+                    child: Text('Reference'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
 
         // Transactions list
         ListView.builder(
@@ -166,7 +177,12 @@ class _TransactionsListState extends State<TransactionsList> {
           itemBuilder: (context, index) {
             final transaction = paginatedTransactions[index];
             return _TransactionItem(
-                transaction: transaction, formatCurrency: _formatCurrency);
+              transaction: transaction,
+              formatCurrency: _formatCurrency,
+              onTap: widget.onTransactionTap != null
+                  ? () => widget.onTransactionTap!(transaction)
+                  : null,
+            );
           },
         ),
 
@@ -176,7 +192,8 @@ class _TransactionsListState extends State<TransactionsList> {
           _buildPaginationControls(totalPages),
         ],
 
-        const SizedBox(height: 80), // Space for bottom nav
+        if (widget.includeBottomPadding)
+          const SizedBox(height: 80), // Space for bottom nav
       ],
     );
   }
@@ -349,10 +366,12 @@ class _PaginationButton extends StatelessWidget {
 class _TransactionItem extends StatelessWidget {
   final Transaction transaction;
   final String Function(double) formatCurrency;
+  final VoidCallback? onTap;
 
   const _TransactionItem({
     required this.transaction,
     required this.formatCurrency,
+    required this.onTap,
   });
 
   @override
@@ -373,103 +392,116 @@ class _TransactionItem extends StatelessWidget {
     final timeStr =
         dateTime != null ? DateFormat('hh:mm a').format(dateTime) : '';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color:
-              Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.1),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurfaceVariant
+                  .withOpacity(0.1),
+              width: 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      transaction.reference,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (transaction.creditor != null ||
-                        transaction.receiver != null)
-                      const SizedBox(height: 4),
-                    if (transaction.creditor != null)
-                      Text(
-                        transaction.creditor!,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    if (transaction.receiver != null)
-                      Text(
-                        transaction.receiver!,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '${isCredit ? '+' : '-'}ETB ${formatCurrency(transaction.amount)}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: isCredit
-                          ? Colors.green
-                          : Theme.of(context).colorScheme.error,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          transaction.reference,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (transaction.creditor != null ||
+                            transaction.receiver != null)
+                          const SizedBox(height: 4),
+                        if (transaction.creditor != null)
+                          Text(
+                            transaction.creditor!,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        if (transaction.receiver != null)
+                          Text(
+                            transaction.receiver!,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
                     ),
                   ),
-                  if (dateTime != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      dateStr,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    if (timeStr.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
                       Text(
-                        timeStr,
+                        '${isCredit ? '+' : '-'}ETB ${formatCurrency(transaction.amount)}',
                         style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant
-                              .withOpacity(0.7),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isCredit
+                              ? Colors.green
+                              : Theme.of(context).colorScheme.error,
                         ),
                       ),
-                  ],
+                      if (dateTime != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          dateStr,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (timeStr.isNotEmpty)
+                          Text(
+                            timeStr,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant
+                                  .withOpacity(0.7),
+                            ),
+                          ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }

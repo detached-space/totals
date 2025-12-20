@@ -21,6 +21,7 @@ class TransactionRepository {
         'type': map['type'],
         'transactionLink': map['transactionLink'],
         'accountNumber': map['accountNumber'],
+        'categoryId': map['categoryId'],
       });
     }).toList();
   }
@@ -56,6 +57,7 @@ class TransactionRepository {
         'type': transaction.type,
         'transactionLink': transaction.transactionLink,
         'accountNumber': transaction.accountNumber,
+        'categoryId': transaction.categoryId,
         'year': year,
         'month': month,
         'day': day,
@@ -98,6 +100,7 @@ class TransactionRepository {
           'type': transaction.type,
           'transactionLink': transaction.transactionLink,
           'accountNumber': transaction.accountNumber,
+          'categoryId': transaction.categoryId,
           'year': year,
           'month': month,
           'day': day,
@@ -188,6 +191,7 @@ class TransactionRepository {
         'type': map['type'],
         'transactionLink': map['transactionLink'],
         'accountNumber': map['accountNumber'],
+        'categoryId': map['categoryId'],
       });
     }).toList();
   }
@@ -231,6 +235,7 @@ class TransactionRepository {
         'type': map['type'],
         'transactionLink': map['transactionLink'],
         'accountNumber': map['accountNumber'],
+        'categoryId': map['categoryId'],
       });
     }).toList();
   }

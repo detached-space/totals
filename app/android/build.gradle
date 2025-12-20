@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlin_version = '1.7.10'
+    ext.kotlin_version = '1.8.10'
     repositories {
         google()
         mavenCentral()
@@ -17,8 +17,10 @@ allprojects {
     }
     configurations.all {
         resolutionStrategy {
-            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10' // Set the desired Kotlin version here
-            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10' // Ensure both stdlib and stdlib-jdk8 are the same version
+            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10'
+            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10'
+            force 'androidx.window:window:1.0.0'
+            force 'androidx.window:window-java:1.0.0'
         }
     }
 }
