@@ -58,9 +58,12 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _exportData() async {
-    // Show dialog to choose between save and share
+    if (!mounted) return;
+    
+    // Show dialog to choose between save and share - always show this dialog
     final action = await showDialog<String>(
       context: context,
+      barrierDismissible: true,
       builder: (context) => AlertDialog(
         title: const Text('Export Data'),
         content: const Text('Choose how you want to export your data:'),
@@ -81,7 +84,7 @@ class _SettingsPageState extends State<SettingsPage>
       ),
     );
 
-    if (action == null) return;
+    if (action == null || !mounted) return;
 
     setState(() => _isExporting = true);
     try {
@@ -91,25 +94,247 @@ class _SettingsPageState extends State<SettingsPage>
       final fileName = 'totals_export_$timestamp.json';
 
       if (action == 'save') {
-        // Save to documents directory
-        final documentsDir = await getApplicationDocumentsDirectory();
-        final file = File('${documentsDir.path}/$fileName');
+        if (!mounted) return;
+        
+        // On Android, saveFile has issues with content URIs
+        // Use a workaround: save to temp file and let user share/save it
+        if (Platform.isAndroid) {
+          // For Android, save to Downloads folder directly
+          // This avoids the content URI issue
+          try {
+            final directory = Directory('/storage/emulated/0/Download');
+            if (!await directory.exists()) {
+              // Fallback to app documents directory
+              final appDir = await getApplicationDocumentsDirectory();
+              final file = File('${appDir.path}/$fileName');
+              await file.writeAsString(jsonData);
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Data saved to: ${appDir.path}/$fileName',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                    ),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                );
+              }
+            } else {
+              final file = File('${directory.path}/$fileName');
       await file.writeAsString(jsonData);
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Data saved to: $fileName',
-                style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
-              ),
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          );
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Data saved to Downloads folder',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                    ),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                );
+              }
+            }
+          } catch (e) {
+            // If direct save fails, use share as fallback
+            final tempDir = await getTemporaryDirectory();
+            final tempFile = File('${tempDir.path}/$fileName');
+            await tempFile.writeAsString(jsonData);
+            
+            if (mounted) {
+              await Share.shareXFiles(
+                [XFile(tempFile.path)],
+                text: 'Totals Data Export',
+                subject: 'Totals Backup',
+              );
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Use Share to save the file',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                  ),
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              );
+            }
+          }
+        } else {
+          // For iOS and other platforms, use file picker
+          // Write to temp file first to avoid app state issues
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File('${tempDir.path}/$fileName');
+          await tempFile.writeAsString(jsonData);
+          
+          if (!mounted) return;
+          
+          // Let user choose where to save the file
+          String? result;
+          try {
+            result = await FilePicker.platform.saveFile(
+              dialogTitle: 'Save Export File',
+              fileName: fileName,
+              type: FileType.custom,
+              allowedExtensions: ['json'],
+            );
+            
+            // Small delay to ensure app is back in foreground after file picker
+            await Future.delayed(const Duration(milliseconds: 100));
+          } catch (e) {
+            // If file picker fails, clean up and show error
+            try {
+              if (await tempFile.exists()) {
+                await tempFile.delete();
+              }
+            } catch (_) {}
+            
+            if (mounted) {
+              setState(() => _isExporting = false);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Failed to open file picker: $e',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onError),
+                  ),
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              );
+            }
+            return;
+          }
+
+          // Check if app is still mounted after file picker
+          if (!mounted) {
+            // Clean up temp file if app was killed
+            try {
+              if (await tempFile.exists()) {
+                await tempFile.delete();
+              }
+            } catch (_) {}
+            return;
+          }
+          
+          // Double-check mounted after delay
+          if (!mounted) {
+            try {
+              if (await tempFile.exists()) {
+                await tempFile.delete();
+              }
+            } catch (_) {}
+            return;
+          }
+
+          if (result != null && result.isNotEmpty) {
+            try {
+              // Copy from temp file to user-selected location
+              final targetFile = File(result);
+              await tempFile.copy(targetFile.path);
+              
+              // Clean up temp file
+              try {
+                if (await tempFile.exists()) {
+                  await tempFile.delete();
+                }
+              } catch (_) {}
+
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Data saved successfully',
+                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                    ),
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                );
+              }
+            } catch (e) {
+              // If copy fails, try direct write
+              try {
+                final targetFile = File(result);
+                await targetFile.writeAsString(jsonData);
+                
+                // Clean up temp file
+                try {
+                  if (await tempFile.exists()) {
+                    await tempFile.delete();
+                  }
+                } catch (_) {}
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Data saved successfully',
+                        style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                      ),
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  );
+                }
+              } catch (writeError) {
+                // Clean up temp file
+                try {
+                  if (await tempFile.exists()) {
+                    await tempFile.delete();
+                  }
+                } catch (_) {}
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Failed to save file: $writeError',
+                        style: TextStyle(color: Theme.of(context).colorScheme.onError),
+                      ),
+                      backgroundColor: Theme.of(context).colorScheme.error,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  );
+                }
+              }
+            }
+          } else {
+            // User cancelled the file picker - clean up temp file
+            try {
+              if (await tempFile.exists()) {
+                await tempFile.delete();
+              }
+            } catch (_) {}
+            
+            if (mounted) {
+              setState(() => _isExporting = false);
+            }
+            return;
+          }
         }
       } else {
       // Share the file
@@ -117,6 +342,8 @@ class _SettingsPageState extends State<SettingsPage>
         final file = File('${tempDir.path}/$fileName');
         await file.writeAsString(jsonData);
 
+        if (!mounted) return;
+        
       await Share.shareXFiles(
         [XFile(file.path)],
         text: 'Totals Data Export',
