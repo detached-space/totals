@@ -5,6 +5,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/services/bank_detection_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/widgets/auth_page.dart';
 import 'package:totals/widgets/home_tabs.dart';
@@ -447,8 +448,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     print("debug: Error syncing patterns: $e");
                   }
 
-                  // Reload transaction data
+                  // Clear bank detection cache so it picks up newly synced banks
+                  final bankDetectionService = BankDetectionService();
+                  await bankDetectionService.clearCache();
+
+                  // Reload transaction data (this will recalculate bankSummaries)
                   await provider.loadData();
+
+                  // Force rebuild to ensure UI updates with new banks
+                  if (mounted) {
+                    setState(() {});
+                  }
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     // style it

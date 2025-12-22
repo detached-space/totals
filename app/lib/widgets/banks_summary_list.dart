@@ -57,10 +57,12 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
   @override
   void didUpdateWidget(BanksSummaryList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Reload detected banks when the registered banks list changes
-    if (oldWidget.banks.length != widget.banks.length) {
-      _loadUnregisteredBanks();
-    }
+    // Reload banks from database when widget updates (e.g., after refresh)
+    // This ensures we have the latest bank data including newly synced banks
+    _loadBanks();
+    // Reload detected banks to pick up any new banks from database
+    // Use forceRefresh to ensure we detect newly synced banks
+    _loadUnregisteredBanks(forceRefresh: true);
   }
 
   Future<void> _loadUnregisteredBanks({bool forceRefresh = false}) async {

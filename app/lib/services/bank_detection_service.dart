@@ -95,7 +95,8 @@ class BankDetectionService {
       }
 
       // No cache or force refresh - scan SMS
-      return await _scanAndCacheBanks(registeredBankIds);
+      // Force reload banks to ensure we have latest synced banks
+      return await _scanAndCacheBanks(registeredBankIds, forceReloadBanks: forceRefresh);
     } catch (e) {
       print("debug: Error detecting banks from SMS: $e");
       // Try to return cached data on error
@@ -197,6 +198,8 @@ class BankDetectionService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_cacheKey);
       await prefs.remove(_cacheTimestampKey);
+      // Also clear the in-memory bank cache to force reload
+      _cachedBanks = null;
       print("debug: Cleared bank detection cache");
     } catch (e) {
       print("debug: Error clearing bank cache: $e");
@@ -219,9 +222,9 @@ class BankDetectionService {
 
   /// Scan SMS and cache results
   Future<List<DetectedBank>> _scanAndCacheBanks(
-      Set<int> registeredBankIds) async {
-    // Fetch banks from database (with caching)
-    if (_cachedBanks == null) {
+      Set<int> registeredBankIds, {bool forceReloadBanks = false}) async {
+    // Fetch banks from database (reload if forced or not cached)
+    if (_cachedBanks == null || forceReloadBanks) {
       _cachedBanks = await _bankConfigService.getBanks();
     }
 
