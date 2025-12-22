@@ -26,6 +26,29 @@ class TransactionsForPeriodPage extends StatefulWidget {
 class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
   String _sortBy = 'Date';
 
+  Transaction? _findUpdatedTransaction(
+    Transaction original,
+    List<Transaction> updatedTransactions,
+  ) {
+    for (final transaction in updatedTransactions) {
+      if (transaction.reference != original.reference) continue;
+      if (transaction.time != original.time) continue;
+      if (transaction.amount != original.amount) continue;
+      if (transaction.bankId != original.bankId) continue;
+      if (transaction.accountNumber != original.accountNumber) continue;
+      return transaction;
+    }
+    return null;
+  }
+
+  List<Transaction> _refreshTransactions(TransactionProvider provider) {
+    final updated = provider.allTransactions;
+    return widget.transactions
+        .map((transaction) =>
+            _findUpdatedTransaction(transaction, updated) ?? transaction)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -49,28 +72,34 @@ class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: TransactionsList(
-              transactions: widget.transactions,
-              sortBy: _sortBy,
-              provider: widget.provider,
-              includeBottomPadding: false,
-              onTransactionTap: (transaction) async {
-                await showCategorizeTransactionSheet(
-                  context: context,
+        child: AnimatedBuilder(
+          animation: widget.provider,
+          builder: (context, _) {
+            final refreshedTransactions = _refreshTransactions(widget.provider);
+            return SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: TransactionsList(
+                  transactions: refreshedTransactions,
+                  sortBy: _sortBy,
                   provider: widget.provider,
-                  transaction: transaction,
-                );
-              },
-              onSortChanged: (sort) {
-                setState(() {
-                  _sortBy = sort;
-                });
-              },
-            ),
-          ),
+                  includeBottomPadding: false,
+                  onTransactionTap: (transaction) async {
+                    await showCategorizeTransactionSheet(
+                      context: context,
+                      provider: widget.provider,
+                      transaction: transaction,
+                    );
+                  },
+                  onSortChanged: (sort) {
+                    setState(() {
+                      _sortBy = sort;
+                    });
+                  },
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
