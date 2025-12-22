@@ -18,7 +18,7 @@ class ChartTypeSelector extends StatelessWidget {
         return Icons.bar_chart;
       case 'Pie Chart':
         return Icons.pie_chart;
-      case 'P&L Calendar':
+      case 'Heatmap':
         return Icons.calendar_today;
       default:
         return Icons.show_chart;
@@ -95,12 +95,12 @@ class ChartTypeSelector extends StatelessWidget {
             ),
           ),
           PopupMenuItem(
-            value: 'P&L Calendar',
+            value: 'Heatmap',
             child: Row(
               children: [
                 Icon(Icons.calendar_today, size: 18),
                 const SizedBox(width: 12),
-                const Text('P&L Calendar'),
+                const Text('Heatmap'),
               ],
             ),
           ),

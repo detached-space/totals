@@ -30,7 +30,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   int? _selectedBankFilter;
   String? _selectedAccountFilter;
   String _sortBy = 'Date';
-  String _chartType = 'P&L Calendar';
+  String _chartType = 'Heatmap';
   int _timeFrameOffset = 0;
 
   late PageController _timeFramePageController;

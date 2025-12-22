@@ -180,10 +180,10 @@ class PnLCalendarChart extends StatelessWidget {
               ),
               Row(
                 children: [
-                  _buildLegendItem(context, 'Profit', Colors.green),
+                  _buildLegendItem(context, 'Income', Colors.green),
                   const SizedBox(width: 12),
                   _buildLegendItem(
-                      context, 'Loss', Theme.of(context).colorScheme.error),
+                      context, 'Expense', Theme.of(context).colorScheme.error),
                 ],
               ),
             ],

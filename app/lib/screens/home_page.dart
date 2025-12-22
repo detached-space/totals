@@ -54,6 +54,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int activeTab = 0;
   int _bottomNavIndex = 0;
   StreamSubscription<NotificationIntent>? _notificationIntentSub;
+  String? _pendingNotificationReference;
+  String? _highlightedReference;
 
   @override
   void initState() {
@@ -71,7 +73,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       (intent) {
         if (!mounted) return;
         if (intent is CategorizeTransactionIntent) {
-          _openTodayAndCategorize(intent.reference);
+          _handleNotificationCategorize(intent.reference);
         }
       },
     );
@@ -178,6 +180,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openTodayAndCategorize(String reference) async {
+    await _openTodayFromNotification(reference, openSheet: true);
+  }
+
+  Future<void> _openTodayFromNotification(
+    String reference, {
+    required bool openSheet,
+  }) async {
     if (!mounted) return;
 
     if (_bottomNavIndex != 0) {
@@ -208,11 +217,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
 
-    await showCategorizeTransactionSheet(
-      context: context,
-      provider: provider,
-      transaction: match,
-    );
+    if (openSheet) {
+      await showCategorizeTransactionSheet(
+        context: context,
+        provider: provider,
+        transaction: match,
+      );
+    } else {
+      _highlightTransaction(reference);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tap the highlighted transaction to categorize it.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _handleNotificationCategorize(String reference) {
+    if (!_isAuthenticated) {
+      _pendingNotificationReference = reference;
+      _authenticateIfAvailable();
+      return;
+    }
+    _openTodayFromNotification(reference, openSheet: true);
+  }
+
+  void _highlightTransaction(String reference) {
+    setState(() {
+      _highlightedReference = reference;
+    });
+    Future.delayed(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      if (_highlightedReference != reference) return;
+      setState(() {
+        _highlightedReference = null;
+      });
+    });
   }
 
   @override
@@ -239,6 +280,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _isAuthenticated = value;
     });
+
+    if (value && _pendingNotificationReference != null) {
+      final reference = _pendingNotificationReference!;
+      _pendingNotificationReference = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _openTodayFromNotification(reference, openSheet: true);
+      });
+    }
 
     if (value && !_hasCheckedInternet) {
       _hasCheckedInternet = true;
@@ -402,6 +452,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return tabs;
   }
 
+  void _syncActiveTabWithPage(List<int> tabs) {
+    if (!mounted) return;
+    if (!_pageController.hasClients || tabs.isEmpty) return;
+
+    final pageIndex = _pageController.page?.round() ?? _pageController.initialPage;
+    final safeIndex = pageIndex.clamp(0, tabs.length - 1);
+    final pageTabId = tabs[safeIndex];
+
+    if (activeTab != pageTabId) {
+      setState(() {
+        activeTab = pageTabId;
+      });
+    }
+  }
+
   List<Transaction> _todayTransactions(TransactionProvider provider) {
     final now = DateTime.now();
     return provider.allTransactions.where((t) {
@@ -420,6 +485,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildHomeContent(TransactionProvider provider) {
     final tabs = _getTabs();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncActiveTabWithPage(tabs);
+    });
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -606,6 +675,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     child: TodayTransactionsList(
                                       transactions: today,
                                       provider: provider,
+                                      highlightedReference: _highlightedReference,
+                                      onTransactionTap: (transaction) async {
+                                        setState(() {
+                                          if (_highlightedReference ==
+                                              transaction.reference) {
+                                            _highlightedReference = null;
+                                          }
+                                        });
+                                        await showCategorizeTransactionSheet(
+                                          context: context,
+                                          provider: provider,
+                                          transaction: transaction,
+                                        );
+                                      },
                                     ),
                                   );
                                 },
