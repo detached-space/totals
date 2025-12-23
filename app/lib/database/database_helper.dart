@@ -20,7 +20,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -116,7 +116,8 @@ class DatabaseHelper {
         image TEXT NOT NULL,
         maskPattern INTEGER,
         uniformMasking INTEGER,
-        simBased INTEGER
+        simBased INTEGER,
+        colors TEXT
       )
     ''');
 
@@ -337,7 +338,8 @@ class DatabaseHelper {
             image TEXT NOT NULL,
             maskPattern INTEGER,
             uniformMasking INTEGER,
-            simBased INTEGER
+            simBased INTEGER,
+            colors TEXT
           )
         ''');
         print("debug: Added banks table");
@@ -389,9 +391,10 @@ class DatabaseHelper {
           updatedAt TEXT
         )
       ''');
-      
+
       // Initialize default "Personal" profile if no profiles exist
-      final profileCount = await db.rawQuery('SELECT COUNT(*) as count FROM profiles');
+      final profileCount =
+          await db.rawQuery('SELECT COUNT(*) as count FROM profiles');
       if ((profileCount.first['count'] as int) == 0) {
         await db.insert(
           'profiles',
@@ -400,6 +403,16 @@ class DatabaseHelper {
             'createdAt': DateTime.now().toIso8601String(),
           },
         );
+      }
+    }
+
+    if (oldVersion < 13) {
+      // Add colors column to banks table for version 13
+      try {
+        await db.execute('ALTER TABLE banks ADD COLUMN colors TEXT');
+        print("debug: Added colors column to banks table");
+      } catch (e) {
+        print("debug: Error adding colors column (might already exist): $e");
       }
     }
   }

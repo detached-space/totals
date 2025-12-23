@@ -25,6 +25,9 @@ class BankConfigService {
                 ? null
                 : (map['uniformMasking'] == 1),
             'simBased': map['simBased'] == null ? null : (map['simBased'] == 1),
+            'colors': map['colors'] != null
+                ? List<String>.from(jsonDecode(map['colors'] as String))
+                : null,
           });
         }).toList();
         print("debug: Loaded ${banks.length} banks from database");
@@ -153,6 +156,7 @@ class BankConfigService {
                 ? null
                 : (bank.uniformMasking! ? 1 : 0),
             'simBased': bank.simBased == null ? null : (bank.simBased! ? 1 : 0),
+            'colors': bank.colors != null ? jsonEncode(bank.colors) : null,
           },
           conflictAlgorithm: ConflictAlgorithm.replace);
     }

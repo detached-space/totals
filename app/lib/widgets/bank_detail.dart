@@ -87,8 +87,8 @@ class _BankDetailState extends State<BankDetail> {
           showBalance: showTotalBalance,
           title: bankName.toUpperCase(),
           logoAsset: bankImage,
-          gradientId:
-              widget.bankId, // Use conditional gradient based on bank ID
+          gradientId: widget.bankId,
+          colors: bankInfo?.colors, // Use colors from bank data if available
           subtitle: "${widget.accountSummaries.length} Accounts",
           onToggleBalance: () {
             setState(() {

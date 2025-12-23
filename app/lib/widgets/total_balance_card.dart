@@ -10,6 +10,7 @@ class TotalBalanceCard extends StatefulWidget {
   final String title;
   final String? subtitle;
   final int gradientId;
+  final List<String>? colors;
   final String logoAsset;
   final String? address;
   final String? accountNumber;
@@ -22,6 +23,7 @@ class TotalBalanceCard extends StatefulWidget {
     this.title = "TOTAL BALANCE",
     this.subtitle,
     this.gradientId = 99,
+    this.colors,
     this.logoAsset = 'assets/images/logo.svg',
     this.address,
     this.accountNumber,
@@ -62,7 +64,9 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
         margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
-          gradient: GradientUtils.getGradient(widget.gradientId),
+          gradient: widget.colors != null && widget.colors!.isNotEmpty
+              ? GradientUtils.getGradientFromColors(widget.colors)
+              : GradientUtils.getGradient(widget.gradientId),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.2),

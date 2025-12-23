@@ -177,7 +177,13 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
       );
     }
 
-    final gradient = GradientUtils.getGradient(bank.bankId);
+    // Use colors from bank data if available, otherwise fallback to gradient ID
+    final LinearGradient gradient;
+    if (bankInfo.colors != null && bankInfo.colors!.isNotEmpty) {
+      gradient = GradientUtils.getGradientFromColors(bankInfo.colors);
+    } else {
+      gradient = GradientUtils.getGradient(bank.bankId);
+    }
 
     return Container(
       decoration: BoxDecoration(

@@ -7,6 +7,7 @@ class Bank {
   final int? maskPattern;
   final bool? uniformMasking;
   final bool? simBased;
+  final List<String>? colors;
 
   Bank({
     required this.id,
@@ -17,6 +18,7 @@ class Bank {
     this.maskPattern,
     this.uniformMasking,
     this.simBased,
+    this.colors,
   });
 
   factory Bank.fromJson(Map<String, dynamic> json) {
@@ -29,6 +31,7 @@ class Bank {
       maskPattern: json['maskPattern'],
       uniformMasking: json['uniformMasking'],
       simBased: json['simBased'],
+      colors: json['colors'] != null ? List<String>.from(json['colors']) : null,
     );
   }
 
@@ -42,6 +45,7 @@ class Bank {
       'maskPattern': maskPattern,
       'uniformMasking': uniformMasking,
       'simBased': simBased,
+      'colors': colors,
     };
   }
 }
