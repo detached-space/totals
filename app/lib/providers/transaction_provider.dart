@@ -198,19 +198,24 @@ class TransactionProvider with ChangeNotifier {
 
       // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
       // This handles legacy data or parsing failures where account wasn't captured.
-      // NOTE: Skip this for banks that match by bankId only (2=Awash, 6=Telebirr)
+      // NOTE: Skip this for banks that match by bankId only (uniformMasking == false)
       // because they already get all transactions via the else clause above
-      if (account.bank != 2 && account.bank != 6) {
-        var bankAccounts =
-            _accounts.where((a) => a.bank == account.bank).toList();
-        if (bankAccounts.length == 1 && bankAccounts.first == account) {
-          var orphanedTransactions = validTransactions
-              .where((t) =>
-                  t.bankId == account.bank &&
-                  (t.accountNumber == null || t.accountNumber!.isEmpty))
-              .toList();
-          accountTransactions.addAll(orphanedTransactions);
+      try {
+        final accountBank = banks.firstWhere((b) => b.id == account.bank);
+        if (accountBank.uniformMasking != false) {
+          var bankAccounts =
+              _accounts.where((a) => a.bank == account.bank).toList();
+          if (bankAccounts.length == 1 && bankAccounts.first == account) {
+            var orphanedTransactions = validTransactions
+                .where((t) =>
+                    t.bankId == account.bank &&
+                    (t.accountNumber == null || t.accountNumber!.isEmpty))
+                .toList();
+            accountTransactions.addAll(orphanedTransactions);
+          }
         }
+      } catch (e) {
+        // Bank not found in database, skip orphaned transactions fallback
       }
 
       double totalDebit = 0.0;
