@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_style.dart';
 
 class CategoriesPage extends StatelessWidget {
   const CategoriesPage({super.key});
@@ -89,12 +90,15 @@ class CategoriesPage extends StatelessWidget {
 
     if (result == null) return;
     if (result.name.trim().isEmpty) return;
+    final isUncategorized = result.type == CategoryType.uncategorized;
+    final isEssential = result.type == CategoryType.essential;
 
     try {
       if (existing == null) {
         await provider.createCategory(
           name: result.name,
-          essential: result.essential,
+          essential: isEssential,
+          uncategorized: isUncategorized,
           iconKey: result.iconKey,
           description: result.description,
           flow: result.flow,
@@ -104,7 +108,8 @@ class CategoriesPage extends StatelessWidget {
         await provider.updateCategory(
           existing.copyWith(
             name: result.name,
-            essential: result.essential,
+            essential: isEssential,
+            uncategorized: isUncategorized,
             iconKey: result.iconKey,
             description: result.description,
             flow: result.flow,
@@ -124,7 +129,7 @@ class CategoriesPage extends StatelessWidget {
 
 class _CategoryEditorResult {
   final String name;
-  final bool essential;
+  final CategoryType type;
   final String? iconKey;
   final String? description;
   final String flow;
@@ -132,7 +137,7 @@ class _CategoryEditorResult {
 
   const _CategoryEditorResult({
     required this.name,
-    required this.essential,
+    required this.type,
     required this.iconKey,
     required this.description,
     required this.flow,
@@ -156,7 +161,7 @@ class _CategoryEditorSheet extends StatefulWidget {
 class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
-  late bool _essential;
+  late CategoryType _categoryType;
   String? _iconKey;
   late String _flow;
   late bool _recurring;
@@ -167,7 +172,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
     _nameController = TextEditingController(text: widget.existing?.name ?? '');
     _descriptionController =
         TextEditingController(text: widget.existing?.description ?? '');
-    _essential = widget.existing?.essential ?? false;
+    _categoryType = widget.existing?.type ?? CategoryType.nonEssential;
     _iconKey = widget.existing?.iconKey ?? 'more_horiz';
     _flow = (widget.existing?.flow ?? widget.initialFlow).toLowerCase() == 'income'
         ? 'income'
@@ -186,6 +191,15 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
     final canDelete = isEdit && (widget.existing?.builtIn != true);
+    final isIncome = _flow == 'income';
+    final essentialLabel = isIncome ? 'Main income' : 'Essential';
+    final nonEssentialLabel = isIncome ? 'Side income' : 'Non-essential';
+    final essentialSubtitle = isIncome
+        ? 'Primary income sources'
+        : 'Used for spending insights';
+    final nonEssentialSubtitle = isIncome
+        ? 'Secondary income sources'
+        : 'Optional or discretionary spending';
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
@@ -215,7 +229,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                         context,
                         _CategoryEditorResult(
                           name: _nameController.text,
-                          essential: _essential,
+                          type: _categoryType,
                           iconKey: _iconKey,
                           description: _descriptionController.text,
                           flow: _flow,
@@ -255,16 +269,38 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                 showSelectedIcon: false,
               ),
               const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _essential,
-                onChanged: (v) => setState(() => _essential = v),
-                title: Text(_flow == 'income' ? 'Main income' : 'Essential'),
-                subtitle: Text(
-                  _flow == 'income'
-                      ? 'Turn on for your primary income sources'
-                      : 'Used for spending insights',
+              Text(
+                'Category type',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
+              ),
+              const SizedBox(height: 4),
+              RadioListTile<CategoryType>(
+                contentPadding: EdgeInsets.zero,
+                value: CategoryType.essential,
+                groupValue: _categoryType,
+                onChanged: (v) => setState(() => _categoryType = v!),
+                title: Text(essentialLabel),
+                subtitle: Text(essentialSubtitle),
+              ),
+              RadioListTile<CategoryType>(
+                contentPadding: EdgeInsets.zero,
+                value: CategoryType.nonEssential,
+                groupValue: _categoryType,
+                onChanged: (v) => setState(() => _categoryType = v!),
+                title: Text(nonEssentialLabel),
+                subtitle: Text(nonEssentialSubtitle),
+              ),
+              RadioListTile<CategoryType>(
+                contentPadding: EdgeInsets.zero,
+                value: CategoryType.uncategorized,
+                groupValue: _categoryType,
+                onChanged: (v) => setState(() => _categoryType = v!),
+                title: const Text('Uncategorized'),
+                subtitle: const Text('Catch-all or mixed transactions'),
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -486,10 +522,7 @@ class _CategoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isIncome = category.flow.toLowerCase() == 'income';
-    final color = isIncome
-        ? (category.essential ? Colors.green : Colors.teal)
-        : (category.essential ? Colors.blue : Colors.orange);
+    final color = categoryTypeColor(category, context);
     final description = (category.description ?? '').trim();
     return Card(
       elevation: 0,
@@ -547,9 +580,16 @@ class _ExpensesTab extends StatelessWidget {
       );
     }
 
-    final essential = categories.where((c) => c.essential).toList(growable: false);
-    final nonEssential =
-        categories.where((c) => !c.essential).toList(growable: false);
+    final essential = categories
+        .where((c) => c.type == CategoryType.essential)
+        .toList(growable: false);
+    final nonEssential = categories
+        .where((c) => c.type == CategoryType.nonEssential)
+        .toList(growable: false);
+    final uncategorized = categories
+        .where((c) => c.type == CategoryType.uncategorized)
+        .toList(growable: false);
+    final hasCoreSections = essential.isNotEmpty || nonEssential.isNotEmpty;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
@@ -567,6 +607,15 @@ class _ExpensesTab extends StatelessWidget {
           _SectionHeader(title: 'Non-essential', count: nonEssential.length),
           const SizedBox(height: 8),
           for (final c in nonEssential) ...[
+            _CategoryTile(category: c, onEdit: () => onEdit(c)),
+            const SizedBox(height: 8),
+          ],
+        ],
+        if (uncategorized.isNotEmpty) ...[
+          if (hasCoreSections) const SizedBox(height: 12),
+          _SectionHeader(title: 'Uncategorized', count: uncategorized.length),
+          const SizedBox(height: 8),
+          for (final c in uncategorized) ...[
             _CategoryTile(category: c, onEdit: () => onEdit(c)),
             const SizedBox(height: 8),
           ],
@@ -598,8 +647,16 @@ class _IncomeTab extends StatelessWidget {
       );
     }
 
-    final main = categories.where((c) => c.essential).toList(growable: false);
-    final side = categories.where((c) => !c.essential).toList(growable: false);
+    final main = categories
+        .where((c) => c.type == CategoryType.essential)
+        .toList(growable: false);
+    final side = categories
+        .where((c) => c.type == CategoryType.nonEssential)
+        .toList(growable: false);
+    final uncategorized = categories
+        .where((c) => c.type == CategoryType.uncategorized)
+        .toList(growable: false);
+    final hasCoreSections = main.isNotEmpty || side.isNotEmpty;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
@@ -617,6 +674,15 @@ class _IncomeTab extends StatelessWidget {
           _SectionHeader(title: 'Side income', count: side.length),
           const SizedBox(height: 8),
           for (final c in side) ...[
+            _CategoryTile(category: c, onEdit: () => onEdit(c)),
+            const SizedBox(height: 8),
+          ],
+        ],
+        if (uncategorized.isNotEmpty) ...[
+          if (hasCoreSections) const SizedBox(height: 12),
+          _SectionHeader(title: 'Uncategorized', count: uncategorized.length),
+          const SizedBox(height: 8),
+          for (final c in uncategorized) ...[
             _CategoryTile(category: c, onEdit: () => onEdit(c)),
             const SizedBox(height: 8),
           ],

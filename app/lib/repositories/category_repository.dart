@@ -12,6 +12,7 @@ class CategoryRepository {
         {
           'name': category.name,
           'essential': category.essential ? 1 : 0,
+          'uncategorized': category.uncategorized ? 1 : 0,
           'iconKey': category.iconKey,
           'description': category.description,
           'flow': category.flow,
@@ -45,6 +46,14 @@ class CategoryRepository {
         where: "builtInKey = ?",
         whereArgs: [category.builtInKey],
       );
+      batch.update(
+        'categories',
+        {
+          'uncategorized': category.uncategorized ? 1 : 0,
+        },
+        where: "builtInKey = ?",
+        whereArgs: [category.builtInKey],
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -53,7 +62,8 @@ class CategoryRepository {
     final db = await DatabaseHelper.instance.database;
     final rows = await db.query(
       'categories',
-      orderBy: "flow ASC, essential DESC, name COLLATE NOCASE ASC",
+      orderBy:
+          "flow ASC, uncategorized ASC, essential DESC, name COLLATE NOCASE ASC",
     );
     return rows.map(models.Category.fromDb).toList();
   }
@@ -61,6 +71,7 @@ class CategoryRepository {
   Future<models.Category> createCategory({
     required String name,
     required bool essential,
+    bool uncategorized = false,
     String? iconKey,
     String? description,
     String flow = 'expense',
@@ -71,6 +82,7 @@ class CategoryRepository {
     final id = await db.insert('categories', {
       'name': trimmed,
       'essential': essential ? 1 : 0,
+      'uncategorized': uncategorized ? 1 : 0,
       'iconKey': iconKey,
       'description': description,
       'flow': flow,
@@ -82,6 +94,7 @@ class CategoryRepository {
       id: id,
       name: trimmed,
       essential: essential,
+      uncategorized: uncategorized,
       iconKey: iconKey,
       description: description,
       flow: flow,
@@ -99,6 +112,7 @@ class CategoryRepository {
       {
         'name': category.name.trim(),
         'essential': category.essential ? 1 : 0,
+        'uncategorized': category.uncategorized ? 1 : 0,
         'iconKey': category.iconKey,
         'description': category.description,
         'flow': category.flow,

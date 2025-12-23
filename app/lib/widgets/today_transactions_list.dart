@@ -4,6 +4,7 @@ import 'package:totals/data/consts.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_style.dart';
 import 'package:totals/widgets/categorize_transaction_sheet.dart';
 
 class TodayTransactionsList extends StatelessWidget {
@@ -126,7 +127,9 @@ class _TodayTransactionItem extends StatelessWidget {
         dateTime != null ? DateFormat('hh:mm a').format(dateTime) : '';
 
     final category = provider.getCategoryById(transaction.categoryId);
-    final isIncomeCategory = category?.flow.toLowerCase() == 'income';
+    final categoryColor = category == null
+        ? Theme.of(context).colorScheme.onSurfaceVariant
+        : categoryTypeColor(category, context);
 
     return Material(
       color: Colors.transparent,
@@ -206,17 +209,7 @@ class _TodayTransactionItem extends StatelessWidget {
                             _CategoryChip(
                               label: category?.name ?? 'Uncategorized',
                               icon: iconForCategoryKey(category?.iconKey),
-                              color: category == null
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant
-                                  : (isIncomeCategory
-                                      ? (category.essential
-                                          ? Colors.green
-                                          : Colors.teal)
-                                      : (category.essential
-                                          ? Colors.blue
-                                          : Colors.orange)),
+                              color: categoryColor,
                             ),
                           ],
                         ),

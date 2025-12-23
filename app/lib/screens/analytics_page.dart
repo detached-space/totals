@@ -12,6 +12,7 @@ import 'package:totals/widgets/analytics/filter_section.dart';
 import 'package:totals/widgets/analytics/income_expense_cards.dart';
 import 'package:totals/widgets/analytics/chart_type_selector.dart';
 import 'package:totals/widgets/analytics/chart_container.dart';
+import 'package:totals/widgets/analytics/category_breakdown.dart';
 import 'package:totals/widgets/analytics/transactions_list.dart';
 import 'package:totals/widgets/analytics/chart_data_point.dart';
 import 'package:totals/widgets/analytics/chart_data_utils.dart';
@@ -561,6 +562,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       onResetTimeFrame: _resetTimeFrame,
                       onNavigateTimeFrame: _navigateTimeFrame,
                     ),
+                    // const SizedBox(height: 24),
+                    // CategoryBreakdown(
+                    //   transactions: filteredTransactions,
+                    //   provider: provider,
+                    //   selectedCard: _selectedCard,
+                    // ),
                     const SizedBox(height: 24),
                     TransactionsList(
                       transactions: filteredTransactions,

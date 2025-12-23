@@ -4,6 +4,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_style.dart';
 
 class RecentTransactionsCard extends StatelessWidget {
   final List<Transaction> transactions;
@@ -228,8 +229,8 @@ class RecentTransactionsCard extends StatelessWidget {
   }
 
   Widget _essentialChip(BuildContext context, Category category) {
-    final label = category.essential ? 'Essential' : 'Non-essential';
-    final color = category.essential ? Colors.blue : Colors.orange;
+    final label = category.typeLabel();
+    final color = categoryTypeColor(category, context);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -308,9 +309,7 @@ class RecentTransactionsCard extends StatelessWidget {
                       return ListTile(
                         leading: Icon(iconForCategoryKey(c.iconKey)),
                         title: Text(c.name),
-                        subtitle: Text(
-                          c.essential ? 'Essential' : 'Non-essential',
-                        ),
+                        subtitle: Text(c.typeLabel()),
                         trailing:
                             selected ? const Icon(Icons.check_rounded) : null,
                         onTap: () async {
