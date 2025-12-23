@@ -15,6 +15,71 @@ import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/screens/profile_management_page.dart';
 import 'package:totals/repositories/profile_repository.dart';
 
+Future<void> _openSupportLink() async {
+  final uri = Uri.parse('https://jami.bio/detached');
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (e) {
+    // Fallback to platform default
+    await launchUrl(uri);
+  }
+}
+
+Future<void> _openSupportChat() async {
+  final uri = Uri.parse('https://t.me/totals_chat');
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (e) {
+    await launchUrl(uri);
+  }
+}
+
+Widget _buildHeaderBackground(BuildContext context) {
+  final theme = Theme.of(context);
+
+  return Container(
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: [
+          theme.colorScheme.primary.withOpacity(0.24),
+          theme.colorScheme.secondary.withOpacity(0.16),
+          theme.colorScheme.background,
+        ],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+    ),
+    child: Stack(
+      children: [
+        Positioned(
+          top: -40,
+          right: -30,
+          child: Container(
+            width: 160,
+            height: 160,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: theme.colorScheme.primary.withOpacity(0.18),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -60,
+          left: -40,
+          child: Container(
+            width: 200,
+            height: 200,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: theme.colorScheme.secondary.withOpacity(0.16),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -45,16 +110,6 @@ class _SettingsPageState extends State<SettingsPage>
   void dispose() {
     _shimmerController.dispose();
     super.dispose();
-  }
-
-  Future<void> _openSupportLink() async {
-    final uri = Uri.parse('https://jami.bio/detached');
-    try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      // Fallback to platform default
-      await launchUrl(uri);
-    }
   }
 
   Future<void> _exportData() async {
@@ -507,121 +562,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  void _showAboutDialog() {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            color: theme.colorScheme.surface,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Logo
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Image.asset(
-                    isDark
-                        ? 'assets/images/logo-text-white.png'
-                        : 'assets/images/logo-text.png',
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) {
-                      // Fallback if image not found
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Center(
-                          child: Text(
-                            'T',
-                            style: TextStyle(
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onPrimary,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Totals',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Version 1.1.0',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'A personal finance tracking app that helps you manage your bank accounts and transactions.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withOpacity(0.7),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: theme.colorScheme.onPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text('Close'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showHelpDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => _FAQDialog(),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -758,13 +698,25 @@ class _SettingsPageState extends State<SettingsPage>
                             _buildSettingTile(
                               icon: Icons.info_outline_rounded,
                               title: 'About',
-                              onTap: _showAboutDialog,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const AboutPage(),
+                                  ),
+                                );
+                              },
                             ),
                             _buildDivider(context),
                             _buildSettingTile(
                               icon: Icons.help_outline_rounded,
                               title: 'Help & FAQ',
-                              onTap: _showHelpDialog,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const FAQPage(),
+                                  ),
+                                );
+                              },
                             ),
                             _buildDivider(context),
                             _buildSettingTile(
@@ -1009,155 +961,500 @@ class _SettingsPageState extends State<SettingsPage>
   }
 }
 
-class _FAQDialog extends StatefulWidget {
+class AboutPage extends StatelessWidget {
+  const AboutPage({super.key});
+
+  Widget _buildFeatureChip(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+  }) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: theme.colorScheme.primary.withOpacity(0.2),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSupportCard(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _openSupportLink,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: theme.colorScheme.outline.withOpacity(0.12),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.favorite_rounded,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Support the devs',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Help us keep improving Totals with thoughtful updates.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurface.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
-  State<_FAQDialog> createState() => _FAQDialogState();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 170,
+            floating: true,
+            pinned: true,
+            elevation: 0,
+            backgroundColor: theme.colorScheme.background,
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+              title: Text(
+                'About',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              background: _buildHeaderBackground(context),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: theme.colorScheme.outline.withOpacity(0.12),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.colorScheme.shadow.withOpacity(0.08),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Totals',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          'Version 1.1.0',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Image.asset(
+                        'assets/icon/detached_logo.png',
+                        width: 120,
+                        height: 120,
+                        fit: BoxFit.contain,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'by detached',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          letterSpacing: 1.1,
+                          color: theme.colorScheme.onSurface.withOpacity(0.65),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'A personal finance tracker that keeps your bank activity organized, searchable, and easy to understand.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurface.withOpacity(0.7),
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          _buildFeatureChip(
+                            context,
+                            icon: Icons.lock_outline_rounded,
+                            label: 'Private',
+                          ),
+                          _buildFeatureChip(
+                            context,
+                            icon: Icons.bolt_rounded,
+                            label: 'Fast',
+                          ),
+                          _buildFeatureChip(
+                            context,
+                            icon: Icons.auto_graph_rounded,
+                            label: 'Insightful',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _buildSupportCard(context),
+                const SizedBox(height: 80),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _FAQDialogState extends State<_FAQDialog> {
+class FAQPage extends StatefulWidget {
+  const FAQPage({super.key});
+
+  @override
+  State<FAQPage> createState() => _FAQPageState();
+}
+
+class _FAQPageState extends State<FAQPage> {
   final Map<int, bool> _expandedItems = {};
 
   final List<Map<String, String>> _faqs = [
     {
       'question': 'How do I add an account?',
-      'answer': 'Tap on the profile card at the top of settings to manage profiles and accounts.',
+      'answer':
+          'Tap on the profile card at the top of settings to manage profiles and accounts.',
     },
     {
       'question': 'How do I export my data?',
-      'answer': 'Go to Settings > Export Data. You can choose to save the file directly or share it with other apps.',
+      'answer':
+          'Go to Settings > Export Data. You can choose to save the file directly or share it with other apps.',
     },
     {
       'question': 'How do I categorize transactions?',
-      'answer': 'Tap on any transaction in your transaction list and select a category from the list that appears.',
-    },
-    {
-      'question': 'How do I switch between profiles?',
-      'answer': 'Go to Settings > tap on your profile card > select the profile you want to use. The active profile will be marked with a checkmark.',
+      'answer':
+          'Tap on any transaction in your transaction list and select a category from the list that appears.',
     },
     {
       'question': 'Can I import data from another device?',
-      'answer': 'Yes! Use the Export Data feature to create a backup file, then use Import Data on your other device to restore it.',
+      'answer':
+          'Yes! Use the Export Data feature to create a backup file, then use Import Data on your other device to restore it.',
+    },
+    {
+      'question': 'My SMS is not parsed. How can I parse it?',
+      'answer':
+          'Open the Failed Parses page and retry parsing the message from there. It is the button next to the lock button on the home page.',
     },
   ];
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
-    return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Container(
-        constraints: const BoxConstraints(maxHeight: 600),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          color: theme.colorScheme.surface,
+    final faqItems = List<Widget>.generate(_faqs.length, (index) {
+      final isExpanded = _expandedItems[index] ?? false;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: _buildFAQItem(
+          context: context,
+          index: index,
+          question: _faqs[index]['question']!,
+          answer: _faqs[index]['answer']!,
+          isExpanded: isExpanded,
+          onTap: () {
+            setState(() {
+              _expandedItems[index] = !isExpanded;
+            });
+          },
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+      );
+    });
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 170,
+            floating: true,
+            pinned: true,
+            elevation: 0,
+            backgroundColor: theme.colorScheme.background,
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+              title: Text(
+                'Help & FAQ',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              background: _buildHeaderBackground(context),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                _buildIntroCard(context),
+                const SizedBox(height: 20),
+                ...faqItems,
+                const SizedBox(height: 20),
+                _buildSupportFooter(context),
+                const SizedBox(height: 80),
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIntroCard(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.outline.withOpacity(0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              Icons.help_outline_rounded,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    'Help & FAQ',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                Text(
+                  'Quick answers',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                const SizedBox(height: 6),
+                Text(
+                  'Tap a question to reveal the details.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurface.withOpacity(0.7),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: _faqs.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final isExpanded = _expandedItems[index] ?? false;
-                  return _buildFAQItem(
-                    context: context,
-                    question: _faqs[index]['question']!,
-                    answer: _faqs[index]['answer']!,
-                    isExpanded: isExpanded,
-                    onTap: () {
-                      setState(() {
-                        _expandedItems[index] = !isExpanded;
-                      });
-                    },
-                  );
-                },
-              ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSupportFooter(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.outline.withOpacity(0.12),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Still need help?',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: theme.colorScheme.primary,
-                  foregroundColor: theme.colorScheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Reach out to detached and we will point you in the right direction.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurface.withOpacity(0.7),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _openSupportChat,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: theme.colorScheme.primary,
+                side: BorderSide(color: theme.colorScheme.primary),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text('Close'),
               ),
-                  ),
-                ],
-              ),
+              child: const Text('Contact us'),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildFAQItem({
     required BuildContext context,
+    required int index,
     required String question,
     required String answer,
     required bool isExpanded,
     required VoidCallback onTap,
   }) {
     final theme = Theme.of(context);
-    
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
         child: Container(
-          padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(12),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: theme.colorScheme.outline.withOpacity(0.1),
+              color: theme.colorScheme.outline.withOpacity(0.12),
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${index + 1}',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       question,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontWeight: FontWeight.w600,
-                        fontSize: 15,
+                        height: 1.3,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   AnimatedRotation(
                     turns: isExpanded ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
@@ -1168,23 +1465,23 @@ class _FAQDialogState extends State<_FAQDialog> {
                   ),
                 ],
               ),
-              if (isExpanded) ...[
-                const SizedBox(height: 12),
-                AnimatedOpacity(
-                  opacity: isExpanded ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    child: Text(
-                      answer,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurface.withOpacity(0.7),
-                        height: 1.5,
-                      ),
+              AnimatedCrossFade(
+                firstChild: const SizedBox.shrink(),
+                secondChild: Padding(
+                  padding: const EdgeInsets.only(left: 44, top: 12, right: 4),
+                  child: Text(
+                    answer,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurface.withOpacity(0.7),
+                      height: 1.5,
                     ),
                   ),
                 ),
-              ],
+                crossFadeState: isExpanded
+                    ? CrossFadeState.showSecond
+                    : CrossFadeState.showFirst,
+                duration: const Duration(milliseconds: 200),
+              ),
             ],
           ),
         ),

@@ -54,7 +54,7 @@ class _ChartContainerState extends State<ChartContainer> {
 
   double _getChartHeight() {
     switch (widget.chartType) {
-      case 'P&L Calendar':
+      case 'Heatmap':
         return 350;
       default:
         return 280;
@@ -97,7 +97,7 @@ class _ChartContainerState extends State<ChartContainer> {
       case 'Pie Chart':
         chartWidget = PieChartWidget(data: data);
         break;
-      case 'P&L Calendar':
+      case 'Heatmap':
         chartWidget = PnLCalendarChart(
           data: data,
           maxValue: maxValue,

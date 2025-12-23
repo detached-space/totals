@@ -42,6 +42,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         essential INTEGER NOT NULL DEFAULT 0,
+        uncategorized INTEGER NOT NULL DEFAULT 0,
         iconKey TEXT,
         description TEXT,
         flow TEXT NOT NULL DEFAULT 'expense',
@@ -263,6 +264,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL UNIQUE,
           essential INTEGER NOT NULL DEFAULT 0,
+          uncategorized INTEGER NOT NULL DEFAULT 0,
           iconKey TEXT,
           description TEXT,
           flow TEXT,
@@ -410,6 +412,7 @@ class DatabaseHelper {
         {
           'name': category.name,
           'essential': category.essential ? 1 : 0,
+          'uncategorized': category.uncategorized ? 1 : 0,
           'iconKey': category.iconKey,
           'description': category.description,
           'flow': category.flow,
@@ -443,6 +446,14 @@ class DatabaseHelper {
         where: "builtInKey = ?",
         whereArgs: [category.builtInKey],
       );
+      batch.update(
+        'categories',
+        {
+          'uncategorized': category.uncategorized ? 1 : 0,
+        },
+        where: "builtInKey = ?",
+        whereArgs: [category.builtInKey],
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -467,6 +478,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
           essential INTEGER NOT NULL DEFAULT 0,
+          uncategorized INTEGER NOT NULL DEFAULT 0,
           iconKey TEXT,
           description TEXT,
           flow TEXT NOT NULL DEFAULT 'expense',
@@ -477,11 +489,12 @@ class DatabaseHelper {
       ''');
 
       await txn.execute('''
-        INSERT INTO categories_new (id, name, essential, iconKey, description, flow, recurring, builtIn, builtInKey)
+        INSERT INTO categories_new (id, name, essential, uncategorized, iconKey, description, flow, recurring, builtIn, builtInKey)
         SELECT
           id,
           name,
           COALESCE(essential, 0),
+          COALESCE(uncategorized, 0),
           iconKey,
           description,
           CASE
@@ -528,6 +541,10 @@ class DatabaseHelper {
     }
     if (!names.contains('description')) {
       await addColumn('ALTER TABLE categories ADD COLUMN description TEXT');
+    }
+    if (!names.contains('uncategorized')) {
+      await addColumn(
+          'ALTER TABLE categories ADD COLUMN uncategorized INTEGER NOT NULL DEFAULT 0');
     }
     if (!names.contains('flow')) {
       await addColumn('ALTER TABLE categories ADD COLUMN flow TEXT');
@@ -593,6 +610,7 @@ class DatabaseHelper {
           (builtInKey IS NULL OR TRIM(builtInKey) = '')
           AND flow = ?
           AND essential = ?
+          AND uncategorized = ?
           AND recurring = ?
           AND (iconKey = ? OR iconKey IS NULL OR TRIM(iconKey) = '')
           AND (description = ? OR description IS NULL OR TRIM(description) = '')
@@ -600,6 +618,7 @@ class DatabaseHelper {
         whereArgs: [
           builtIn.flow,
           builtIn.essential ? 1 : 0,
+          builtIn.uncategorized ? 1 : 0,
           builtIn.recurring ? 1 : 0,
           builtIn.iconKey,
           builtIn.description,

@@ -10,6 +10,8 @@ class IncomeExpenseCards extends StatelessWidget {
   final String selectedPeriod;
   final int? selectedBankFilter;
   final String? selectedAccountFilter;
+  final Set<int?> selectedIncomeCategoryIds;
+  final Set<int?> selectedExpenseCategoryIds;
   final DateTime Function() getBaseDate;
   final ValueChanged<String?> onCardSelected;
 
@@ -19,12 +21,20 @@ class IncomeExpenseCards extends StatelessWidget {
     required this.selectedPeriod,
     required this.selectedBankFilter,
     required this.selectedAccountFilter,
+    required this.selectedIncomeCategoryIds,
+    required this.selectedExpenseCategoryIds,
     required this.getBaseDate,
     required this.onCardSelected,
   });
 
   DateTime _dateOnly(DateTime dateTime) {
     return DateTime(dateTime.year, dateTime.month, dateTime.day);
+  }
+
+  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
+    if (selection.isEmpty) return true;
+    if (categoryId == null) return selection.contains(null);
+    return selection.contains(categoryId);
   }
 
   @override
@@ -137,10 +147,16 @@ class IncomeExpenseCards extends StatelessWidget {
 
         // Calculate income and expenses for the period
         final periodIncome = periodFiltered
-            .where((t) => t.type == 'CREDIT')
+            .where((t) =>
+                t.type == 'CREDIT' &&
+                _matchesCategorySelection(
+                    t.categoryId, selectedIncomeCategoryIds))
             .fold(0.0, (sum, t) => sum + t.amount);
         final periodExpenses = periodFiltered
-            .where((t) => t.type == 'DEBIT')
+            .where((t) =>
+                t.type == 'DEBIT' &&
+                _matchesCategorySelection(
+                    t.categoryId, selectedExpenseCategoryIds))
             .fold(0.0, (sum, t) => sum + t.amount);
 
         return Row(

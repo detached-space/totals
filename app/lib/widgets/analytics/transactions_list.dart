@@ -5,6 +5,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_style.dart';
 
 class TransactionsList extends StatefulWidget {
   final List<Transaction> transactions;
@@ -443,9 +444,10 @@ class _TransactionItem extends StatelessWidget {
     final receiver = transaction.receiver?.trim();
     final hasReceiver = receiver != null && receiver.isNotEmpty;
 
-    final category =
-        provider?.getCategoryById(transaction.categoryId);
-    final isIncomeCategory = category?.flow.toLowerCase() == 'income';
+    final category = provider?.getCategoryById(transaction.categoryId);
+    final categoryColor = category == null
+        ? Theme.of(context).colorScheme.onSurfaceVariant
+        : categoryTypeColor(category, context);
 
     return Material(
       color: Colors.transparent,
@@ -509,17 +511,7 @@ class _TransactionItem extends StatelessWidget {
                               _CategoryChip(
                                 label: category?.name ?? 'Uncategorized',
                                 icon: iconForCategoryKey(category?.iconKey),
-                                color: category == null
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant
-                                    : (isIncomeCategory
-                                        ? (category.essential
-                                            ? Colors.green
-                                            : Colors.teal)
-                                        : (category.essential
-                                            ? Colors.blue
-                                            : Colors.orange)),
+                                color: categoryColor,
                               ),
                             ],
                           ),

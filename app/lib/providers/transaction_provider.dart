@@ -331,6 +331,7 @@ class TransactionProvider with ChangeNotifier {
   Future<void> createCategory({
     required String name,
     required bool essential,
+    bool uncategorized = false,
     String? iconKey,
     String? description,
     String flow = 'expense',
@@ -339,6 +340,7 @@ class TransactionProvider with ChangeNotifier {
     await _categoryRepo.createCategory(
       name: name,
       essential: essential,
+      uncategorized: uncategorized,
       iconKey: iconKey,
       description: description,
       flow: flow,
