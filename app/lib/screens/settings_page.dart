@@ -114,7 +114,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   Future<void> _exportData() async {
     if (!mounted) return;
-    
+
     // Show dialog to choose between save and share - always show this dialog
     final action = await showDialog<String>(
       context: context,
@@ -150,7 +150,7 @@ class _SettingsPageState extends State<SettingsPage>
 
       if (action == 'save') {
         if (!mounted) return;
-        
+
         // On Android, saveFile has issues with content URIs
         // Use a workaround: save to temp file and let user share/save it
         if (Platform.isAndroid) {
@@ -163,13 +163,14 @@ class _SettingsPageState extends State<SettingsPage>
               final appDir = await getApplicationDocumentsDirectory();
               final file = File('${appDir.path}/$fileName');
               await file.writeAsString(jsonData);
-              
+
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
                       'Data saved to: ${appDir.path}/$fileName',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary),
                     ),
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     behavior: SnackBarBehavior.floating,
@@ -181,14 +182,15 @@ class _SettingsPageState extends State<SettingsPage>
               }
             } else {
               final file = File('${directory.path}/$fileName');
-      await file.writeAsString(jsonData);
+              await file.writeAsString(jsonData);
 
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
                       'Data saved to Downloads folder',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary),
                     ),
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     behavior: SnackBarBehavior.floating,
@@ -204,19 +206,20 @@ class _SettingsPageState extends State<SettingsPage>
             final tempDir = await getTemporaryDirectory();
             final tempFile = File('${tempDir.path}/$fileName');
             await tempFile.writeAsString(jsonData);
-            
+
             if (mounted) {
               await Share.shareXFiles(
                 [XFile(tempFile.path)],
                 text: 'Totals Data Export',
                 subject: 'Totals Backup',
               );
-              
+
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
                     'Use Share to save the file',
-                    style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary),
                   ),
                   backgroundColor: Theme.of(context).colorScheme.primary,
                   behavior: SnackBarBehavior.floating,
@@ -233,9 +236,9 @@ class _SettingsPageState extends State<SettingsPage>
           final tempDir = await getTemporaryDirectory();
           final tempFile = File('${tempDir.path}/$fileName');
           await tempFile.writeAsString(jsonData);
-          
+
           if (!mounted) return;
-          
+
           // Let user choose where to save the file
           String? result;
           try {
@@ -245,7 +248,7 @@ class _SettingsPageState extends State<SettingsPage>
               type: FileType.custom,
               allowedExtensions: ['json'],
             );
-            
+
             // Small delay to ensure app is back in foreground after file picker
             await Future.delayed(const Duration(milliseconds: 100));
           } catch (e) {
@@ -255,14 +258,15 @@ class _SettingsPageState extends State<SettingsPage>
                 await tempFile.delete();
               }
             } catch (_) {}
-            
+
             if (mounted) {
               setState(() => _isExporting = false);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
                     'Failed to open file picker: $e',
-                    style: TextStyle(color: Theme.of(context).colorScheme.onError),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.onError),
                   ),
                   backgroundColor: Theme.of(context).colorScheme.error,
                   behavior: SnackBarBehavior.floating,
@@ -285,7 +289,7 @@ class _SettingsPageState extends State<SettingsPage>
             } catch (_) {}
             return;
           }
-          
+
           // Double-check mounted after delay
           if (!mounted) {
             try {
@@ -301,7 +305,7 @@ class _SettingsPageState extends State<SettingsPage>
               // Copy from temp file to user-selected location
               final targetFile = File(result);
               await tempFile.copy(targetFile.path);
-              
+
               // Clean up temp file
               try {
                 if (await tempFile.exists()) {
@@ -314,7 +318,8 @@ class _SettingsPageState extends State<SettingsPage>
                   SnackBar(
                     content: Text(
                       'Data saved successfully',
-                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary),
                     ),
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     behavior: SnackBarBehavior.floating,
@@ -329,20 +334,21 @@ class _SettingsPageState extends State<SettingsPage>
               try {
                 final targetFile = File(result);
                 await targetFile.writeAsString(jsonData);
-                
+
                 // Clean up temp file
                 try {
                   if (await tempFile.exists()) {
                     await tempFile.delete();
                   }
                 } catch (_) {}
-                
+
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         'Data saved successfully',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onPrimary),
                       ),
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       behavior: SnackBarBehavior.floating,
@@ -359,13 +365,14 @@ class _SettingsPageState extends State<SettingsPage>
                     await tempFile.delete();
                   }
                 } catch (_) {}
-                
+
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
                         'Failed to save file: $writeError',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onError),
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onError),
                       ),
                       backgroundColor: Theme.of(context).colorScheme.error,
                       behavior: SnackBarBehavior.floating,
@@ -384,7 +391,7 @@ class _SettingsPageState extends State<SettingsPage>
                 await tempFile.delete();
               }
             } catch (_) {}
-            
+
             if (mounted) {
               setState(() => _isExporting = false);
             }
@@ -392,25 +399,26 @@ class _SettingsPageState extends State<SettingsPage>
           }
         }
       } else {
-      // Share the file
+        // Share the file
         final tempDir = await getTemporaryDirectory();
         final file = File('${tempDir.path}/$fileName');
         await file.writeAsString(jsonData);
 
         if (!mounted) return;
-        
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Totals Data Export',
-        subject: 'Totals Backup',
-      );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          text: 'Totals Data Export',
+          subject: 'Totals Backup',
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
                 'Data exported successfully',
-                style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                style:
+                    TextStyle(color: Theme.of(context).colorScheme.onPrimary),
               ),
               backgroundColor: Theme.of(context).colorScheme.primary,
               behavior: SnackBarBehavior.floating,
@@ -500,8 +508,8 @@ class _SettingsPageState extends State<SettingsPage>
               SnackBar(
                 content: Text(
                   'Data imported successfully',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.onPrimary),
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.onPrimary),
                 ),
                 backgroundColor: Theme.of(context).colorScheme.primary,
                 behavior: SnackBarBehavior.floating,
@@ -566,7 +574,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -575,7 +583,7 @@ class _SettingsPageState extends State<SettingsPage>
             floating: true,
             pinned: true,
             snap: false,
-        elevation: 0,
+            elevation: 0,
             backgroundColor: theme.colorScheme.background,
             flexibleSpace: FlexibleSpaceBar(
               titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
@@ -612,81 +620,84 @@ class _SettingsPageState extends State<SettingsPage>
                         _buildSectionHeader(title: 'Preferences'),
                         const SizedBox(height: 12),
                         _buildSettingsCard(
-        children: [
-                Consumer<ThemeProvider>(
-                  builder: (context, themeProvider, child) {
+                          children: [
+                            Consumer<ThemeProvider>(
+                              builder: (context, themeProvider, child) {
                                 return _buildSettingTile(
-                                  icon: themeProvider.themeMode == ThemeMode.dark
-                              ? Icons.light_mode_rounded
-                              : Icons.dark_mode_rounded,
+                                  icon:
+                                      themeProvider.themeMode == ThemeMode.dark
+                                          ? Icons.light_mode_rounded
+                                          : Icons.dark_mode_rounded,
                                   title: 'Theme',
-                        trailing: Switch(
-                          value: themeProvider.themeMode == ThemeMode.dark,
-                          onChanged: (value) {
-                            themeProvider.toggleTheme();
-                          },
-                        ),
+                                  trailing: Switch(
+                                    value: themeProvider.themeMode ==
+                                        ThemeMode.dark,
+                                    onChanged: (value) {
+                                      themeProvider.toggleTheme();
+                                    },
+                                  ),
                                   onTap: null,
-                    );
-                  },
-                ),
+                                );
+                              },
+                            ),
                             _buildDivider(context),
                             _buildSettingTile(
                               icon: Icons.toc_rounded,
                               title: 'Categories',
                               flipIconHorizontally: true,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const CategoriesPage(),
-                        ),
-                      );
-                    },
-                  ),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const CategoriesPage(),
+                                  ),
+                                );
+                              },
+                            ),
                             _buildDivider(context),
                             _buildSettingTile(
                               icon: Icons.notifications_rounded,
                               title: 'Notifications',
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const NotificationSettingsPage(),
-                        ),
-                      );
-                    },
-                  ),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const NotificationSettingsPage(),
+                                  ),
+                                );
+                              },
+                            ),
                             _buildDivider(context),
                             _buildSettingTile(
                               icon: Icons.upload_rounded,
                               title: 'Export Data',
-                    trailing: _isExporting
+                              trailing: _isExporting
                                   ? SizedBox(
-                            width: 20,
-                            height: 20,
+                                      width: 20,
+                                      height: 20,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
                                         color: theme.colorScheme.primary,
                                       ),
-                          )
+                                    )
                                   : null,
-                    onTap: _isExporting ? null : _exportData,
-                  ),
+                              onTap: _isExporting ? null : _exportData,
+                            ),
                             _buildDivider(context),
                             _buildSettingTile(
                               icon: Icons.download_rounded,
                               title: 'Import Data',
-                    trailing: _isImporting
+                              trailing: _isImporting
                                   ? SizedBox(
-                            width: 20,
-                            height: 20,
+                                      width: 20,
+                                      height: 20,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
                                         color: theme.colorScheme.primary,
                                       ),
-                          )
+                                    )
                                   : null,
-                    onTap: _isImporting ? null : _importData,
-                  ),
+                              onTap: _isImporting ? null : _importData,
+                            ),
                           ],
                         ),
                         const SizedBox(height: 24),
@@ -725,9 +736,9 @@ class _SettingsPageState extends State<SettingsPage>
                               title: 'Clear Data',
                               titleColor: theme.colorScheme.error,
                               onTap: () => showClearDatabaseDialog(context),
-                ),
-              ],
-            ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 32),
 
                         // Support Developers Button
@@ -752,7 +763,7 @@ class _SettingsPageState extends State<SettingsPage>
     required bool isDark,
   }) {
     final theme = Theme.of(context);
-    
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -837,7 +848,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildSettingsCard({required List<Widget> children}) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.transparent,
@@ -871,7 +882,7 @@ class _SettingsPageState extends State<SettingsPage>
         child: leadingIcon,
       );
     }
-    
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -915,7 +926,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildDivider(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    
+
     return Padding(
       padding: const EdgeInsets.only(left: 56),
       child: Divider(
@@ -930,7 +941,7 @@ class _SettingsPageState extends State<SettingsPage>
 
   Widget _buildSupportDevelopersButton() {
     final theme = Theme.of(context);
-    
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -946,8 +957,8 @@ class _SettingsPageState extends State<SettingsPage>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               AnimatedBuilder(
-          animation: _shimmerController,
-          builder: (context, child) {
+                animation: _shimmerController,
+                builder: (context, child) {
                   return Icon(
                     Icons.favorite_rounded,
                     color: theme.colorScheme.primary,
@@ -1142,7 +1153,7 @@ class AboutPage extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       Image.asset(
-                        'assets/icon/detached_logo.png',
+                        'assets/images/detached_logo.png',
                         width: 120,
                         height: 120,
                         fit: BoxFit.contain,
