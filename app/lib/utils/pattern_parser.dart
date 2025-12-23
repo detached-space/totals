@@ -34,8 +34,8 @@ class PatternParser {
 
           if (match.groupNames.contains('amount')) {
             print("debug: Extracted amount: ${match.namedGroup('amount')}");
-            extracted['amount'] =
-                double.tryParse(_cleanNumber(match.namedGroup('amount')) ?? "");
+            final cleanedAmount = _cleanNumber(match.namedGroup('amount'));
+            extracted['amount'] = double.tryParse(cleanedAmount ?? "");
             print("debug: Extracted amount: ${extracted['amount']}");
           }
           if (match.groupNames.contains('balance')) {
@@ -83,6 +83,13 @@ class PatternParser {
             extracted['reference'] = match.namedGroup('reference');
             print("debug: Extracted reference: ${extracted['reference']}");
           }
+          if (match.groupNames.contains('type')) {
+            final rawType = match.namedGroup('type');
+            final normalized = _normalizeType(rawType);
+            if (normalized != null) {
+              extracted['type'] = normalized;
+            }
+          }
           if (match.groupNames.contains('creditor')) {
             extracted['creditor'] = match.namedGroup('creditor');
           }
@@ -106,19 +113,34 @@ class PatternParser {
           print("debug: receiver ${extracted["receiver"]}");
 
           if (pattern.refRequired == false && extracted["reference"] == null) {
-            extracted["reference"] = pattern.bankId.toString() +
-                "_" +
-                messageDate!.toIso8601String();
+            final fallbackDate = messageDate ?? DateTime.now();
+            extracted["reference"] =
+                "${pattern.bankId}_${fallbackDate.toIso8601String()}";
           }
-          // Validate required fields
-          if (pattern.refRequired == true &&
-              pattern.hasAccount == true &&
-              (extracted['amount'] == null ||
-                  extracted['currentBalance'] == null ||
-                  extracted['accountNumber'] == null ||
-                  extracted['reference'] == null)) {
+
+          final requiresReference = pattern.refRequired == true;
+          final requiresAccount =
+              pattern.hasAccount == true && match.groupNames.contains('account');
+
+          if (extracted['amount'] == null) {
             print(
-                "✗ Pattern '${pattern.description}' matched but missing required fields (amount, balance, or reference). Skipping.");
+                "✗ Pattern '${pattern.description}' matched but amount missing. Skipping.");
+            continue;
+          }
+          if (match.groupNames.contains('balance') &&
+              extracted['currentBalance'] == null) {
+            print(
+                "✗ Pattern '${pattern.description}' matched but balance missing. Skipping.");
+            continue;
+          }
+          if (requiresReference && extracted['reference'] == null) {
+            print(
+                "✗ Pattern '${pattern.description}' matched but reference missing. Skipping.");
+            continue;
+          }
+          if (requiresAccount && extracted['accountNumber'] == null) {
+            print(
+                "✗ Pattern '${pattern.description}' matched but account missing. Skipping.");
             continue;
           }
 
@@ -146,5 +168,13 @@ class PatternParser {
     cleaned = cleaned.replaceAll(RegExp(r'\.+$'), '');
 
     return cleaned;
+  }
+
+  static String? _normalizeType(String? rawType) {
+    if (rawType == null) return null;
+    final lower = rawType.toLowerCase();
+    if (lower.contains('debit')) return 'DEBIT';
+    if (lower.contains('credit')) return 'CREDIT';
+    return null;
   }
 }

@@ -49,6 +49,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _isAuthenticating = false;
   bool _hasCheckedInternet = false;
   bool _hasCheckedNotificationPermissions = false;
+  bool _hasInitializedPermissions = false;
 
   // UI State
   bool showTotalBalance = false;
@@ -65,13 +66,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // Initialize services and check permissions
-    _initPermissions().catchError((error) {
-      if (kDebugMode) {
-        print('debug: _initPermissions failed: $error');
-      }
-    });
 
     _notificationIntentSub = NotificationIntentBus.instance.stream.listen(
       (intent) {
@@ -284,6 +278,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _isAuthenticated = value;
     });
+
+    if (value && !_hasInitializedPermissions) {
+      _hasInitializedPermissions = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _initPermissions().catchError((error) {
+          if (kDebugMode) {
+            print('debug: _initPermissions failed: $error');
+          }
+        });
+      });
+    }
 
     if (value && _pendingNotificationReference != null) {
       final reference = _pendingNotificationReference!;

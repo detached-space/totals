@@ -6,6 +6,71 @@ import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/bank.dart';
 
 class BankConfigService {
+  static final List<Bank> _defaultBanks = [
+    Bank(
+      id: 1,
+      name: "Commercial Bank Of Ethiopia",
+      shortName: "CBE",
+      codes: ["CBE"],
+      image: "assets/images/cbe.png",
+      maskPattern: 4,
+      uniformMasking: true,
+    ),
+    Bank(
+      id: 2,
+      name: "Awash Bank",
+      shortName: "Awash",
+      codes: ["Awash", "Awash Bank", "AwashBank"],
+      image: "assets/images/awash.png",
+      maskPattern: 4,
+      uniformMasking: true,
+    ),
+    Bank(
+      id: 3,
+      name: "Bank Of Abyssinia",
+      shortName: "BOA",
+      codes: ["BOA"],
+      image: "assets/images/boa.png",
+      maskPattern: 4,
+      uniformMasking: true,
+    ),
+    Bank(
+      id: 4,
+      name: "Dashen Bank",
+      shortName: "Dashen",
+      codes: ["Dashen", "DashenBank"],
+      image: "assets/images/dashen.png",
+      maskPattern: 4,
+      uniformMasking: true,
+    ),
+    Bank(
+      id: 5,
+      name: "Zemen Bank",
+      shortName: "Zemen",
+      codes: ["Zemen"],
+      image: "assets/images/zemen.png",
+      maskPattern: 4,
+      uniformMasking: true,
+    ),
+    Bank(
+      id: 6,
+      name: "Telebirr",
+      shortName: "Telebirr",
+      codes: ["telebirr", "Telebirr", "127"],
+      image: "assets/images/telebirr.png",
+      uniformMasking: false,
+    ),
+    Bank(
+      id: 7,
+      name: "Nib Bank",
+      shortName: "NIB",
+      codes: ["NIB"],
+      image: "assets/images/nib.png",
+      maskPattern: 4,
+      uniformMasking: true,
+    ),
+  ];
+
   Future<List<Bank>> getBanks() async {
     final db = await DatabaseHelper.instance.database;
 
@@ -51,9 +116,10 @@ class BankConfigService {
       print("debug: No internet connection, cannot fetch remote banks");
     }
 
-    // Fallback to empty list if no banks found
-    print("debug: No banks available");
-    return [];
+    // Fallback to default list if no banks found
+    print("debug: No banks available, using defaults");
+    await saveBanks(_defaultBanks);
+    return _defaultBanks;
   }
 
   Future<bool> _hasInternetConnection() async {
