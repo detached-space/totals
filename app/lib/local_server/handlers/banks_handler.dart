@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 /// Handler for bank-related API endpoints
 class BanksHandler {
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank>? _cachedBanks;
+
   /// Returns a configured router with all bank routes
   Router get router {
     final router = Router();
@@ -22,13 +26,21 @@ class BanksHandler {
   /// Returns all supported banks
   Future<Response> _getBanks(Request request) async {
     try {
-      final banks = AppConstants.banks
+      // Fetch banks from database (with caching)
+      if (_cachedBanks == null) {
+        _cachedBanks = await _bankConfigService.getBanks();
+      }
+
+      final banks = _cachedBanks!
           .map((bank) => {
                 'id': bank.id,
                 'name': bank.name,
                 'shortName': bank.shortName,
                 'codes': bank.codes,
                 'image': bank.image,
+                'maskPattern': bank.maskPattern,
+                'uniformMasking': bank.uniformMasking,
+                'simBased': bank.simBased,
               })
           .toList();
 
@@ -50,14 +62,15 @@ class BanksHandler {
         return _errorResponse('Invalid bank ID', 400);
       }
 
-      final bank = AppConstants.banks.cast<Bank?>().firstWhere(
-            (b) => b!.id == parsedId,
-            orElse: () => null,
-          );
-
-      if (bank == null) {
-        return _errorResponse('Bank not found', 404);
+      // Fetch banks from database (with caching)
+      if (_cachedBanks == null) {
+        _cachedBanks = await _bankConfigService.getBanks();
       }
+
+      final bank = _cachedBanks!.firstWhere(
+        (b) => b.id == parsedId,
+        orElse: () => throw Exception('Bank not found'),
+      );
 
       return Response.ok(
         jsonEncode({
@@ -66,10 +79,16 @@ class BanksHandler {
           'shortName': bank.shortName,
           'codes': bank.codes,
           'image': bank.image,
+          'maskPattern': bank.maskPattern,
+          'uniformMasking': bank.uniformMasking,
+          'simBased': bank.simBased,
         }),
         headers: {'Content-Type': 'application/json'},
       );
     } catch (e) {
+      if (e.toString().contains('Bank not found')) {
+        return _errorResponse('Bank not found', 404);
+      }
       return _errorResponse('Failed to fetch bank: $e', 500);
     }
   }

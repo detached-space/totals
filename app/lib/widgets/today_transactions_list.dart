@@ -4,16 +4,21 @@ import 'package:totals/data/consts.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_style.dart';
 import 'package:totals/widgets/categorize_transaction_sheet.dart';
 
 class TodayTransactionsList extends StatelessWidget {
   final List<Transaction> transactions;
   final TransactionProvider provider;
+  final String? highlightedReference;
+  final ValueChanged<Transaction>? onTransactionTap;
 
   const TodayTransactionsList({
     super.key,
     required this.transactions,
     required this.provider,
+    this.highlightedReference,
+    this.onTransactionTap,
   });
 
   String _formatCurrency(double amount) {
@@ -61,12 +66,18 @@ class TodayTransactionsList extends StatelessWidget {
           transaction: transaction,
           formatCurrency: _formatCurrency,
           provider: provider,
+          isHighlighted: highlightedReference != null &&
+              transaction.reference == highlightedReference,
           onTap: () {
-            showCategorizeTransactionSheet(
-              context: context,
-              provider: provider,
-              transaction: transaction,
-            );
+            if (onTransactionTap != null) {
+              onTransactionTap!(transaction);
+            } else {
+              showCategorizeTransactionSheet(
+                context: context,
+                provider: provider,
+                transaction: transaction,
+              );
+            }
           },
         );
       },
@@ -79,12 +90,14 @@ class _TodayTransactionItem extends StatelessWidget {
   final String Function(double) formatCurrency;
   final TransactionProvider provider;
   final VoidCallback onTap;
+  final bool isHighlighted;
 
   const _TodayTransactionItem({
     required this.transaction,
     required this.formatCurrency,
     required this.provider,
     required this.onTap,
+    required this.isHighlighted,
   });
 
   @override
@@ -114,28 +127,33 @@ class _TodayTransactionItem extends StatelessWidget {
         dateTime != null ? DateFormat('hh:mm a').format(dateTime) : '';
 
     final category = provider.getCategoryById(transaction.categoryId);
-    final isIncomeCategory = category?.flow.toLowerCase() == 'income';
+    final categoryColor = category == null
+        ? Theme.of(context).colorScheme.onSurfaceVariant
+        : categoryTypeColor(category, context);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color:
-                Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurfaceVariant
-                  .withOpacity(0.1),
-              width: 1,
-            ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isHighlighted
+              ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
+              : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isHighlighted
+                ? Theme.of(context).colorScheme.primary.withOpacity(0.5)
+                : Theme.of(context)
+                    .colorScheme
+                    .onSurfaceVariant
+                    .withOpacity(0.1),
+            width: 1,
           ),
+        ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -191,17 +209,7 @@ class _TodayTransactionItem extends StatelessWidget {
                             _CategoryChip(
                               label: category?.name ?? 'Uncategorized',
                               icon: iconForCategoryKey(category?.iconKey),
-                              color: category == null
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant
-                                  : (isIncomeCategory
-                                      ? (category.essential
-                                          ? Colors.green
-                                          : Colors.teal)
-                                      : (category.essential
-                                          ? Colors.blue
-                                          : Colors.orange)),
+                              color: categoryColor,
                             ),
                           ],
                         ),

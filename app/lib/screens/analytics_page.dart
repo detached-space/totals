@@ -2,15 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/models/summary_models.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
+import 'package:intl/intl.dart';
+import 'package:totals/screens/transactions_for_period_page.dart';
 import 'package:totals/widgets/analytics/time_period_selector.dart';
 import 'package:totals/widgets/analytics/filter_section.dart';
 import 'package:totals/widgets/analytics/income_expense_cards.dart';
 import 'package:totals/widgets/analytics/chart_type_selector.dart';
 import 'package:totals/widgets/analytics/chart_container.dart';
+import 'package:totals/widgets/analytics/category_breakdown.dart';
 import 'package:totals/widgets/analytics/transactions_list.dart';
 import 'package:totals/widgets/analytics/chart_data_point.dart';
 import 'package:totals/widgets/analytics/chart_data_utils.dart';
 import 'package:totals/screens/insights_page.dart';
+import 'package:totals/widgets/categorize_transaction_sheet.dart';
+import 'package:totals/widgets/category_filter_button.dart';
+import 'package:totals/widgets/category_filter_sheet.dart';
 
 class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});
@@ -25,16 +34,35 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   int? _selectedBankFilter;
   String? _selectedAccountFilter;
   String _sortBy = 'Date';
-  String _chartType = 'P&L Calendar';
+  String _chartType = 'Heatmap';
   int _timeFrameOffset = 0;
+  Set<int?> _selectedIncomeCategoryIds = {};
+  Set<int?> _selectedExpenseCategoryIds = {};
 
   late PageController _timeFramePageController;
   bool _isTransitioning = false;
+  final Map<String, DateTime?> _transactionDateCache = {};
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
 
   @override
   void initState() {
     super.initState();
     _timeFramePageController = PageController(initialPage: 1);
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
   }
 
   @override
@@ -107,305 +135,351 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     }
   }
 
-  List<Transaction> _filterTransactions(
-      List<Transaction> allTransactions, List accounts, DateTime now) {
-    return allTransactions.where((t) {
-      // Filter out transactions that don't have a matching account
-      // This ensures deleted accounts' transactions don't appear
-      bool hasMatchingAccount = false;
-      if (t.bankId != null) {
-        // Check if there's an account for this transaction's bank
-        final bankAccounts =
-            accounts.where((a) => a.bankId == t.bankId).toList();
+  DateTime? _resolveTransactionDate(Transaction transaction) {
+    final rawTime = transaction.time;
+    if (rawTime == null || rawTime.isEmpty) return null;
+    if (_transactionDateCache.containsKey(rawTime)) {
+      return _transactionDateCache[rawTime];
+    }
+    try {
+      final parsed = DateTime.parse(rawTime);
+      _transactionDateCache[rawTime] = parsed;
+      return parsed;
+    } catch (_) {
+      _transactionDateCache[rawTime] = null;
+      return null;
+    }
+  }
 
-        if (bankAccounts.isEmpty) {
-          // No accounts for this bank, exclude transaction
-          return false;
-        }
+  Map<int, List<AccountSummary>> _groupAccountsByBank(
+      List<AccountSummary> accounts) {
+    final grouped = <int, List<AccountSummary>>{};
+    for (final account in accounts) {
+      grouped
+          .putIfAbsent(account.bankId, () => <AccountSummary>[])
+          .add(account);
+    }
+    return grouped;
+  }
 
-        // If transaction has accountNumber, verify it matches an account
-        if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
-          for (var account in bankAccounts) {
-            bool matches = false;
+  AccountSummary? _resolveSelectedAccount(List<AccountSummary> accounts) {
+    if (_selectedAccountFilter == null || _selectedBankFilter == null) {
+      return null;
+    }
+    if (accounts.isEmpty) return null;
+    return accounts.firstWhere(
+      (a) =>
+          a.accountNumber == _selectedAccountFilter &&
+          a.bankId == _selectedBankFilter,
+      orElse: () => accounts.firstWhere(
+        (a) => a.bankId == _selectedBankFilter,
+        orElse: () => accounts.first,
+      ),
+    );
+  }
 
-            if (account.bankId == 1 && account.accountNumber.length >= 4) {
-              // CBE: match last 4 digits
-              matches = t.accountNumber!.length >= 4 &&
-                  t.accountNumber!.substring(t.accountNumber!.length - 4) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 4);
-            } else if (account.bankId == 4 &&
-                account.accountNumber.length >= 3) {
-              // Dashen: match last 3 digits
-              matches = t.accountNumber!.length >= 3 &&
-                  t.accountNumber!.substring(t.accountNumber!.length - 3) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 3);
-            } else if (account.bankId == 3 &&
-                account.accountNumber.length >= 2) {
-              // Bank of Abyssinia: match last 2 digits
-              matches = t.accountNumber!.length >= 2 &&
-                  t.accountNumber!.substring(t.accountNumber!.length - 2) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 2);
-            } else if (account.bankId == 2 || account.bankId == 6) {
-              // Awash/Telebirr: match by bankId only
-              matches = true;
-            } else {
-              // Other banks: exact match
-              matches = t.accountNumber == account.accountNumber;
-            }
+  bool _matchesSelectedAccount(
+      Transaction transaction, AccountSummary account) {
+    final txnAccount = transaction.accountNumber;
+    if (txnAccount == null || txnAccount.isEmpty) {
+      return transaction.bankId == account.bankId;
+    }
 
-            if (matches) {
-              hasMatchingAccount = true;
-              break;
-            }
-          }
+    try {
+      final bank = _banks.firstWhere((b) => b.id == account.bankId);
 
-          // If transaction has accountNumber but no matching account, exclude it
-          if (!hasMatchingAccount) {
-            return false;
-          }
-        } else {
-          // Transaction has no accountNumber - include only if it's the only account for the bank
-          // (handles legacy data)
-          if (bankAccounts.length == 1 && (t.bankId == 2 || t.bankId == 6)) {
-            hasMatchingAccount = true;
-          } else if (bankAccounts.length == 1) {
-            // For other banks, include NULL accountNumber transactions only if single account
-            hasMatchingAccount = true;
-          }
-        }
+      if (bank.uniformMasking == true && bank.maskPattern != null) {
+        return txnAccount.substring(txnAccount.length - bank.maskPattern!) ==
+            account.accountNumber
+                .substring(account.accountNumber.length - bank.maskPattern!);
+      } else if (bank.uniformMasking == false) {
+        // Match by bankId only
+        return transaction.bankId == account.bankId;
       } else {
-        // Transaction has no bankId, exclude it
-        return false;
+        // Exact match (uniformMasking is null)
+        return txnAccount == account.accountNumber;
       }
+    } catch (e) {
+      // Bank not found in database, fallback to bankId match
+      return transaction.bankId == account.bankId;
+    }
+  }
 
-      bool matchesCard = true;
-      if (_selectedCard == 'Income') {
-        matchesCard = t.type == 'CREDIT';
-      } else if (_selectedCard == 'Expense') {
-        matchesCard = t.type == 'DEBIT';
-      }
+  bool _hasMatchingAccount(
+    Transaction transaction,
+    Map<int, List<AccountSummary>> accountsByBank,
+  ) {
+    final bankId = transaction.bankId;
+    if (bankId == null) return false;
+    final bankAccounts = accountsByBank[bankId] ?? const <AccountSummary>[];
+    if (bankAccounts.isEmpty) return false;
 
-      bool matchesBank =
-          _selectedBankFilter == null || t.bankId == _selectedBankFilter;
+    if (transaction.accountNumber != null &&
+        transaction.accountNumber!.isNotEmpty) {
+      for (final account in bankAccounts) {
+        bool matches = false;
 
-      bool matchesAccount = true;
-      if (_selectedAccountFilter != null && _selectedBankFilter != null) {
-        final account = accounts.firstWhere(
-          (a) =>
-              a.accountNumber == _selectedAccountFilter &&
-              a.bankId == _selectedBankFilter,
-          orElse: () => accounts.firstWhere(
-              (a) => a.bankId == _selectedBankFilter,
-              orElse: () => accounts.first),
-        );
-
-        if (account.bankId == 1 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 4) {
-          matchesAccount = t.accountNumber!
-                  .substring(t.accountNumber!.length - 4) ==
-              account.accountNumber.substring(account.accountNumber.length - 4);
-        } else if (account.bankId == 4 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 3) {
-          matchesAccount = t.accountNumber!
-                  .substring(t.accountNumber!.length - 3) ==
-              account.accountNumber.substring(account.accountNumber.length - 3);
-        } else if (account.bankId == 3 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 2) {
-          matchesAccount = t.accountNumber!
-                  .substring(t.accountNumber!.length - 2) ==
-              account.accountNumber.substring(account.accountNumber.length - 2);
-        } else {
-          matchesAccount = t.bankId == account.bank;
-        }
-      }
-
-      bool matchesPeriod = true;
-      if (t.time != null) {
         try {
-          final transactionDate = DateTime.parse(t.time!);
-          if (_selectedPeriod == 'Week') {
-            int daysSinceMonday = (now.weekday - 1) % 7;
-            final weekStart = DateTime(now.year, now.month, now.day)
-                .subtract(Duration(days: daysSinceMonday));
-            matchesPeriod = transactionDate
-                    .isAfter(weekStart.subtract(const Duration(days: 1))) &&
-                transactionDate.isBefore(now.add(const Duration(days: 1)));
-          } else if (_selectedPeriod == 'Month') {
-            matchesPeriod = transactionDate.year == now.year &&
-                transactionDate.month == now.month;
-          } else if (_selectedPeriod == 'Year') {
-            matchesPeriod = transactionDate.year == now.year;
+          final bank = _banks.firstWhere((b) => b.id == account.bankId);
+
+          if (bank.uniformMasking == true && bank.maskPattern != null) {
+            // Match last N digits based on mask pattern
+            if (transaction.accountNumber!.length >= bank.maskPattern! &&
+                account.accountNumber.length >= bank.maskPattern!) {
+              matches = transaction.accountNumber!.substring(
+                      transaction.accountNumber!.length - bank.maskPattern!) ==
+                  account.accountNumber.substring(
+                      account.accountNumber.length - bank.maskPattern!);
+            }
+          } else if (bank.uniformMasking == false) {
+            // Match by bankId only
+            matches = true;
+          } else {
+            // Exact match (uniformMasking is null)
+            matches = transaction.accountNumber == account.accountNumber;
           }
         } catch (e) {
-          matchesPeriod = false;
+          // Bank not found in database, fallback to exact match
+          matches = transaction.accountNumber == account.accountNumber;
         }
-      } else {
-        matchesPeriod = false;
-      }
 
-      return hasMatchingAccount &&
-          matchesCard &&
-          matchesBank &&
-          matchesAccount &&
-          matchesPeriod;
-    }).toList();
+        if (matches) {
+          return true;
+        }
+      }
+      return false;
+    } else {
+      return bankAccounts.length == 1;
+    }
+  }
+
+  bool _matchesBaseFilters(
+    Transaction transaction,
+    AccountSummary? selectedAccount,
+  ) {
+    if (_selectedCard == 'Income' && transaction.type != 'CREDIT') {
+      return false;
+    }
+    if (_selectedCard == 'Expense' && transaction.type != 'DEBIT') {
+      return false;
+    }
+    if (_selectedBankFilter != null &&
+        transaction.bankId != _selectedBankFilter) {
+      return false;
+    }
+    if (selectedAccount != null &&
+        !_matchesSelectedAccount(transaction, selectedAccount)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
+    if (selection.isEmpty) return true;
+    if (categoryId == null) return selection.contains(null);
+    return selection.contains(categoryId);
+  }
+
+  List<Transaction> _filterByCategorySelections(
+    List<Transaction> transactions,
+  ) {
+    if (_selectedIncomeCategoryIds.isEmpty &&
+        _selectedExpenseCategoryIds.isEmpty) {
+      return transactions;
+    }
+
+    final filtered = <Transaction>[];
+    for (final transaction in transactions) {
+      if (transaction.type == 'CREDIT') {
+        if (_matchesCategorySelection(
+            transaction.categoryId, _selectedIncomeCategoryIds)) {
+          filtered.add(transaction);
+        }
+        continue;
+      }
+      if (transaction.type == 'DEBIT') {
+        if (_matchesCategorySelection(
+            transaction.categoryId, _selectedExpenseCategoryIds)) {
+          filtered.add(transaction);
+        }
+        continue;
+      }
+      if (_selectedIncomeCategoryIds.isEmpty &&
+          _selectedExpenseCategoryIds.isEmpty) {
+        filtered.add(transaction);
+      }
+    }
+    return filtered;
+  }
+
+  bool _matchesPeriod(DateTime transactionDate, DateTime baseDate) {
+    if (_selectedPeriod == 'Week') {
+      final baseDay = DateTime(baseDate.year, baseDate.month, baseDate.day);
+      final daysSinceMonday = (baseDay.weekday - 1) % 7;
+      final weekStart = baseDay.subtract(Duration(days: daysSinceMonday));
+      final weekEnd = weekStart.add(const Duration(days: 6));
+      final transactionDay = DateTime(
+        transactionDate.year,
+        transactionDate.month,
+        transactionDate.day,
+      );
+      return !transactionDay.isBefore(weekStart) &&
+          !transactionDay.isAfter(weekEnd);
+    } else if (_selectedPeriod == 'Month') {
+      return transactionDate.year == baseDate.year &&
+          transactionDate.month == baseDate.month;
+    } else {
+      return transactionDate.year == baseDate.year;
+    }
+  }
+
+  List<Transaction> _filterBaseTransactions(
+    List<Transaction> allTransactions,
+    Map<int, List<AccountSummary>> accountsByBank,
+    AccountSummary? selectedAccount,
+  ) {
+    final filtered = <Transaction>[];
+    for (final transaction in allTransactions) {
+      if (!_hasMatchingAccount(transaction, accountsByBank)) {
+        continue;
+      }
+      if (!_matchesBaseFilters(transaction, selectedAccount)) {
+        continue;
+      }
+      filtered.add(transaction);
+    }
+    return filtered;
+  }
+
+  List<Transaction> _filterByPeriod(
+    List<Transaction> transactions,
+    DateTime baseDate,
+  ) {
+    final filtered = <Transaction>[];
+    for (final transaction in transactions) {
+      final transactionDate = _resolveTransactionDate(transaction);
+      if (transactionDate == null) continue;
+      if (_matchesPeriod(transactionDate, baseDate)) {
+        filtered.add(transaction);
+      }
+    }
+    return filtered;
+  }
+
+  List<Transaction> _filterTransactionsForBarChart(
+      List<Transaction> allTransactions) {
+    if (_selectedBankFilter == null) return allTransactions;
+    return allTransactions
+        .where((t) => t.bankId == _selectedBankFilter)
+        .toList();
+  }
+
+  List<Transaction> _filterTransactionsForPnl(
+    List<Transaction> allTransactions,
+    AccountSummary? selectedAccount,
+  ) {
+    final filtered = <Transaction>[];
+    for (final transaction in allTransactions) {
+      if (_selectedCard == 'Income' && transaction.type != 'CREDIT') {
+        continue;
+      }
+      if (_selectedCard == 'Expense' && transaction.type != 'DEBIT') {
+        continue;
+      }
+      if (_selectedBankFilter != null &&
+          transaction.bankId != _selectedBankFilter) {
+        continue;
+      }
+      if (selectedAccount != null &&
+          !_matchesSelectedAccount(transaction, selectedAccount)) {
+        continue;
+      }
+      filtered.add(transaction);
+    }
+    return filtered;
   }
 
   List<ChartDataPoint> _getChartData(
     List<Transaction> transactions,
-    String period,
-    int? bankFilter,
-    String? accountFilter, {
-    DateTime? baseDate,
-  }) {
-    var filteredTransactions = transactions;
-    if (bankFilter != null) {
-      filteredTransactions =
-          transactions.where((t) => t.bankId == bankFilter).toList();
-    }
-
-    final effectiveBaseDate = baseDate ?? _getBaseDate();
+    DateTime baseDate,
+  ) {
     return ChartDataUtils.getChartData(
-        filteredTransactions, period, effectiveBaseDate);
+      transactions,
+      _selectedPeriod,
+      baseDate,
+      dateForTransaction: _resolveTransactionDate,
+    );
   }
 
-  List<ChartDataPoint> _getChartDataForOffset(
-      List<ChartDataPoint> baseData, int offset) {
-    final baseDate = _getBaseDate(offset);
-    final allTransactions =
-        Provider.of<TransactionProvider>(context, listen: false)
-            .allTransactions;
-    final accounts = Provider.of<TransactionProvider>(context, listen: false)
-        .accountSummaries;
-
-    // Filter out transactions that don't have a matching account
-    final validTransactions = allTransactions.where((t) {
-      if (t.bankId == null) return false;
-
-      final bankAccounts = accounts.where((a) => a.bankId == t.bankId).toList();
-      if (bankAccounts.isEmpty) return false;
-
-      // If transaction has accountNumber, verify it matches an account
-      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
-        for (var account in bankAccounts) {
-          bool matches = false;
-
-          if (account.bankId == 1 && account.accountNumber.length >= 4) {
-            matches = t.accountNumber!.length >= 4 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 4);
-          } else if (account.bankId == 4 && account.accountNumber.length >= 3) {
-            matches = t.accountNumber!.length >= 3 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 3);
-          } else if (account.bankId == 3 && account.accountNumber.length >= 2) {
-            matches = t.accountNumber!.length >= 2 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 2);
-          } else if (account.bankId == 2 || account.bankId == 6) {
-            matches = true; // Match by bankId only
-          } else {
-            matches = t.accountNumber == account.accountNumber;
-          }
-
-          if (matches) return true;
-        }
-        return false; // No matching account found
-      } else {
-        // NULL accountNumber - include only if single account for bank (legacy data)
-        return bankAccounts.length == 1;
+  List<Transaction> _transactionsForCalendarCell(
+    DateTime cellDate,
+    List<Transaction> transactions,
+  ) {
+    return transactions.where((transaction) {
+      final transactionDate = _resolveTransactionDate(transaction);
+      if (transactionDate == null) return false;
+      if (_selectedPeriod == 'Year') {
+        return transactionDate.year == cellDate.year &&
+            transactionDate.month == cellDate.month;
       }
+      return transactionDate.year == cellDate.year &&
+          transactionDate.month == cellDate.month &&
+          transactionDate.day == cellDate.day;
     }).toList();
+  }
 
-    final filteredTransactions = validTransactions.where((t) {
-      bool matchesCard = true;
-      if (_selectedCard == 'Income') {
-        matchesCard = t.type == 'CREDIT';
-      } else if (_selectedCard == 'Expense') {
-        matchesCard = t.type == 'DEBIT';
-      }
+  String _formatCalendarSelectionLabel(DateTime cellDate) {
+    if (_selectedPeriod == 'Year') {
+      return DateFormat('MMMM yyyy').format(cellDate);
+    }
+    return DateFormat('MMM dd, yyyy').format(cellDate);
+  }
 
-      bool matchesBank =
-          _selectedBankFilter == null || t.bankId == _selectedBankFilter;
+  void _openCalendarTransactions(
+    DateTime cellDate,
+    List<Transaction> transactions,
+    TransactionProvider provider,
+  ) {
+    final filtered = _transactionsForCalendarCell(cellDate, transactions);
+    final subtitle = _formatCalendarSelectionLabel(cellDate);
 
-      bool matchesAccount = true;
-      if (_selectedAccountFilter != null && _selectedBankFilter != null) {
-        final account = accounts.firstWhere(
-          (a) =>
-              a.accountNumber == _selectedAccountFilter &&
-              a.bankId == _selectedBankFilter,
-          orElse: () => accounts.firstWhere(
-              (a) => a.bankId == _selectedBankFilter,
-              orElse: () => accounts.first),
-        );
-
-        if (account.bankId == 1 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 4) {
-          matchesAccount = t.accountNumber!
-                  .substring(t.accountNumber!.length - 4) ==
-              account.accountNumber.substring(account.accountNumber.length - 4);
-        } else if (account.bankId == 4 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 3) {
-          matchesAccount = t.accountNumber!
-                  .substring(t.accountNumber!.length - 3) ==
-              account.accountNumber.substring(account.accountNumber.length - 3);
-        } else if (account.bankId == 3 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 2) {
-          matchesAccount = t.accountNumber!
-                  .substring(t.accountNumber!.length - 2) ==
-              account.accountNumber.substring(account.accountNumber.length - 2);
-        } else {
-          matchesAccount = t.bankId == account.bankId;
-        }
-      }
-
-      bool matchesPeriod = true;
-      if (t.time != null) {
-        try {
-          final transactionDate = DateTime.parse(t.time!);
-          if (_selectedPeriod == 'Week') {
-            int daysSinceMonday = (baseDate.weekday - 1) % 7;
-            final weekStart =
-                DateTime(baseDate.year, baseDate.month, baseDate.day)
-                    .subtract(Duration(days: daysSinceMonday));
-            matchesPeriod = transactionDate
-                    .isAfter(weekStart.subtract(const Duration(days: 1))) &&
-                transactionDate.isBefore(baseDate.add(const Duration(days: 1)));
-          } else if (_selectedPeriod == 'Month') {
-            matchesPeriod = transactionDate.year == baseDate.year &&
-                transactionDate.month == baseDate.month;
-          } else if (_selectedPeriod == 'Year') {
-            matchesPeriod = transactionDate.year == baseDate.year;
-          }
-        } catch (e) {
-          matchesPeriod = false;
-        }
-      } else {
-        matchesPeriod = false;
-      }
-
-      return matchesCard && matchesBank && matchesAccount && matchesPeriod;
-    }).toList();
-
-    return _getChartData(
-      filteredTransactions,
-      _selectedPeriod,
-      _selectedBankFilter,
-      _selectedAccountFilter,
-      baseDate: baseDate,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TransactionsForPeriodPage(
+          transactions: filtered,
+          provider: provider,
+          title: 'Transactions',
+          subtitle: subtitle,
+        ),
+      ),
     );
+  }
+
+  Future<void> _openCategoryFilterSheet({
+    required TransactionProvider provider,
+    required String flow,
+  }) async {
+    final currentSelection = flow == 'income'
+        ? _selectedIncomeCategoryIds
+        : _selectedExpenseCategoryIds;
+    final result = await showCategoryFilterSheet(
+      context: context,
+      provider: provider,
+      selectedCategoryIds: currentSelection,
+      title: flow == 'income'
+          ? 'Filter income categories'
+          : 'Filter expense categories',
+      flow: flow,
+    );
+    if (result == null) return;
+
+    setState(() {
+      if (flow == 'income') {
+        _selectedIncomeCategoryIds = result.toSet();
+      } else {
+        _selectedExpenseCategoryIds = result.toSet();
+      }
+    });
   }
 
   @override
@@ -416,12 +490,39 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         final bankSummaries = provider.bankSummaries;
         final accounts = provider.accountSummaries;
 
-        final now = _getBaseDate();
-        final filteredTransactions =
-            _filterTransactions(allTransactions, accounts, now);
+        final baseDate = _getBaseDate();
+        final accountsByBank = _groupAccountsByBank(accounts);
+        final selectedAccount = _resolveSelectedAccount(accounts);
 
-        final chartData = _getChartData(filteredTransactions, _selectedPeriod,
-            _selectedBankFilter, _selectedAccountFilter);
+        final baseFilteredTransactions = _filterBaseTransactions(
+          allTransactions,
+          accountsByBank,
+          selectedAccount,
+        );
+        final categoryFilteredBase =
+            _filterByCategorySelections(baseFilteredTransactions);
+        final filteredTransactions =
+            _filterByPeriod(categoryFilteredBase, baseDate);
+        final barChartTransactions =
+            _filterByCategorySelections(_filterTransactionsForBarChart(allTransactions));
+        final pnlTransactions =
+            _filterByCategorySelections(
+                _filterTransactionsForPnl(allTransactions, selectedAccount));
+
+        final chartData = _getChartData(filteredTransactions, baseDate);
+        final chartDataByOffset = <int, List<ChartDataPoint>>{};
+
+        List<ChartDataPoint> getChartDataForOffset(int offset) {
+          return chartDataByOffset.putIfAbsent(offset, () {
+            final offsetDate = _getBaseDate(offset);
+            final periodFiltered = _filterByPeriod(
+              categoryFilteredBase,
+              offsetDate,
+            );
+            return _getChartData(periodFiltered, offsetDate);
+          });
+        }
+
         final maxValue = chartData.isEmpty
             ? 5000.0
             : (chartData.map((e) => e.value).reduce((a, b) => a > b ? a : b) *
@@ -498,6 +599,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       selectedPeriod: _selectedPeriod,
                       selectedBankFilter: _selectedBankFilter,
                       selectedAccountFilter: _selectedAccountFilter,
+                      selectedIncomeCategoryIds: _selectedIncomeCategoryIds,
+                      selectedExpenseCategoryIds: _selectedExpenseCategoryIds,
                       getBaseDate: _getBaseDate,
                       onCardSelected: (card) {
                         setState(() {
@@ -509,6 +612,30 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        CategoryFilterIconButton(
+                          icon: Icons.toc_rounded,
+                          selectedCount: _selectedIncomeCategoryIds.length,
+                          tooltip: 'Income categories',
+                          iconColor: Colors.green,
+                          flipIconHorizontally: true,
+                          onTap: () => _openCategoryFilterSheet(
+                            provider: provider,
+                            flow: 'income',
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        CategoryFilterIconButton(
+                          icon: Icons.toc_rounded,
+                          selectedCount: _selectedExpenseCategoryIds.length,
+                          tooltip: 'Expense categories',
+                          iconColor: Theme.of(context).colorScheme.error,
+                          flipIconHorizontally: true,
+                          onTap: () => _openCategoryFilterSheet(
+                            provider: provider,
+                            flow: 'expense',
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         ChartTypeSelector(
                           chartType: _chartType,
                           onChartTypeChanged: (type) {
@@ -529,17 +656,39 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       timeFramePageController: _timeFramePageController,
                       onTimeFramePageChanged: _onTimeFramePageChanged,
                       getBaseDate: _getBaseDate,
-                      getChartDataForOffset: _getChartDataForOffset,
+                      getChartDataForOffset: getChartDataForOffset,
                       selectedCard: _selectedCard,
-                      selectedBankFilter: _selectedBankFilter,
-                      selectedAccountFilter: _selectedAccountFilter,
+                      barChartTransactions: barChartTransactions,
+                      pnlTransactions: pnlTransactions,
+                      dateForTransaction: _resolveTransactionDate,
+                      onCalendarCellSelected: (date) {
+                        _openCalendarTransactions(
+                          date,
+                          pnlTransactions,
+                          provider,
+                        );
+                      },
                       onResetTimeFrame: _resetTimeFrame,
                       onNavigateTimeFrame: _navigateTimeFrame,
                     ),
+                    // const SizedBox(height: 24),
+                    // CategoryBreakdown(
+                    //   transactions: filteredTransactions,
+                    //   provider: provider,
+                    //   selectedCard: _selectedCard,
+                    // ),
                     const SizedBox(height: 24),
                     TransactionsList(
                       transactions: filteredTransactions,
                       sortBy: _sortBy,
+                      provider: provider,
+                      onTransactionTap: (transaction) async {
+                        await showCategorizeTransactionSheet(
+                          context: context,
+                          provider: provider,
+                          transaction: transaction,
+                        );
+                      },
                       onSortChanged: (sort) {
                         setState(() {
                           _sortBy = sort;

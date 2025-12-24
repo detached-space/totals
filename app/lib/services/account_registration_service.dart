@@ -1,16 +1,22 @@
-import 'package:another_telephony/telephony.dart';
-import 'package:totals/data/consts.dart';
 import 'package:totals/models/account.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/account_sync_status_service.dart';
+import 'package:totals/services/notification_service.dart';
+import 'package:totals/sms_handler/telephony.dart';
 import 'package:totals/utils/pattern_parser.dart';
 
 class AccountRegistrationService {
   final AccountRepository _accountRepo = AccountRepository();
   final AccountSyncStatusService _syncStatusService =
       AccountSyncStatusService.instance;
+  final BankConfigService _bankConfigService = BankConfigService();
+  final NotificationService _notificationService =
+      NotificationService.instance;
+  List<Bank>? _cachedBanks;
 
   /// Registers a new account and optionally syncs previous SMS messages
   /// Returns the account if created successfully
@@ -60,22 +66,35 @@ class AccountRegistrationService {
     String accountNumber,
     Function(String stage, double progress)? onProgress,
   ) async {
-    // Set initial sync status
-    _syncStatusService.setSyncStatus(accountNumber, bankId, "Starting sync...");
-    _syncStatusService.setSyncStatus(
-        accountNumber, bankId, "Finding bank messages...");
-    onProgress?.call("Finding bank messages...", 0.3);
-    final bank = AppConstants.banks.firstWhere(
+    // Fetch banks from database (with caching)
+    if (_cachedBanks == null) {
+      _cachedBanks = await _bankConfigService.getBanks();
+    }
+
+    final bank = _cachedBanks!.firstWhere(
       (element) => element.id == bankId,
       orElse: () => throw Exception("Bank with id $bankId not found"),
     );
 
+    Future<void> reportProgress(String stage, double progress) async {
+      _syncStatusService.setSyncStatus(accountNumber, bankId, stage);
+      onProgress?.call(stage, progress);
+      await _notificationService.showAccountSyncProgress(
+        accountNumber: accountNumber,
+        bankId: bankId,
+        bankLabel: bank.shortName,
+        stage: stage,
+        progress: progress,
+      );
+    }
+
+    await reportProgress("Starting sync...", 0.05);
+    await reportProgress("Finding bank messages...", 0.3);
+
     final bankCodes = bank.codes;
     print("debug: Syncing SMS for bank ${bank.name} with codes: $bankCodes");
 
-    _syncStatusService.setSyncStatus(
-        accountNumber, bankId, "Fetching SMS messages...");
-    onProgress?.call("Fetching SMS messages...", 0.4);
+    await reportProgress("Fetching SMS messages...", 0.4);
 
     // Get all messages from the bank
     final Telephony telephony = Telephony.instance;
@@ -124,12 +143,16 @@ class AccountRegistrationService {
     if (messages.isEmpty) {
       _syncStatusService.clearSyncStatus(accountNumber, bankId);
       onProgress?.call("No messages found", 1.0);
+      await _notificationService.showAccountSyncComplete(
+        accountNumber: accountNumber,
+        bankId: bankId,
+        bankLabel: bank.shortName,
+        message: "No messages found to import.",
+      );
       return;
     }
 
-    _syncStatusService.setSyncStatus(
-        accountNumber, bankId, "Loading patterns...");
-    onProgress?.call("Loading parsing patterns...", 0.5);
+    await reportProgress("Loading parsing patterns...", 0.5);
 
     // Load patterns for this bank
     final configService = SmsConfigService();
@@ -140,12 +163,16 @@ class AccountRegistrationService {
       print("debug: No patterns found for bank $bankId, skipping parsing");
       _syncStatusService.clearSyncStatus(accountNumber, bankId);
       onProgress?.call("No patterns found", 1.0);
+      await _notificationService.showAccountSyncComplete(
+        accountNumber: accountNumber,
+        bankId: bankId,
+        bankLabel: bank.shortName,
+        message: "No patterns found for this bank.",
+      );
       return;
     }
 
-    _syncStatusService.setSyncStatus(
-        accountNumber, bankId, "Parsing messages...");
-    onProgress?.call("Parsing messages...", 0.6);
+    await reportProgress("Parsing messages...", 0.6);
 
     // Process messages in batches for better performance
     int processedCount = 0;
@@ -171,11 +198,7 @@ class AccountRegistrationService {
       final batchProgress = batchEnd / totalMessages;
       final currentProgress = baseProgress + (batchProgress * 0.35);
       final status = "Processing ${batchEnd}/$totalMessages messages...";
-      _syncStatusService.setSyncStatus(accountNumber, bankId, status);
-      onProgress?.call(
-        "Processing messages ${batchStart + 1}-$batchEnd of $totalMessages...",
-        currentProgress,
-      );
+      await reportProgress(status, currentProgress);
 
       // Process batch concurrently
       final results = await Future.wait(
@@ -187,9 +210,10 @@ class AccountRegistrationService {
           try {
             // Check if message matches any pattern
             final cleanedBody = configService.cleanSmsText(message.body!);
-            final details = PatternParser.extractTransactionDetails(
+            final details = await PatternParser.extractTransactionDetails(
               cleanedBody,
               message.address!,
+              DateTime.fromMillisecondsSinceEpoch(message.date!),
               relevantPatterns,
             );
 
@@ -240,9 +264,7 @@ class AccountRegistrationService {
 
     // Update account balance from the latest message
     if (latestBalanceDetails != null) {
-      _syncStatusService.setSyncStatus(
-          accountNumber, bankId, "Updating balance...");
-      onProgress?.call("Updating account balance...", 0.95);
+      await reportProgress("Updating account balance...", 0.95);
       await _updateAccountBalanceFromLatestMessage(
         bankId,
         latestBalanceDetails,
@@ -255,6 +277,12 @@ class AccountRegistrationService {
     onProgress?.call(
       "Complete! Processed $processedCount transactions",
       1.0,
+    );
+    await _notificationService.showAccountSyncComplete(
+      accountNumber: accountNumber,
+      bankId: bankId,
+      bankLabel: bank.shortName,
+      message: "Imported $processedCount transactions.",
     );
 
     print(
@@ -272,69 +300,60 @@ class AccountRegistrationService {
     try {
       final accounts = await _accountRepo.getAccounts();
       int bankIdFromDetails = details['bankId'] ?? bankId;
+      final banks = await _bankConfigService.getBanks();
+      final bank = banks.firstWhere((b) => b.id == bankIdFromDetails);
 
-      // Use the same logic as SmsService for matching accounts
-      if (bankIdFromDetails == 6 || bankIdFromDetails == 2) {
-        // For bank 6 (Telebirr) and 2 (Awash), match by bank only
-        final index = accounts.indexWhere((a) => a.bank == bankIdFromDetails);
-        if (index != -1) {
-          final account = accounts[index];
-          final newBalance = details['currentBalance'] != null
-              ? SmsService.sanitizeAmount(details['currentBalance'])
-              : account.balance;
+      int index = -1;
 
-          final updated = Account(
-            accountNumber: account.accountNumber,
-            bank: account.bank,
-            balance: newBalance,
-            accountHolderName: account.accountHolderName,
-            settledBalance: account.settledBalance,
-            pendingCredit: account.pendingCredit,
-          );
-          await _accountRepo.saveAccount(updated);
-          print(
-              "debug: Account balance updated from latest message: $newBalance");
-        }
-      } else if (extractedAccountNumber != null) {
-        int index = -1;
-        if (bankId == 1) {
+      // Use uniformMasking logic to match accounts
+      if (bank.uniformMasking == false) {
+        // Match by bankId only (e.g., Awash/Telebirr)
+        index = accounts.indexWhere((a) => a.bank == bankIdFromDetails);
+      } else if (extractedAccountNumber != null &&
+          extractedAccountNumber.isNotEmpty) {
+        if (bank.uniformMasking == true && bank.maskPattern != null) {
+          // Match last N digits based on mask pattern
+          final extractedSuffix = extractedAccountNumber.length >=
+                  bank.maskPattern!
+              ? extractedAccountNumber
+                  .substring(extractedAccountNumber.length - bank.maskPattern!)
+              : extractedAccountNumber;
+
           index = accounts.indexWhere((a) {
-            if (a.bank != bankId) return false;
-            return a.accountNumber.endsWith(extractedAccountNumber
-                .substring(extractedAccountNumber.length - 4));
+            if (a.bank != bankIdFromDetails) return false;
+            if (a.accountNumber.length < bank.maskPattern!) return false;
+            final accountSuffix = a.accountNumber
+                .substring(a.accountNumber.length - bank.maskPattern!);
+            return accountSuffix == extractedSuffix;
           });
-        } else if (bankId == 3) {
-          index = accounts.indexWhere((a) {
-            if (a.bank != bankId) return false;
-            return a.accountNumber.endsWith(extractedAccountNumber
-                .substring(extractedAccountNumber.length - 2));
-          });
-        } else if (bankId == 4) {
-          index = accounts.indexWhere((a) {
-            if (a.bank != bankId) return false;
-            return a.accountNumber.endsWith(extractedAccountNumber
-                .substring(extractedAccountNumber.length - 3));
-          });
+        } else {
+          // Exact match (uniformMasking is null)
+          index = accounts.indexWhere((a) =>
+              a.bank == bankIdFromDetails &&
+              a.accountNumber == extractedAccountNumber);
         }
+      } else {
+        // No account number extracted, match by bankId only
+        index = accounts.indexWhere((a) => a.bank == bankIdFromDetails);
+      }
 
-        if (index != -1) {
-          final account = accounts[index];
-          final newBalance = details['currentBalance'] != null
-              ? SmsService.sanitizeAmount(details['currentBalance'])
-              : account.balance;
+      if (index != -1) {
+        final account = accounts[index];
+        final newBalance = details['currentBalance'] != null
+            ? SmsService.sanitizeAmount(details['currentBalance'])
+            : account.balance;
 
-          final updated = Account(
-            accountNumber: account.accountNumber,
-            bank: account.bank,
-            balance: newBalance,
-            accountHolderName: account.accountHolderName,
-            settledBalance: account.settledBalance,
-            pendingCredit: account.pendingCredit,
-          );
-          await _accountRepo.saveAccount(updated);
-          print(
-              "debug: Account balance updated from latest message for ${account.accountHolderName}: $newBalance");
-        }
+        final updated = Account(
+          accountNumber: account.accountNumber,
+          bank: account.bank,
+          balance: newBalance,
+          accountHolderName: account.accountHolderName,
+          settledBalance: account.settledBalance,
+          pendingCredit: account.pendingCredit,
+        );
+        await _accountRepo.saveAccount(updated);
+        print(
+            "debug: Account balance updated from latest message for ${account.accountHolderName}: $newBalance");
       }
     } catch (e) {
       print("debug: Error updating account balance from latest message: $e");

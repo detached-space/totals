@@ -5,6 +5,8 @@ class SmsPattern {
   final String type; // CREDIT or DEBIT
   final String
       description; // For debugging, e.g., "CBE Debit with Service Charge"
+  final bool? refRequired;
+  final bool? hasAccount;
 
   SmsPattern({
     required this.bankId,
@@ -12,6 +14,8 @@ class SmsPattern {
     required this.regex,
     required this.type,
     this.description = "",
+    this.refRequired,
+    this.hasAccount,
   });
 
   factory SmsPattern.fromJson(Map<String, dynamic> json) {
@@ -21,6 +25,8 @@ class SmsPattern {
       regex: json['regex'],
       type: json['type'],
       description: json['description'] ?? "",
+      refRequired: json['refRequired'],
+      hasAccount: json['hasAccount'],
     );
   }
 
@@ -31,6 +37,8 @@ class SmsPattern {
       'regex': regex,
       'type': type,
       'description': description,
+      'refRequired': refRequired,
+      'hasAccount': hasAccount,
     };
   }
 }

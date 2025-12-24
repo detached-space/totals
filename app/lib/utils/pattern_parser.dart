@@ -1,10 +1,14 @@
 import 'package:totals/models/sms_pattern.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 class PatternParser {
   /// Iterates through [patterns] that match the [senderAddress].
   /// Returns a map of extracted data if a match is found, or null otherwise.
-  static Map<String, dynamic>? extractTransactionDetails(
-      String messageBody, String senderAddress, List<SmsPattern> patterns) {
+  static Future<Map<String, dynamic>?> extractTransactionDetails(
+      String messageBody,
+      String senderAddress,
+      DateTime? messageDate,
+      List<SmsPattern> patterns) async {
     String cleanBody = messageBody.trim();
 
     for (var pattern in patterns) {
@@ -30,8 +34,8 @@ class PatternParser {
 
           if (match.groupNames.contains('amount')) {
             print("debug: Extracted amount: ${match.namedGroup('amount')}");
-            extracted['amount'] =
-                double.tryParse(_cleanNumber(match.namedGroup('amount')) ?? "");
+            final cleanedAmount = _cleanNumber(match.namedGroup('amount'));
+            extracted['amount'] = double.tryParse(cleanedAmount ?? "");
             print("debug: Extracted amount: ${extracted['amount']}");
           }
           if (match.groupNames.contains('balance')) {
@@ -45,22 +49,25 @@ class PatternParser {
             print("debug: Raw account value: '$raw'");
 
             if (raw != null) {
-              // specific cleanup for masked accounts (CBE style 1000***1234)
-              if (pattern.bankId == 1) {
-                extracted['accountNumber'] = raw.substring(raw.length - 4);
-                print(
-                    "Cleaned account (masked): ${extracted['accountNumber']}");
-              }
-              if (pattern.bankId == 3) {
-                extracted['accountNumber'] = raw.substring(raw.length - 2);
-                print(
-                    "Cleaned account (masked): ${extracted['accountNumber']}");
-              }
-              if (pattern.bankId == 4) {
-                extracted['accountNumber'] = raw.substring(raw.length - 3);
-                print(
-                    "Cleaned account (masked): ${extracted['accountNumber']}");
+              final BankConfigService bankConfigService = BankConfigService();
+              final banks = await bankConfigService.getBanks();
+              final bank = banks.firstWhere((b) => b.id == pattern.bankId);
+
+              // Use bank configuration for account extraction
+              if (bank.uniformMasking == true && bank.maskPattern != null) {
+                // Extract last N digits based on mask pattern
+                if (raw.length >= bank.maskPattern!) {
+                  extracted['accountNumber'] =
+                      raw.substring(raw.length - bank.maskPattern!);
+                  print(
+                      "Cleaned account (masked): ${extracted['accountNumber']}");
+                } else {
+                  extracted['accountNumber'] = raw;
+                  print(
+                      "Cleaned account (fallback): ${extracted['accountNumber']}");
+                }
               } else {
+                // No masking or uniformMasking is false - use full account number
                 extracted['accountNumber'] = raw;
                 print(
                     "Cleaned account (direct): ${extracted['accountNumber']}");
@@ -75,6 +82,13 @@ class PatternParser {
           if (match.groupNames.contains('reference')) {
             extracted['reference'] = match.namedGroup('reference');
             print("debug: Extracted reference: ${extracted['reference']}");
+          }
+          if (match.groupNames.contains('type')) {
+            final rawType = match.namedGroup('type');
+            final normalized = _normalizeType(rawType);
+            if (normalized != null) {
+              extracted['type'] = normalized;
+            }
           }
           if (match.groupNames.contains('creditor')) {
             extracted['creditor'] = match.namedGroup('creditor');
@@ -98,20 +112,35 @@ class PatternParser {
           print("debug: reference ${extracted["reference"]}");
           print("debug: receiver ${extracted["receiver"]}");
 
-          if ((pattern.bankId == 4 || pattern.bankId == 2) &&
-              extracted["reference"] == null) {
-            extracted["reference"] = DateTime.now().toIso8601String();
+          if (pattern.refRequired == false && extracted["reference"] == null) {
+            final fallbackDate = messageDate ?? DateTime.now();
+            extracted["reference"] =
+                "${pattern.bankId}_${fallbackDate.toIso8601String()}";
           }
-          // Validate required fields
-          if ((pattern.bankId == 1 ||
-                  pattern.bankId == 3 ||
-                  pattern.bankId == 4) &&
-              (extracted['amount'] == null ||
-                  extracted['currentBalance'] == null ||
-                  extracted['accountNumber'] == null ||
-                  extracted['reference'] == null)) {
+
+          final requiresReference = pattern.refRequired == true;
+          final requiresAccount =
+              pattern.hasAccount == true && match.groupNames.contains('account');
+
+          if (extracted['amount'] == null) {
             print(
-                "✗ Pattern '${pattern.description}' matched but missing required fields (amount, balance, or reference). Skipping.");
+                "✗ Pattern '${pattern.description}' matched but amount missing. Skipping.");
+            continue;
+          }
+          if (match.groupNames.contains('balance') &&
+              extracted['currentBalance'] == null) {
+            print(
+                "✗ Pattern '${pattern.description}' matched but balance missing. Skipping.");
+            continue;
+          }
+          if (requiresReference && extracted['reference'] == null) {
+            print(
+                "✗ Pattern '${pattern.description}' matched but reference missing. Skipping.");
+            continue;
+          }
+          if (requiresAccount && extracted['accountNumber'] == null) {
+            print(
+                "✗ Pattern '${pattern.description}' matched but account missing. Skipping.");
             continue;
           }
 
@@ -139,5 +168,13 @@ class PatternParser {
     cleaned = cleaned.replaceAll(RegExp(r'\.+$'), '');
 
     return cleaned;
+  }
+
+  static String? _normalizeType(String? rawType) {
+    if (rawType == null) return null;
+    final lower = rawType.toLowerCase();
+    if (lower.contains('debit')) return 'DEBIT';
+    if (lower.contains('credit')) return 'CREDIT';
+    return null;
   }
 }

@@ -1,8 +1,9 @@
 import 'dart:ui';
 
 import 'package:another_telephony/telephony.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -12,6 +13,27 @@ import 'package:totals/models/failed_parse.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:flutter/widgets.dart';
 import 'package:totals/services/notification_service.dart';
+
+enum ParseStatus {
+  success,
+  noBank,
+  noPattern,
+  duplicate,
+}
+
+class ParseResult {
+  final ParseStatus status;
+  final Transaction? transaction;
+  final String? reason;
+
+  const ParseResult({
+    required this.status,
+    this.transaction,
+    this.reason,
+  });
+
+  bool get isResolved => status == ParseStatus.success;
+}
 
 // Top-level function for background execution
 @pragma('vm:entry-point')
@@ -32,9 +54,11 @@ onBackgroundMessage(SmsMessage message) async {
     }
 
     print("debug: BG: Checking if relevant...");
-    if (SmsService.isRelevantMessage(address)) {
+    if (await SmsService.isRelevantMessage(address)) {
       print("debug: BG: Message IS relevant. Processing...");
-      await SmsService.processMessage(body, address!, notifyUser: true);
+      await SmsService.processMessage(body, address!,
+          notifyUser: true,
+          messageDate: DateTime.fromMillisecondsSinceEpoch(message.date!));
       print("debug: BG: Processing finished.");
     } else {
       print("debug: BG: Message NOT relevant.");
@@ -47,6 +71,8 @@ onBackgroundMessage(SmsMessage message) async {
 
 class SmsService {
   final Telephony _telephony = Telephony.instance;
+  static final BankConfigService _bankConfigService = BankConfigService();
+  static List<Bank>? _cachedBanks;
 
   // Callback for foreground-only UI updates.
   ValueChanged<Transaction>? onTransactionSaved;
@@ -68,12 +94,11 @@ class SmsService {
     if (message.body == null) return;
 
     try {
-      if (SmsService.isRelevantMessage(message.address)) {
+      if (await SmsService.isRelevantMessage(message.address)) {
         final tx = await SmsService.processMessage(
-          message.body!,
-          message.address!,
-          notifyUser: true,
-        );
+            message.body!, message.address!,
+            notifyUser: true,
+            messageDate: DateTime.fromMillisecondsSinceEpoch(message.date!));
         if (tx != null && onTransactionSaved != null) {
           onTransactionSaved!(tx);
         }
@@ -84,15 +109,22 @@ class SmsService {
   }
 
   /// Checks if the message address matches any of our known bank codes.
-  static bool isRelevantMessage(String? address) {
+  static Future<bool> isRelevantMessage(String? address) async {
     if (address == null) return false;
-    return getRelevantBank(address) != null;
+    final bank = await getRelevantBank(address);
+    return bank != null;
   }
 
   /// Identifies the bank associated with the sender address.
-  static Bank? getRelevantBank(String? address) {
+  static Future<Bank?> getRelevantBank(String? address) async {
     if (address == null) return null;
-    for (var bank in AppConstants.banks) {
+
+    // Fetch banks from database (with static caching)
+    if (_cachedBanks == null) {
+      _cachedBanks = await _bankConfigService.getBanks();
+    }
+
+    for (var bank in _cachedBanks!) {
       for (var code in bank.codes) {
         if (address.contains(code)) {
           return bank;
@@ -137,13 +169,47 @@ class SmsService {
     DateTime? messageDate,
     bool notifyUser = false,
   }) async {
+    final result = await _processMessageInternal(
+      messageBody,
+      senderAddress,
+      messageDate: messageDate,
+      notifyUser: notifyUser,
+      recordFailure: true,
+    );
+    return result.transaction;
+  }
+
+  static Future<ParseResult> retryFailedParse(
+    String messageBody,
+    String senderAddress, {
+    DateTime? messageDate,
+  }) async {
+    return _processMessageInternal(
+      messageBody,
+      senderAddress,
+      messageDate: messageDate,
+      notifyUser: false,
+      recordFailure: false,
+    );
+  }
+
+  static Future<ParseResult> _processMessageInternal(
+    String messageBody,
+    String senderAddress, {
+    DateTime? messageDate,
+    bool notifyUser = false,
+    bool recordFailure = true,
+  }) async {
     print("debug: Processing message: $messageBody");
 
-    Bank? bank = getRelevantBank(senderAddress);
+    Bank? bank = await getRelevantBank(senderAddress);
     if (bank == null) {
       print(
           "dubg: No bank found for address $senderAddress - skipping processing.");
-      return null;
+      return const ParseResult(
+        status: ParseStatus.noBank,
+        reason: "No matching bank",
+      );
     }
 
     // 1. Load Patterns
@@ -153,19 +219,25 @@ class SmsService {
         patterns.where((p) => p.bankId == bank.id).toList();
     // 2. Parse
     configService.debugSms(messageBody);
-    var details = PatternParser.extractTransactionDetails(
+    var details = await PatternParser.extractTransactionDetails(
         configService.cleanSmsText(messageBody),
         senderAddress,
+        messageDate,
         relevantPatterns);
 
     if (details == null) {
       print("debug: No matching pattern found for message from $senderAddress");
-      await FailedParseRepository().add(FailedParse(
-          address: senderAddress,
-          body: messageBody,
-          reason: "No matching pattern",
-          timestamp: DateTime.now().toIso8601String()));
-      return null;
+      if (recordFailure) {
+        await FailedParseRepository().add(FailedParse(
+            address: senderAddress,
+            body: messageBody,
+            reason: "No matching pattern",
+            timestamp: DateTime.now().toIso8601String()));
+      }
+      return const ParseResult(
+        status: ParseStatus.noPattern,
+        reason: "No matching pattern",
+      );
     }
 
     print("debug: Extracted details: $details");
@@ -185,19 +257,25 @@ class SmsService {
     String? newRef = details['reference'];
     if (newRef != null && existingTx.any((t) => t.reference == newRef)) {
       print("debug: Duplicate transaction skipped");
-      await FailedParseRepository().add(FailedParse(
-          address: senderAddress,
-          body: messageBody,
-          reason: "Duplicate transaction $newRef",
-          timestamp: DateTime.now().toIso8601String()));
-      return null;
+      if (recordFailure) {
+        await FailedParseRepository().add(FailedParse(
+            address: senderAddress,
+            body: messageBody,
+            reason: "Duplicate transaction $newRef",
+            timestamp: DateTime.now().toIso8601String()));
+      }
+      return ParseResult(
+        status: ParseStatus.duplicate,
+        reason: "Duplicate transaction $newRef",
+      );
     }
 
     // 4. Update Account Balance
     // We need to match the Bank ID from the pattern, not just assume 1 (CBE)
     int bankId = details['bankId'] ?? bank.id;
-
-    if (bankId == 6 || bankId == 2) {
+    final banks = await _bankConfigService.getBanks();
+    final currentBank = banks.firstWhere((b) => b.id == bankId);
+    if (currentBank.uniformMasking == false) {
       AccountRepository accRepo = AccountRepository();
       List<Account> accounts = await accRepo.getAccounts();
       int index = accounts.indexWhere((a) {
@@ -224,23 +302,13 @@ class SmsService {
       String extractedAccount = details['accountNumber'];
 
       int index = -1;
-      if (bankId == 1) {
+      final banks = await _bankConfigService.getBanks();
+      final bank = banks.firstWhere((b) => b.id == bankId);
+      if (bank.uniformMasking == true) {
         index = accounts.indexWhere((a) {
           if (a.bank != bankId) return false;
-          return a.accountNumber.endsWith(
-              extractedAccount.substring(extractedAccount.length - 4));
-        });
-      } else if (bankId == 3) {
-        index = accounts.indexWhere((a) {
-          if (a.bank != bankId) return false;
-          return a.accountNumber.endsWith(
-              extractedAccount.substring(extractedAccount.length - 2));
-        });
-      } else if (bankId == 4) {
-        index = accounts.indexWhere((a) {
-          if (a.bank != bankId) return false;
-          return a.accountNumber.endsWith(
-              extractedAccount.substring(extractedAccount.length - 3));
+          return a.accountNumber.endsWith(extractedAccount
+              .substring(extractedAccount.length - bank.maskPattern!));
         });
       }
 
@@ -281,6 +349,9 @@ class SmsService {
       );
     }
 
-    return newTx;
+    return ParseResult(
+      status: ParseStatus.success,
+      transaction: newTx,
+    );
   }
 }

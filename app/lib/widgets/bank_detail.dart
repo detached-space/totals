@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/models/summary_models.dart';
-import 'package:totals/utils/text_utils.dart';
 import 'package:totals/widgets/accounts_summary.dart';
 import 'package:totals/widgets/total_balance_card.dart';
 
@@ -23,6 +23,35 @@ class _BankDetailState extends State<BankDetail> {
   // isBankDetailExpanded is no longer needed as TotalBalanceCard handles its own expansion.
   bool showTotalBalance = false;
   List<String> visibleTotalBalancesForSubCards = [];
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
+  }
+
+  Bank? _getBankInfo() {
+    try {
+      return _banks.firstWhere((element) => element.id == widget.bankId);
+    } catch (e) {
+      return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,18 +69,14 @@ class _BankDetailState extends State<BankDetail> {
     final bankSummary = AllSummary(
       totalCredit: totalCredit,
       totalDebit: totalDebit,
-      banks: 1, 
+      banks: 1,
       totalBalance: totalBalance,
       accounts: widget.accountSummaries.length,
     );
 
-    final bankName = AppConstants.banks
-        .firstWhere((element) => element.id == widget.bankId)
-        .name;
-
-    final bankImage = AppConstants.banks
-        .firstWhere((element) => element.id == widget.bankId)
-        .image;
+    final bankInfo = _getBankInfo();
+    final bankName = bankInfo?.name ?? "Unknown Bank";
+    final bankImage = bankInfo?.image ?? "assets/images/cbe.png";
 
     return Column(
       children: [
@@ -60,20 +85,19 @@ class _BankDetailState extends State<BankDetail> {
         TotalBalanceCard(
           summary: bankSummary,
           showBalance: showTotalBalance,
-          title: bankName.toUpperCase(), 
+          title: bankName.toUpperCase(),
           logoAsset: bankImage,
-          gradientId: widget.bankId, // Use conditional gradient based on bank ID
+          gradientId: widget.bankId,
+          colors: bankInfo?.colors, // Use colors from bank data if available
           subtitle: "${widget.accountSummaries.length} Accounts",
           onToggleBalance: () {
             setState(() {
               showTotalBalance = !showTotalBalance;
               // Migrate logic: toggling main balance also toggles all sub-cards
-              visibleTotalBalancesForSubCards =
-                  visibleTotalBalancesForSubCards.isEmpty
-                      ? widget.accountSummaries
-                          .map((e) => e.accountNumber)
-                          .toList()
-                      : [];
+              visibleTotalBalancesForSubCards = visibleTotalBalancesForSubCards
+                      .isEmpty
+                  ? widget.accountSummaries.map((e) => e.accountNumber).toList()
+                  : [];
             });
           },
         ),
@@ -83,7 +107,6 @@ class _BankDetailState extends State<BankDetail> {
               accountSummaries: widget.accountSummaries,
               visibleTotalBalancesForSubCards: visibleTotalBalancesForSubCards),
         ),
-        const SizedBox(height: 100), // Padding for floating nav
       ],
     );
   }

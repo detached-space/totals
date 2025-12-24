@@ -580,7 +580,7 @@ class SmsMessage {
   SmsMessage.fromMap(Map rawMessage, List<SmsColumn> columns) {
     final message = Map.castFrom<dynamic, dynamic, String, dynamic>(rawMessage);
     for (var column in columns) {
-      debugPrint('Column is ${column._columnName}');
+      // debugPrint('Column is ${column._columnName}');
       final value = message[column._columnName];
       switch (column._columnName) {
         case _SmsProjections.ID:

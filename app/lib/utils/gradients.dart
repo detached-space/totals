@@ -6,7 +6,10 @@ class GradientUtils {
     2: [Color(0xFFd97706), Color(0xFF1a3a5c)], // Awash: Orange / Blue
     3: [Color(0xFFd9b90b), Color(0xFF382e0c)], // Boa: Dark Yellow
     4: [Color(0xFF1a2d5c), Color(0xFF344e7b)], // Dashen: Dark Blue
-    6: [Color.fromARGB(255, 29, 56, 229), Color.fromARGB(255, 144, 213, 238)], // Telebirr: White to Light Green
+    6: [
+      Color.fromARGB(255, 29, 56, 229),
+      Color.fromARGB(255, 144, 213, 238)
+    ], // Telebirr: White to Light Green
     99: [
       Color(0xFF2563EB),
       Color(0xFF1E3A8A)
@@ -17,6 +20,42 @@ class GradientUtils {
     Color(0xFF1b0b2e),
     Color(0xFF3a0f5c)
   ];
+
+  /// Converts a hex color string to a Color object
+  /// Supports formats: "#RRGGBB" or "#AARRGGBB"
+  static Color hexToColor(String hex) {
+    final hexString = hex.replaceFirst('#', '');
+    if (hexString.length == 6) {
+      // Add alpha channel if not present
+      return Color(int.parse('FF$hexString', radix: 16));
+    } else if (hexString.length == 8) {
+      return Color(int.parse(hexString, radix: 16));
+    }
+    throw FormatException('Invalid hex color format: $hex');
+  }
+
+  /// Creates a LinearGradient from a list of hex color strings
+  static LinearGradient getGradientFromColors(List<String>? hexColors) {
+    if (hexColors == null || hexColors.isEmpty) {
+      return LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: defaultColors,
+      );
+    }
+
+    final colors = hexColors.map((hex) => hexToColor(hex)).toList();
+    // If only one color provided, duplicate it for gradient
+    if (colors.length == 1) {
+      colors.add(colors[0]);
+    }
+
+    return LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: colors,
+    );
+  }
 
   /// Returns a LinearGradient based on the bank ID.
   /// Simulates 135deg (TopLeft to BottomRight)

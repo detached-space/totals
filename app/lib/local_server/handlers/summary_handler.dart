@@ -1,16 +1,19 @@
 import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:totals/data/consts.dart';
 import 'package:totals/models/account.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 /// Handler for summary-related API endpoints
 class SummaryHandler {
   final AccountRepository _accountRepo = AccountRepository();
   final TransactionRepository _transactionRepo = TransactionRepository();
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank>? _cachedBanks;
 
   /// Returns a configured router with all summary routes
   Router get router {
@@ -32,6 +35,7 @@ class SummaryHandler {
   Future<List<Transaction>> _filterOrphanedTransactions(
       List<Transaction> transactions) async {
     final accounts = await _accountRepo.getAccounts();
+    final banks = await _bankConfigService.getBanks();
 
     return transactions.where((t) {
       if (t.bankId == null) return false;
@@ -42,23 +46,14 @@ class SummaryHandler {
       if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
         for (var account in bankAccounts) {
           bool matches = false;
+          final bank = banks.firstWhere((b) => b.id == t.bankId);
 
-          if (account.bank == 1 && account.accountNumber.length >= 4) {
-            matches = t.accountNumber!.length >= 4 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 4);
-          } else if (account.bank == 4 && account.accountNumber.length >= 3) {
-            matches = t.accountNumber!.length >= 3 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 3);
-          } else if (account.bank == 3 && account.accountNumber.length >= 2) {
-            matches = t.accountNumber!.length >= 2 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 2);
-          } else if (account.bank == 2 || account.bank == 6) {
+          if (bank.uniformMasking == true) {
+            matches = t.accountNumber!
+                    .substring(t.accountNumber!.length - bank.maskPattern!) ==
+                account.accountNumber.substring(
+                    account.accountNumber.length - bank.maskPattern!);
+          } else if (bank.uniformMasking == false) {
             matches = true;
           } else {
             matches = t.accountNumber == account.accountNumber;
@@ -150,49 +145,51 @@ class SummaryHandler {
       }
 
       // Calculate summary for each bank
-      final bankSummaries = accountsByBank.entries.map((entry) {
-        final bankId = entry.key;
-        final bankAccounts = entry.value;
-        final bankTransactions = transactionsByBank[bankId] ?? [];
-        final bank = _getBankById(bankId);
+      final bankSummaries = await Future.wait(
+        accountsByBank.entries.map((entry) async {
+          final bankId = entry.key;
+          final bankAccounts = entry.value;
+          final bankTransactions = transactionsByBank[bankId] ?? [];
+          final bank = await _getBankById(bankId);
 
-        // Account totals
-        double totalBalance = 0;
-        double settledBalance = 0;
-        double pendingCredit = 0;
+          // Account totals
+          double totalBalance = 0;
+          double settledBalance = 0;
+          double pendingCredit = 0;
 
-        for (var account in bankAccounts) {
-          totalBalance += account.balance;
-          settledBalance += account.settledBalance ?? 0;
-          pendingCredit += account.pendingCredit ?? 0;
-        }
-
-        // Transaction totals
-        double totalCredit = 0;
-        double totalDebit = 0;
-
-        for (var t in bankTransactions) {
-          if (t.type == 'CREDIT') {
-            totalCredit += t.amount.abs();
-          } else if (t.type == 'DEBIT') {
-            totalDebit += t.amount.abs();
+          for (var account in bankAccounts) {
+            totalBalance += account.balance;
+            settledBalance += account.settledBalance ?? 0;
+            pendingCredit += account.pendingCredit ?? 0;
           }
-        }
 
-        return {
-          'bankId': bankId,
-          'bankName': bank?.name ?? 'Unknown Bank',
-          'bankShortName': bank?.shortName ?? 'N/A',
-          'bankImage': bank?.image ?? '',
-          'totalBalance': totalBalance,
-          'settledBalance': settledBalance,
-          'pendingCredit': pendingCredit,
-          'totalCredit': totalCredit,
-          'totalDebit': totalDebit,
-          'accountCount': bankAccounts.length,
-          'transactionCount': bankTransactions.length,
-        };
-      }).toList();
+          // Transaction totals
+          double totalCredit = 0;
+          double totalDebit = 0;
+
+          for (var t in bankTransactions) {
+            if (t.type == 'CREDIT') {
+              totalCredit += t.amount.abs();
+            } else if (t.type == 'DEBIT') {
+              totalDebit += t.amount.abs();
+            }
+          }
+
+          return {
+            'bankId': bankId,
+            'bankName': bank?.name ?? 'Unknown Bank',
+            'bankShortName': bank?.shortName ?? 'N/A',
+            'bankImage': bank?.image ?? '',
+            'totalBalance': totalBalance,
+            'settledBalance': settledBalance,
+            'pendingCredit': pendingCredit,
+            'totalCredit': totalCredit,
+            'totalDebit': totalDebit,
+            'accountCount': bankAccounts.length,
+            'transactionCount': bankTransactions.length,
+          };
+        }),
+      );
 
       return Response.ok(
         jsonEncode(bankSummaries),
@@ -211,84 +208,86 @@ class SummaryHandler {
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
 
-      final accountSummaries = accounts.map((account) {
-        final bank = _getBankById(account.bank);
+      final accountSummaries = await Future.wait(
+        accounts.map((account) async {
+          final bank = await _getBankById(account.bank);
 
-        // Find transactions for this account
-        final accountTransactions = transactions.where((t) {
-          if (t.bankId != account.bank) return false;
+          // Find transactions for this account
+          final accountTransactions = transactions.where((t) {
+            if (t.bankId != account.bank) return false;
 
-          // Match by account number (handling partial matches for different banks)
-          if (t.accountNumber == null) {
-            // Include transactions with no account number if this is the only account for the bank
-            final bankAccountCount =
-                accounts.where((a) => a.bank == account.bank).length;
-            return bankAccountCount == 1;
+            // Match by account number (handling partial matches for different banks)
+            if (t.accountNumber == null) {
+              // Include transactions with no account number if this is the only account for the bank
+              final bankAccountCount =
+                  accounts.where((a) => a.bank == account.bank).length;
+              return bankAccountCount == 1;
+            }
+
+            // Different banks use different matching logic
+            switch (account.bank) {
+              case 1: // CBE - match last 4 digits
+                if (account.accountNumber.length >= 4 &&
+                    t.accountNumber!.length >= 4) {
+                  return t.accountNumber!
+                          .substring(t.accountNumber!.length - 4) ==
+                      account.accountNumber
+                          .substring(account.accountNumber.length - 4);
+                }
+                break;
+              case 4: // Dashen - match last 3 digits
+                if (account.accountNumber.length >= 3 &&
+                    t.accountNumber!.length >= 3) {
+                  return t.accountNumber!
+                          .substring(t.accountNumber!.length - 3) ==
+                      account.accountNumber
+                          .substring(account.accountNumber.length - 3);
+                }
+                break;
+              case 3: // Bank of Abyssinia - match last 2 digits
+                if (account.accountNumber.length >= 2 &&
+                    t.accountNumber!.length >= 2) {
+                  return t.accountNumber!
+                          .substring(t.accountNumber!.length - 2) ==
+                      account.accountNumber
+                          .substring(account.accountNumber.length - 2);
+                }
+                break;
+              default:
+                return t.bankId == account.bank;
+            }
+
+            return t.bankId == account.bank;
+          }).toList();
+
+          // Calculate transaction totals
+          double totalCredit = 0;
+          double totalDebit = 0;
+
+          for (var t in accountTransactions) {
+            if (t.type == 'CREDIT') {
+              totalCredit += t.amount.abs();
+            } else if (t.type == 'DEBIT') {
+              totalDebit += t.amount.abs();
+            }
           }
 
-          // Different banks use different matching logic
-          switch (account.bank) {
-            case 1: // CBE - match last 4 digits
-              if (account.accountNumber.length >= 4 &&
-                  t.accountNumber!.length >= 4) {
-                return t.accountNumber!
-                        .substring(t.accountNumber!.length - 4) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 4);
-              }
-              break;
-            case 4: // Dashen - match last 3 digits
-              if (account.accountNumber.length >= 3 &&
-                  t.accountNumber!.length >= 3) {
-                return t.accountNumber!
-                        .substring(t.accountNumber!.length - 3) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 3);
-              }
-              break;
-            case 3: // Bank of Abyssinia - match last 2 digits
-              if (account.accountNumber.length >= 2 &&
-                  t.accountNumber!.length >= 2) {
-                return t.accountNumber!
-                        .substring(t.accountNumber!.length - 2) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 2);
-              }
-              break;
-            default:
-              return t.bankId == account.bank;
-          }
-
-          return t.bankId == account.bank;
-        }).toList();
-
-        // Calculate transaction totals
-        double totalCredit = 0;
-        double totalDebit = 0;
-
-        for (var t in accountTransactions) {
-          if (t.type == 'CREDIT') {
-            totalCredit += t.amount.abs();
-          } else if (t.type == 'DEBIT') {
-            totalDebit += t.amount.abs();
-          }
-        }
-
-        return {
-          'accountNumber': account.accountNumber,
-          'accountHolderName': account.accountHolderName,
-          'bankId': account.bank,
-          'bankName': bank?.name ?? 'Unknown Bank',
-          'bankShortName': bank?.shortName ?? 'N/A',
-          'bankImage': bank?.image ?? '',
-          'balance': account.balance,
-          'settledBalance': account.settledBalance,
-          'pendingCredit': account.pendingCredit,
-          'totalCredit': totalCredit,
-          'totalDebit': totalDebit,
-          'transactionCount': accountTransactions.length,
-        };
-      }).toList();
+          return {
+            'accountNumber': account.accountNumber,
+            'accountHolderName': account.accountHolderName,
+            'bankId': account.bank,
+            'bankName': bank?.name ?? 'Unknown Bank',
+            'bankShortName': bank?.shortName ?? 'N/A',
+            'bankImage': bank?.image ?? '',
+            'balance': account.balance,
+            'settledBalance': account.settledBalance,
+            'pendingCredit': account.pendingCredit,
+            'totalCredit': totalCredit,
+            'totalDebit': totalDebit,
+            'transactionCount': accountTransactions.length,
+          };
+        }),
+      );
 
       return Response.ok(
         jsonEncode(accountSummaries),
@@ -299,10 +298,14 @@ class SummaryHandler {
     }
   }
 
-  /// Finds a bank by ID from AppConstants
-  Bank? _getBankById(int bankId) {
+  /// Finds a bank by ID from the database
+  Future<Bank?> _getBankById(int bankId) async {
     try {
-      return AppConstants.banks.firstWhere((b) => b.id == bankId);
+      // Fetch banks from database (with caching)
+      if (_cachedBanks == null) {
+        _cachedBanks = await _bankConfigService.getBanks();
+      }
+      return _cachedBanks!.firstWhere((b) => b.id == bankId);
     } catch (e) {
       return null;
     }

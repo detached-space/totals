@@ -57,7 +57,11 @@ class LineChartWidget extends StatelessWidget {
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                     showTitles: true,
+                    interval: 1,
                     getTitlesWidget: (value, meta) {
+                      if ((value % 1).abs() > 0.001) {
+                        return const SizedBox.shrink();
+                      }
                       final index = value.toInt();
                       if (index >= 0 && index < data.length) {
                         // Only highlight if this is the current time frame (offset 0) and matches today

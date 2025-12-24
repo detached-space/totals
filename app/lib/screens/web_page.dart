@@ -261,7 +261,7 @@ class _WebPageState extends State<WebPage> {
 
                 // Status text
                 Text(
-                  isRunning ? 'Server Running!' : 'Server Stopped',
+                  isRunning ? 'Your link is ready' : 'Visit your Web Dashboard',
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: isRunning ? runningColor : onSurfaceColor,
@@ -271,11 +271,11 @@ class _WebPageState extends State<WebPage> {
 
                 // Description
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
                   child: Text(
                     isRunning
-                        ? 'Your web dashboard is ready! Open the link below in any browser on this network to view your financial data.'
-                        : 'Start the server to access your financial dashboard from any browser on this network.',
+                        ? 'Copy the link below and paste it into a browser on your computer to view your transactions.'
+                        : 'Step 1: Turn on your phone hotspot.\nStep 2: Connect your computer to that hotspot.\nStep 3: Tap "Create Link" below.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: onSurfaceVariantColor,
@@ -303,8 +303,10 @@ class _WebPageState extends State<WebPage> {
                         : SizedBox(),
                     label: Text(
                       _isLoading
-                          ? (isRunning ? 'Stopping...' : 'Starting...')
-                          : (isRunning ? 'Stop Server' : 'Start Server'),
+                          ? (isRunning
+                              ? 'Turning off link...'
+                              : 'Creating link...')
+                          : (isRunning ? 'Turn Off Link' : 'Create Link'),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -364,7 +366,7 @@ class _WebPageState extends State<WebPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Dashboard URL',
+                                    'Your private link',
                                     style: TextStyle(
                                       color: onSurfaceVariantColor,
                                       fontSize: 12,
@@ -392,7 +394,7 @@ class _WebPageState extends State<WebPage> {
                                 onPressed: _copyUrl,
                                 icon: Icon(Icons.copy,
                                     size: 18, color: primaryColor),
-                                label: Text('Copy Link',
+                                label: Text('Copy link',
                                     style: TextStyle(color: primaryColor)),
                                 style: OutlinedButton.styleFrom(
                                   padding:
@@ -433,7 +435,7 @@ class _WebPageState extends State<WebPage> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'Open this link on any device after connecting them to your hotspot',
+                            'On your computer, connect to your phone hotspot, then paste this link into a browser.',
                             style: TextStyle(
                               color: isDark
                                   ? primaryColor.withOpacity(0.9)
@@ -597,35 +599,35 @@ class _WebPageState extends State<WebPage> {
                 // Network info when not running
                 if (!isRunning && _networkIp != null) ...[
                   const SizedBox(height: 24),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: surfaceVariantColor.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.wifi,
-                          size: 18,
-                          color: onSurfaceVariantColor,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Your IP: $_networkIp',
-                          style: TextStyle(
-                            color: onSurfaceVariantColor,
-                            fontSize: 13,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  // Container(
+                  //   padding: const EdgeInsets.symmetric(
+                  //     horizontal: 16,
+                  //     vertical: 12,
+                  //   ),
+                  //   decoration: BoxDecoration(
+                  //     color: surfaceVariantColor.withOpacity(0.5),
+                  //     borderRadius: BorderRadius.circular(12),
+                  //   ),
+                  //   child: Row(
+                  //     mainAxisSize: MainAxisSize.min,
+                  //     children: [
+                  //       Icon(
+                  //         Icons.wifi,
+                  //         size: 18,
+                  //         color: onSurfaceVariantColor,
+                  //       ),
+                  //       const SizedBox(width: 8),
+                  //       Text(
+                  //         'Phone hotspot IP: $_networkIp',
+                  //         style: TextStyle(
+                  //           color: onSurfaceVariantColor,
+                  //           fontSize: 13,
+                  //           fontFamily: 'monospace',
+                  //         ),
+                  //       ),
+                  //     ],
+                  //   ),
+                  // ),
                 ],
               ],
             ),

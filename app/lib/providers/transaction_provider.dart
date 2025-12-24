@@ -6,11 +6,13 @@ import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 class TransactionProvider with ChangeNotifier {
   final TransactionRepository _transactionRepo = TransactionRepository();
   final AccountRepository _accountRepo = AccountRepository();
   final CategoryRepository _categoryRepo = CategoryRepository();
+  final BankConfigService _bankConfigService = BankConfigService();
 
   List<Transaction> _transactions = [];
   List<Account> _accounts = [];
@@ -62,7 +64,7 @@ class TransactionProvider with ChangeNotifier {
       _allTransactions = await _transactionRepo.getTransactions();
       print("debug: Transactions: ${_allTransactions.length}");
 
-      _calculateSummaries(_allTransactions);
+      await _calculateSummaries(_allTransactions);
       _filterTransactions(_allTransactions);
     } catch (e) {
       print("debug: Error loading data: $e");
@@ -82,7 +84,9 @@ class TransactionProvider with ChangeNotifier {
     loadData();
   }
 
-  void _calculateSummaries(List<Transaction> allTransactions) {
+  Future<void> _calculateSummaries(List<Transaction> allTransactions) async {
+    final banks = await _bankConfigService.getBanks();
+
     // Filter out transactions that don't have a matching account (orphaned transactions)
     final validTransactions = allTransactions.where((t) {
       if (t.bankId == null) return false;
@@ -95,26 +99,15 @@ class TransactionProvider with ChangeNotifier {
       if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
         for (var account in bankAccounts) {
           bool matches = false;
+          final bank = banks.firstWhere((b) => b.id == t.bankId);
 
-          if (account.bank == 1 && account.accountNumber.length >= 4) {
+          if (bank.uniformMasking == true) {
             // CBE: match last 4 digits
-            matches = t.accountNumber!.length >= 4 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 4) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 4);
-          } else if (account.bank == 4 && account.accountNumber.length >= 3) {
-            // Dashen: match last 3 digits
-            matches = t.accountNumber!.length >= 3 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 3) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 3);
-          } else if (account.bank == 3 && account.accountNumber.length >= 2) {
-            // Bank of Abyssinia: match last 2 digits
-            matches = t.accountNumber!.length >= 2 &&
-                t.accountNumber!.substring(t.accountNumber!.length - 2) ==
-                    account.accountNumber
-                        .substring(account.accountNumber.length - 2);
-          } else if (account.bank == 2 || account.bank == 6) {
+            matches = t.accountNumber!
+                    .substring(t.accountNumber!.length - bank.maskPattern!) ==
+                account.accountNumber.substring(
+                    account.accountNumber.length - bank.maskPattern!);
+          } else if (bank.uniformMasking == false) {
             // Awash/Telebirr: match by bankId only
             matches = true;
           } else {
@@ -167,32 +160,6 @@ class TransactionProvider with ChangeNotifier {
           accounts.fold(0.0, (sum, a) => sum + (a.pendingCredit ?? 0.0));
       double totalBalance = accounts.fold(0.0, (sum, a) => sum + a.balance);
 
-      // Log Telebirr (bankId 6) data
-      if (bankId == 6) {
-        var creditCount =
-            bankTransactions.where((t) => t.type == "CREDIT").length;
-        var debitCount =
-            bankTransactions.where((t) => t.type == "DEBIT").length;
-        var refs = bankTransactions.map((t) => t.reference).toList();
-        var uniqueRefs = refs.toSet();
-
-        print("debug: [TELEBIRR] Bank Summary:");
-        print(
-            "debug: [TELEBIRR]   Total Transactions count: ${bankTransactions.length}");
-        print("debug: [TELEBIRR]   Credit transactions: $creditCount");
-        print("debug: [TELEBIRR]   Debit transactions: $debitCount");
-        print("debug: [TELEBIRR]   Total Credit: $totalCredit");
-        print("debug: [TELEBIRR]   Total Debit: $totalDebit");
-        print("debug: [TELEBIRR]   Total Balance: $totalBalance");
-        print("debug: [TELEBIRR]   Account count: ${accounts.length}");
-        if (refs.length != uniqueRefs.length) {
-          print(
-              "debug: [TELEBIRR]   WARNING: Duplicate references in bank transactions!");
-          print(
-              "debug: [TELEBIRR]   Total refs: ${refs.length}, Unique refs: ${uniqueRefs.length}");
-        }
-      }
-
       return BankSummary(
         bankId: bankId,
         totalCredit: totalCredit,
@@ -213,32 +180,15 @@ class TransactionProvider with ChangeNotifier {
         bool bankMatch = t.bankId == account.bank;
         if (!bankMatch) return false;
 
-        if (account.bank == 1 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 4) {
+        final bank = banks.firstWhere((b) => b.id == t.bankId);
+
+        if (bank.uniformMasking == true) {
           // CBE check: last 4 digits
-          print(
-              "debug: CBE check: ${t.accountNumber} == ${account.accountNumber.substring(account.accountNumber.length - 4)}");
-          return t.accountNumber?.substring(t.accountNumber!.length - 4) ==
-              account.accountNumber.substring(account.accountNumber.length - 4);
-        }
-        if (account.bank == 4 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 3) {
-          // Dashen check: last 3 digits
-          print(
-              "debug: CBE check: ${t.accountNumber} == ${account.accountNumber.substring(account.accountNumber.length - 3)}");
-          return t.accountNumber?.substring(t.accountNumber!.length - 3) ==
-              account.accountNumber.substring(account.accountNumber.length - 3);
-        }
-        if (account.bank == 3 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 2) {
-          // Bank of Abyssinia check: last 2 digits
-          print(
-              "debug: CBE check: ${t.accountNumber} == ${account.accountNumber.substring(account.accountNumber.length - 2)}");
-          return t.accountNumber?.substring(t.accountNumber!.length - 2) ==
-              account.accountNumber.substring(account.accountNumber.length - 2);
+
+          return t.accountNumber
+                  ?.substring(t.accountNumber!.length - bank.maskPattern!) ==
+              account.accountNumber
+                  .substring(account.accountNumber.length - bank.maskPattern!);
         } else {
           return t.bankId == account.bank;
         }
@@ -248,19 +198,24 @@ class TransactionProvider with ChangeNotifier {
 
       // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
       // This handles legacy data or parsing failures where account wasn't captured.
-      // NOTE: Skip this for banks that match by bankId only (2=Awash, 6=Telebirr)
+      // NOTE: Skip this for banks that match by bankId only (uniformMasking == false)
       // because they already get all transactions via the else clause above
-      if (account.bank != 2 && account.bank != 6) {
-        var bankAccounts =
-            _accounts.where((a) => a.bank == account.bank).toList();
-        if (bankAccounts.length == 1 && bankAccounts.first == account) {
-          var orphanedTransactions = validTransactions
-              .where((t) =>
-                  t.bankId == account.bank &&
-                  (t.accountNumber == null || t.accountNumber!.isEmpty))
-              .toList();
-          accountTransactions.addAll(orphanedTransactions);
+      try {
+        final accountBank = banks.firstWhere((b) => b.id == account.bank);
+        if (accountBank.uniformMasking != false) {
+          var bankAccounts =
+              _accounts.where((a) => a.bank == account.bank).toList();
+          if (bankAccounts.length == 1 && bankAccounts.first == account) {
+            var orphanedTransactions = validTransactions
+                .where((t) =>
+                    t.bankId == account.bank &&
+                    (t.accountNumber == null || t.accountNumber!.isEmpty))
+                .toList();
+            accountTransactions.addAll(orphanedTransactions);
+          }
         }
+      } catch (e) {
+        // Bank not found in database, skip orphaned transactions fallback
       }
 
       double totalDebit = 0.0;
@@ -291,25 +246,6 @@ class TransactionProvider with ChangeNotifier {
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalDebit);
     double grandTotalBalance =
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalBalance);
-
-    // Log Telebirr summary in grand totals
-    var telebirrSummary = _bankSummaries.firstWhere(
-      (b) => b.bankId == 6,
-      orElse: () => BankSummary(
-        bankId: 6,
-        totalCredit: 0.0,
-        totalDebit: 0.0,
-        settledBalance: 0.0,
-        pendingCredit: 0.0,
-        totalBalance: 0.0,
-        accountCount: 0,
-      ),
-    );
-    print("debug: [TELEBIRR] Final Summary:");
-    print("debug: [TELEBIRR]   Bank Credit: ${telebirrSummary.totalCredit}");
-    print("debug: [TELEBIRR]   Bank Debit: ${telebirrSummary.totalDebit}");
-    print("debug: [TELEBIRR]   Grand Total Credit: $grandTotalCredit");
-    print("debug: [TELEBIRR]   Grand Total Debit: $grandTotalDebit");
 
     _summary = AllSummary(
       totalCredit: grandTotalCredit,
@@ -400,6 +336,7 @@ class TransactionProvider with ChangeNotifier {
   Future<void> createCategory({
     required String name,
     required bool essential,
+    bool uncategorized = false,
     String? iconKey,
     String? description,
     String flow = 'expense',
@@ -408,6 +345,7 @@ class TransactionProvider with ChangeNotifier {
     await _categoryRepo.createCategory(
       name: name,
       essential: essential,
+      uncategorized: uncategorized,
       iconKey: iconKey,
       description: description,
       flow: flow,

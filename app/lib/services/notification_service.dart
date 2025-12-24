@@ -14,6 +14,7 @@ class NotificationService {
 
   static const String _transactionChannelId = 'transactions';
   static const String _dailySpendingChannelId = 'daily_spending';
+  static const String _accountSyncChannelId = 'account_sync';
   static const int dailySpendingNotificationId = 9001;
   static const int dailySpendingTestNotificationId = 9002;
 
@@ -52,6 +53,14 @@ class NotificationService {
         "Today's spending",
         description: "Daily summary of today's spending",
         importance: Importance.defaultImportance,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _accountSyncChannelId,
+        'Account sync',
+        description: 'Background sync of account transactions',
+        importance: Importance.low,
       ),
     );
 
@@ -240,6 +249,90 @@ class NotificationService {
     );
   }
 
+  Future<void> showAccountSyncProgress({
+    required String accountNumber,
+    required int bankId,
+    required String stage,
+    required double progress,
+    String? bankLabel,
+  }) async {
+    try {
+      await ensureInitialized();
+
+      final clamped = progress.clamp(0.0, 1.0);
+      final percent = (clamped * 100).round();
+      final title = bankLabel == null ? 'Syncing account' : '$bankLabel sync';
+      final maskedAccount = _maskAccountNumber(accountNumber);
+      final body =
+          maskedAccount == null ? stage : '$stage - $maskedAccount';
+
+      await _plugin.show(
+        _accountSyncNotificationId(accountNumber, bankId),
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _accountSyncChannelId,
+            'Account sync',
+            channelDescription: 'Background sync of account transactions',
+            importance: Importance.low,
+            priority: Priority.low,
+            showProgress: true,
+            maxProgress: 100,
+            progress: percent,
+            ongoing: clamped < 1.0,
+            onlyAlertOnce: true,
+            enableVibration: false,
+            playSound: false,
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentSound: false,
+            presentBadge: false,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show account sync progress: $e');
+      }
+    }
+  }
+
+  Future<void> showAccountSyncComplete({
+    required String accountNumber,
+    required int bankId,
+    String? bankLabel,
+    String? message,
+  }) async {
+    try {
+      await ensureInitialized();
+
+      final title =
+          bankLabel == null ? 'Account sync complete' : '$bankLabel sync complete';
+      final body = message ?? 'Your transactions are up to date.';
+
+      await _plugin.show(
+        _accountSyncNotificationId(accountNumber, bankId),
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _accountSyncChannelId,
+            'Account sync',
+            channelDescription: 'Background sync of account transactions',
+            importance: Importance.low,
+            priority: Priority.low,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show account sync completion: $e');
+      }
+    }
+  }
+
   static Bank? _findBank(int? bankId) {
     if (bankId == null) return null;
     for (final bank in AppConstants.banks) {
@@ -289,5 +382,17 @@ class NotificationService {
       if (trimmed != null && trimmed.isNotEmpty) return trimmed;
     }
     return null;
+  }
+
+  static int _accountSyncNotificationId(String accountNumber, int bankId) {
+    final raw = '$bankId|$accountNumber';
+    return 8000 + (raw.hashCode & 0x7fffffff);
+  }
+
+  static String? _maskAccountNumber(String accountNumber) {
+    final trimmed = accountNumber.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.length <= 4) return trimmed;
+    return '****${trimmed.substring(trimmed.length - 4)}';
   }
 }

@@ -153,6 +153,11 @@ class MigrationHelper {
           'regex': pattern.regex,
           'type': pattern.type,
           'description': pattern.description,
+          'refRequired': pattern.refRequired == null
+              ? null
+              : (pattern.refRequired! ? 1 : 0),
+          'hasAccount':
+              pattern.hasAccount == null ? null : (pattern.hasAccount! ? 1 : 0),
         });
         count++;
       } catch (e) {

@@ -1,8 +1,8 @@
-// stateless widget
 import 'package:flutter/material.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
 
-class HomeTabs extends StatelessWidget {
+class HomeTabs extends StatefulWidget {
   static const int recentTabId = -1;
 
   final void Function(int tabId) onChangeTab;
@@ -15,6 +15,41 @@ class HomeTabs extends StatelessWidget {
       required this.onChangeTab});
 
   @override
+  State<HomeTabs> createState() => _HomeTabsState();
+}
+
+class _HomeTabsState extends State<HomeTabs> {
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
+  }
+
+  String _getBankShortName(int bankId) {
+    try {
+      return _banks.firstWhere((element) => element.id == bankId).shortName;
+    } catch (e) {
+      return "Bank $bankId";
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
@@ -22,15 +57,14 @@ class HomeTabs extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
         border: Border(
-          bottom: BorderSide(
-              color: Theme.of(context).dividerColor, width: 0.5),
+          bottom: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
         ),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: List.generate(tabs.length, (index) {
-            final isActive = activeTab == tabs[index];
+          children: List.generate(widget.tabs.length, (index) {
+            final isActive = widget.activeTab == widget.tabs[index];
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: AnimatedContainer(
@@ -43,7 +77,10 @@ class HomeTabs extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   border: isActive
                       ? Border.all(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(0.3),
                           width: 1,
                         )
                       : null,
@@ -52,27 +89,28 @@ class HomeTabs extends StatelessWidget {
                   color: Colors.transparent,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () => onChangeTab(tabs[index]),
+                    onTap: () => widget.onChangeTab(widget.tabs[index]),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            tabs[index] == 0
+                            widget.tabs[index] == 0
                                 ? "Summary"
-                                : (tabs[index] == recentTabId
+                                : (widget.tabs[index] == HomeTabs.recentTabId
                                     ? "Today"
-                                    : AppConstants.banks
-                                        .firstWhere((element) =>
-                                            element.id == tabs[index])
-                                        .shortName),
+                                    : _getBankShortName(widget.tabs[index])),
                             style: TextStyle(
                               fontSize: 14,
-                              fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                              fontWeight:
+                                  isActive ? FontWeight.w600 : FontWeight.w500,
                               color: isActive
                                   ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                               letterSpacing: 0.2,
                             ),
                           ),

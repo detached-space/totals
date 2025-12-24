@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:intl/intl.dart';
 
 class IncomeExpenseCards extends StatelessWidget {
@@ -9,6 +10,8 @@ class IncomeExpenseCards extends StatelessWidget {
   final String selectedPeriod;
   final int? selectedBankFilter;
   final String? selectedAccountFilter;
+  final Set<int?> selectedIncomeCategoryIds;
+  final Set<int?> selectedExpenseCategoryIds;
   final DateTime Function() getBaseDate;
   final ValueChanged<String?> onCardSelected;
 
@@ -18,9 +21,21 @@ class IncomeExpenseCards extends StatelessWidget {
     required this.selectedPeriod,
     required this.selectedBankFilter,
     required this.selectedAccountFilter,
+    required this.selectedIncomeCategoryIds,
+    required this.selectedExpenseCategoryIds,
     required this.getBaseDate,
     required this.onCardSelected,
   });
+
+  DateTime _dateOnly(DateTime dateTime) {
+    return DateTime(dateTime.year, dateTime.month, dateTime.day);
+  }
+
+  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
+    if (selection.isEmpty) return true;
+    if (categoryId == null) return selection.contains(null);
+    return selection.contains(categoryId);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,122 +45,148 @@ class IncomeExpenseCards extends StatelessWidget {
     final accounts = Provider.of<TransactionProvider>(context, listen: false)
         .accountSummaries;
 
-    // Filter by period
-    final now = getBaseDate();
-    List<Transaction> periodFiltered = [];
+    final BankConfigService bankConfigService = BankConfigService();
+    final banksFuture = bankConfigService.getBanks();
 
-    if (selectedPeriod == 'Week') {
-      int daysSinceMonday = (now.weekday - 1) % 7;
-      final weekStart = DateTime(now.year, now.month, now.day)
-          .subtract(Duration(days: daysSinceMonday));
-      periodFiltered = allTransactions.where((t) {
-        if (t.time == null) return false;
-        try {
-          final transactionDate = DateTime.parse(t.time!);
-          return transactionDate
-                  .isAfter(weekStart.subtract(const Duration(days: 1))) &&
-              transactionDate.isBefore(now.add(const Duration(days: 1)));
-        } catch (e) {
-          return false;
+    return FutureBuilder(
+      future: banksFuture,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Row(
+            children: [
+              Expanded(child: SizedBox(height: 100)),
+              SizedBox(width: 12),
+              Expanded(child: SizedBox(height: 100)),
+            ],
+          );
         }
-      }).toList();
-    } else if (selectedPeriod == 'Month') {
-      final monthStart = DateTime(now.year, now.month, 1);
-      periodFiltered = allTransactions.where((t) {
-        if (t.time == null) return false;
-        try {
-          final transactionDate = DateTime.parse(t.time!);
-          return transactionDate.year == now.year &&
-              transactionDate.month == now.month;
-        } catch (e) {
-          return false;
-        }
-      }).toList();
-    } else {
-      // Year
-      periodFiltered = allTransactions.where((t) {
-        if (t.time == null) return false;
-        try {
-          final transactionDate = DateTime.parse(t.time!);
-          return transactionDate.year == now.year;
-        } catch (e) {
-          return false;
-        }
-      }).toList();
-    }
 
-    // Filter by bank if selected
-    if (selectedBankFilter != null) {
-      periodFiltered =
-          periodFiltered.where((t) => t.bankId == selectedBankFilter).toList();
-    }
+        final banks = snapshot.data!;
 
-    // Filter by account if selected
-    if (selectedAccountFilter != null && selectedBankFilter != null) {
-      final account = accounts.firstWhere(
-        (a) =>
-            a.accountNumber == selectedAccountFilter &&
-            a.bankId == selectedBankFilter,
-        orElse: () => accounts.firstWhere((a) => a.bankId == selectedBankFilter,
-            orElse: () => accounts.first),
-      );
+        // Filter by period
+        final now = getBaseDate();
+        final baseDay = _dateOnly(now);
+        List<Transaction> periodFiltered = [];
 
-      periodFiltered = periodFiltered.where((t) {
-        if (account.bankId == 1 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 4) {
-          return t.accountNumber!.substring(t.accountNumber!.length - 4) ==
-              account.accountNumber.substring(account.accountNumber.length - 4);
-        } else if (account.bankId == 4 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 3) {
-          return t.accountNumber!.substring(t.accountNumber!.length - 3) ==
-              account.accountNumber.substring(account.accountNumber.length - 3);
-        } else if (account.bankId == 3 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 2) {
-          return t.accountNumber!.substring(t.accountNumber!.length - 2) ==
-              account.accountNumber.substring(account.accountNumber.length - 2);
+        if (selectedPeriod == 'Week') {
+          int daysSinceMonday = (baseDay.weekday - 1) % 7;
+          final weekStart = baseDay.subtract(Duration(days: daysSinceMonday));
+          final weekEnd = weekStart.add(const Duration(days: 6));
+          periodFiltered = allTransactions.where((t) {
+            if (t.time == null) return false;
+            try {
+              final transactionDate = DateTime.parse(t.time!);
+              final transactionDay = _dateOnly(transactionDate);
+              return !transactionDay.isBefore(weekStart) &&
+                  !transactionDay.isAfter(weekEnd);
+            } catch (e) {
+              return false;
+            }
+          }).toList();
+        } else if (selectedPeriod == 'Month') {
+          periodFiltered = allTransactions.where((t) {
+            if (t.time == null) return false;
+            try {
+              final transactionDate = DateTime.parse(t.time!);
+              return transactionDate.year == now.year &&
+                  transactionDate.month == now.month;
+            } catch (e) {
+              return false;
+            }
+          }).toList();
         } else {
-          return t.bankId == account.bankId;
+          // Year
+          periodFiltered = allTransactions.where((t) {
+            if (t.time == null) return false;
+            try {
+              final transactionDate = DateTime.parse(t.time!);
+              return transactionDate.year == now.year;
+            } catch (e) {
+              return false;
+            }
+          }).toList();
         }
-      }).toList();
-    }
 
-    // Calculate income and expenses for the period
-    final periodIncome = periodFiltered
-        .where((t) => t.type == 'CREDIT')
-        .fold(0.0, (sum, t) => sum + t.amount);
-    final periodExpenses = periodFiltered
-        .where((t) => t.type == 'DEBIT')
-        .fold(0.0, (sum, t) => sum + t.amount);
+        // Filter by bank if selected
+        if (selectedBankFilter != null) {
+          periodFiltered = periodFiltered
+              .where((t) => t.bankId == selectedBankFilter)
+              .toList();
+        }
 
-    return Row(
-      children: [
-        Expanded(
-          child: _IncomeExpenseCard(
-            label: 'Income',
-            amount: periodIncome,
-            color: Colors.green,
-            cardType: 'Income',
-            isSelected: selectedCard == 'Income',
-            onTap: () =>
-                onCardSelected(selectedCard == 'Income' ? null : 'Income'),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _IncomeExpenseCard(
-            label: 'Expense',
-            amount: periodExpenses,
-            color: Theme.of(context).colorScheme.error,
-            cardType: 'Expense',
-            isSelected: selectedCard == 'Expense',
-            onTap: () =>
-                onCardSelected(selectedCard == 'Expense' ? null : 'Expense'),
-          ),
-        ),
-      ],
+        // Filter by account if selected
+        if (selectedAccountFilter != null && selectedBankFilter != null) {
+          final account = accounts.firstWhere(
+            (a) =>
+                a.accountNumber == selectedAccountFilter &&
+                a.bankId == selectedBankFilter,
+            orElse: () => accounts
+                .firstWhere((a) => a.bankId == selectedBankFilter, orElse: () {
+              if (accounts.isEmpty) {
+                throw StateError('No accounts available');
+              }
+              return accounts.first;
+            }),
+          );
+          final bank = banks.firstWhere((b) => b.id == account.bankId);
+          periodFiltered = periodFiltered.where((t) {
+            if (bank.uniformMasking == true &&
+                bank.maskPattern != null &&
+                t.accountNumber != null &&
+                account.accountNumber.length >= bank.maskPattern! &&
+                t.accountNumber!.length >= bank.maskPattern!) {
+              return t.accountNumber!
+                      .substring(t.accountNumber!.length - bank.maskPattern!) ==
+                  account.accountNumber.substring(
+                      account.accountNumber.length - bank.maskPattern!);
+            } else {
+              return t.bankId == account.bankId;
+            }
+          }).toList();
+        }
+
+        // Calculate income and expenses for the period
+        final periodIncome = periodFiltered
+            .where((t) =>
+                t.type == 'CREDIT' &&
+                _matchesCategorySelection(
+                    t.categoryId, selectedIncomeCategoryIds))
+            .fold(0.0, (sum, t) => sum + t.amount);
+        final periodExpenses = periodFiltered
+            .where((t) =>
+                t.type == 'DEBIT' &&
+                _matchesCategorySelection(
+                    t.categoryId, selectedExpenseCategoryIds))
+            .fold(0.0, (sum, t) => sum + t.amount);
+
+        return Row(
+          children: [
+            Expanded(
+              child: _IncomeExpenseCard(
+                label: 'Income',
+                amount: periodIncome,
+                color: Colors.green,
+                cardType: 'Income',
+                isSelected: selectedCard == 'Income',
+                onTap: () =>
+                    onCardSelected(selectedCard == 'Income' ? null : 'Income'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _IncomeExpenseCard(
+                label: 'Expense',
+                amount: periodExpenses,
+                color: Theme.of(context).colorScheme.error,
+                cardType: 'Expense',
+                isSelected: selectedCard == 'Expense',
+                onTap: () => onCardSelected(
+                    selectedCard == 'Expense' ? null : 'Expense'),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -276,4 +317,3 @@ class _IncomeExpenseCard extends StatelessWidget {
     );
   }
 }
-

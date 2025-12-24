@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/summary_models.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/gradients.dart';
 import 'package:totals/utils/text_utils.dart';
 
@@ -24,6 +25,27 @@ class AccountCard extends StatefulWidget {
 class _AccountCardState extends State<AccountCard> {
   bool isHidden = false;
   bool copied = false;
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
+  }
 
   void _toggleVisibility() {
     setState(() {
@@ -48,17 +70,22 @@ class _AccountCardState extends State<AccountCard> {
   @override
   Widget build(BuildContext context) {
     // Determine Bank Info
-    final bank = AppConstants.banks.firstWhere(
-      (b) => b.id == widget.account.bankId,
-      orElse: () => AppConstants.banks.isNotEmpty
-          ? AppConstants.banks[0]
-          : const Bank(
+    Bank bank;
+    try {
+      bank = _banks.firstWhere(
+        (b) => b.id == widget.account.bankId,
+      );
+    } catch (e) {
+      // Bank not found, use fallback
+      bank = _banks.isNotEmpty
+          ? _banks[0]
+          : Bank(
               id: 0,
               name: "Unknown",
               shortName: "?",
               codes: [],
-              image: "assets/images/cbe.png"),
-    );
+              image: "assets/images/cbe.png");
+    }
 
     final displayBalance = isHidden
         ? "*****"
@@ -302,7 +329,9 @@ class _AccountCardState extends State<AccountCard> {
                                     // BOTTOM LOGO IS BANK LOGO
                                     child: ClipOval(
                                       child: Image.asset(bank.image,
-                                          width: 32, height: 32, fit: BoxFit.cover),
+                                          width: 32,
+                                          height: 32,
+                                          fit: BoxFit.cover),
                                     ),
                                   ),
                                 ],

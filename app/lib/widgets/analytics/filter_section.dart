@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
 
-class FilterSection extends StatelessWidget {
+class FilterSection extends StatefulWidget {
   final List bankSummaries;
   final int? selectedBankFilter;
   final String? selectedAccountFilter;
@@ -20,6 +21,41 @@ class FilterSection extends StatelessWidget {
   });
 
   @override
+  State<FilterSection> createState() => _FilterSectionState();
+}
+
+class _FilterSectionState extends State<FilterSection> {
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
+  }
+
+  Bank? _getBankInfo(int bankId) {
+    try {
+      return _banks.firstWhere((element) => element.id == bankId);
+    } catch (e) {
+      return _banks.isNotEmpty ? _banks.first : null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       children: [
@@ -31,29 +67,26 @@ class FilterSection extends StatelessWidget {
               _buildFilterChip(
                 context,
                 'All',
-                selectedBankFilter == null,
-                onTap: () => onBankFilterChanged(null),
+                widget.selectedBankFilter == null,
+                onTap: () => widget.onBankFilterChanged(null),
               ),
               const SizedBox(width: 8),
-              ...bankSummaries.map((bank) {
-                final bankInfo = AppConstants.banks.firstWhere(
-                  (b) => b.id == bank.bankId,
-                  orElse: () => AppConstants.banks.first,
-                );
+              ...widget.bankSummaries.map((bank) {
+                final bankInfo = _getBankInfo(bank.bankId);
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: _buildFilterChip(
                     context,
-                    bankInfo.shortName,
-                    selectedBankFilter == bank.bankId,
-                    onTap: () => onBankFilterChanged(bank.bankId),
+                    bankInfo?.shortName ?? "Bank ${bank.bankId}",
+                    widget.selectedBankFilter == bank.bankId,
+                    onTap: () => widget.onBankFilterChanged(bank.bankId),
                   ),
                 );
               }),
             ],
           ),
         ),
-        if (selectedBankFilter != null) ...[
+        if (widget.selectedBankFilter != null) ...[
           const SizedBox(height: 16),
           _buildAccountFilterSection(context),
         ],
@@ -63,13 +96,15 @@ class FilterSection extends StatelessWidget {
 
   Widget _buildAccountFilterSection(BuildContext context) {
     // Filter accounts by selected bank
-    final bankAccounts = accounts.where((a) => a.bankId == selectedBankFilter).toList();
-    
+    final bankAccounts = widget.accounts
+        .where((a) => a.bankId == widget.selectedBankFilter)
+        .toList();
+
     // Only show if there are multiple accounts
     if (bankAccounts.length <= 1) {
       return const SizedBox.shrink();
     }
-    
+
     return SizedBox(
       height: 40,
       child: ListView(
@@ -78,21 +113,23 @@ class FilterSection extends StatelessWidget {
           _buildFilterChip(
             context,
             'All',
-            selectedAccountFilter == null,
-            onTap: () => onAccountFilterChanged(null),
+            widget.selectedAccountFilter == null,
+            onTap: () => widget.onAccountFilterChanged(null),
           ),
           const SizedBox(width: 8),
           ...bankAccounts.map((account) {
             final accountDisplay = account.accountNumber.length > 4
-                ? account.accountNumber.substring(account.accountNumber.length - 4)
+                ? account.accountNumber
+                    .substring(account.accountNumber.length - 4)
                 : account.accountNumber;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: _buildFilterChip(
                 context,
                 accountDisplay,
-                selectedAccountFilter == account.accountNumber,
-                onTap: () => onAccountFilterChanged(account.accountNumber),
+                widget.selectedAccountFilter == account.accountNumber,
+                onTap: () =>
+                    widget.onAccountFilterChanged(account.accountNumber),
               ),
             );
           }),
@@ -101,7 +138,8 @@ class FilterSection extends StatelessWidget {
     );
   }
 
-  Widget _buildFilterChip(BuildContext context, String label, bool isSelected, {VoidCallback? onTap}) {
+  Widget _buildFilterChip(BuildContext context, String label, bool isSelected,
+      {VoidCallback? onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -128,4 +166,3 @@ class FilterSection extends StatelessWidget {
     );
   }
 }
-

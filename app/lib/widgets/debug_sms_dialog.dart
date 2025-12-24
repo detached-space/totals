@@ -42,8 +42,9 @@ Future<void> showDebugSmsDialog(BuildContext context) async {
             onPressed: () async {
               final address = addressController.text;
               final body = bodyController.text;
-              if (SmsService.isRelevantMessage(address)) {
-                await SmsService.processMessage(body, address);
+              if (await SmsService.isRelevantMessage(address)) {
+                await SmsService.processMessage(body, address,
+                    messageDate: DateTime.now());
                 if (context.mounted) {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(

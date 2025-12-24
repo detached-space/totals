@@ -2,6 +2,7 @@ class Category {
   final int? id;
   final String name;
   final bool essential;
+  final bool uncategorized;
   final String? iconKey;
   final String? description;
   final String flow; // 'expense' | 'income'
@@ -13,6 +14,7 @@ class Category {
     this.id,
     required this.name,
     required this.essential,
+    this.uncategorized = false,
     this.iconKey,
     this.description,
     this.flow = 'expense',
@@ -27,6 +29,7 @@ class Category {
       id: row['id'] as int?,
       name: (row['name'] as String?) ?? '',
       essential: (row['essential'] as int? ?? 0) == 1,
+      uncategorized: (row['uncategorized'] as int? ?? 0) == 1,
       iconKey: row['iconKey'] as String?,
       description: row['description'] as String?,
       flow: rawFlow == 'income' ? 'income' : 'expense',
@@ -41,6 +44,7 @@ class Category {
       'id': id,
       'name': name,
       'essential': essential ? 1 : 0,
+      'uncategorized': uncategorized ? 1 : 0,
       'iconKey': iconKey,
       'description': description,
       'flow': flow,
@@ -54,6 +58,7 @@ class Category {
     int? id,
     String? name,
     bool? essential,
+    bool? uncategorized,
     String? iconKey,
     String? description,
     String? flow,
@@ -65,6 +70,7 @@ class Category {
       id: id ?? this.id,
       name: name ?? this.name,
       essential: essential ?? this.essential,
+      uncategorized: uncategorized ?? this.uncategorized,
       iconKey: iconKey ?? this.iconKey,
       description: description ?? this.description,
       flow: flow ?? this.flow,
@@ -72,6 +78,27 @@ class Category {
       builtIn: builtIn ?? this.builtIn,
       builtInKey: builtInKey ?? this.builtInKey,
     );
+  }
+}
+
+enum CategoryType {
+  essential,
+  nonEssential,
+  uncategorized,
+}
+
+extension CategoryTypeX on Category {
+  CategoryType get type {
+    if (uncategorized) return CategoryType.uncategorized;
+    return essential ? CategoryType.essential : CategoryType.nonEssential;
+  }
+
+  String typeLabel() {
+    if (uncategorized) return 'Uncategorized';
+    if (flow.toLowerCase() == 'income') {
+      return essential ? 'Main income' : 'Side income';
+    }
+    return essential ? 'Essential' : 'Non-essential';
   }
 }
 
@@ -150,6 +177,7 @@ class BuiltInCategories {
     Category(
       name: 'Misc',
       essential: false,
+      uncategorized: true,
       iconKey: 'more_horiz',
       description: 'Other income that doesn’t fit other categories',
       flow: 'income',
@@ -260,6 +288,7 @@ class BuiltInCategories {
     Category(
       name: 'Misc',
       essential: false,
+      uncategorized: true,
       iconKey: 'more_horiz',
       description: 'Anything that doesn’t fit other categories',
       flow: 'expense',

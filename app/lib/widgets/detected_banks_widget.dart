@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:totals/data/consts.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/services/bank_detection_service.dart';
 import 'package:totals/widgets/add_account_form.dart';
 
@@ -20,17 +21,19 @@ class DetectedBanksWidget extends StatefulWidget {
 }
 
 class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final BankDetectionService _detectionService = BankDetectionService();
   List<DetectedBank> _detectedBanks = [];
   bool _isLoading = true;
   bool _hasError = false;
+  bool _needsSmsPermission = false;
 
   late AnimationController _shimmerController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _shimmerController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -40,17 +43,37 @@ class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _shimmerController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!_needsSmsPermission) return;
+    _loadDetectedBanks();
   }
 
   Future<void> _loadDetectedBanks({bool forceRefresh = false}) async {
     setState(() {
       _isLoading = true;
       _hasError = false;
+      _needsSmsPermission = false;
     });
 
     try {
+      final permissionStatus = await Permission.sms.status;
+      if (!permissionStatus.isGranted) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _needsSmsPermission = true;
+          });
+        }
+        return;
+      }
+
       final banks = await _detectionService.detectUnregisteredBanks(
         forceRefresh: forceRefresh,
       );
@@ -71,6 +94,25 @@ class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
     }
   }
 
+  Future<void> _requestSmsPermission() async {
+    final status = await Permission.sms.request();
+    if (!mounted) return;
+
+    if (status.isGranted) {
+      await _loadDetectedBanks();
+      return;
+    }
+
+    if (status.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+
+    setState(() {
+      _needsSmsPermission = true;
+      _isLoading = false;
+    });
+  }
+
   void _openRegistrationForm({Bank? bank}) {
     showModalBottomSheet(
       isScrollControlled: true,
@@ -85,10 +127,8 @@ class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
               child: RegisterAccountForm(
                 initialBankId: bank?.id,
                 onSubmit: () {
-                  // Clear cache and force refresh after adding account
-                  _detectionService.clearCache();
                   widget.onAccountAdded();
-                  _loadDetectedBanks(forceRefresh: true); // Refresh the list
+                  _loadDetectedBanks();
                 },
               ),
             ),
@@ -107,6 +147,10 @@ class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
 
     if (_isLoading) {
       return _buildSkeletonLoading();
+    }
+
+    if (_needsSmsPermission) {
+      return _buildPermissionState();
     }
 
     if (_hasError) {
@@ -310,6 +354,49 @@ class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
               ),
             ),
             const SizedBox(height: 32),
+            _buildManualAddButton(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPermissionState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.sms_failed_rounded,
+              size: 56,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Allow SMS access",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "We use SMS to detect your banks. You can still add accounts manually.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextButton(
+              onPressed: _requestSmsPermission,
+              child: const Text("Allow SMS access"),
+            ),
+            const SizedBox(height: 8),
             _buildManualAddButton(),
           ],
         ),

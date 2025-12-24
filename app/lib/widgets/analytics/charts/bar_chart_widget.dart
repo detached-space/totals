@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
 import '../chart_data_point.dart';
 import '../chart_data_utils.dart';
@@ -11,8 +9,9 @@ class BarChartWidget extends StatelessWidget {
   final double maxValue;
   final DateTime baseDate;
   final String selectedPeriod;
-  final int? selectedBankFilter;
   final int timeFrameOffset;
+  final List<Transaction> transactions;
+  final DateTime? Function(Transaction)? dateForTransaction;
 
   const BarChartWidget({
     super.key,
@@ -20,8 +19,9 @@ class BarChartWidget extends StatelessWidget {
     required this.maxValue,
     required this.baseDate,
     required this.selectedPeriod,
-    required this.selectedBankFilter,
     required this.timeFrameOffset,
+    required this.transactions,
+    this.dateForTransaction,
   });
 
   @override
@@ -44,67 +44,69 @@ class BarChartWidget extends StatelessWidget {
       );
     }
     
-    // Get income and expense data separately by recalculating for each period point
-    final allTransactions = Provider.of<TransactionProvider>(context, listen: false).allTransactions;
-    
-    // Filter by bank if selected
-    var bankFiltered = allTransactions;
-    if (selectedBankFilter != null) {
-      bankFiltered = allTransactions.where((t) => t.bankId == selectedBankFilter).toList();
-    }
-    
-    // Calculate income and expense for each period point using the same logic as chart data
-    final incomeData = <double>[];
-    final expenseData = <double>[];
-    
-    for (var point in data) {
-      final pointDate = point.date;
-      if (pointDate == null) {
-        incomeData.add(0.0);
-        expenseData.add(0.0);
-        continue;
+    DateTime? resolveDate(Transaction transaction) {
+      if (dateForTransaction != null) {
+        return dateForTransaction!(transaction);
       }
-      
-      // Filter transactions for this specific period point
-      final pointTransactions = bankFiltered.where((t) {
-        if (t.time == null) return false;
-        try {
-          final transactionDate = DateTime.parse(t.time!);
-          if (selectedPeriod == 'Week') {
-            return transactionDate.year == pointDate.year &&
-                   transactionDate.month == pointDate.month &&
-                   transactionDate.day == pointDate.day;
-          } else if (selectedPeriod == 'Month') {
-            // For month view, match week ranges
-            final weekStart = pointDate;
-            final weekEnd = weekStart.add(const Duration(days: 6));
-            return transactionDate.isAfter(weekStart.subtract(const Duration(days: 1))) &&
-                   transactionDate.isBefore(weekEnd.add(const Duration(days: 1)));
-          } else {
-            // For year view, match month
-            return transactionDate.year == pointDate.year &&
-                   transactionDate.month == pointDate.month;
-          }
-        } catch (e) {
-          return false;
+      if (transaction.time == null) return null;
+      try {
+        return DateTime.parse(transaction.time!);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final incomeData = List<double>.filled(data.length, 0.0);
+    final expenseData = List<double>.filled(data.length, 0.0);
+    final periodStart = data.first.date ??
+        DateTime(baseDate.year, baseDate.month, baseDate.day)
+            .subtract(Duration(days: (baseDate.weekday - 1) % 7));
+
+    for (final transaction in transactions) {
+      final transactionDate = resolveDate(transaction);
+      if (transactionDate == null) continue;
+      final day = DateTime(
+        transactionDate.year,
+        transactionDate.month,
+        transactionDate.day,
+      );
+      int? bucketIndex;
+
+      if (selectedPeriod == 'Week') {
+        final diffDays = day.difference(periodStart).inDays;
+        if (diffDays >= 0 && diffDays < data.length) {
+          bucketIndex = diffDays;
         }
-      }).toList();
-      
-      final income = pointTransactions
-          .where((t) => t.type == 'CREDIT')
-          .fold(0.0, (sum, t) => sum + t.amount);
-      final expense = pointTransactions
-          .where((t) => t.type == 'DEBIT')
-          .fold(0.0, (sum, t) => sum + t.amount);
-      
-      incomeData.add(income);
-      expenseData.add(expense);
+      } else if (selectedPeriod == 'Month') {
+        if (day.year != baseDate.year || day.month != baseDate.month) {
+          continue;
+        }
+        final monthStart = DateTime(baseDate.year, baseDate.month, 1);
+        final diffDays = day.difference(monthStart).inDays;
+        final weekIndex = (diffDays / 7).floor();
+        if (weekIndex >= 0 && weekIndex < data.length) {
+          bucketIndex = weekIndex;
+        }
+      } else {
+        if (day.year != baseDate.year) continue;
+        final monthIndex = day.month - 1;
+        if (monthIndex >= 0 && monthIndex < data.length) {
+          bucketIndex = monthIndex;
+        }
+      }
+
+      if (bucketIndex == null) continue;
+      if (transaction.type == 'CREDIT') {
+        incomeData[bucketIndex] += transaction.amount;
+      } else if (transaction.type == 'DEBIT') {
+        expenseData[bucketIndex] += transaction.amount;
+      }
     }
     
     final maxBarValue = [
       ...incomeData,
       ...expenseData,
-    ].reduce((a, b) => a > b ? a : b);
+    ].fold(0.0, (maxValue, value) => value > maxValue ? value : maxValue);
     final chartMaxValue = (maxBarValue * 1.2).clamp(100.0, double.infinity);
     
     int currentDayIndex = ChartDataUtils.getCurrentDayIndex(data, baseDate, selectedPeriod);

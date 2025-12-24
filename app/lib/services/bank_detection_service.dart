@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:another_telephony/telephony.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:totals/data/consts.dart';
 import 'package:totals/models/account.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 /// Represents a bank detected from SMS messages
 class DetectedBank {
@@ -30,10 +31,11 @@ class DetectedBank {
   }
 
   /// Create from JSON cache
-  static DetectedBank? fromJson(Map<String, dynamic> json) {
+  static Future<DetectedBank?> fromJson(
+      Map<String, dynamic> json, List<Bank> banks) async {
     try {
       final bankId = json['bankId'] as int;
-      final bank = AppConstants.banks.firstWhere(
+      final bank = banks.firstWhere(
         (b) => b.id == bankId,
         orElse: () => throw Exception('Bank not found'),
       );
@@ -57,14 +59,16 @@ class DetectedBank {
 class BankDetectionService {
   static const String _cacheKey = 'detected_banks_cache';
   static const String _cacheTimestampKey = 'detected_banks_cache_timestamp';
-  static const Duration _cacheValidDuration = Duration(hours: 1);
 
   final Telephony _telephony = Telephony.instance;
   final AccountRepository _accountRepo = AccountRepository();
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank>? _cachedBanks;
 
   /// Scans the SMS inbox and returns banks that the user has messages from
   /// but hasn't registered an account for yet.
-  /// Uses cache for faster loading, refreshes in background.
+  /// Uses cached results for faster loading. Scans SMS only when cache is empty
+  /// or forceRefresh is true.
   Future<List<DetectedBank>> detectUnregisteredBanks({
     bool forceRefresh = false,
   }) async {
@@ -83,15 +87,13 @@ class BankDetectionService {
               .where((db) => !registeredBankIds.contains(db.bank.id))
               .toList();
 
-          // Refresh cache in background
-          _refreshCacheInBackground();
-
           return filtered;
         }
       }
 
       // No cache or force refresh - scan SMS
-      return await _scanAndCacheBanks(registeredBankIds);
+      // Force reload banks to ensure we have latest synced banks
+      return await _scanAndCacheBanks(registeredBankIds, forceReloadBanks: forceRefresh);
     } catch (e) {
       print("debug: Error detecting banks from SMS: $e");
       // Try to return cached data on error
@@ -108,36 +110,55 @@ class BankDetectionService {
     }
   }
 
-  /// Get cached detected banks if valid
+  /// Get cached detected banks if available
   Future<List<DetectedBank>?> _getCachedBanks() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final timestampStr = prefs.getString(_cacheTimestampKey);
-
-      if (timestampStr == null) return null;
-
-      final timestamp = DateTime.parse(timestampStr);
-      final now = DateTime.now();
-
-      // Check if cache is still valid
-      if (now.difference(timestamp) > _cacheValidDuration) {
-        return null;
-      }
-
       final cacheJson = prefs.getString(_cacheKey);
       if (cacheJson == null) return null;
 
       final List<dynamic> decoded = json.decode(cacheJson);
-      final List<DetectedBank> banks = decoded
-          .map((item) => DetectedBank.fromJson(item as Map<String, dynamic>))
-          .where((bank) => bank != null)
-          .cast<DetectedBank>()
-          .toList();
 
-      print("debug: Loaded ${banks.length} banks from cache");
-      return banks;
+      // Fetch banks from database for deserialization
+      if (_cachedBanks == null) {
+        _cachedBanks = await _bankConfigService.getBanks();
+      }
+
+      // Ensure we have banks before deserializing
+      if (_cachedBanks == null || _cachedBanks!.isEmpty) {
+        print("debug: No banks available for deserialization, clearing cache");
+        await clearCache();
+        return null;
+      }
+
+      try {
+        final List<DetectedBank> banks = (await Future.wait(
+          decoded.map((item) => DetectedBank.fromJson(
+              item as Map<String, dynamic>, _cachedBanks!)),
+        ))
+            .where((bank) => bank != null)
+            .cast<DetectedBank>()
+            .toList();
+
+        print("debug: Loaded ${banks.length} banks from cache");
+        return banks;
+      } catch (e) {
+        // If there's a type mismatch (e.g., old Bank type in cache), clear cache
+        if (e.toString().contains('is not a subtype') ||
+            e.toString().contains('Bank')) {
+          print("debug: Type mismatch detected in cache, clearing: $e");
+          await clearCache();
+        }
+        return null;
+      }
     } catch (e) {
       print("debug: Error reading bank cache: $e");
+      // Clear cache on any error to prevent stale data
+      try {
+        await clearCache();
+      } catch (clearError) {
+        print("debug: Error clearing cache: $clearError");
+      }
       return null;
     }
   }
@@ -162,29 +183,22 @@ class BankDetectionService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_cacheKey);
       await prefs.remove(_cacheTimestampKey);
+      // Also clear the in-memory bank cache to force reload
+      _cachedBanks = null;
       print("debug: Cleared bank detection cache");
     } catch (e) {
       print("debug: Error clearing bank cache: $e");
     }
   }
 
-  /// Refresh cache in background without blocking
-  void _refreshCacheInBackground() {
-    Future(() async {
-      try {
-        List<Account> registeredAccounts = await _accountRepo.getAccounts();
-        Set<int> registeredBankIds =
-            registeredAccounts.map((a) => a.bank).toSet();
-        await _scanAndCacheBanks(registeredBankIds);
-      } catch (e) {
-        print("debug: Background cache refresh failed: $e");
-      }
-    });
-  }
-
   /// Scan SMS and cache results
   Future<List<DetectedBank>> _scanAndCacheBanks(
-      Set<int> registeredBankIds) async {
+      Set<int> registeredBankIds, {bool forceReloadBanks = false}) async {
+    // Fetch banks from database (reload if forced or not cached)
+    if (_cachedBanks == null || forceReloadBanks) {
+      _cachedBanks = await _bankConfigService.getBanks();
+    }
+
     // Get SMS messages from inbox
     List<SmsMessage> messages = await _telephony.getInboxSms(
       columns: [SmsColumn.ADDRESS, SmsColumn.DATE],
@@ -245,7 +259,13 @@ class BankDetectionService {
 
   /// Checks if the address matches any known bank and returns it
   Bank? _getMatchingBank(String address) {
-    for (var bank in AppConstants.banks) {
+    if (_cachedBanks == null) {
+      // Should not happen if called after _scanAndCacheBanks or detectAllBanks
+      // but handle gracefully
+      return null;
+    }
+
+    for (var bank in _cachedBanks!) {
       for (var code in bank.codes) {
         if (address.contains(code)) {
           return bank;
@@ -262,9 +282,13 @@ class BankDetectionService {
       if (!forceRefresh) {
         final cachedBanks = await _getCachedBanks();
         if (cachedBanks != null) {
-          _refreshCacheInBackground();
           return cachedBanks;
         }
+      }
+
+      // Fetch banks from database (with caching)
+      if (_cachedBanks == null) {
+        _cachedBanks = await _bankConfigService.getBanks();
       }
 
       // Scan all banks

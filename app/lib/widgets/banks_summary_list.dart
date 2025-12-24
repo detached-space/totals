@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/services/bank_detection_service.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/gradients.dart';
 import 'package:totals/widgets/add_account_form.dart';
@@ -12,12 +13,14 @@ class BanksSummaryList extends StatefulWidget {
   final List<BankSummary> banks;
   final List<String> visibleTotalBalancesForSubCards;
   final VoidCallback onAddAccount;
+  final VoidCallback onAccountAdded;
   final Function(int) onBankTap;
 
   BanksSummaryList({
     required this.banks,
     required this.visibleTotalBalancesForSubCards,
     required this.onAddAccount,
+    required this.onAccountAdded,
     required this.onBankTap,
   });
 
@@ -27,21 +30,38 @@ class BanksSummaryList extends StatefulWidget {
 
 class _BanksSummaryListState extends State<BanksSummaryList> {
   final BankDetectionService _detectionService = BankDetectionService();
+  final BankConfigService _bankConfigService = BankConfigService();
   List<DetectedBank> _unregisteredBanks = [];
+  List<Bank> _banks = [];
 
   @override
   void initState() {
     super.initState();
+    _loadBanks();
     _loadUnregisteredBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
   }
 
   @override
   void didUpdateWidget(BanksSummaryList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Reload detected banks when the registered banks list changes
-    if (oldWidget.banks.length != widget.banks.length) {
-      _loadUnregisteredBanks();
-    }
+    // Reload banks from database when widget updates (e.g., after refresh)
+    // This ensures we have the latest bank data including newly synced banks
+    _loadBanks();
+    // Reload detected banks from cache to reflect any account changes
+    _loadUnregisteredBanks();
   }
 
   Future<void> _loadUnregisteredBanks({bool forceRefresh = false}) async {
@@ -73,10 +93,8 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
               child: RegisterAccountForm(
                 initialBankId: bank.id,
                 onSubmit: () {
-                  // Clear cache and force refresh after adding account
-                  _detectionService.clearCache();
-                  widget.onAddAccount();
-                  _loadUnregisteredBanks(forceRefresh: true);
+                  widget.onAccountAdded();
+                  _loadUnregisteredBanks();
                 },
               ),
             ),
@@ -97,7 +115,7 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
     return Consumer<AccountSyncStatusService>(
       builder: (context, syncStatusService, child) {
         return GridView.builder(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             crossAxisSpacing: 12,
@@ -135,9 +153,34 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
   ) {
     final isSyncing = syncStatusService.hasAnyAccountSyncing(bank.bankId);
     final syncStatus = syncStatusService.getSyncStatusForBank(bank.bankId);
-    final bankInfo =
-        AppConstants.banks.firstWhere((element) => element.id == bank.bankId);
-    final gradient = GradientUtils.getGradient(bank.bankId);
+
+    // Find bank info from cached banks
+    Bank? bankInfo;
+    try {
+      bankInfo = _banks.firstWhere((element) => element.id == bank.bankId);
+    } catch (e) {
+      // Bank not found, return placeholder
+      return Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.grey.withOpacity(0.2),
+        ),
+        child: Center(
+          child: Text(
+            'Bank ${bank.bankId}',
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+    }
+
+    // Use colors from bank data if available, otherwise fallback to gradient ID
+    final LinearGradient gradient;
+    if (bankInfo.colors != null && bankInfo.colors!.isNotEmpty) {
+      gradient = GradientUtils.getGradientFromColors(bankInfo.colors);
+    } else {
+      gradient = GradientUtils.getGradient(bank.bankId);
+    }
 
     return Container(
       decoration: BoxDecoration(

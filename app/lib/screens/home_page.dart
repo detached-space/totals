@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/widgets/auth_page.dart';
 import 'package:totals/widgets/home_tabs.dart';
@@ -11,13 +12,10 @@ import 'package:totals/widgets/banks_summary_list.dart';
 import 'package:totals/widgets/bank_detail.dart';
 import 'package:totals/widgets/add_account_form.dart';
 import 'package:totals/widgets/total_balance_card.dart';
-import 'package:totals/widgets/debug_sms_dialog.dart';
-import 'package:totals/widgets/debug_transactions_dialog.dart';
-import 'package:totals/widgets/failed_parse_dialog.dart';
-import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/widgets/custom_bottom_nav.dart';
 import 'package:totals/widgets/detected_banks_widget.dart';
+import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/analytics_page.dart';
 import 'package:totals/screens/web_page.dart';
 import 'package:totals/screens/settings_page.dart';
@@ -27,8 +25,10 @@ import 'package:totals/data/consts.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/widgets/today_transactions_list.dart';
 import 'package:totals/widgets/categorize_transaction_sheet.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:totals/widgets/category_filter_button.dart';
+import 'package:totals/widgets/category_filter_sheet.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -44,8 +44,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final PageController _mainPageController = PageController();
 
   bool _isAuthenticated = false;
+  bool _isAuthenticating = false;
   bool _hasCheckedInternet = false;
   bool _hasCheckedNotificationPermissions = false;
+  bool _hasInitializedPermissions = false;
+  bool _hasInitializedSmsPermissions = false;
 
   // UI State
   bool showTotalBalance = false;
@@ -53,24 +56,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int activeTab = 0;
   int _bottomNavIndex = 0;
   StreamSubscription<NotificationIntent>? _notificationIntentSub;
+  String? _pendingNotificationReference;
+  String? _highlightedReference;
+  Set<int?> _selectedTodayIncomeCategoryIds = {};
+  Set<int?> _selectedTodayExpenseCategoryIds = {};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Initialize services and check permissions
-    _initPermissions().catchError((error) {
-      if (kDebugMode) {
-        print('debug: _initPermissions failed: $error');
-      }
-    });
-
     _notificationIntentSub = NotificationIntentBus.instance.stream.listen(
       (intent) {
         if (!mounted) return;
         if (intent is CategorizeTransactionIntent) {
-          _openTodayAndCategorize(intent.reference);
+          _handleNotificationCategorize(intent.reference);
         }
       },
     );
@@ -124,6 +124,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         Provider.of<TransactionProvider>(context, listen: false).loadData();
       }
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _initSmsPermissions();
+      if (mounted) {
+        _authenticateIfAvailable();
+      }
+    });
   }
 
   void _showInternetDialog() {
@@ -173,6 +180,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openTodayAndCategorize(String reference) async {
+    await _openTodayFromNotification(reference, openSheet: true);
+  }
+
+  Future<void> _openTodayFromNotification(
+    String reference, {
+    required bool openSheet,
+  }) async {
     if (!mounted) return;
 
     if (_bottomNavIndex != 0) {
@@ -203,11 +217,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
 
-    await showCategorizeTransactionSheet(
-      context: context,
-      provider: provider,
-      transaction: match,
-    );
+    if (openSheet) {
+      await showCategorizeTransactionSheet(
+        context: context,
+        provider: provider,
+        transaction: match,
+      );
+    } else {
+      _highlightTransaction(reference);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tap the highlighted transaction to categorize it.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _handleNotificationCategorize(String reference) {
+    if (!_isAuthenticated) {
+      _pendingNotificationReference = reference;
+      _authenticateIfAvailable();
+      return;
+    }
+    _openTodayFromNotification(reference, openSheet: true);
+  }
+
+  void _highlightTransaction(String reference) {
+    setState(() {
+      _highlightedReference = reference;
+    });
+    Future.delayed(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      if (_highlightedReference != reference) return;
+      setState(() {
+        _highlightedReference = null;
+      });
+    });
   }
 
   @override
@@ -218,61 +264,149 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> authenticateUser() async {
-    if (!_isAuthenticated) {
-      final bool canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
-      if (canAuthenticateWithBiometrics) {
-        try {
-          final bool didAuthenticate = await _auth.authenticate(
-              localizedReason: 'Please authenticate to show account details',
-              options: const AuthenticationOptions(biometricOnly: false));
-          setState(() {
-            _isAuthenticated = didAuthenticate;
-          });
-
-          // Check internet requirement after successful authentication
-          if (didAuthenticate && !_hasCheckedInternet) {
-            _hasCheckedInternet = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _checkInternetRequirement();
-            });
-          }
-        } catch (e) {
-          print(e);
-        }
-      }
-    } else {
+    if (_isAuthenticated) {
       setState(() {
         _isAuthenticated = false;
         _hasCheckedInternet = false; // Reset when logging out
       });
+      return;
+    }
+
+    await _initSmsPermissions();
+    await _authenticateIfAvailable();
+  }
+
+  void _setAuthenticated(bool value) {
+    if (!mounted) return;
+    setState(() {
+      _isAuthenticated = value;
+    });
+
+    if (value && !_hasInitializedPermissions) {
+      _hasInitializedPermissions = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _initPermissions().catchError((error) {
+          if (kDebugMode) {
+            print('debug: _initPermissions failed: $error');
+          }
+        });
+      });
+    }
+
+    if (value && _pendingNotificationReference != null) {
+      final reference = _pendingNotificationReference!;
+      _pendingNotificationReference = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _openTodayFromNotification(reference, openSheet: true);
+      });
+    }
+
+    if (value && !_hasCheckedInternet) {
+      _hasCheckedInternet = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _checkInternetRequirement();
+      });
+    }
+  }
+
+  bool _shouldBypassSecurity(PlatformException error) {
+    final code = error.code.toLowerCase();
+    return code.contains('notavailable') ||
+        code.contains('notenrolled') ||
+        code.contains('passcodenotset') ||
+        code.contains('passcode_not_set') ||
+        code.contains('not_enrolled') ||
+        code.contains('not_available');
+  }
+
+  Future<void> _authenticateIfAvailable() async {
+    if (_isAuthenticated || _isAuthenticating) return;
+
+    if (kIsWeb) {
+      _setAuthenticated(true);
+      return;
+    }
+
+    setState(() {
+      _isAuthenticating = true;
+    });
+
+    try {
+      final canCheckBiometrics = await _auth.canCheckBiometrics;
+      final isDeviceSupported = await _auth.isDeviceSupported();
+
+      if (!canCheckBiometrics && !isDeviceSupported) {
+        _setAuthenticated(true);
+        return;
+      }
+
+      final didAuthenticate = await _auth.authenticate(
+        localizedReason: 'Please authenticate to show account details',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
+      );
+
+      if (!mounted) return;
+      if (didAuthenticate) {
+        _setAuthenticated(true);
+      }
+    } on PlatformException catch (e) {
+      if (_shouldBypassSecurity(e)) {
+        _setAuthenticated(true);
+      } else {
+        if (kDebugMode) {
+          print('debug: Authentication error: $e');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Authentication error: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAuthenticating = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _initSmsPermissions() async {
+    if (_hasInitializedSmsPermissions) return;
+    _hasInitializedSmsPermissions = true;
+    try {
+      await _smsService.init();
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: SMS permission init failed: $e');
+      }
     }
   }
 
   Future<void> _checkInternetRequirement() async {
     final configService = SmsConfigService();
-    final needsInternet = await configService.initializePatterns();
-    if (needsInternet && mounted) {
+    final bankConfigService = BankConfigService();
+
+    // Check if patterns and banks exist
+    final needsInternetForPatterns = await configService.initializePatterns();
+    final needsInternetForBanks = await bankConfigService.initializeBanks();
+
+    // If either needs internet and we don't have it, show dialog
+    if ((needsInternetForPatterns || needsInternetForBanks) && mounted) {
       _showInternetDialog();
     }
   }
 
   Future<void> _initPermissions() async {
     try {
-      // Check SMS permission status first
-      final smsPermissionStatus = await Permission.sms.status;
-      final smsAlreadyGranted = smsPermissionStatus.isGranted;
-      
-      // Initialize SMS service (this may show a permission dialog)
-      await _smsService.init();
-      
-      // If SMS permission was already granted, we can check notification permissions immediately
-      // Otherwise, wait briefly to allow the SMS permission dialog to be shown and dismissed
-      final delay = smsAlreadyGranted 
-          ? const Duration(milliseconds: 1)  // Minimal delay if no SMS dialog will show
-          : const Duration(milliseconds: 1);  // Brief delay if SMS dialog was shown
-      
-      await Future.delayed(delay);
-      
+      if (!_hasInitializedSmsPermissions) {
+        _hasInitializedSmsPermissions = true;
+        await _smsService.init();
+      }
+
       if (mounted && !_hasCheckedNotificationPermissions) {
         await _checkNotificationPermissions();
       }
@@ -293,15 +427,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _checkNotificationPermissions() async {
     if (kIsWeb) return;
     if (_hasCheckedNotificationPermissions) return;
-    
+
     // Set flag immediately to prevent duplicate checks
     _hasCheckedNotificationPermissions = true;
-    
-    final permissionsGranted = await NotificationService.instance.arePermissionsGranted();
+
+    final permissionsGranted =
+        await NotificationService.instance.arePermissionsGranted();
     if (!permissionsGranted && mounted) {
       // Automatically trigger the system permission dialog
       await NotificationService.instance.requestPermissionsIfNeeded();
     }
+  }
+
+  Future<void> _openFailedParsesPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const FailedParsesPage()),
+    );
   }
 
   void changeTab(int tabId) {
@@ -329,6 +470,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return tabs;
   }
 
+  void _syncActiveTabWithPage(List<int> tabs) {
+    if (!mounted) return;
+    if (!_pageController.hasClients || tabs.isEmpty) return;
+
+    final pageIndex =
+        _pageController.page?.round() ?? _pageController.initialPage;
+    final safeIndex = pageIndex.clamp(0, tabs.length - 1);
+    final pageTabId = tabs[safeIndex];
+
+    if (activeTab != pageTabId) {
+      setState(() {
+        activeTab = pageTabId;
+      });
+    }
+  }
+
   List<Transaction> _todayTransactions(TransactionProvider provider) {
     final now = DateTime.now();
     return provider.allTransactions.where((t) {
@@ -345,8 +502,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }).toList(growable: false);
   }
 
+  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
+    if (selection.isEmpty) return true;
+    if (categoryId == null) return selection.contains(null);
+    return selection.contains(categoryId);
+  }
+
+  bool _matchesCategoryFilter(Transaction transaction) {
+    if (_selectedTodayIncomeCategoryIds.isEmpty &&
+        _selectedTodayExpenseCategoryIds.isEmpty) {
+      return true;
+    }
+    if (transaction.type == 'CREDIT') {
+      return _matchesCategorySelection(
+          transaction.categoryId, _selectedTodayIncomeCategoryIds);
+    }
+    if (transaction.type == 'DEBIT') {
+      return _matchesCategorySelection(
+          transaction.categoryId, _selectedTodayExpenseCategoryIds);
+    }
+    return true;
+  }
+
+  List<Transaction> _filterByCategory(List<Transaction> transactions) {
+    return transactions.where(_matchesCategoryFilter).toList(growable: false);
+  }
+
+  Future<void> _openTodayCategoryFilterSheet(
+    TransactionProvider provider, {
+    required String flow,
+  }) async {
+    final result = await showCategoryFilterSheet(
+      context: context,
+      provider: provider,
+      selectedCategoryIds: flow == 'income'
+          ? _selectedTodayIncomeCategoryIds
+          : _selectedTodayExpenseCategoryIds,
+      flow: flow,
+    );
+    if (result == null) return;
+    setState(() {
+      if (flow == 'income') {
+        _selectedTodayIncomeCategoryIds = result.toSet();
+      } else {
+        _selectedTodayExpenseCategoryIds = result.toSet();
+      }
+    });
+  }
+
   Widget _buildHomeContent(TransactionProvider provider) {
     final tabs = _getTabs();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncActiveTabWithPage(tabs);
+    });
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,14 +576,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 onRefresh: () async {
                   // Sync regex patterns from remote
                   final configService = SmsConfigService();
+                  final bankConfigService = BankConfigService();
                   try {
                     await configService.syncRemoteConfig();
+                    await bankConfigService.syncRemoteConfig();
                   } catch (e) {
                     print("debug: Error syncing patterns: $e");
                   }
 
-                  // Reload transaction data
+                  // Reload transaction data (this will recalculate bankSummaries)
                   await provider.loadData();
+
+                  // Force rebuild to ensure UI updates with new banks
+                  if (mounted) {
+                    setState(() {});
+                  }
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     // style it
@@ -421,6 +637,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     visibleTotalBalancesForSubCards:
                                         visibleTotalBalancesForSubCards,
                                     onBankTap: changeTab,
+                                    onAccountAdded: () {
+                                      provider.loadData();
+                                    },
                                     onAddAccount: () {
                                       showModalBottomSheet(
                                         isScrollControlled: true,
@@ -452,8 +671,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     },
                                   ),
                           ),
-                          const SizedBox(
-                              height: 100), // Padding for floating nav
                         ],
                       )
                     : tabId == HomeTabs.recentTabId
@@ -463,6 +680,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               Builder(
                                 builder: (context) {
                                   final today = _todayTransactions(provider);
+                                  final filteredToday =
+                                      _filterByCategory(today);
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 16,
@@ -472,39 +691,84 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Text(
-                                          "Today's transactions",
-                                          style: TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurface,
+                                        Flexible(
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                "Today's transactions",
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurface,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary
+                                                      .withOpacity(0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                ),
+                                                child: Text(
+                                                  '${filteredToday.length}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primary,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withOpacity(0.1),
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                          child: Text(
-                                            '${today.length}',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primary,
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            CategoryFilterIconButton(
+                                              icon: Icons.toc_rounded,
+                                              iconColor: Colors.green,
+                                              flipIconHorizontally: true,
+                                              selectedCount:
+                                                  _selectedTodayIncomeCategoryIds
+                                                      .length,
+                                              tooltip: 'Income categories',
+                                              onTap: () =>
+                                                  _openTodayCategoryFilterSheet(
+                                                provider,
+                                                flow: 'income',
+                                              ),
                                             ),
-                                          ),
+                                            const SizedBox(width: 8),
+                                            CategoryFilterIconButton(
+                                              icon: Icons.toc_rounded,
+                                              iconColor: Theme.of(context)
+                                                  .colorScheme
+                                                  .error,
+                                              flipIconHorizontally: true,
+                                              selectedCount:
+                                                  _selectedTodayExpenseCategoryIds
+                                                      .length,
+                                              tooltip: 'Expense categories',
+                                              onTap: () =>
+                                                  _openTodayCategoryFilterSheet(
+                                                provider,
+                                                flow: 'expense',
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
                                     ),
@@ -514,26 +778,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               Builder(
                                 builder: (context) {
                                   final today = _todayTransactions(provider);
+                                  final filteredToday =
+                                      _filterByCategory(today);
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 16,
                                     ),
                                     child: TodayTransactionsList(
-                                      transactions: today,
+                                      transactions: filteredToday,
                                       provider: provider,
+                                      highlightedReference:
+                                          _highlightedReference,
+                                      onTransactionTap: (transaction) async {
+                                        setState(() {
+                                          if (_highlightedReference ==
+                                              transaction.reference) {
+                                            _highlightedReference = null;
+                                          }
+                                        });
+                                        await showCategorizeTransactionSheet(
+                                          context: context,
+                                          provider: provider,
+                                          transaction: transaction,
+                                        );
+                                      },
                                     ),
                                   );
                                 },
                               ),
-                              const SizedBox(height: 100),
                             ],
                           )
-                    : BankDetail(
-                        bankId: tabId,
-                        accountSummaries: provider.accountSummaries
-                            .where((e) => e.bankId == tabId)
-                            .toList(),
-                      ),
+                        : BankDetail(
+                            bankId: tabId,
+                            accountSummaries: provider.accountSummaries
+                                .where((e) => e.bankId == tabId)
+                                .toList(),
+                          ),
               );
             },
           ),
@@ -549,13 +829,154 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       children: [
         Consumer<TransactionProvider>(
           builder: (context, provider, child) {
-            return _buildHomeContent(provider);
+            return Scaffold(
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              appBar: _buildHomeAppBar(),
+              body: _buildHomeContent(provider),
+            );
           },
         ),
         const AnalyticsPage(),
         const WebPage(),
         const SettingsPage(),
       ],
+    );
+  }
+
+  PreferredSizeWidget _buildHomeAppBar() {
+    return AppBar(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      toolbarHeight: 70,
+      scrolledUnderElevation: 0,
+      elevation: 0,
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.asset(
+              "assets/images/logo-text.png",
+              fit: BoxFit.contain,
+              width: 80,
+              height: 24,
+            ),
+          ),
+          Flexible(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Debug buttons grouped in a container
+                Flexible(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceVariant
+                          .withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        //         InkWell(
+                        //           onTap: () =>
+                        //               showDebugTransactionsDialog(context),
+                        //           borderRadius: BorderRadius.circular(8),
+                        //           child: Container(
+                        //             width: 40,
+                        //             height: 40,
+                        //             padding: const EdgeInsets.all(8),
+                        //             child: Icon(
+                        //               Icons.list_alt,
+                        //               color: Theme.of(context)
+                        //                   .iconTheme
+                        //                   .color,
+                        //               size: 20,
+                        //             ),
+                        //           ),
+                        //         ),
+                        //         InkWell(
+                        //           onTap: () => showDebugSmsDialog(context),
+                        //           borderRadius: BorderRadius.circular(8),
+                        //           child: Container(
+                        //             width: 40,
+                        //             height: 40,
+                        //             padding: const EdgeInsets.all(8),
+                        //             child: Icon(
+                        //               Icons.message_outlined,
+                        //               color: Theme.of(context)
+                        //                   .iconTheme
+                        //                   .color,
+                        //               size: 20,
+                        //             ),
+                        //           ),
+                        //         ),
+
+                        // InkWell(
+                        //   onTap: _openFailedParsesPage,
+                        //   borderRadius: BorderRadius.circular(8),
+                        //   child: Tooltip(
+                        //     message: 'View Failed Parsings',
+                        //     child: Container(
+                        //       padding: const EdgeInsets.all(8),
+                        //       child: Icon(
+                        //         Icons.error_outline,
+                        //         color: Theme.of(context).iconTheme.color,
+                        //         size: 22,
+                        //       ),
+                        //     ),
+                        //   ),
+                        // ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceVariant
+                        .withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: Icon(Icons.error_outline,
+                        color: Theme.of(context).iconTheme.color, size: 22),
+                    onPressed: _openFailedParsesPage,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                ),
+                // Debug menu button
+                const SizedBox(width: 7),
+                // Lock button
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceVariant
+                        .withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: Icon(Icons.lock_outline,
+                        color: Theme.of(context).iconTheme.color, size: 22),
+                    onPressed: () {
+                      setState(() {
+                        _isAuthenticated = false;
+                      });
+                    },
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -570,128 +991,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         return Scaffold(
           extendBody: true,
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: _bottomNavIndex == 0
-              ? AppBar(
-                  backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                  toolbarHeight: 70,
-                  scrolledUnderElevation: 0,
-                  elevation: 0,
-                  title: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
-                          "assets/images/logo-text.png",
-                          fit: BoxFit.contain,
-                          width: 80,
-                          height: 24,
-                        ),
-                      ),
-                      Flexible(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Debug buttons grouped in a container
-                            Flexible(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceVariant
-                                      .withOpacity(0.5),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    //         InkWell(
-                                    //           onTap: () =>
-                                    //               showDebugTransactionsDialog(context),
-                                    //           borderRadius: BorderRadius.circular(8),
-                                    //           child: Container(
-                                    //             width: 40,
-                                    //             height: 40,
-                                    //             padding: const EdgeInsets.all(8),
-                                    //             child: Icon(
-                                    //               Icons.list_alt,
-                                    //               color: Theme.of(context)
-                                    //                   .iconTheme
-                                    //                   .color,
-                                    //               size: 20,
-                                    //             ),
-                                    //           ),
-                                    //         ),
-                                    //         InkWell(
-                                    //           onTap: () => showDebugSmsDialog(context),
-                                    //           borderRadius: BorderRadius.circular(8),
-                                    //           child: Container(
-                                    //             width: 40,
-                                    //             height: 40,
-                                    //             padding: const EdgeInsets.all(8),
-                                    //             child: Icon(
-                                    //               Icons.message_outlined,
-                                    //               color: Theme.of(context)
-                                    //                   .iconTheme
-                                    //                   .color,
-                                    //               size: 20,
-                                    //             ),
-                                    //           ),
-                                    //         ),
-                                    InkWell(
-                                      onTap: () =>
-                                          showFailedParseDialog(context),
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Tooltip(
-                                        message: 'View Failed Parsings',
-                                        child: Container(
-                                          width: 40,
-                                          height: 40,
-                                          padding: const EdgeInsets.all(8),
-                                          child: Icon(
-                                            Icons.error_outline,
-                                            color: Theme.of(context)
-                                                .iconTheme
-                                                .color,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            // Lock button
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceVariant
-                                    .withOpacity(0.5),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: IconButton(
-                                icon: Icon(Icons.lock_outline,
-                                    color: Theme.of(context).iconTheme.color,
-                                    size: 22),
-                                onPressed: () {
-                                  setState(() {
-                                    _isAuthenticated = false;
-                                  });
-                                },
-                                padding: const EdgeInsets.all(8),
-                                constraints: const BoxConstraints(),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ))
-              : null,
           body: _buildCurrentPage(),
           bottomNavigationBar: CustomBottomNavModern(
             currentIndex: _bottomNavIndex,

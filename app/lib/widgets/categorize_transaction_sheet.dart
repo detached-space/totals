@@ -68,7 +68,7 @@ Future<void> showCategorizeTransactionSheet({
                     return ListTile(
                       leading: Icon(iconForCategoryKey(c.iconKey)),
                       title: Text(c.name),
-                      subtitle: Text(c.essential ? 'Essential' : 'Non-essential'),
+                      subtitle: Text(c.typeLabel()),
                       trailing: selected ? const Icon(Icons.check_rounded) : null,
                       onTap: () async {
                         if (c.id == null) return;

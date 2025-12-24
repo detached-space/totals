@@ -1,8 +1,11 @@
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 class TransactionRepository {
+  final BankConfigService _bankConfigService = BankConfigService();
+
   Future<List<Transaction>> getTransactions() async {
     final db = await DatabaseHelper.instance.database;
     final List<Map<String, dynamic>> maps =
@@ -248,16 +251,20 @@ class TransactionRepository {
     int? bankId,
     String? type,
   }) async {
-    return getTransactionsByDateRange(weekStart, weekEnd, bankId: bankId, type: type);
+    return getTransactionsByDateRange(weekStart, weekEnd,
+        bankId: bankId, type: type);
   }
 
   /// Delete transactions associated with an account
   /// Uses the same matching logic as TransactionProvider to identify transactions
-  Future<void> deleteTransactionsByAccount(String accountNumber, int bank) async {
+  Future<void> deleteTransactionsByAccount(
+      String accountNumber, int bank) async {
     final db = await DatabaseHelper.instance.database;
-    
+    final banks = await _bankConfigService.getBanks();
+    final currentBank = banks.firstWhere((b) => b.id == bank);
+
     // For banks that match by bankId only (Awash=2, Telebirr=6), delete all transactions for that bank
-    if (bank == 2 || bank == 6) {
+    if (currentBank.uniformMasking == false) {
       await db.delete(
         'transactions',
         where: 'bankId = ?',
@@ -265,27 +272,22 @@ class TransactionRepository {
       );
       return;
     }
-    
+
     // For other banks, match by accountNumber substring logic
     String? accountSuffix;
-    
-    if (bank == 1 && accountNumber.length >= 4) {
-      // CBE: last 4 digits
-      accountSuffix = accountNumber.substring(accountNumber.length - 4);
-    } else if (bank == 4 && accountNumber.length >= 3) {
-      // Dashen: last 3 digits
-      accountSuffix = accountNumber.substring(accountNumber.length - 3);
-    } else if (bank == 3 && accountNumber.length >= 2) {
-      // Bank of Abyssinia: last 2 digits
-      accountSuffix = accountNumber.substring(accountNumber.length - 2);
+
+    if (currentBank.uniformMasking == true) {
+      accountSuffix = accountNumber
+          .substring(accountNumber.length - currentBank.maskPattern!);
     }
-    
+
     if (accountSuffix != null) {
       // Delete transactions where bankId matches and accountNumber ends with the suffix
       // Using SQL LIKE pattern matching to match the suffix at the end
       await db.delete(
         'transactions',
-        where: 'bankId = ? AND accountNumber IS NOT NULL AND accountNumber LIKE ?',
+        where:
+            'bankId = ? AND accountNumber IS NOT NULL AND accountNumber LIKE ?',
         whereArgs: [bank, '%$accountSuffix'],
       );
     } else {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 class BanksListPage extends StatefulWidget {
   final Function(int) onBankSelected;
@@ -11,8 +12,55 @@ class BanksListPage extends StatefulWidget {
 }
 
 class _BanksListPageState extends State<BanksListPage> {
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFFAFAFA),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFFFAFAFA),
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          ),
+          title: Text('Choose Bank', style: TextStyle(fontSize: 20)),
+        ),
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
       appBar: AppBar(
@@ -33,11 +81,11 @@ class _BanksListPageState extends State<BanksListPage> {
           mainAxisSpacing: 12, // Vertical spacing between items
           childAspectRatio: 0.75, // Adjust this value to control item height
         ),
-        itemCount: AppConstants.banks.length,
+        itemCount: _banks.length,
         itemBuilder: (context, index) {
           return InkWell(
             onTap: () {
-              widget.onBankSelected(AppConstants.banks[index].id);
+              widget.onBankSelected(_banks[index].id);
               Navigator.pop(context);
             },
             child: Container(
@@ -61,14 +109,14 @@ class _BanksListPageState extends State<BanksListPage> {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: Image.asset(
-                        AppConstants.banks[index].image,
+                        _banks[index].image,
                         fit: BoxFit.cover,
                       ),
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    AppConstants.banks[index].name,
+                    _banks[index].name,
                     style: const TextStyle(
                       fontSize: 14,
                       color: Color(0xFF444750),

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
-import 'package:totals/data/consts.dart';
+import 'package:totals/models/bank.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/widgets/account_detail.dart';
 import 'package:totals/models/summary_models.dart';
@@ -25,10 +26,35 @@ class AccountsSummaryList extends StatefulWidget {
 
 class _AccountsSummaryListState extends State<AccountsSummaryList> {
   String isExpanded = "";
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank> _banks = [];
+
   @override
   void initState() {
     super.initState();
     print(widget.accountSummaries.length);
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    try {
+      final banks = await _bankConfigService.getBanks();
+      if (mounted) {
+        setState(() {
+          _banks = banks;
+        });
+      }
+    } catch (e) {
+      print("debug: Error loading banks: $e");
+    }
+  }
+
+  Bank? _getBankInfo(int bankId) {
+    try {
+      return _banks.firstWhere((element) => element.id == bankId);
+    } catch (e) {
+      return null;
+    }
   }
 
   @override
@@ -36,7 +62,7 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
     return Consumer<AccountSyncStatusService>(
       builder: (context, syncStatusService, _) {
         return ListView.builder(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           itemCount: widget.accountSummaries.length,
           itemBuilder: (context, index) {
             final account = widget.accountSummaries[index];
@@ -76,10 +102,8 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
                                 child: Image.asset(
-                                  AppConstants.banks
-                                      .firstWhere((element) =>
-                                          element.id == account.bankId)
-                                      .image,
+                                  _getBankInfo(account.bankId)?.image ??
+                                      "assets/images/cbe.png",
                                   fit: BoxFit.cover,
                                 ),
                               ),
@@ -96,11 +120,9 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                              AppConstants.banks
-                                                  .firstWhere((element) =>
-                                                      element.id ==
-                                                      account.bankId)
-                                                  .name,
+                                              _getBankInfo(account.bankId)
+                                                      ?.name ??
+                                                  "Unknown Bank",
                                               style: TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.bold,
@@ -519,7 +541,7 @@ class _AccountsSummaryListState extends State<AccountsSummaryList> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Bank: ${AppConstants.banks.firstWhere((element) => element.id == account.bankId).name}',
+                      'Bank: ${_getBankInfo(account.bankId)?.name ?? "Unknown Bank"}',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,

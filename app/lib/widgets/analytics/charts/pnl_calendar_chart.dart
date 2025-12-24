@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:intl/intl.dart';
 import '../chart_data_point.dart';
@@ -11,8 +9,9 @@ class PnLCalendarChart extends StatelessWidget {
   final DateTime baseDate;
   final String selectedPeriod;
   final String? selectedCard;
-  final int? selectedBankFilter;
-  final String? selectedAccountFilter;
+  final List<Transaction> transactions;
+  final DateTime? Function(Transaction)? dateForTransaction;
+  final ValueChanged<DateTime>? onDateSelected;
 
   const PnLCalendarChart({
     super.key,
@@ -21,64 +20,32 @@ class PnLCalendarChart extends StatelessWidget {
     required this.baseDate,
     required this.selectedPeriod,
     required this.selectedCard,
-    required this.selectedBankFilter,
-    required this.selectedAccountFilter,
+    required this.transactions,
+    this.dateForTransaction,
+    this.onDateSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    final allTransactions =
-        Provider.of<TransactionProvider>(context, listen: false)
-            .allTransactions;
-    final accounts = Provider.of<TransactionProvider>(context, listen: false)
-        .accountSummaries;
     final now = baseDate;
-
-    // Filter by bank, account, and income/expense card
-    var filtered = allTransactions;
-
-    // Filter by selected card (Income/Expense)
-    if (selectedCard == 'Income') {
-      filtered = filtered.where((t) => t.type == 'CREDIT').toList();
-    } else if (selectedCard == 'Expense') {
-      filtered = filtered.where((t) => t.type == 'DEBIT').toList();
-    }
-
-    // Filter by bank
-    if (selectedBankFilter != null) {
-      filtered = filtered.where((t) => t.bankId == selectedBankFilter).toList();
-    }
-
-    // Filter by account if selected
-    if (selectedAccountFilter != null && selectedBankFilter != null) {
-      final account = accounts.firstWhere(
-        (a) =>
-            a.accountNumber == selectedAccountFilter &&
-            a.bankId == selectedBankFilter,
-        orElse: () => accounts.firstWhere((a) => a.bankId == selectedBankFilter,
-            orElse: () => accounts.first),
+    Widget wrapCell(DateTime date, Widget child) {
+      if (onDateSelected == null) return child;
+      return GestureDetector(
+        onTap: () => onDateSelected!(date),
+        child: child,
       );
+    }
 
-      filtered = filtered.where((t) {
-        if (account.bankId == 1 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 4) {
-          return t.accountNumber!.substring(t.accountNumber!.length - 4) ==
-              account.accountNumber.substring(account.accountNumber.length - 4);
-        } else if (account.bankId == 4 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 3) {
-          return t.accountNumber!.substring(t.accountNumber!.length - 3) ==
-              account.accountNumber.substring(account.accountNumber.length - 3);
-        } else if (account.bankId == 3 &&
-            t.accountNumber != null &&
-            account.accountNumber.length >= 2) {
-          return t.accountNumber!.substring(t.accountNumber!.length - 2) ==
-              account.accountNumber.substring(account.accountNumber.length - 2);
-        } else {
-          return t.bankId == account.bankId;
-        }
-      }).toList();
+    DateTime? resolveDate(Transaction transaction) {
+      if (dateForTransaction != null) {
+        return dateForTransaction!(transaction);
+      }
+      if (transaction.time == null) return null;
+      try {
+        return DateTime.parse(transaction.time!);
+      } catch (_) {
+        return null;
+      }
     }
 
     // Determine date range based on selected period
@@ -114,46 +81,62 @@ class PnLCalendarChart extends StatelessWidget {
     }
 
     final firstWeekday = (dates.first.weekday - 1) % 7;
+    final dailyPnL = {for (final date in dates) date: 0.0};
 
-    final dailyPnL = <DateTime, double>{};
-    for (final date in dates) {
-      final dayTransactions = filtered.where((t) {
-        if (t.time == null) return false;
-        try {
-          final transactionDate = DateTime.parse(t.time!);
-          if (selectedPeriod == 'Week') {
-            return transactionDate.year == date.year &&
-                transactionDate.month == date.month &&
-                transactionDate.day == date.day;
-          } else if (selectedPeriod == 'Month') {
-            return transactionDate.year == date.year &&
-                transactionDate.month == date.month &&
-                transactionDate.day == date.day;
-          } else {
-            return transactionDate.year == date.year &&
-                transactionDate.month == date.month;
-          }
-        } catch (e) {
-          return false;
-        }
-      }).toList();
+    void addPnL(DateTime key, Transaction transaction) {
+      if (!dailyPnL.containsKey(key)) return;
+      if (selectedCard == 'Income' && transaction.type != 'CREDIT') return;
+      if (selectedCard == 'Expense' && transaction.type != 'DEBIT') return;
 
-      double pnl = 0.0;
+      double delta = 0.0;
       if (selectedCard == 'Income') {
-        pnl = dayTransactions.fold(0.0, (sum, t) => sum + t.amount);
+        delta = transaction.amount;
       } else if (selectedCard == 'Expense') {
-        pnl = -dayTransactions.fold(0.0, (sum, t) => sum + t.amount);
+        delta = -transaction.amount;
       } else {
-        final income = dayTransactions
-            .where((t) => t.type == 'CREDIT')
-            .fold(0.0, (sum, t) => sum + t.amount);
-        final expenses = dayTransactions
-            .where((t) => t.type == 'DEBIT')
-            .fold(0.0, (sum, t) => sum + t.amount);
-        pnl = income - expenses;
+        if (transaction.type == 'CREDIT') {
+          delta = transaction.amount;
+        } else if (transaction.type == 'DEBIT') {
+          delta = -transaction.amount;
+        } else {
+          return;
+        }
       }
 
-      dailyPnL[date] = pnl;
+      dailyPnL[key] = (dailyPnL[key] ?? 0.0) + delta;
+    }
+
+    for (final transaction in transactions) {
+      final transactionDate = resolveDate(transaction);
+      if (transactionDate == null) continue;
+
+      if (selectedPeriod == 'Week') {
+        final dayKey = DateTime(
+          transactionDate.year,
+          transactionDate.month,
+          transactionDate.day,
+        );
+        if (dayKey.isBefore(startDate) || dayKey.isAfter(endDate)) {
+          continue;
+        }
+        addPnL(dayKey, transaction);
+      } else if (selectedPeriod == 'Month') {
+        if (transactionDate.year != now.year ||
+            transactionDate.month != now.month) {
+          continue;
+        }
+        final dayKey = DateTime(
+          transactionDate.year,
+          transactionDate.month,
+          transactionDate.day,
+        );
+        addPnL(dayKey, transaction);
+      } else {
+        if (transactionDate.year != now.year) continue;
+        final monthKey =
+            DateTime(transactionDate.year, transactionDate.month, 1);
+        addPnL(monthKey, transaction);
+      }
     }
 
     final maxPnL = dailyPnL.values.isEmpty
@@ -197,10 +180,10 @@ class PnLCalendarChart extends StatelessWidget {
               ),
               Row(
                 children: [
-                  _buildLegendItem(context, 'Profit', Colors.green),
+                  _buildLegendItem(context, 'Income', Colors.green),
                   const SizedBox(width: 12),
                   _buildLegendItem(
-                      context, 'Loss', Theme.of(context).colorScheme.error),
+                      context, 'Expense', Theme.of(context).colorScheme.error),
                 ],
               ),
             ],
@@ -277,62 +260,65 @@ class PnLCalendarChart extends StatelessWidget {
                         final useWhiteText = bgOpacity > 0.5;
 
                         return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.all(2),
-                            child: Container(
-                              height: 50,
-                              decoration: BoxDecoration(
-                                color: !hasTransactions
-                                    ? Colors.grey.withOpacity(0.2)
-                                    : (isPositive
-                                        ? Colors.green.withOpacity(bgOpacity)
-                                        : Theme.of(context)
-                                            .colorScheme
-                                            .error
-                                            .withOpacity(bgOpacity)),
-                                borderRadius: BorderRadius.circular(8),
-                                border: isCurrentMonth
-                                    ? Border.all(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                        width: 2,
-                                      )
-                                    : null,
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    monthName,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: isCurrentMonth
-                                          ? FontWeight.bold
-                                          : FontWeight.w500,
-                                      color: useWhiteText
-                                          ? Colors.white
+                          child: wrapCell(
+                            date,
+                            Padding(
+                              padding: const EdgeInsets.all(2),
+                              child: Container(
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  color: !hasTransactions
+                                      ? Colors.grey.withOpacity(0.2)
+                                      : (isPositive
+                                          ? Colors.green.withOpacity(bgOpacity)
                                           : Theme.of(context)
                                               .colorScheme
-                                              .onSurface,
-                                    ),
-                                  ),
-                                  if (pnl != 0)
+                                              .error
+                                              .withOpacity(bgOpacity)),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: isCurrentMonth
+                                      ? Border.all(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          width: 2,
+                                        )
+                                      : null,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
                                     Text(
-                                      '${pnl > 0 ? '+' : ''}${(pnl / 1000).toStringAsFixed(1)}k',
+                                      monthName,
                                       style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                        fontWeight: isCurrentMonth
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
                                         color: useWhiteText
                                             ? Colors.white
-                                            : (isPositive
-                                                ? Colors.green.shade700
-                                                : Theme.of(context)
-                                                    .colorScheme
-                                                    .error),
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
                                       ),
                                     ),
-                                ],
+                                    if (pnl != 0)
+                                      Text(
+                                        '${pnl > 0 ? '+' : ''}${(pnl / 1000).toStringAsFixed(1)}k',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w600,
+                                          color: useWhiteText
+                                              ? Colors.white
+                                              : (isPositive
+                                                  ? Colors.green.shade700
+                                                  : Theme.of(context)
+                                                      .colorScheme
+                                                      .error),
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -367,62 +353,66 @@ class PnLCalendarChart extends StatelessWidget {
                           final useWhiteText = bgOpacity > 0.5;
 
                           return Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.all(2),
-                              child: Container(
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: !hasTransactions
-                                      ? Colors.grey.withOpacity(0.2)
-                                      : (isPositive
-                                          ? Colors.green.withOpacity(bgOpacity)
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .error
-                                              .withOpacity(bgOpacity)),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: isToday
-                                      ? Border.all(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                          width: 2,
-                                        )
-                                      : null,
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      '$dayNumber',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: isToday
-                                            ? FontWeight.bold
-                                            : FontWeight.w500,
-                                        color: useWhiteText
-                                            ? Colors.white
+                            child: wrapCell(
+                              date,
+                              Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Container(
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: !hasTransactions
+                                        ? Colors.grey.withOpacity(0.2)
+                                        : (isPositive
+                                            ? Colors.green
+                                                .withOpacity(bgOpacity)
                                             : Theme.of(context)
                                                 .colorScheme
-                                                .onSurface,
-                                      ),
-                                    ),
-                                    if (pnl != 0)
+                                                .error
+                                                .withOpacity(bgOpacity)),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: isToday
+                                        ? Border.all(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            width: 2,
+                                          )
+                                        : null,
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
                                       Text(
-                                        '${pnl > 0 ? '+' : ''}${(pnl / 1000).toStringAsFixed(1)}k',
+                                        '$dayNumber',
                                         style: TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12,
+                                          fontWeight: isToday
+                                              ? FontWeight.bold
+                                              : FontWeight.w500,
                                           color: useWhiteText
                                               ? Colors.white
-                                              : (isPositive
-                                                  ? Colors.green.shade700
-                                                  : Theme.of(context)
-                                                      .colorScheme
-                                                      .error),
+                                              : Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface,
                                         ),
                                       ),
-                                  ],
+                                      if (pnl != 0)
+                                        Text(
+                                          '${pnl > 0 ? '+' : ''}${(pnl / 1000).toStringAsFixed(1)}k',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w600,
+                                            color: useWhiteText
+                                                ? Colors.white
+                                                : (isPositive
+                                                    ? Colors.green.shade700
+                                                    : Theme.of(context)
+                                                        .colorScheme
+                                                        .error),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -451,62 +441,66 @@ class PnLCalendarChart extends StatelessWidget {
                           final useWhiteText = bgOpacity > 0.5;
 
                           return Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.all(2),
-                              child: Container(
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: !hasTransactions
-                                      ? Colors.grey.withOpacity(0.2)
-                                      : (isPositive
-                                          ? Colors.green.withOpacity(bgOpacity)
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .error
-                                              .withOpacity(bgOpacity)),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: isToday
-                                      ? Border.all(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                          width: 2,
-                                        )
-                                      : null,
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      '$dayNumber',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: isToday
-                                            ? FontWeight.bold
-                                            : FontWeight.w500,
-                                        color: useWhiteText
-                                            ? Colors.white
+                            child: wrapCell(
+                              date,
+                              Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Container(
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: !hasTransactions
+                                        ? Colors.grey.withOpacity(0.2)
+                                        : (isPositive
+                                            ? Colors.green
+                                                .withOpacity(bgOpacity)
                                             : Theme.of(context)
                                                 .colorScheme
-                                                .onSurface,
-                                      ),
-                                    ),
-                                    if (pnl != 0)
+                                                .error
+                                                .withOpacity(bgOpacity)),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: isToday
+                                        ? Border.all(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            width: 2,
+                                          )
+                                        : null,
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
                                       Text(
-                                        '${pnl > 0 ? '+' : ''}${(pnl / 1000).toStringAsFixed(1)}k',
+                                        '$dayNumber',
                                         style: TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12,
+                                          fontWeight: isToday
+                                              ? FontWeight.bold
+                                              : FontWeight.w500,
                                           color: useWhiteText
                                               ? Colors.white
-                                              : (isPositive
-                                                  ? Colors.green.shade700
-                                                  : Theme.of(context)
-                                                      .colorScheme
-                                                      .error),
+                                              : Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface,
                                         ),
                                       ),
-                                  ],
+                                      if (pnl != 0)
+                                        Text(
+                                          '${pnl > 0 ? '+' : ''}${(pnl / 1000).toStringAsFixed(1)}k',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w600,
+                                            color: useWhiteText
+                                                ? Colors.white
+                                                : (isPositive
+                                                    ? Colors.green.shade700
+                                                    : Theme.of(context)
+                                                        .colorScheme
+                                                        .error),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -548,4 +542,3 @@ class PnLCalendarChart extends StatelessWidget {
     );
   }
 }
-

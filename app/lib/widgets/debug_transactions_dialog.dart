@@ -23,7 +23,7 @@ class DebugTransactionsDialog extends StatelessWidget {
                 final t = transactions[index];
                 return ListTile(
                   title: Text(
-                    "${t.bankId == 1 ? 'CBE' : 'Bank(${t.bankId})'} - ${t.reference ?? 'No Ref'}",
+                    "Bank(${t.bankId})'} - ${t.reference ?? 'No Ref'}",
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: Column(

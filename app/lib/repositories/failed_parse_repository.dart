@@ -9,6 +9,7 @@ class FailedParseRepository {
 
     return maps.map((map) {
       return FailedParse.fromJson({
+        'id': map['id'],
         'address': map['address'],
         'body': map['body'],
         'reason': map['reason'],
@@ -33,5 +34,25 @@ class FailedParseRepository {
   Future<void> clear() async {
     final db = await DatabaseHelper.instance.database;
     await db.delete('failed_parses');
+  }
+
+  Future<void> deleteById(int id) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.delete(
+      'failed_parses',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteByIds(List<int> ids) async {
+    if (ids.isEmpty) return;
+    final db = await DatabaseHelper.instance.database;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    await db.delete(
+      'failed_parses',
+      where: 'id IN ($placeholders)',
+      whereArgs: ids,
+    );
   }
 }

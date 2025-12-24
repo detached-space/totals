@@ -1,8 +1,8 @@
 // This is a generated file; do not edit or check into version control.
-FLUTTER_ROOT=/Users/brooksolomon/fvm/versions/3.19.5
-FLUTTER_APPLICATION_PATH=/Users/brooksolomon/projects/totals/app
+FLUTTER_ROOT=C:\Users\Yewe\dev\flutter2
+FLUTTER_APPLICATION_PATH=C:\Users\Yewe\Desktop\W\yew\collab\4631\totals\app
 COCOAPODS_PARALLEL_CODE_SIGN=true
-FLUTTER_TARGET=lib/main.dart
+FLUTTER_TARGET=lib\main.dart
 FLUTTER_BUILD_DIR=build
 FLUTTER_BUILD_NAME=1.1.0
 FLUTTER_BUILD_NUMBER=1

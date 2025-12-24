@@ -1,13 +1,16 @@
 import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:totals/data/consts.dart';
 import 'package:totals/models/account.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/services/bank_config_service.dart';
 
 /// Handler for account-related API endpoints
 class AccountsHandler {
   final AccountRepository _accountRepo = AccountRepository();
+  final BankConfigService _bankConfigService = BankConfigService();
+  List<Bank>? _cachedBanks;
 
   /// Returns a configured router with all account routes
   Router get router {
@@ -28,9 +31,9 @@ class AccountsHandler {
     try {
       final accounts = await _accountRepo.getAccounts();
 
-      final enrichedAccounts = accounts.map((account) {
-        return _enrichAccountWithBankInfo(account);
-      }).toList();
+      final enrichedAccounts = await Future.wait(
+        accounts.map((account) => _enrichAccountWithBankInfo(account)),
+      );
 
       return Response.ok(
         jsonEncode(enrichedAccounts),
@@ -65,7 +68,7 @@ class AccountsHandler {
         return _errorResponse('Account not found', 404);
       }
 
-      final enrichedAccount = _enrichAccountWithBankInfo(account);
+      final enrichedAccount = await _enrichAccountWithBankInfo(account);
 
       return Response.ok(
         jsonEncode(enrichedAccount),
@@ -77,8 +80,9 @@ class AccountsHandler {
   }
 
   /// Enriches an Account with bank name, short name, and image
-  Map<String, dynamic> _enrichAccountWithBankInfo(Account account) {
-    final bank = _getBankById(account.bank);
+  Future<Map<String, dynamic>> _enrichAccountWithBankInfo(
+      Account account) async {
+    final bank = await _getBankById(account.bank);
 
     return {
       'accountNumber': account.accountNumber,
@@ -93,10 +97,14 @@ class AccountsHandler {
     };
   }
 
-  /// Finds a bank by ID from AppConstants
-  Bank? _getBankById(int bankId) {
+  /// Finds a bank by ID from the database
+  Future<Bank?> _getBankById(int bankId) async {
     try {
-      return AppConstants.banks.firstWhere((b) => b.id == bankId);
+      // Fetch banks from database (with caching)
+      if (_cachedBanks == null) {
+        _cachedBanks = await _bankConfigService.getBanks();
+      }
+      return _cachedBanks!.firstWhere((b) => b.id == bankId);
     } catch (e) {
       return null;
     }
