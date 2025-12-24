@@ -49,6 +49,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _hasCheckedNotificationPermissions = false;
   bool _hasInitializedPermissions = false;
   bool _hasInitializedSmsPermissions = false;
+  bool _isRefreshingTodaySms = false;
 
   // UI State
   bool showTotalBalance = false;
@@ -550,6 +551,106 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _refreshTodaySms(TransactionProvider provider) async {
+    if (_isRefreshingTodaySms) return;
+    setState(() {
+      _isRefreshingTodaySms = true;
+    });
+
+    try {
+      final result = await _smsService.syncTodayBankSms();
+      if (!mounted) return;
+
+      if (result.permissionDenied) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SMS permission denied.'),
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+
+      if (result.added > 0) {
+        await provider.loadData();
+      }
+
+      final message = result.added > 0
+          ? 'Added ${result.added} new transactions'
+          : 'No missed transactions';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to refresh SMS'),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshingTodaySms = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildTodayRefreshButton(TransactionProvider provider) {
+    final theme = Theme.of(context);
+    final borderColor = theme.colorScheme.onSurfaceVariant.withOpacity(0.2);
+    final background = theme.colorScheme.surfaceVariant.withOpacity(0.3);
+    final iconColor = theme.colorScheme.onSurfaceVariant;
+
+    return Tooltip(
+      message: "Refresh today's SMS",
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _isRefreshingTodaySms ? null : () => _refreshTodaySms(provider),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: borderColor),
+            ),
+            child: Center(
+              child: _isRefreshingTodaySms
+                  ? SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                      ),
+                    )
+                  : Icon(
+                      Icons.refresh_rounded,
+                      size: 20,
+                      color: iconColor,
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildHomeContent(TransactionProvider provider) {
     final tabs = _getTabs();
 
@@ -737,6 +838,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                         Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
+                                            _buildTodayRefreshButton(provider),
+                                            const SizedBox(width: 8),
                                             CategoryFilterIconButton(
                                               icon: Icons.toc_rounded,
                                               iconColor: Colors.green,

@@ -35,6 +35,28 @@ class ParseResult {
   bool get isResolved => status == ParseStatus.success;
 }
 
+class TodaySmsSyncResult {
+  final int processed;
+  final int added;
+  final int duplicates;
+  final int noPattern;
+  final int skipped;
+  final int errors;
+  final bool permissionDenied;
+
+  const TodaySmsSyncResult({
+    this.processed = 0,
+    this.added = 0,
+    this.duplicates = 0,
+    this.noPattern = 0,
+    this.skipped = 0,
+    this.errors = 0,
+    this.permissionDenied = false,
+  });
+
+  bool get hasBankMessages => processed > 0;
+}
+
 // Top-level function for background execution
 @pragma('vm:entry-point')
 onBackgroundMessage(SmsMessage message) async {
@@ -106,6 +128,90 @@ class SmsService {
     } catch (e) {
       print("debug: Error processing foreground message: $e");
     }
+  }
+
+  Future<TodaySmsSyncResult> syncTodayBankSms() async {
+    final bool? permissionGranted = await _telephony.requestSmsPermissions;
+    if (permissionGranted != true) {
+      return const TodaySmsSyncResult(permissionDenied: true);
+    }
+
+    final now = DateTime.now();
+    final startOfDay = DateTime(now.year, now.month, now.day);
+    final endOfDay = startOfDay.add(const Duration(days: 1));
+
+    final filter = SmsFilter.where(SmsColumn.DATE)
+        .greaterThanOrEqualTo(startOfDay.millisecondsSinceEpoch.toString())
+        .and(SmsColumn.DATE)
+        .lessThan(endOfDay.millisecondsSinceEpoch.toString());
+
+    final messages = await _telephony.getInboxSms(
+      filter: filter,
+      sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
+    );
+
+    int processed = 0;
+    int added = 0;
+    int duplicates = 0;
+    int noPattern = 0;
+    int skipped = 0;
+    int errors = 0;
+
+    for (final message in messages) {
+      final body = message.body;
+      final address = message.address;
+      if (body == null || address == null) {
+        skipped++;
+        continue;
+      }
+
+      final bank = await getRelevantBank(address);
+      if (bank == null) {
+        skipped++;
+        continue;
+      }
+
+      processed++;
+      final messageDate = message.date != null
+          ? DateTime.fromMillisecondsSinceEpoch(message.date!)
+          : null;
+
+      try {
+        final result = await _processMessageInternal(
+          body,
+          address,
+          messageDate: messageDate,
+          notifyUser: false,
+          recordFailure: false,
+        );
+        switch (result.status) {
+          case ParseStatus.success:
+            added++;
+            break;
+          case ParseStatus.duplicate:
+            duplicates++;
+            break;
+          case ParseStatus.noPattern:
+            noPattern++;
+            break;
+          case ParseStatus.noBank:
+            skipped++;
+            break;
+        }
+      } catch (e) {
+        errors++;
+        print("debug: Error processing SMS: $e");
+      }
+    }
+
+    return TodaySmsSyncResult(
+      processed: processed,
+      added: added,
+      duplicates: duplicates,
+      noPattern: noPattern,
+      skipped: skipped,
+      errors: errors,
+    );
   }
 
   /// Checks if the message address matches any of our known bank codes.
