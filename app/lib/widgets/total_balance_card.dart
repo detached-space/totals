@@ -61,7 +61,7 @@ class _TotalBalanceCardState extends State<TotalBalanceCard> {
         });
       },
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0.0),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           gradient: widget.colors != null && widget.colors!.isNotEmpty

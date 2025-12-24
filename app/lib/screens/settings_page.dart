@@ -1244,6 +1244,11 @@ class _FAQPageState extends State<FAQPage> {
       'answer':
           'Open the Failed Parses page and retry parsing the message from there. It is the button next to the lock button on the home page.',
     },
+    {
+      'question': 'Skipped a transaction today?',
+      'answer':
+          "In Today's transactions, tap the refresh button to rescan today's bank SMS to add anything that was missed.",
+    },
   ];
 
   @override
