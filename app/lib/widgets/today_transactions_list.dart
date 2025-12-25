@@ -12,6 +12,9 @@ class TodayTransactionsList extends StatelessWidget {
   final TransactionProvider provider;
   final String? highlightedReference;
   final ValueChanged<Transaction>? onTransactionTap;
+  final ValueChanged<Transaction>? onTransactionLongPress;
+  final bool selectionMode;
+  final Set<String> selectedReferences;
 
   const TodayTransactionsList({
     super.key,
@@ -19,6 +22,9 @@ class TodayTransactionsList extends StatelessWidget {
     required this.provider,
     this.highlightedReference,
     this.onTransactionTap,
+    this.onTransactionLongPress,
+    this.selectionMode = false,
+    this.selectedReferences = const <String>{},
   });
 
   String _formatCurrency(double amount) {
@@ -27,6 +33,8 @@ class TodayTransactionsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final selectionMode =
+        this.selectionMode || selectedReferences.isNotEmpty;
     final sorted = List<Transaction>.from(transactions);
     sorted.sort((a, b) {
       if (a.time == null && b.time == null) return 0;
@@ -68,6 +76,8 @@ class TodayTransactionsList extends StatelessWidget {
           provider: provider,
           isHighlighted: highlightedReference != null &&
               transaction.reference == highlightedReference,
+          selectionMode: selectionMode,
+          isSelected: selectedReferences.contains(transaction.reference),
           onTap: () {
             if (onTransactionTap != null) {
               onTransactionTap!(transaction);
@@ -79,6 +89,9 @@ class TodayTransactionsList extends StatelessWidget {
               );
             }
           },
+          onLongPress: onTransactionLongPress != null
+              ? () => onTransactionLongPress!(transaction)
+              : null,
         );
       },
     );
@@ -91,6 +104,9 @@ class _TodayTransactionItem extends StatelessWidget {
   final TransactionProvider provider;
   final VoidCallback onTap;
   final bool isHighlighted;
+  final bool selectionMode;
+  final bool isSelected;
+  final VoidCallback? onLongPress;
 
   const _TodayTransactionItem({
     required this.transaction,
@@ -98,6 +114,9 @@ class _TodayTransactionItem extends StatelessWidget {
     required this.provider,
     required this.onTap,
     required this.isHighlighted,
+    required this.selectionMode,
+    required this.isSelected,
+    required this.onLongPress,
   });
 
   @override
@@ -130,30 +149,40 @@ class _TodayTransactionItem extends StatelessWidget {
     final categoryColor = category == null
         ? Theme.of(context).colorScheme.onSurfaceVariant
         : categoryTypeColor(category, context);
+    final selectionColor = Theme.of(context).colorScheme.primary;
+    final highlightColor = Theme.of(context).colorScheme.primary;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isHighlighted
-              ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
-              : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isHighlighted
-                ? Theme.of(context).colorScheme.primary.withOpacity(0.5)
-                : Theme.of(context)
-                    .colorScheme
-                    .onSurfaceVariant
-                    .withOpacity(0.1),
-            width: 1,
+        onLongPress: onLongPress,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? selectionColor.withOpacity(0.08)
+                : isHighlighted
+                    ? highlightColor.withOpacity(0.12)
+                    : Theme.of(context)
+                        .colorScheme
+                        .surfaceVariant
+                        .withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? selectionColor.withOpacity(0.4)
+                  : isHighlighted
+                      ? highlightColor.withOpacity(0.5)
+                      : Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant
+                          .withOpacity(0.1),
+              width: 1,
+            ),
           ),
-        ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -220,6 +249,20 @@ class _TodayTransactionItem extends StatelessWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      if (selectionMode) ...[
+                        Icon(
+                          isSelected
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 18,
+                          color: isSelected
+                              ? selectionColor
+                              : Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       Text(
                         '${isCredit ? '+' : '-'}ETB ${formatCurrency(transaction.amount)}',
                         style: TextStyle(

@@ -299,4 +299,26 @@ class TransactionRepository {
       );
     }
   }
+
+  Future<void> deleteTransactionsByReferences(
+      Iterable<String> references) async {
+    final refs = references.toSet();
+    if (refs.isEmpty) return;
+
+    const maxSqlVars = 900;
+    final refList = refs.toList();
+    final db = await DatabaseHelper.instance.database;
+
+    for (var i = 0; i < refList.length; i += maxSqlVars) {
+      final chunkEnd =
+          (i + maxSqlVars) > refList.length ? refList.length : i + maxSqlVars;
+      final chunk = refList.sublist(i, chunkEnd);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      await db.delete(
+        'transactions',
+        where: 'reference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+    }
+  }
 }

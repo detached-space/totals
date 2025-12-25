@@ -37,6 +37,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   int _timeFrameOffset = 0;
   Set<int?> _selectedIncomeCategoryIds = {};
   Set<int?> _selectedExpenseCategoryIds = {};
+  Set<String> _selectedReferences = {};
 
   late PageController _timeFramePageController;
   bool _isTransitioning = false;
@@ -481,6 +482,98 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     });
   }
 
+  bool get _isSelectionMode => _selectedReferences.isNotEmpty;
+
+  void _toggleSelection(Transaction transaction) {
+    setState(() {
+      if (_selectedReferences.contains(transaction.reference)) {
+        _selectedReferences.remove(transaction.reference);
+      } else {
+        _selectedReferences.add(transaction.reference);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    if (_selectedReferences.isEmpty) return;
+    setState(() {
+      _selectedReferences.clear();
+    });
+  }
+
+  void _toggleSelectAll(List<Transaction> transactions) {
+    final references =
+        transactions.map((transaction) => transaction.reference).toSet();
+    setState(() {
+      if (references.isEmpty) {
+        _selectedReferences.clear();
+        return;
+      }
+      final isAllSelected = _selectedReferences.length == references.length &&
+          _selectedReferences.containsAll(references);
+      if (isAllSelected) {
+        _selectedReferences.clear();
+      } else {
+        _selectedReferences = references;
+      }
+    });
+  }
+
+  void _invertSelection(List<Transaction> transactions) {
+    final references =
+        transactions.map((transaction) => transaction.reference).toSet();
+    setState(() {
+      _selectedReferences = references.difference(_selectedReferences);
+    });
+  }
+
+  void _pruneSelection(Set<String> validReferences) {
+    if (_selectedReferences.isEmpty) return;
+    if (_selectedReferences.every(validReferences.contains)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _selectedReferences.removeWhere(
+          (reference) => !validReferences.contains(reference),
+        );
+      });
+    });
+  }
+
+  Future<void> _confirmDeleteSelected(TransactionProvider provider) async {
+    if (_selectedReferences.isEmpty) return;
+    final count = _selectedReferences.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Delete $count transaction${count == 1 ? '' : 's'}?'),
+          content: const Text('This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    await provider.deleteTransactionsByReferences(_selectedReferences);
+    if (!mounted) return;
+    setState(() {
+      _selectedReferences.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<TransactionProvider>(
@@ -502,6 +595,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             _filterByCategorySelections(baseFilteredTransactions);
         final filteredTransactions =
             _filterByPeriod(categoryFilteredBase, baseDate);
+        _pruneSelection(filteredTransactions
+            .map((transaction) => transaction.reference)
+            .toSet());
         final barChartTransactions =
             _filterByCategorySelections(_filterTransactionsForBarChart(allTransactions));
         final pnlTransactions =
@@ -667,16 +763,73 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     //   selectedCard: _selectedCard,
                     // ),
                     const SizedBox(height: 24),
+                    if (_isSelectionMode) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.close),
+                                tooltip: 'Clear selection',
+                                onPressed: _clearSelection,
+                              ),
+                              Text(
+                                '${_selectedReferences.length} selected',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color:
+                                      Theme.of(context).colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              IconButton(
+                                tooltip: 'Select all',
+                                icon: const Icon(Icons.select_all),
+                                onPressed: () =>
+                                    _toggleSelectAll(filteredTransactions),
+                              ),
+                              IconButton(
+                                tooltip: 'Invert selection',
+                                icon: const Icon(Icons.swap_horiz),
+                                onPressed: () =>
+                                    _invertSelection(filteredTransactions),
+                              ),
+                              IconButton(
+                                tooltip: 'Delete selected',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () =>
+                                    _confirmDeleteSelected(provider),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     TransactionsList(
                       transactions: filteredTransactions,
                       sortBy: _sortBy,
                       provider: provider,
+                      selectionMode: _isSelectionMode,
+                      selectedReferences: _selectedReferences,
                       onTransactionTap: (transaction) async {
+                        if (_isSelectionMode) {
+                          _toggleSelection(transaction);
+                          return;
+                        }
                         await showCategorizeTransactionSheet(
                           context: context,
                           provider: provider,
                           transaction: transaction,
                         );
+                      },
+                      onTransactionLongPress: (transaction) {
+                        _toggleSelection(transaction);
                       },
                       onSortChanged: (sort) {
                         setState(() {

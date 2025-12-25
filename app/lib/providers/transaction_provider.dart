@@ -333,6 +333,12 @@ class TransactionProvider with ChangeNotifier {
     await loadData();
   }
 
+  Future<void> deleteTransactionsByReferences(
+      Iterable<String> references) async {
+    await _transactionRepo.deleteTransactionsByReferences(references);
+    await loadData();
+  }
+
   Future<void> createCategory({
     required String name,
     required bool essential,

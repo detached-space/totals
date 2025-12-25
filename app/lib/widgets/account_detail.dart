@@ -31,6 +31,7 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
   bool isExpanded = false;
   Set<int?> _selectedIncomeCategoryIds = {};
   Set<int?> _selectedExpenseCategoryIds = {};
+  Set<String> _selectedReferences = {};
 
   // Date filter - default to last 30 days
   late DateTime _startDate;
@@ -156,6 +157,98 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
       } else {
         _selectedExpenseCategoryIds = result.toSet();
       }
+    });
+  }
+
+  bool get _isSelectionMode => _selectedReferences.isNotEmpty;
+
+  void _toggleSelection(Transaction transaction) {
+    setState(() {
+      if (_selectedReferences.contains(transaction.reference)) {
+        _selectedReferences.remove(transaction.reference);
+      } else {
+        _selectedReferences.add(transaction.reference);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    if (_selectedReferences.isEmpty) return;
+    setState(() {
+      _selectedReferences.clear();
+    });
+  }
+
+  void _toggleSelectAll(List<Transaction> transactions) {
+    final references =
+        transactions.map((transaction) => transaction.reference).toSet();
+    setState(() {
+      if (references.isEmpty) {
+        _selectedReferences.clear();
+        return;
+      }
+      final isAllSelected = _selectedReferences.length == references.length &&
+          _selectedReferences.containsAll(references);
+      if (isAllSelected) {
+        _selectedReferences.clear();
+      } else {
+        _selectedReferences = references;
+      }
+    });
+  }
+
+  void _invertSelection(List<Transaction> transactions) {
+    final references =
+        transactions.map((transaction) => transaction.reference).toSet();
+    setState(() {
+      _selectedReferences = references.difference(_selectedReferences);
+    });
+  }
+
+  void _pruneSelection(Set<String> validReferences) {
+    if (_selectedReferences.isEmpty) return;
+    if (_selectedReferences.every(validReferences.contains)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _selectedReferences.removeWhere(
+          (reference) => !validReferences.contains(reference),
+        );
+      });
+    });
+  }
+
+  Future<void> _confirmDeleteSelected(TransactionProvider provider) async {
+    if (_selectedReferences.isEmpty) return;
+    final count = _selectedReferences.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Delete $count transaction${count == 1 ? '' : 's'}?'),
+          content: const Text('This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    await provider.deleteTransactionsByReferences(_selectedReferences);
+    if (!mounted) return;
+    setState(() {
+      _selectedReferences.clear();
     });
   }
 
@@ -290,6 +383,10 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
 
       final showIncomeFilter = activeTab != "Debits";
       final showExpenseFilter = activeTab != "Credits";
+      final visibleReferences =
+          visibleTransaction.map((transaction) => transaction.reference).toSet();
+      _pruneSelection(visibleReferences);
+      final selectionCount = _selectedReferences.length;
 
       return Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -305,11 +402,43 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                 Navigator.pop(context);
               },
             ),
-            title: Text('Transaction History',
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w500,
-                    color: Theme.of(context).colorScheme.primary)),
+            title: _isSelectionMode
+                ? Text('$selectionCount selected',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).colorScheme.primary))
+                : Text('Transaction History',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).colorScheme.primary)),
+            actions: _isSelectionMode
+                ? [
+                    IconButton(
+                      tooltip: 'Clear selection',
+                      icon: const Icon(Icons.close),
+                      onPressed: _clearSelection,
+                    ),
+                    IconButton(
+                      tooltip: 'Select all',
+                      icon: const Icon(Icons.select_all),
+                      onPressed: () =>
+                          _toggleSelectAll(visibleTransaction),
+                    ),
+                    IconButton(
+                      tooltip: 'Invert selection',
+                      icon: const Icon(Icons.swap_horiz),
+                      onPressed: () =>
+                          _invertSelection(visibleTransaction),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete selected',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _confirmDeleteSelected(provider),
+                    ),
+                  ]
+                : null,
           ),
           body: SingleChildScrollView(
               child: Column(
@@ -694,7 +823,17 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
                           bankLabel: _getBankLabel(transaction),
                           provider: provider,
                           formatCurrency: _formatCurrency,
+                          selectionMode: _isSelectionMode,
+                          isSelected: _selectedReferences
+                              .contains(transaction.reference),
+                          onLongPress: () {
+                            _toggleSelection(transaction);
+                          },
                           onTap: () async {
+                            if (_isSelectionMode) {
+                              _toggleSelection(transaction);
+                              return;
+                            }
                             await showCategorizeTransactionSheet(
                               context: context,
                               provider: provider,

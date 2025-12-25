@@ -61,6 +61,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? _highlightedReference;
   Set<int?> _selectedTodayIncomeCategoryIds = {};
   Set<int?> _selectedTodayExpenseCategoryIds = {};
+  Set<String> _selectedTodayReferences = {};
 
   @override
   void initState() {
@@ -551,6 +552,109 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
+  bool get _isTodaySelectionMode => _selectedTodayReferences.isNotEmpty;
+
+  void _toggleTodaySelection(Transaction transaction) {
+    setState(() {
+      if (_selectedTodayReferences.contains(transaction.reference)) {
+        _selectedTodayReferences.remove(transaction.reference);
+      } else {
+        _selectedTodayReferences.add(transaction.reference);
+      }
+      if (_highlightedReference == transaction.reference) {
+        _highlightedReference = null;
+      }
+    });
+  }
+
+  void _clearTodaySelection() {
+    if (_selectedTodayReferences.isEmpty) return;
+    setState(() {
+      _selectedTodayReferences.clear();
+    });
+  }
+
+  void _toggleSelectAllToday(List<Transaction> transactions) {
+    final references =
+        transactions.map((transaction) => transaction.reference).toSet();
+    setState(() {
+      if (references.isEmpty) {
+        _selectedTodayReferences.clear();
+        return;
+      }
+      final isAllSelected =
+          _selectedTodayReferences.length == references.length &&
+              _selectedTodayReferences.containsAll(references);
+      if (isAllSelected) {
+        _selectedTodayReferences.clear();
+      } else {
+        _selectedTodayReferences = references;
+      }
+    });
+  }
+
+  void _invertTodaySelection(List<Transaction> transactions) {
+    final references =
+        transactions.map((transaction) => transaction.reference).toSet();
+    setState(() {
+      _selectedTodayReferences = references.difference(_selectedTodayReferences);
+    });
+  }
+
+  void _pruneTodaySelection(Set<String> validReferences) {
+    if (_selectedTodayReferences.isEmpty) return;
+    if (_selectedTodayReferences.every(validReferences.contains)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _selectedTodayReferences.removeWhere(
+          (reference) => !validReferences.contains(reference),
+        );
+      });
+    });
+  }
+
+  Future<void> _confirmDeleteTodaySelection(
+    TransactionProvider provider,
+  ) async {
+    if (_selectedTodayReferences.isEmpty) return;
+    final count = _selectedTodayReferences.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Delete $count transaction${count == 1 ? '' : 's'}?'),
+          content: const Text('This action cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    final clearHighlight = _highlightedReference != null &&
+        _selectedTodayReferences.contains(_highlightedReference);
+    await provider.deleteTransactionsByReferences(_selectedTodayReferences);
+    if (!mounted) return;
+    setState(() {
+      _selectedTodayReferences.clear();
+      if (clearHighlight) {
+        _highlightedReference = null;
+      }
+    });
+  }
+
   Future<void> _refreshTodaySms(TransactionProvider provider) async {
     if (_isRefreshingTodaySms) return;
     setState(() {
@@ -775,69 +879,110 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ],
                       )
                     : tabId == HomeTabs.recentTabId
-                        ? ListView(
-                            children: [
-                              const SizedBox(height: 12),
-                              Builder(
-                                builder: (context) {
-                                  final today = _todayTransactions(provider);
-                                  final filteredToday =
-                                      _filterByCategory(today);
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
-                                    ),
+                        ? Builder(
+                            builder: (context) {
+                              final today = _todayTransactions(provider);
+                              final filteredToday = _filterByCategory(today);
+                              final filteredReferences = filteredToday
+                                  .map((transaction) => transaction.reference)
+                                  .toSet();
+                              _pruneTodaySelection(filteredReferences);
+                              final selectionCount =
+                                  _selectedTodayReferences.length;
+
+                              final headerRow = Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Flexible(
                                     child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Flexible(
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                "Today's transactions",
-                                                style: TextStyle(
-                                                  fontSize: 18,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurface,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 10,
-                                                  vertical: 6,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .primary
-                                                      .withOpacity(0.1),
-                                                  borderRadius:
-                                                      BorderRadius.circular(12),
-                                                ),
-                                                child: Text(
-                                                  '${filteredToday.length}',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .primary,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
+                                        if (_isTodaySelectionMode) ...[
+                                          IconButton(
+                                            icon: const Icon(Icons.close),
+                                            tooltip: 'Clear selection',
+                                            onPressed: _clearTodaySelection,
                                           ),
-                                        ),
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
+                                          Text(
+                                            '$selectionCount selected',
+                                            style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface,
+                                            ),
+                                          ),
+                                        ] else ...[
+                                          Text(
+                                            "Today's transactions",
+                                            style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withOpacity(0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: Text(
+                                              '${filteredToday.length}',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: _isTodaySelectionMode
+                                        ? [
+                                            IconButton(
+                                              tooltip: 'Select all',
+                                              icon: const Icon(
+                                                  Icons.select_all),
+                                              onPressed: () =>
+                                                  _toggleSelectAllToday(
+                                                      filteredToday),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Invert selection',
+                                              icon: const Icon(Icons.swap_horiz),
+                                              onPressed: () =>
+                                                  _invertTodaySelection(
+                                                      filteredToday),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Delete selected',
+                                              icon: const Icon(
+                                                  Icons.delete_outline),
+                                              onPressed: () =>
+                                                  _confirmDeleteTodaySelection(
+                                                      provider),
+                                            ),
+                                          ]
+                                        : [
                                             _buildTodayRefreshButton(provider),
                                             const SizedBox(width: 8),
                                             CategoryFilterIconButton(
@@ -872,44 +1017,70 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                               ),
                                             ),
                                           ],
+                                  ),
+                                ],
+                              );
+
+                              return CustomScrollView(
+                                slivers: [
+                                  const SliverToBoxAdapter(
+                                    child: SizedBox(height: 12),
+                                  ),
+                                  SliverPersistentHeader(
+                                    pinned: true,
+                                    delegate: _StickyHeaderDelegate(
+                                      height: 64,
+                                      child: Container(
+                                        color: Theme.of(context)
+                                            .scaffoldBackgroundColor,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 8,
                                         ),
-                                      ],
+                                        child: headerRow,
+                                      ),
                                     ),
-                                  );
-                                },
-                              ),
-                              Builder(
-                                builder: (context) {
-                                  final today = _todayTransactions(provider);
-                                  final filteredToday =
-                                      _filterByCategory(today);
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    child: TodayTransactionsList(
-                                      transactions: filteredToday,
-                                      provider: provider,
-                                      highlightedReference:
-                                          _highlightedReference,
-                                      onTransactionTap: (transaction) async {
-                                        setState(() {
-                                          if (_highlightedReference ==
-                                              transaction.reference) {
-                                            _highlightedReference = null;
+                                  ),
+                                  SliverToBoxAdapter(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      child: TodayTransactionsList(
+                                        transactions: filteredToday,
+                                        provider: provider,
+                                        highlightedReference:
+                                            _highlightedReference,
+                                        selectionMode: _isTodaySelectionMode,
+                                        selectedReferences:
+                                            _selectedTodayReferences,
+                                        onTransactionTap:
+                                            (transaction) async {
+                                          if (_isTodaySelectionMode) {
+                                            _toggleTodaySelection(transaction);
+                                            return;
                                           }
-                                        });
-                                        await showCategorizeTransactionSheet(
-                                          context: context,
-                                          provider: provider,
-                                          transaction: transaction,
-                                        );
-                                      },
+                                          setState(() {
+                                            if (_highlightedReference ==
+                                                transaction.reference) {
+                                              _highlightedReference = null;
+                                            }
+                                          });
+                                          await showCategorizeTransactionSheet(
+                                            context: context,
+                                            provider: provider,
+                                            transaction: transaction,
+                                          );
+                                        },
+                                        onTransactionLongPress: (transaction) {
+                                          _toggleTodaySelection(transaction);
+                                        },
+                                      ),
                                     ),
-                                  );
-                                },
-                              ),
-                            ],
+                                  ),
+                                ],
+                              );
+                            },
                           )
                         : BankDetail(
                             bankId: tabId,
@@ -1107,5 +1278,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         );
       },
     );
+  }
+}
+
+class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double height;
+  final Widget child;
+
+  _StickyHeaderDelegate({
+    required this.height,
+    required this.child,
+  });
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return SizedBox.expand(child: child);
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
+    return height != oldDelegate.height || child != oldDelegate.child;
   }
 }

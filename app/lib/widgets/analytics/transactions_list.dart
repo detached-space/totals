@@ -14,7 +14,10 @@ class TransactionsList extends StatefulWidget {
   final bool showHeader;
   final bool includeBottomPadding;
   final ValueChanged<Transaction>? onTransactionTap;
+  final ValueChanged<Transaction>? onTransactionLongPress;
   final TransactionProvider? provider;
+  final bool selectionMode;
+  final Set<String> selectedReferences;
 
   const TransactionsList({
     super.key,
@@ -24,7 +27,10 @@ class TransactionsList extends StatefulWidget {
     this.showHeader = true,
     this.includeBottomPadding = true,
     this.onTransactionTap,
+    this.onTransactionLongPress,
     this.provider,
+    this.selectionMode = false,
+    this.selectedReferences = const <String>{},
   });
 
   @override
@@ -88,6 +94,8 @@ class _TransactionsListState extends State<TransactionsList> {
 
   @override
   Widget build(BuildContext context) {
+    final selectionMode =
+        widget.selectionMode || widget.selectedReferences.isNotEmpty;
     final sortedTransactions = List<Transaction>.from(widget.transactions);
     sortedTransactions.sort((a, b) {
       switch (widget.sortBy) {
@@ -224,8 +232,14 @@ class _TransactionsListState extends State<TransactionsList> {
               bankLabel: _getBankLabel(transaction),
               provider: widget.provider,
               formatCurrency: _formatCurrency,
+              selectionMode: selectionMode,
+              isSelected:
+                  widget.selectedReferences.contains(transaction.reference),
               onTap: widget.onTransactionTap != null
                   ? () => widget.onTransactionTap!(transaction)
+                  : null,
+              onLongPress: widget.onTransactionLongPress != null
+                  ? () => widget.onTransactionLongPress!(transaction)
                   : null,
             );
           },
@@ -413,14 +427,20 @@ class TransactionListItem extends StatelessWidget {
   final String bankLabel;
   final TransactionProvider? provider;
   final String Function(double) formatCurrency;
+  final bool selectionMode;
+  final bool isSelected;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   const TransactionListItem({
     required this.transaction,
     required this.bankLabel,
     required this.provider,
     required this.formatCurrency,
+    required this.selectionMode,
+    required this.isSelected,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -448,23 +468,29 @@ class TransactionListItem extends StatelessWidget {
     final categoryColor = category == null
         ? Theme.of(context).colorScheme.onSurfaceVariant
         : categoryTypeColor(category, context);
+    final selectionColor = Theme.of(context).colorScheme.primary;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+            color: isSelected
+                ? selectionColor.withOpacity(0.08)
+                : Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurfaceVariant
-                  .withOpacity(0.1),
+              color: isSelected
+                  ? selectionColor.withOpacity(0.4)
+                  : Theme.of(context)
+                      .colorScheme
+                      .onSurfaceVariant
+                      .withOpacity(0.1),
               width: 1,
             ),
           ),
@@ -522,6 +548,18 @@ class TransactionListItem extends StatelessWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      if (selectionMode) ...[
+                        Icon(
+                          isSelected
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          size: 18,
+                          color: isSelected
+                              ? selectionColor
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       Text(
                         '${isCredit ? '+' : '-'}ETB ${formatCurrency(transaction.amount)}',
                         style: TextStyle(
