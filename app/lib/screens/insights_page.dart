@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:totals/data/consts.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/financial_insights.dart';
 import 'package:totals/widgets/insights/insights_explainer_bottomsheet.dart';
 
@@ -15,134 +17,14 @@ class InsightsPage extends StatelessWidget {
     this.periodLabel,
   });
 
-  double _toDouble(dynamic value) {
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) return double.tryParse(value) ?? 0.0;
-    return 0.0;
-  }
-
-  Widget _buildStabilityCard(BuildContext context, double variance) {
-    // Simple thresholds to convert raw variance into human-readable labels.
-    String label;
-    String description;
-    Color color;
-
-    if (variance < 50000) {
-      label = 'Stable';
-      description =
-          'Your spending is fairly predictable from month to month.';
-      color = Colors.green;
-    } else if (variance < 500000) {
-      label = 'Moderate';
-      description = 'Your spending changes, but not extremely.';
-      color = Colors.orange;
-    } else {
-      label = 'Very Irregular';
-      description =
-          'Your spending jumps a lot between months. Try smoothing big spikes.';
-      color = Colors.red;
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withOpacity(0.18),
-            color.withOpacity(0.06),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: color.withOpacity(0.35),
-          width: 1.4,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.08),
-            ),
-            child: Icon(
-              Icons.show_chart,
-              color: color,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Spending Stability',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color:
-                        Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _bankLabel(int? bankId) {
-    if (bankId == null) return 'Unknown bank';
-    for (final bank in AppConstants.banks) {
-      if (bank.id == bankId) return bank.shortName;
-    }
-    return 'Bank($bankId)';
-  }
-
-  String _dateLabel(String? isoTime) {
-    if (isoTime == null) return 'Unknown date';
-    try {
-      return DateFormat('MMM d').format(DateTime.parse(isoTime));
-    } catch (_) {
-      return 'Unknown date';
-    }
-  }
-
-  String _formatLargeNumber(double value) {
-    if (value >= 1000000) {
-      return '${(value / 1000000).toStringAsFixed(2)}M';
-    } else if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(2)}K';
-    }
-    return value.toStringAsFixed(2);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final insightsService = InsightsService(() => transactions);
+    final txProvider = Provider.of<TransactionProvider>(context, listen: false);
+    final insightsService = InsightsService(
+      () => transactions,
+      getCategoryById: txProvider.getCategoryById,
+    );
+
     final insights = insightsService.summarize();
 
     final score = insights['score']['value'] as int;
@@ -156,6 +38,10 @@ class InsightsPage extends StatelessWidget {
     final totalExpense = _toDouble(insights['totalExpense']);
 
     final formatter = NumberFormat.currency(symbol: 'ETB ', decimalDigits: 2);
+
+    final double categorizedCoverage =
+        _toDouble(patterns['categorizedCoverage']);
+    final bool lowCoverage = categorizedCoverage < 0.7;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -273,7 +159,7 @@ class InsightsPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                _buildScoreCard(context, score),
+                _buildScoreCard(context, score, lowCoverage: lowCoverage),
                 const SizedBox(height: 12),
                 _buildStabilityCard(
                   context,
@@ -431,7 +317,8 @@ class InsightsPage extends StatelessWidget {
                       _buildInfoRow(
                         context,
                         'Spending Variance',
-                        _formatLargeNumber(_toDouble(patterns['spendVariance'])),
+                        _formatLargeNumber(
+                            _toDouble(patterns['stabilityIndex'])),
                       ),
                       // Removed Essentials Share - will be improved in the future
                       // when better categorization is available
@@ -455,7 +342,66 @@ class InsightsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildScoreCard(BuildContext context, int score) {
+  String _bankLabel(int? bankId) {
+    if (bankId == null) return 'Unknown bank';
+    for (final bank in AppConstants.banks) {
+      if (bank.id == bankId) return bank.shortName;
+    }
+    return 'Bank($bankId)';
+  }
+
+  Widget _buildExpandableRecurringSection(
+    BuildContext context,
+    List<dynamic> recurring,
+    NumberFormat formatter,
+  ) {
+    return _ExpandableRecurringCard(
+      recurring: recurring,
+      formatter: formatter,
+      toDouble: _toDouble,
+    );
+  }
+
+  Widget _buildInfoRow(
+    BuildContext context,
+    String label,
+    String value, {
+    bool isHighlight = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: isHighlight
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: isHighlight ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: isHighlight
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScoreCard(BuildContext context, int score,
+      {bool lowCoverage = false}) {
     Color scoreColor;
     String scoreLabel;
     String scoreSubtitle;
@@ -540,6 +486,155 @@ class InsightsPage extends StatelessWidget {
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
+                const SizedBox(height: 4),
+                if (lowCoverage)
+                  Text(
+                    'Your score becomes more accurate as you categorize more of your spending.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionCard(
+    BuildContext context,
+    String title,
+    IconData icon,
+    List<Widget> children,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outline.withOpacity(0.16),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                icon,
+                color: Theme.of(context).colorScheme.primary,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStabilityCard(BuildContext context, double variance) {
+    // Simple thresholds to convert raw variance into human-readable labels.
+    String label;
+    String description;
+    Color color;
+
+    if (variance < 50000) {
+      label = 'Stable';
+      description = 'Your spending is fairly predictable from month to month.';
+      color = Colors.green;
+    } else if (variance < 500000) {
+      label = 'Moderate';
+      description = 'Your spending changes, but not extremely.';
+      color = Colors.orange;
+    } else {
+      label = 'Very Irregular';
+      description =
+          'Your spending jumps a lot between months. Try smoothing big spikes.';
+      color = Colors.red;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withOpacity(0.18),
+            color.withOpacity(0.06),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: color.withOpacity(0.35),
+          width: 1.4,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withOpacity(0.08),
+            ),
+            child: Icon(
+              Icons.show_chart,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Spending Stability',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
           ),
@@ -599,104 +694,29 @@ class InsightsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionCard(
-    BuildContext context,
-    String title,
-    IconData icon,
-    List<Widget> children,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outline.withOpacity(0.16),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                icon,
-                color: Theme.of(context).colorScheme.primary,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...children,
-        ],
-      ),
-    );
+  String _dateLabel(String? isoTime) {
+    if (isoTime == null) return 'Unknown date';
+    try {
+      return DateFormat('MMM d').format(DateTime.parse(isoTime));
+    } catch (_) {
+      return 'Unknown date';
+    }
   }
 
-  Widget _buildInfoRow(
-    BuildContext context,
-    String label,
-    String value, {
-    bool isHighlight = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                color: isHighlight
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
-                fontWeight: isHighlight ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: isHighlight
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-        ],
-      ),
-    );
+  String _formatLargeNumber(double value) {
+    if (value >= 1000000) {
+      return '${(value / 1000000).toStringAsFixed(2)}M';
+    } else if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(2)}K';
+    }
+    return value.toStringAsFixed(2);
   }
 
-  Widget _buildExpandableRecurringSection(
-    BuildContext context,
-    List<dynamic> recurring,
-    NumberFormat formatter,
-  ) {
-    return _ExpandableRecurringCard(
-      recurring: recurring,
-      formatter: formatter,
-      toDouble: _toDouble,
-    );
+  double _toDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
   }
 }
 

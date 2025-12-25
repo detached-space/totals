@@ -71,7 +71,7 @@ class InsightsExplainerBottomSheet extends StatelessWidget {
                       _buildExplanationItem(
                         context,
                         'Financial Health Score',
-                        'A 0-100 score showing how well you\'re managing your money. It considers how much you spend vs earn, your savings rate, and how consistent your spending is. Higher is better!',
+                        'A 0-100 score showing how well you\'re managing your money. It looks at how much you spend vs earn, your savings rate, and how consistent your spending is. As you categorize more of your transactions (needs vs wants), the score and tips become more accurate.',
                         Icons.favorite,
                         Colors.red,
                       ),

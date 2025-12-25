@@ -1,16 +1,25 @@
 import 'dart:math';
 
+import 'package:totals/models/category.dart';
+
 import '../models/transaction.dart';
 import '../utils/math_utils.dart';
 
 class InsightsService {
+  const int _scoreVersion = 2; // v1 = no categories, v2 = category aware.
   final List<Transaction> Function() _getTransactions;
+
+  // function that maps categoryId to Category?
+  final Category? Function(int? categoryId)? _getCategoryById;
 
   // small memoization cache, will be cleared
   // when transactions change
   Map<String, dynamic>? _cache;
 
-  InsightsService(this._getTransactions);
+  InsightsService(this._getTransactions,
+      {Category? Function(int? categoryId)? getCategoryById})
+      : _getCategoryById = getCategoryById;
+
   void invalidate() => _cache = null;
 
   Map<String, dynamic> summarize() {
@@ -21,13 +30,36 @@ class InsightsService {
     // use the existing type + sign approach
     // to split income/expense
     final income = transactions.where(_isIncome).toList();
+    final totalIncome = MathUtils.findTransactionSum(income);
 
     final expenses = transactions.where((t) => !_isIncome(t)).toList();
+    final expensesAbs = transactions
+        .where((t) => !_isIncome(t))
+        .map((t) => t.amount.abs())
+        .toList();
 
-    final totalIncome = MathUtils.findTransactionSum(income);
-    final totalExpense = MathUtils.findTransactionSum(expenses);
+    final categoryBreakdown = _computeCategorySpend(transactions);
+    final totalExpense = MathUtils.findSum(expensesAbs);
+
+    final double categorizedTotal =
+        categoryBreakdown.essential + categoryBreakdown.nonEssential;
+    final categorizedCoverage = totalExpense == 0
+        ? 0.0
+        : (categorizedTotal / totalExpense).clamp(0.0, 1.0);
+
+    final double essentialsRatio = categorizedTotal == 0
+        ? 0.0
+        : (categoryBreakdown.essential / categorizedTotal).clamp(0.0, 1.0);
 
     final patterns = _spendingPatterns(transactions);
+    // we add these to the summary map so that the UI
+    // can use them later.
+    patterns["essentialsRatio"] = essentialsRatio;
+    patterns["categorizedCoverage"] = categorizedCoverage;
+    patterns["essentialSpend"] = categoryBreakdown.essential;
+    patterns["nonEssentialSpend"] = categoryBreakdown.nonEssential;
+    patterns["uncategorizedSpend"] = categoryBreakdown.uncategorized;
+
     final recurring = _recurring(expenses);
     final anomalies = _anomalies(expenses);
     final incomeAnomalies = _anomalies(income);
@@ -38,6 +70,9 @@ class InsightsService {
       expense: totalExpense,
       savingsRate: _savingsRate(totalIncome, totalExpense),
       variance: patterns["spendVariance"].toDouble(),
+      stabilityIndex: patterns["stablityIndex"].toDouble(),
+      essentialsRatio: patterns["essentialsRatio"].toDouble(),
+      categorizedCoverage: patterns["categorizedCoverate"].toDouble(),
       // essentialsRatio removed from health score calculation
       // Will be improved in the future when better categorization is available
     );
@@ -46,6 +81,8 @@ class InsightsService {
       totalIncome: totalIncome,
       totalExpense: totalExpense,
       categoryTotals: patterns['byCategory'] as Map<String, double>,
+      essentialsSpend: patterns['essentialSpend'] as double,
+      nonEssentialsSpend: patterns['nonEssentialSpend'] as double,
     );
 
     _cache = {
@@ -87,7 +124,7 @@ class InsightsService {
     for (final t in txns) {
       // parse from ISO string.
       final txnDate = DateTime.tryParse(t.time ?? '') ??
-          DateTime.now().subtract(Duration(days: 30));
+          DateTime.now().subtract(const Duration(days: 30));
       final key = '${txnDate.year}-${txnDate.month}';
 
       byMonth[key] = (byMonth[key] ?? 0) + t.amount;
@@ -102,25 +139,48 @@ class InsightsService {
     required double totalIncome,
     required double totalExpense,
     required Map<String, double> categoryTotals,
+    required double essentialsSpend,
+    required double nonEssentialsSpend,
   }) {
     // baseline 50/30/20, overspend flags on per-category wantslike bucket.
     final needsCap = totalIncome * 0.5;
     final wantsCap = totalIncome * 0.3;
     final saveTarget = totalIncome * 0.2;
 
-    final overspend = <String, double>{};
-    categoryTotals.forEach((cat, amount) {
-      if (cat == "CREDIT") return;
+    final actualNeeds = essentialsSpend;
+    final actualWants = nonEssentialsSpend;
+    final estimatedSavings =
+        (totalIncome - totalExpense).clamp(-double.infinity, double.infinity);
 
-      if (amount > wantsCap) overspend[cat] = amount - wantsCap;
-    });
+    final Map<String, double> overspend = {};
+    if (actualWants > wantsCap) {
+      overspend['wants'] = actualWants - wantsCap;
+      overspend['needs'] = actualNeeds - needsCap;
+    }
+
+    String tip = '';
+    if (totalExpense > totalIncome) {
+      tip =
+          'You\'re spending more than you earn. Try reducing wants first, then look at long-term ways to lower fixed(essential) costs.';
+    } else if (overspend.containsKey('wants')) {
+      tip =
+          'Your lifestyle spending (wants) is above the usual 30% guielne. Cutting a few non-essentials can free up more savings';
+    } else if (estimatedSavings < saveTarget) {
+      tip =
+          'You are saving, but below the common 20% goal. Consider slowly increasing your monthly savings';
+    } else {
+      tip =
+          'Great job. Your spending and savings are close to common 50/30/20 guidelines';
+    }
 
     return {
-      'targets': {'needs': needsCap, 'wants': wantsCap, 'savings': saveTarget},
+      'targets': {
+        'needs': needsCap,
+        'wants': wantsCap,
+        'savings': saveTarget,
+      },
       'overspend': overspend,
-      'tip': totalExpense > totalIncome
-          ? 'Spending exceeds income; reduce your spending'
-          : 'Good job keeping spending under income!',
+      'tip': tip,
     };
   }
 
@@ -130,50 +190,84 @@ class InsightsService {
     return "DEBIT";
   }
 
+  _CategorySpendBreakdown _computeCategorySpend(List<Transaction> txns) {
+    double essential = 0;
+    double nonEssential = 0;
+    double uncategorized = 0;
+
+    for (final t in txns) {
+      if (_isIncome(t)) continue; // we only care about expenses here
+
+      final amount = t.amount.abs(); // we take the absolute value
+      final category = _getCategoryById?.call(t.categoryId);
+
+      if (category == null) {
+        uncategorized += amount;
+        continue;
+      }
+
+      // if an "income" category is attached to an expense
+      if (category.flow.toLowerCase() == "income") {
+        nonEssential += amount;
+        continue;
+      }
+
+      if (category.essential) {
+        essential += amount;
+      } else {
+        nonEssential += amount;
+      }
+    }
+
+    return _CategorySpendBreakdown(
+      essential: essential,
+      nonEssential: nonEssential,
+      uncategorized: uncategorized,
+    );
+  }
+
   Map<String, dynamic> _healthScore({
     required double income,
     required double expense,
     required double savingsRate,
     required double variance,
-    // essentialsRatio parameter removed - will be improved in the future
-    // when better categorization (essentials vs discretionary) is available
+    required double stabilityIndex,
+    required double essentialsRatio,
+    required double categorizedCoverage,
   }) {
     // weighted blend: spend discipline, savings, stability
-    // Note: Essentials ratio component removed - currently all expenses are
-    // treated as essentials due to lack of categorization data.
-    // This will be improved in the future when transaction categorization
-    // becomes more sophisticated.
+    // new calculation for the health score, includes the essentials spend
+    // deriving it from the app's categories.
 
     final expenseIncomeRatio =
         income == 0 ? 1.0 : (expense / income).clamp(0, 2);
 
-    final stability = 1 / (1 + variance);
+    // coverage factor for essentials influence
+    // i.e. how much of the sms messages have been
+    // categorized. In most cases, at this early stage of the app,
+    // users will have categorized only a small percentage of the sms messages,
+    // so the rest will be "uncategorized". This will affect the calculatioin
+    // of the financial health score. So we will make sure that it will not make
+    // the results biased, by using the coverage factor to derive 
+    // the essentials component of the equation.
+    double coverageFactor = 0.1;
+    if (categorizedCoverage < 0.3) {
+      coverageFactor = 0.0;
+    } else if (categorizedCoverage > 0.7) {
+      coverageFactor = 0.5;
+    } else {
+      coverageFactor = 1.0;
+    }
 
-    // OLD IMPLEMENTATION (commented out for future reference):
-    // final essentials = 1 - essentialsRatio;
-    // double score = 0.35 * (1 - expenseIncomeRatio.clamp(0, 1)) +
-    //     0.25 * savingsRate.clamp(0, 1) +
-    //     0.20 * stability.clamp(0, 1) +
-    //     0.20 * essentials.clamp(0, 1);
+    final essentialsComponent =
+        (1 - essentialsRatio).clamp(0.0, 0.1) * coverageFactor;
 
-    // NEW IMPLEMENTATION: Removed essentials component
-    // Redistributed weights: expense/income (40%), savings (30%), stability (30%)
     double score = 0.40 * (1 - expenseIncomeRatio.clamp(0, 1)) +
         0.30 * savingsRate.clamp(0, 1) +
-        0.30 * stability.clamp(0, 1);
+        0.20 * stabilityIndex.clamp(0, 1) +
+        0.10 * essentialsComponent;
 
     return {'value': (score * 100).clamp(0, 100).round()};
-  }
-
-  bool _isIncome(Transaction t) {
-    final type = t.type?.toUpperCase() ?? '';
-
-    // Prefer explicit type when available
-    if (type.contains("CREDIT")) return true;
-    if (type.contains("DEBIT")) return false;
-
-    // Fallback to sign only when type is unknown
-    return t.amount >= 0;
   }
 
   bool _isExpense(Transaction t) {
@@ -185,6 +279,17 @@ class InsightsService {
 
     // Fallback to sign only when type is unknown
     return t.amount < 0;
+  }
+
+  bool _isIncome(Transaction t) {
+    final type = t.type?.toUpperCase() ?? '';
+
+    // Prefer explicit type when available
+    if (type.contains("CREDIT")) return true;
+    if (type.contains("DEBIT")) return false;
+
+    // Fallback to sign only when type is unknown
+    return t.amount >= 0;
   }
 
   Map<String, dynamic> _projections(
@@ -255,43 +360,33 @@ class InsightsService {
       byCategory[cat] = (byCategory[cat] ?? 0) + (txn.amount);
     }
 
-    final amounts = txns.map((txn) => txn.amount).toList();
-
     // variance shows how volatile our spending is.
+    // we scale the amounts down so that we work in thousands
+    // this is because the variance can get very high,
+    // even in the millions.
+    final amounts = txns.map((txn) => txn.amount / 1000.0).toList();
     final variance = MathUtils.findVariance(amounts);
 
-    // essentials ratio calculation (kept for future use, not currently used in health score)
-    // TODO: Improve this when better transaction categorization is available
-    // Currently, all expenses are treated as "essentials" since we don't have
-    // reliable way to distinguish essentials vs discretionary spending.
-    // This will be enhanced in the future with better categorization logic.
-    final essenSpends =
-        txns.where((t) => !_isIncome(t)).map((t) => t.amount).toList();
-    final essentialsSpend = MathUtils.findSum(essenSpends);
-
-    final totalSpends =
-        txns.where((t) => !_isIncome(t)).map((t) => t.amount).toList();
-    final totalSpend = MathUtils.findSum(totalSpends);
-
-    final essentialsRatio =
-        totalSpend == 0 ? 0 : (essentialsSpend / totalSpend).clamp(0, 1);
+    // then we convert the varaince into a stability index between
+    // 0 and 1. we will tweak "k" after seing real data (e.g. k = 5 or 10)
+    const double k = 5.0;
+    final double stabilityIndex = 1 / (1 + (variance / k));
 
     return {
-      'byCategory': byCategory,
       'spendVariance': variance.toDouble(),
-      'essentialsRatio': essentialsRatio,
+      'stabilityIndex': stabilityIndex.clamp(0.0, 1.0),
     };
   }
 
   double _trend(List<Transaction> txns) {
-    // last month minux previous month.
+    // last month minus previous month.
     // returns 0 when data is insufficient.
     final Map<String, double> byMonth = {};
 
     for (final t in txns) {
       // parse from ISO string.
       final txnDate = DateTime.tryParse(t.time ?? '') ??
-          DateTime.now().subtract(Duration(days: 30));
+          DateTime.now().subtract(const Duration(days: 30));
 
       final key = '${txnDate.year}-${txnDate.month}';
 
@@ -308,4 +403,16 @@ class InsightsService {
 
     return last - beforeLast;
   }
+}
+
+class _CategorySpendBreakdown {
+  final double essential;
+  final double nonEssential;
+  final double uncategorized;
+
+  _CategorySpendBreakdown({
+    required this.essential,
+    required this.nonEssential,
+    required this.uncategorized,
+  });
 }
