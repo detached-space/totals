@@ -16,6 +16,7 @@ import 'package:totals/widgets/analytics/category_breakdown.dart';
 import 'package:totals/widgets/analytics/transactions_list.dart';
 import 'package:totals/widgets/analytics/chart_data_point.dart';
 import 'package:totals/widgets/analytics/chart_data_utils.dart';
+import 'package:totals/screens/insights_page.dart';
 import 'package:totals/widgets/categorize_transaction_sheet.dart';
 import 'package:totals/widgets/category_filter_button.dart';
 import 'package:totals/widgets/category_filter_sheet.dart';
@@ -657,6 +658,16 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                         if (_timeFramePageController.hasClients) {
                           _timeFramePageController.jumpToPage(1);
                         }
+                      },
+                      onInsightsTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => InsightsPage(
+                              transactions: filteredTransactions,
+                              periodLabel: 'Based on $_selectedPeriod view',
+                            ),
+                          ),
+                        );
                       },
                     ),
                     const SizedBox(height: 24),

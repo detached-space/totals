@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
-import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/providers/insights_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
-import 'package:totals/services/account_sync_status_service.dart';
+import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/home_page.dart';
 import 'package:totals/database/migration_helper.dart';
+import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:totals/background/daily_spending_worker.dart';
@@ -49,6 +50,16 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => TransactionProvider()),
+
+        // we need insights provider to use the existing transacton provider instead of using
+        // a new transaction provider instance.
+        ChangeNotifierProxyProvider<TransactionProvider, InsightsProvider>(
+          create: (context) => InsightsProvider(
+              txProvider:
+                  Provider.of<TransactionProvider>(context, listen: false)),
+          update: (context, txProvider, previous) =>
+              previous!..txProvider = txProvider,
+        ),
         ChangeNotifierProvider.value(value: AccountSyncStatusService.instance),
       ],
       child: Consumer<ThemeProvider>(
@@ -63,12 +74,12 @@ class MyApp extends StatelessWidget {
               useMaterial3: true,
             ),
             darkTheme: ThemeData(
-              colorScheme: ColorScheme.dark(
-                primary: const Color(0xFF294EC3),
-                secondary: const Color(0xFF3B5FE8),
-                surface: const Color(0xFF0A0E1A),
-                background: const Color(0xFF0A0E1A),
-                surfaceVariant: const Color(0xFF1A1F2E),
+              colorScheme: const ColorScheme.dark(
+                primary: Color(0xFF294EC3),
+                secondary: Color(0xFF3B5FE8),
+                surface: Color(0xFF0A0E1A),
+                background: Color(0xFF0A0E1A),
+                surfaceVariant: Color(0xFF1A1F2E),
                 onPrimary: Colors.white,
                 onSecondary: Colors.white,
                 onSurface: Colors.white,
