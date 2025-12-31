@@ -34,46 +34,55 @@ class ToolsPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
-              _ToolCard(
-                title: 'Web Dashboard',
-                description: 'Access your financial dashboard via web browser',
-                icon: Icons.dashboard_outlined,
-                iconColor: colorScheme.primary,
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const WebPage(),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              _ToolCard(
-                title: 'Accounts',
-                description: 'View and manage your quick access accounts',
-                icon: Icons.account_balance_outlined,
-                iconColor: colorScheme.secondary,
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const AccountsPage(),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              _ToolCard(
-                title: 'Verify Payments',
-                description: 'Scan QR codes to verify payment information',
-                icon: Icons.qr_code_scanner,
-                iconColor: colorScheme.tertiary,
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const VerifyPaymentsPage(),
-                    ),
-                  );
-                },
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.85,
+                children: [
+                  _ToolCard(
+                    title: 'Web Dashboard',
+                    description:
+                        'Access your financial dashboard via web browser',
+                    icon: Icons.dashboard_outlined,
+                    iconColor: colorScheme.primary,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const WebPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  _ToolCard(
+                    title: 'Accounts',
+                    description: 'View and manage your quick access accounts',
+                    icon: Icons.account_balance_outlined,
+                    iconColor: colorScheme.secondary,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const AccountsPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  _ToolCard(
+                    title: 'Verify Payments',
+                    description: 'Scan QR codes to verify payment information',
+                    icon: Icons.qr_code_scanner,
+                    iconColor: colorScheme.tertiary,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const VerifyPaymentsPage(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -117,46 +126,41 @@ class _ToolCard extends StatelessWidget {
               color: colorScheme.outline.withOpacity(0.2),
             ),
           ),
-          child: Row(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 56,
-                height: 56,
+                width: 64,
+                height: 64,
                 decoration: BoxDecoration(
                   color: iconColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Icon(
                   icon,
                   color: iconColor,
-                  size: 28,
+                  size: 32,
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
                 ),
+                textAlign: TextAlign.center,
               ),
-              Icon(
-                Icons.chevron_right,
-                color: colorScheme.onSurfaceVariant,
+              const SizedBox(height: 8),
+              Text(
+                description,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
