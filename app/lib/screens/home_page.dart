@@ -31,6 +31,7 @@ import 'package:totals/widgets/category_filter_sheet.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:totals/widgets/paste_sms_sheet.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -992,8 +993,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                             ),
                                           ]
                                         : [
-                                            _buildTodayRefreshButton(provider),
-                                            const SizedBox(width: 8),
+                                            // SMS refresh button only shown on Android
+                                            if (SmsService.isSmsAvailable) ...[
+                                              _buildTodayRefreshButton(
+                                                  provider),
+                                              const SizedBox(width: 8),
+                                            ],
                                             CategoryFilterIconButton(
                                               icon: Icons.toc_rounded,
                                               iconColor: Colors.green,
@@ -1216,6 +1221,34 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 4),
+                // Paste SMS button - iOS only
+                if (shouldShowPasteSmsFeature) ...[
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withOpacity(0.3),
+                      ),
+                    ),
+                    child: IconButton(
+                      icon: Icon(Icons.content_paste,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 22),
+                      onPressed: () => showPasteSmsSheet(context: context),
+                      padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Paste Bank SMS',
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                ],
                 Container(
                   decoration: BoxDecoration(
                     color: Theme.of(context)

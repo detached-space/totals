@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:another_telephony/telephony.dart';
@@ -102,7 +103,16 @@ class SmsService {
   // Callback for foreground-only UI updates.
   ValueChanged<Transaction>? onTransactionSaved;
 
+  /// Returns true if SMS features are available (Android only)
+  static bool get isSmsAvailable => Platform.isAndroid;
+
   Future<void> init() async {
+    // SMS reading is only available on Android
+    if (!Platform.isAndroid) {
+      print("debug: SMS features not available on this platform (iOS)");
+      return;
+    }
+
     final bool? result = await _telephony.requestSmsPermissions;
     if (result != null && result) {
       _telephony.listenIncomingSms(
@@ -134,6 +144,12 @@ class SmsService {
   }
 
   Future<TodaySmsSyncResult> syncTodayBankSms() async {
+    // SMS reading is only available on Android
+    if (!Platform.isAndroid) {
+      print("debug: SMS sync not available on this platform (iOS)");
+      return const TodaySmsSyncResult(permissionDenied: true);
+    }
+
     final bool? permissionGranted = await _telephony.requestSmsPermissions;
     if (permissionGranted != true) {
       return const TodaySmsSyncResult(permissionDenied: true);
