@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -61,11 +62,19 @@ class AccountRegistrationService {
   }
 
   /// Syncs and parses previous SMS messages from the bank
+  /// Note: SMS syncing is only available on Android.
   Future<void> _syncPreviousSms(
     int bankId,
     String accountNumber,
     Function(String stage, double progress)? onProgress,
   ) async {
+    // SMS reading is only available on Android
+    if (!Platform.isAndroid) {
+      print("debug: SMS sync not available on iOS");
+      onProgress?.call("SMS sync not available on iOS", 1.0);
+      return;
+    }
+
     // Fetch banks from database (with caching)
     if (_cachedBanks == null) {
       _cachedBanks = await _bankConfigService.getBanks();

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:another_telephony/telephony.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/models/account.dart';
@@ -69,9 +70,16 @@ class BankDetectionService {
   /// but hasn't registered an account for yet.
   /// Uses cached results for faster loading. Scans SMS only when cache is empty
   /// or forceRefresh is true.
+  /// Note: SMS scanning is only available on Android. On iOS, returns empty list.
   Future<List<DetectedBank>> detectUnregisteredBanks({
     bool forceRefresh = false,
   }) async {
+    // SMS reading is only available on Android
+    if (!Platform.isAndroid) {
+      print("debug: Bank detection via SMS not available on iOS");
+      return [];
+    }
+
     try {
       // Get registered accounts first (needed for filtering)
       List<Account> registeredAccounts = await _accountRepo.getAccounts();
@@ -276,7 +284,14 @@ class BankDetectionService {
   }
 
   /// Gets all banks detected from SMS (including those already registered)
+  /// Note: SMS scanning is only available on Android. On iOS, returns empty list.
   Future<List<DetectedBank>> detectAllBanks({bool forceRefresh = false}) async {
+    // SMS reading is only available on Android
+    if (!Platform.isAndroid) {
+      print("debug: Bank detection via SMS not available on iOS");
+      return [];
+    }
+
     try {
       // Try cache first
       if (!forceRefresh) {

@@ -59,6 +59,7 @@ dependencies:
   permission_handler: ^11.3.1
   mobile_scanner: ^5.1.1
   home_widget: ^0.9.0
+  pretty_qr_code: ^3.3.0
   image_picker:
     ^1.1.2
     # background_sms: ^0.0.4
@@ -81,12 +82,17 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^2.0.0
-flutter_icons:
+
+# Force newer versions of packages with Dart SDK compatibility issues
+dependency_overrides:
+  win32: ^5.15.0
+flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/icon/totals_icon.png" # Path to your app icon
-  adaptive_icon_background: "#ffffff" # (Optional) For Android adaptive icons
+  image_path: "assets/icon/totals_icon.png"
+  adaptive_icon_background: "#ffffff"
   adaptive_icon_foreground: "assets/icon/totals_icon.png"
+  remove_alpha_ios: true
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
