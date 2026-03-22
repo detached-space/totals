@@ -23,7 +23,7 @@ class NotificationScheduler {
       await Workmanager().registerPeriodicTask(
         dailySpendingSummaryUniqueName,
         dailySpendingSummaryTask,
-        existingWorkPolicy: ExistingWorkPolicy.replace,
+        existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
         frequency: _dailySummaryCheckFrequency,
         initialDelay: Duration.zero,
       );

@@ -14,7 +14,7 @@ class WidgetRefreshScheduler {
       await Workmanager().registerPeriodicTask(
         widgetMidnightRefreshUniqueName,
         widgetMidnightRefreshTask,
-        existingWorkPolicy: ExistingWorkPolicy.replace,
+        existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
         frequency: _refreshCheckFrequency,
         initialDelay: Duration.zero,
       );

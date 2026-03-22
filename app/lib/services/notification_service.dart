@@ -26,6 +26,7 @@ class NotificationService {
   static const String _dailySpendingChannelId = 'daily_spending';
   static const String _accountSyncChannelId = 'account_sync';
   static const String _budgetChannelId = 'budgets';
+  static const String _duplicateChannelId = 'duplicate_warnings';
   static const int dailySpendingNotificationId = 9001;
   static const int dailySpendingTestNotificationId = 9002;
 
@@ -323,6 +324,40 @@ class NotificationService {
     } catch (e) {
       if (kDebugMode) {
         print('debug: Failed to show transaction notification: $e');
+      }
+    }
+  }
+
+  Future<void> showDuplicateWarningNotification({
+    required Transaction transaction,
+    required Duration timeDelta,
+  }) async {
+    try {
+      await ensureInitialized();
+      final seconds = timeDelta.inSeconds;
+      final deltaLabel = seconds < 60 ? '${seconds}s' : '${timeDelta.inMinutes}m';
+      final amountStr =
+          'ETB ${transaction.amount.toStringAsFixed(2)}';
+      await _plugin.show(
+        transaction.reference.hashCode ^ 0xD0B1,
+        '⚠️ Possible duplicate transaction',
+        '$amountStr appeared twice within $deltaLabel — verify in the app.',
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _duplicateChannelId,
+            'Duplicate Warnings',
+            channelDescription:
+                'Alerts when a transaction looks like a duplicate',
+            importance: Importance.high,
+            priority: Priority.high,
+            color: const Color(0xFFE53935),
+          ),
+          iOS: const DarwinNotificationDetails(),
+        ),
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show duplicate warning notification: $e');
       }
     }
   }

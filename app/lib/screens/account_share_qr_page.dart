@@ -383,9 +383,9 @@ class _TotalsRandomColorSymbol extends PrettyQrShape {
 
     final radius = moduleDimension / 2;
     final effectiveRadius =
-        PrettyQrShape.clampDouble(radius * rounding, 0, radius);
+        (radius * rounding).clamp(0.0, radius).toDouble();
     final effectiveDensity =
-        radius - PrettyQrShape.clampDouble(radius * density, 1, radius);
+        radius - (radius * density).clamp(1.0, radius).toDouble();
 
     for (final module in matrix) {
       if (!module.isDark) continue;

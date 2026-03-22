@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:totals/screens/web_page.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
+import 'package:totals/screens/duplicate_transactions_page.dart';
 
 class ToolsPage extends StatelessWidget {
   const ToolsPage({super.key});
@@ -78,6 +79,19 @@ class ToolsPage extends StatelessWidget {
                       );
                     },
                   ),
+                  _ToolCard(
+                    title: 'Duplicate Checker',
+                    icon: Icons.content_copy_rounded,
+                    iconColor: colorScheme.error,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const DuplicateTransactionsPage(),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ],
@@ -114,7 +128,7 @@ class _ToolCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: colorScheme.surfaceVariant.withOpacity(0.3),
+            color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: colorScheme.outline.withOpacity(0.2),

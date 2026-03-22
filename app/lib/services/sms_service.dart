@@ -16,6 +16,7 @@ import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/services/widget_service.dart';
+import 'package:totals/services/duplicate_transaction_service.dart';
 
 enum ParseStatus {
   success,
@@ -62,7 +63,7 @@ class TodaySmsSyncResult {
 
 // Top-level function for background execution
 @pragma('vm:entry-point')
-onBackgroundMessage(SmsMessage message) async {
+Future<void> onBackgroundMessage(SmsMessage message) async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     DartPluginRegistrant.ensureInitialized();
@@ -229,9 +230,7 @@ class SmsService {
     if (address == null) return null;
 
     // Fetch banks from database (with static caching)
-    if (_cachedBanks == null) {
-      _cachedBanks = await _bankConfigService.getBanks();
-    }
+    _cachedBanks ??= await _bankConfigService.getBanks();
 
     for (var bank in _cachedBanks!) {
       for (var code in bank.codes) {
@@ -261,7 +260,7 @@ class SmsService {
 
     // If the string ends with a dot, add a zero → "12." → "12.0"
     if (cleaned.endsWith('.')) {
-      cleaned = cleaned + '0';
+      cleaned = '${cleaned}0';
     }
 
     // If empty after cleaning, return 0
@@ -520,6 +519,17 @@ class SmsService {
     await txRepo.saveTransaction(newTx);
 
     print("debug: New transaction saved: ${newTx.reference}");
+
+    // Check if this looks like a duplicate of a recent transaction
+    final suspectedDuplicate = DuplicateTransactionService()
+        .checkIncoming(newTx, existingTx);
+    if (suspectedDuplicate != null) {
+      print("debug: Suspected duplicate detected for ${newTx.reference}");
+      await NotificationService.instance.showDuplicateWarningNotification(
+        transaction: newTx,
+        timeDelta: suspectedDuplicate.timeDelta,
+      );
+    }
 
     if (_isAtmWithdrawal(details, messageBody)) {
       try {

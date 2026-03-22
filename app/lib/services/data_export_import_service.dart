@@ -368,6 +368,54 @@ class DataExportImportService {
     }
   }
 
+  /// Export transactions to CSV format
+  Future<String> exportTransactionsCsv() async {
+    try {
+      final transactions = await _transactionRepo.getTransactions();
+      final categories = await _categoryRepo.getCategories();
+      final categoryNames = {
+        for (final c in categories)
+          if (c.id != null) c.id!: c.name
+      };
+
+      final buffer = StringBuffer();
+      buffer.writeln(
+          'Date,Type,Amount (ETB),Creditor,Receiver,Account Number,Bank ID,Balance After,Category,Reference,Service Charge,VAT');
+
+      for (final t in transactions) {
+        buffer.writeln([
+          _csvField(t.time ?? ''),
+          _csvField(t.type ?? ''),
+          t.amount.toStringAsFixed(2),
+          _csvField(t.creditor ?? ''),
+          _csvField(t.receiver ?? ''),
+          _csvField(t.accountNumber ?? ''),
+          _csvField(t.bankId?.toString() ?? ''),
+          _csvField(t.currentBalance ?? ''),
+          _csvField(
+              t.categoryId != null ? (categoryNames[t.categoryId] ?? '') : ''),
+          _csvField(t.reference),
+          (t.serviceCharge ?? 0).toStringAsFixed(2),
+          (t.vat ?? 0).toStringAsFixed(2),
+        ].join(','));
+      }
+
+      return buffer.toString();
+    } catch (e) {
+      throw Exception('Failed to export transactions as CSV: $e');
+    }
+  }
+
+  String _csvField(String value) {
+    if (value.contains(',') ||
+        value.contains('"') ||
+        value.contains('\n') ||
+        value.contains('\r')) {
+      return '"${value.replaceAll('"', '""')}"';
+    }
+    return value;
+  }
+
   Future<List<Bank>> _getBanksFromDb() async {
     final db = await DatabaseHelper.instance.database;
     final rows = await db.query('banks');
