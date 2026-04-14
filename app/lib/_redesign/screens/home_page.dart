@@ -277,9 +277,12 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                               final isMisc = category?.uncategorized == true;
                               final categoryLabel = isSelfTransfer
                                   ? 'Self'
-                                  : (category?.name ?? 'Categorize');
-                              final isCategorize =
-                                  isSelfTransfer || category != null;
+                                  : provider.categoryLabelForTransaction(
+                                      transaction,
+                                      uncategorizedLabel: 'Categorize',
+                                    );
+                              final isCategorize = isSelfTransfer ||
+                                  transaction.selectedCategoryIds.isNotEmpty;
                               final isCredit = transaction.type == 'CREDIT';
                               final amountLabel = _amountLabel(
                                 transaction.amount,
@@ -983,8 +986,6 @@ class _InsightCard extends StatelessWidget {
                       height: 1.45,
                     ),
                   ),
-
-
                   const SizedBox(height: 14),
                   FilledButton.icon(
                     onPressed: isImportingBackup ? null : onImportBackupTap,

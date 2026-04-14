@@ -1710,9 +1710,14 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final category = provider.getCategoryById(transaction.categoryId);
     final isSelfTransfer = provider.isSelfTransfer(transaction);
     final isMisc = category?.uncategorized == true;
-    final categoryLabel =
-        isSelfTransfer ? 'Self' : (category?.name ?? 'Categorize');
-    final isCategorized = isSelfTransfer || category != null;
+    final categoryLabel = isSelfTransfer
+        ? 'Self'
+        : provider.categoryLabelForTransaction(
+            transaction,
+            uncategorizedLabel: 'Categorize',
+          );
+    final isCategorized =
+        isSelfTransfer || transaction.selectedCategoryIds.isNotEmpty;
     final isCredit = transaction.type == 'CREDIT';
 
     final selected = _selectedRefs.contains(transaction.reference);
@@ -2992,7 +2997,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     // Category filter
     if (_filter.categoryId != null) {
-      result = result.where((t) => t.categoryId == _filter.categoryId).toList();
+      result =
+          result.where((t) => t.includesCategory(_filter.categoryId)).toList();
     }
 
     // Amount range filter
@@ -3550,7 +3556,7 @@ bool _matchesAnalyticsHeatmapFilterValue(
     return false;
   }
   if (filter.categoryId != null &&
-      transaction.categoryId != filter.categoryId) {
+      !transaction.includesCategory(filter.categoryId)) {
     return false;
   }
   if (filter.startDate != null) {

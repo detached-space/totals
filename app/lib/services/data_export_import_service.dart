@@ -23,7 +23,7 @@ import 'package:totals/utils/transaction_duplicate_detector.dart';
 const int _dashenBankId = 4;
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 4;
+  static const int currentSchemaVersion = 5;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -304,15 +304,39 @@ class DataExportImportService {
             transaction = transaction.copyWith(reference: reference);
           }
 
-          final categoryId = transaction.categoryId;
-          if (categoryId != null) {
-            final mappedId = categoryIdMap[categoryId];
-            if (mappedId != null) {
-              transaction = transaction.copyWith(categoryId: mappedId);
+          final sourceCategoryIds = transaction.selectedCategoryIds;
+          if (sourceCategoryIds.isNotEmpty) {
+            final mappedCategoryIds = <int>[];
+            for (final sourceId in sourceCategoryIds) {
+              final mappedId = categoryIdMap[sourceId];
+              if (mappedId != null) {
+                mappedCategoryIds.add(mappedId);
+              } else if (!categoryIdsCanBeMapped) {
+                mappedCategoryIds.add(sourceId);
+              }
+            }
+
+            int? mappedPrimaryCategoryId;
+            final sourcePrimaryCategoryId = transaction.categoryId;
+            if (sourcePrimaryCategoryId != null) {
+              mappedPrimaryCategoryId =
+                  categoryIdMap[sourcePrimaryCategoryId] ??
+                      (categoryIdsCanBeMapped ? null : sourcePrimaryCategoryId);
+            }
+
+            if (mappedCategoryIds.isNotEmpty) {
+              transaction = transaction.copyWith(
+                categoryId: mappedPrimaryCategoryId ?? mappedCategoryIds.first,
+                categoryIds: mappedCategoryIds,
+              );
             } else if (categoryIdsCanBeMapped) {
-              // If categories are included but this ID is unresolved, clear it
-              // to avoid linking to a wrong category in the destination DB.
-              transaction = transaction.copyWith(clearCategoryId: true);
+              // If categories are included but none of the referenced IDs are
+              // resolvable, clear the category linkage instead of keeping stale
+              // foreign keys from the source database.
+              transaction = transaction.copyWith(
+                clearCategoryId: true,
+                clearCategoryIds: true,
+              );
             }
           }
 
@@ -417,6 +441,7 @@ class DataExportImportService {
                     ),
               'flow': rule.flow,
               'categoryId': categoryId,
+              'isPrimary': rule.isPrimary ? 1 : 0,
               'createdAt': rule.createdAt,
             },
             conflictAlgorithm: ConflictAlgorithm.replace,
@@ -488,6 +513,7 @@ class DataExportImportService {
               ),
               'flow': _autoCategorizationService.normalizeFlow(category.flow),
               'categoryId': resolvedCategoryId,
+              'isPrimary': 1,
               'createdAt':
                   mapping['createdAt'] ?? DateTime.now().toIso8601String(),
             },

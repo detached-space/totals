@@ -233,6 +233,30 @@ class TransactionProvider with ChangeNotifier {
     return _categoryById[id];
   }
 
+  List<Category> categoriesForTransaction(Transaction transaction) {
+    final categories = <Category>[];
+    for (final categoryId in transaction.selectedCategoryIds) {
+      final category = getCategoryById(categoryId);
+      if (category != null) {
+        categories.add(category);
+      }
+    }
+    return categories;
+  }
+
+  String categoryLabelForTransaction(
+    Transaction transaction, {
+    String uncategorizedLabel = 'Uncategorized',
+  }) {
+    final categories = categoriesForTransaction(transaction);
+    if (categories.isEmpty) return uncategorizedLabel;
+    final primaryLabel = categories.first.name.trim();
+    if (primaryLabel.isEmpty) return uncategorizedLabel;
+    final extraCount = categories.length - 1;
+    if (extraCount <= 0) return primaryLabel;
+    return '$primaryLabel +$extraCount';
+  }
+
   List<AutoCategorizationRule> autoCategorizationRulesForFlow(String flow) {
     final normalizedFlow = _autoCategorizationService.normalizeFlow(flow);
     final rules = _autoCategorizationRules
@@ -244,6 +268,17 @@ class TransactionProvider with ChangeNotifier {
             b.counterparty.toLowerCase(),
           ),
     );
+    rules.sort((a, b) {
+      if (a.counterparty.toLowerCase() != b.counterparty.toLowerCase()) {
+        return a.counterparty.toLowerCase().compareTo(
+              b.counterparty.toLowerCase(),
+            );
+      }
+      if (a.isPrimary != b.isPrimary) {
+        return a.isPrimary ? -1 : 1;
+      }
+      return a.categoryId.compareTo(b.categoryId);
+    });
     return rules;
   }
 
@@ -266,21 +301,49 @@ class TransactionProvider with ChangeNotifier {
     return _autoCategorizationService.flowForTransactionType(transaction.type);
   }
 
-  AutoCategorizationRule? findAutoCategorizationRuleForTransaction(
+  List<AutoCategorizationRule> autoCategorizationRulesForTransaction(
     Transaction transaction,
   ) {
     final counterparty = resolvePrimaryCounterparty(transaction);
-    if (counterparty == null) return null;
+    if (counterparty == null) return const [];
 
     final normalizedCounterparty =
         _autoCategorizationService.normalizeCounterparty(counterparty);
     final flow = autoCategorizationFlowForTransaction(transaction);
-    for (final rule in _autoCategorizationRules) {
-      if (rule.flow != flow) continue;
-      if (rule.normalizedCounterparty != normalizedCounterparty) continue;
-      return rule;
+    final rules = _autoCategorizationRules
+        .where((rule) => rule.flow == flow)
+        .where((rule) => rule.normalizedCounterparty == normalizedCounterparty)
+        .where((rule) => _categoryById.containsKey(rule.categoryId))
+        .toList(growable: false);
+    rules.sort((a, b) {
+      if (a.isPrimary != b.isPrimary) {
+        return a.isPrimary ? -1 : 1;
+      }
+      return a.categoryId.compareTo(b.categoryId);
+    });
+    return rules;
+  }
+
+  List<int> autoCategorizationCategoryIdsForTransaction(
+    Transaction transaction,
+  ) {
+    final ids = <int>[];
+    for (final rule in autoCategorizationRulesForTransaction(transaction)) {
+      if (rule.categoryId <= 0 || ids.contains(rule.categoryId)) continue;
+      ids.add(rule.categoryId);
     }
-    return null;
+    return ids;
+  }
+
+  AutoCategorizationRule? findAutoCategorizationRuleForTransaction(
+    Transaction transaction,
+  ) {
+    final rules = autoCategorizationRulesForTransaction(transaction);
+    if (rules.isEmpty) return null;
+    for (final rule in rules) {
+      if (rule.isPrimary) return rule;
+    }
+    return rules.first;
   }
 
   bool canConfigureAutoCategorizationForTransaction(Transaction transaction) {
@@ -1282,14 +1345,62 @@ class TransactionProvider with ChangeNotifier {
     Category category,
   ) async {
     if (category.id == null) return;
-    final updated = transaction.copyWith(categoryId: category.id);
+    await updateCategoriesForTransaction(
+      transaction,
+      categoryIds: <int>[category.id!],
+      primaryCategoryId: category.id,
+    );
+  }
+
+  Future<Transaction> updateCategoriesForTransaction(
+    Transaction transaction, {
+    required List<int> categoryIds,
+    int? primaryCategoryId,
+  }) async {
+    final normalizedCategoryIds = <int>[];
+    for (final categoryId in categoryIds) {
+      if (categoryId <= 0 || normalizedCategoryIds.contains(categoryId)) {
+        continue;
+      }
+      normalizedCategoryIds.add(categoryId);
+    }
+
+    final resolvedPrimaryCategoryId = normalizedCategoryIds.isEmpty
+        ? null
+        : (primaryCategoryId != null &&
+                normalizedCategoryIds.contains(primaryCategoryId)
+            ? primaryCategoryId
+            : normalizedCategoryIds.first);
+
+    final updated = normalizedCategoryIds.isEmpty
+        ? transaction.copyWith(
+            clearCategoryId: true,
+            clearCategoryIds: true,
+          )
+        : transaction.copyWith(
+            categoryId: resolvedPrimaryCategoryId,
+            categoryIds: normalizedCategoryIds,
+          );
+
+    final hasSelectionChanged = updated.categoryId != transaction.categoryId ||
+        !listEquals(
+          updated.selectedCategoryIds,
+          transaction.selectedCategoryIds,
+        );
+    if (!hasSelectionChanged) {
+      return transaction;
+    }
+
     final previous = _replaceTransactionLocally(updated);
     if (previous != null) {
       _notifyOptimisticChange();
     }
 
     try {
-      await _transactionRepo.saveTransaction(updated);
+      await _transactionRepo.saveTransaction(
+        updated,
+        skipAutoCategorization: true,
+      );
     } catch (e) {
       if (previous != null) {
         _replaceTransactionLocally(previous);
@@ -1301,9 +1412,11 @@ class TransactionProvider with ChangeNotifier {
     unawaited(
       _finalizeCategoryMutationAfterSave(
         transactionType: transaction.type,
-        categoryId: category.id,
+        categoryIds: updated.selectedCategoryIds,
       ),
     );
+
+    return updated;
   }
 
   Future<void> updateNoteForTransaction(
@@ -1364,6 +1477,7 @@ class TransactionProvider with ChangeNotifier {
       transactionLink: transaction.transactionLink,
       accountNumber: transaction.accountNumber,
       categoryId: transaction.categoryId,
+      categoryIds: transaction.categoryIds,
       profileId: transaction.profileId,
       serviceCharge: transaction.serviceCharge,
       vat: transaction.vat,
@@ -1395,36 +1509,15 @@ class TransactionProvider with ChangeNotifier {
   }
 
   Future<void> clearCategoryForTransaction(Transaction transaction) async {
-    // Use copyWith with clearCategoryId flag to explicitly set categoryId to null
-    final updated = transaction.copyWith(clearCategoryId: true);
-    final previous = _replaceTransactionLocally(updated);
-    if (previous != null) {
-      _notifyOptimisticChange();
-    }
-
-    try {
-      await _transactionRepo.saveTransaction(
-        updated,
-        skipAutoCategorization: true,
-      );
-    } catch (e) {
-      if (previous != null) {
-        _replaceTransactionLocally(previous);
-        _notifyOptimisticChange();
-      }
-      rethrow;
-    }
-
-    unawaited(
-      _finalizeCategoryMutationAfterSave(
-        transactionType: transaction.type,
-      ),
+    await updateCategoriesForTransaction(
+      transaction,
+      categoryIds: const <int>[],
     );
   }
 
   Future<void> _finalizeCategoryMutationAfterSave({
     required String? transactionType,
-    int? categoryId,
+    Iterable<int> categoryIds = const <int>[],
   }) async {
     try {
       await _recomputeAfterTransactionMutation();
@@ -1433,12 +1526,14 @@ class TransactionProvider with ChangeNotifier {
       print("debug: Error recomputing state after categorizing: $e");
     }
 
-    if (transactionType == 'DEBIT' && categoryId != null) {
-      try {
-        await _budgetAlertService
-            .checkAndNotifyBudgetAlertsForCategory(categoryId);
-      } catch (e) {
-        print("debug: Error checking budget alerts after categorizing: $e");
+    if (transactionType == 'DEBIT') {
+      for (final categoryId in categoryIds.toSet()) {
+        try {
+          await _budgetAlertService
+              .checkAndNotifyBudgetAlertsForCategory(categoryId);
+        } catch (e) {
+          print("debug: Error checking budget alerts after categorizing: $e");
+        }
       }
     }
   }
@@ -1551,36 +1646,80 @@ class TransactionProvider with ChangeNotifier {
     required Category category,
     required bool shouldAutoCategorize,
   }) async {
-    if (!_autoCategorizationEnabled) return;
-
     final categoryId = category.id;
     if (categoryId == null) return;
+    await syncAutoCategorizationRulesForSelection(
+      transaction: transaction,
+      categoryIds: <int>[categoryId],
+      primaryCategoryId: categoryId,
+      shouldAutoCategorize: shouldAutoCategorize,
+    );
+  }
+
+  Future<void> syncAutoCategorizationRulesForSelection({
+    required Transaction transaction,
+    required List<int> categoryIds,
+    int? primaryCategoryId,
+    required bool shouldAutoCategorize,
+  }) async {
+    if (!_autoCategorizationEnabled) return;
 
     final counterparty = resolvePrimaryCounterparty(transaction);
     if (counterparty == null) return;
 
-    final flow = _autoCategorizationService.normalizeFlow(category.flow);
-    final existingRule = findAutoCategorizationRuleForTransaction(transaction);
-
-    if (shouldAutoCategorize) {
-      if (existingRule != null && existingRule.categoryId == categoryId) {
-        return;
+    final normalizedCategoryIds = <int>[];
+    for (final categoryId in categoryIds) {
+      if (categoryId <= 0 || normalizedCategoryIds.contains(categoryId)) {
+        continue;
       }
-      await _autoCategorizationService.upsertRule(
+      if (!_categoryById.containsKey(categoryId)) continue;
+      normalizedCategoryIds.add(categoryId);
+    }
+
+    final resolvedPrimaryCategoryId = normalizedCategoryIds.isEmpty
+        ? null
+        : (primaryCategoryId != null &&
+                normalizedCategoryIds.contains(primaryCategoryId)
+            ? primaryCategoryId
+            : normalizedCategoryIds.first);
+
+    final flow = autoCategorizationFlowForTransaction(transaction);
+
+    if (shouldAutoCategorize && resolvedPrimaryCategoryId != null) {
+      await _autoCategorizationService.replaceRules(
         counterparty: counterparty,
         flow: flow,
-        categoryId: categoryId,
+        categoryIds: normalizedCategoryIds,
+        primaryCategoryId: resolvedPrimaryCategoryId,
       );
       await _autoCategorizationService.clearPromptDismissal(
         counterparty: counterparty,
         flow: flow,
       );
     } else {
-      final existingRuleId = existingRule?.id;
-      if (existingRuleId == null) return;
-      await _autoCategorizationService.deleteRule(existingRuleId);
+      await _autoCategorizationService.deleteRulesForCounterparty(
+        counterparty,
+        flow,
+      );
     }
 
+    await _reloadAutoCategorizationState();
+    _dataVersion += 1;
+    notifyListeners();
+  }
+
+  Future<void> clearAutoCategorizationRuleForTransaction(
+    Transaction transaction,
+  ) async {
+    if (!_autoCategorizationEnabled) return;
+
+    final counterparty = resolvePrimaryCounterparty(transaction);
+    if (counterparty == null) return;
+
+    await _autoCategorizationService.deleteRulesForCounterparty(
+      counterparty,
+      autoCategorizationFlowForTransaction(transaction),
+    );
     await _reloadAutoCategorizationState();
     _dataVersion += 1;
     notifyListeners();
@@ -1651,15 +1790,20 @@ class TransactionProvider with ChangeNotifier {
     final batch = <Transaction>[];
 
     for (final transaction in uncategorizedTransactions) {
-      final categoryId =
-          await _autoCategorizationService.getCategoryForTransaction(
+      final selection =
+          await _autoCategorizationService.getCategorySelectionForTransaction(
         type: transaction.type,
         receiver: transaction.receiver,
         creditor: transaction.creditor,
       );
 
-      if (categoryId != null) {
-        batch.add(transaction.copyWith(categoryId: categoryId));
+      if (selection != null && !selection.isEmpty) {
+        batch.add(
+          transaction.copyWith(
+            categoryId: selection.primaryCategoryId,
+            categoryIds: selection.categoryIds,
+          ),
+        );
         updatedCount++;
       }
     }

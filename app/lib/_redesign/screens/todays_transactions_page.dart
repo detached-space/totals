@@ -13,8 +13,7 @@ class TodaysTransactionsPage extends StatefulWidget {
   const TodaysTransactionsPage({super.key});
 
   @override
-  State<TodaysTransactionsPage> createState() =>
-      _TodaysTransactionsPageState();
+  State<TodaysTransactionsPage> createState() => _TodaysTransactionsPageState();
 }
 
 class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
@@ -147,20 +146,19 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                   itemBuilder: (context, index) {
                     final tx = transactions[index];
                     final bankLabel = provider.getBankShortName(tx.bankId);
-                    final category =
-                        provider.getCategoryById(tx.categoryId);
-                    final isSelfTransfer =
-                        provider.isSelfTransfer(tx);
-                    final isMisc =
-                        category?.uncategorized == true;
+                    final category = provider.getCategoryById(tx.categoryId);
+                    final isSelfTransfer = provider.isSelfTransfer(tx);
+                    final isMisc = category?.uncategorized == true;
                     final categoryLabel = isSelfTransfer
                         ? 'Self'
-                        : (category?.name ?? 'Categorize');
+                        : provider.categoryLabelForTransaction(
+                            tx,
+                            uncategorizedLabel: 'Categorize',
+                          );
                     final isCategorized =
-                        isSelfTransfer || category != null;
+                        isSelfTransfer || tx.selectedCategoryIds.isNotEmpty;
                     final isCredit = tx.type == 'CREDIT';
-                    final selected =
-                        _selectedRefs.contains(tx.reference);
+                    final selected = _selectedRefs.contains(tx.reference);
 
                     return TransactionTile(
                       bank: bankLabel,
@@ -171,9 +169,8 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       isSelfTransfer: isSelfTransfer,
                       isMisc: isMisc,
                       amount: _amountLabel(tx.amount, isCredit: isCredit),
-                      amountColor: isCredit
-                          ? AppColors.incomeSuccess
-                          : AppColors.red,
+                      amountColor:
+                          isCredit ? AppColors.incomeSuccess : AppColors.red,
                       name: _counterparty(tx, isSelfTransfer: isSelfTransfer),
                       timestamp: _timeLabel(tx),
                       selected: selected,

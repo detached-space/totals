@@ -367,7 +367,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
 
   double _spentForBudget(Budget b, List<Transaction> debits) {
     return debits
-        .where((t) => b.includesCategory(t.categoryId))
+        .where((t) => t.selectedCategoryIds.any(b.includesCategory))
         .fold(0.0, (s, t) => s + t.amount);
   }
 
@@ -479,7 +479,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
         ? <Transaction>[]
         : debits.where((t) {
             if (tp.isSelfTransfer(t)) return false;
-            return !budgetedCatIds.contains(t.categoryId);
+            return !t.selectedCategoryIds.any(budgetedCatIds.contains);
           }).toList();
     final unbudgetedAmount = unbudgetedTxns.fold(0.0, (s, t) => s + t.amount);
 
@@ -595,8 +595,9 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     final categorySummary = _categorySummaryForBudget(budget, tp);
 
     // Transactions for this budget
-    final txns =
-        debits.where((t) => budget.includesCategory(t.categoryId)).toList();
+    final txns = debits
+        .where((t) => t.selectedCategoryIds.any(budget.includesCategory))
+        .toList();
     // Sort newest first
     txns.sort((a, b) {
       final ta = a.time != null ? DateTime.tryParse(a.time!) : null;
@@ -685,9 +686,12 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                         key: ValueKey(
                             'budget_txn_${t.reference}_${t.categoryId}'),
                         bank: _bankLabel(t.bankId),
-                        category: transactionCategory?.name ?? 'Uncategorized',
+                        category: tp.categoryLabelForTransaction(
+                          t,
+                          uncategorizedLabel: 'Uncategorized',
+                        ),
                         categoryModel: transactionCategory,
-                        isCategorized: transactionCategory != null,
+                        isCategorized: t.selectedCategoryIds.isNotEmpty,
                         isDebit: t.type?.toUpperCase() == 'DEBIT',
                         amount: formatNumberWithComma(t.amount),
                         amountColor: t.type?.toUpperCase() == 'DEBIT'
@@ -1304,7 +1308,7 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
             if (dt == null) return false;
             if (dt.isBefore(monthStart) || !dt.isBefore(monthEnd)) return false;
             if (provider.isSelfTransfer(t)) return false;
-            return !budgetedCategoryIds.contains(t.categoryId);
+            return !t.selectedCategoryIds.any(budgetedCategoryIds.contains);
           }).toList()
             ..sort((a, b) {
               final ta = a.time != null ? DateTime.tryParse(a.time!) : null;
@@ -1349,9 +1353,14 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                   final cat = provider.getCategoryById(t.categoryId);
                   final isSelfTransfer = provider.isSelfTransfer(t);
                   final isMisc = cat?.uncategorized == true;
-                  final categoryLabel =
-                      isSelfTransfer ? 'Self' : (cat?.name ?? 'Categorize');
-                  final isCategorized = isSelfTransfer || cat != null;
+                  final categoryLabel = isSelfTransfer
+                      ? 'Self'
+                      : provider.categoryLabelForTransaction(
+                          t,
+                          uncategorizedLabel: 'Categorize',
+                        );
+                  final isCategorized =
+                      isSelfTransfer || t.selectedCategoryIds.isNotEmpty;
                   final isCredit = t.type == 'CREDIT';
 
                   return TransactionTile(

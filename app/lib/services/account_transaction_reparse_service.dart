@@ -831,6 +831,7 @@ class AccountTransactionReparseService {
           existing.transactionLink, reparsed.transactionLink),
       accountNumber: _pickText(existing.accountNumber, reparsed.accountNumber),
       categoryId: existing.categoryId,
+      categoryIds: existing.categoryIds,
       profileId: existing.profileId,
       serviceCharge:
           _pickAmount(existing.serviceCharge, reparsed.serviceCharge),
@@ -848,15 +849,18 @@ class AccountTransactionReparseService {
   ) async {
     if (transaction.categoryId != null) return null;
 
-    final categoryId =
-        await _autoCategorizationService.getCategoryForTransaction(
+    final selection =
+        await _autoCategorizationService.getCategorySelectionForTransaction(
       type: transaction.type,
       receiver: transaction.receiver,
       creditor: transaction.creditor,
     );
-    if (categoryId == null) return null;
+    if (selection == null || selection.isEmpty) return null;
 
-    return transaction.copyWith(categoryId: categoryId);
+    return transaction.copyWith(
+      categoryId: selection.primaryCategoryId,
+      categoryIds: selection.categoryIds,
+    );
   }
 
   bool _isSameTransaction(Transaction a, Transaction b) {
@@ -873,6 +877,7 @@ class AccountTransactionReparseService {
         a.transactionLink == b.transactionLink &&
         a.accountNumber == b.accountNumber &&
         a.categoryId == b.categoryId &&
+        listEquals(a.selectedCategoryIds, b.selectedCategoryIds) &&
         a.profileId == b.profileId &&
         a.serviceCharge == b.serviceCharge &&
         a.vat == b.vat;

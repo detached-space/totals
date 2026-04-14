@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/category.dart' as models;
@@ -138,12 +140,69 @@ class CategoryRepository {
     }
     final db = await DatabaseHelper.instance.database;
     await db.transaction((txn) async {
-      await txn.update(
+      final affectedTransactions = await txn.query(
         'transactions',
-        {'categoryId': null},
-        where: 'categoryId = ?',
+        columns: ['id', 'categoryId', 'categoryIds'],
+        where: 'categoryId = ? OR categoryIds IS NOT NULL',
         whereArgs: [category.id],
       );
+
+      List<int> decodeCategoryIds(dynamic raw) {
+        if (raw == null) return const <int>[];
+        if (raw is String && raw.trim().isEmpty) return const <int>[];
+        try {
+          final decoded = raw is String ? jsonDecode(raw) : raw;
+          if (decoded is! List) return const <int>[];
+          return decoded
+              .map((value) {
+                if (value is int) return value;
+                if (value is num) return value.toInt();
+                if (value is String) return int.tryParse(value.trim());
+                return null;
+              })
+              .whereType<int>()
+              .toList(growable: false);
+        } catch (_) {
+          return const <int>[];
+        }
+      }
+
+      final batch = txn.batch();
+      for (final row in affectedTransactions) {
+        final transactionId = row['id'] as int?;
+        if (transactionId == null) continue;
+
+        final selectedCategoryIds =
+            decodeCategoryIds(row['categoryIds']).toList(growable: true);
+        final primaryCategoryId = row['categoryId'] as int?;
+        if (primaryCategoryId != null &&
+            primaryCategoryId > 0 &&
+            !selectedCategoryIds.contains(primaryCategoryId)) {
+          selectedCategoryIds.insert(0, primaryCategoryId);
+        }
+
+        if (!selectedCategoryIds.contains(category.id)) {
+          continue;
+        }
+
+        final remainingIds = selectedCategoryIds
+            .where((id) => id != category.id)
+            .toSet()
+            .toList(growable: false);
+
+        batch.update(
+          'transactions',
+          {
+            'categoryId': remainingIds.isEmpty ? null : remainingIds.first,
+            'categoryIds':
+                remainingIds.isEmpty ? null : jsonEncode(remainingIds),
+          },
+          where: 'id = ?',
+          whereArgs: [transactionId],
+        );
+      }
+      await batch.commit(noResult: true);
+
       await txn.delete(
         'categories',
         where: 'id = ?',

@@ -4,6 +4,7 @@ class AutoCategorizationRule {
   final String normalizedCounterparty;
   final String flow;
   final int categoryId;
+  final bool isPrimary;
   final String createdAt;
 
   const AutoCategorizationRule({
@@ -12,10 +13,12 @@ class AutoCategorizationRule {
     required this.normalizedCounterparty,
     required this.flow,
     required this.categoryId,
+    this.isPrimary = false,
     required this.createdAt,
   });
 
   factory AutoCategorizationRule.fromDb(Map<String, dynamic> row) {
+    final rawIsPrimary = row['isPrimary'];
     return AutoCategorizationRule(
       id: row['id'] as int?,
       counterparty: (row['counterparty'] as String?) ?? '',
@@ -25,6 +28,7 @@ class AutoCategorizationRule {
           ? 'income'
           : 'expense',
       categoryId: row['categoryId'] as int? ?? 0,
+      isPrimary: rawIsPrimary == null ? true : rawIsPrimary == 1,
       createdAt: (row['createdAt'] as String?) ?? '',
     );
   }
@@ -35,6 +39,17 @@ class AutoCategorizationRule {
       if (value is num) return value.toInt();
       if (value is String) return int.tryParse(value.trim());
       return null;
+    }
+
+    bool toBool(dynamic value, {required bool defaultValue}) {
+      if (value is bool) return value;
+      if (value is num) return value != 0;
+      if (value is String) {
+        final normalized = value.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return defaultValue;
     }
 
     final rawFlow = (json['flow'] as String?)?.trim().toLowerCase();
@@ -49,6 +64,10 @@ class AutoCategorizationRule {
           : counterparty.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase(),
       flow: rawFlow == 'income' ? 'income' : 'expense',
       categoryId: toInt(json['categoryId']) ?? 0,
+      isPrimary: toBool(
+        json['isPrimary'],
+        defaultValue: true,
+      ),
       createdAt:
           (json['createdAt'] as String?) ?? DateTime.now().toIso8601String(),
     );
@@ -61,6 +80,7 @@ class AutoCategorizationRule {
       'normalizedCounterparty': normalizedCounterparty,
       'flow': flow,
       'categoryId': categoryId,
+      'isPrimary': isPrimary ? 1 : 0,
       'createdAt': createdAt,
     };
   }
@@ -72,9 +92,22 @@ class AutoCategorizationRule {
       'normalizedCounterparty': normalizedCounterparty,
       'flow': flow,
       'categoryId': categoryId,
+      'isPrimary': isPrimary,
       'createdAt': createdAt,
     };
   }
+}
+
+class AutoCategorizationSelection {
+  final int? primaryCategoryId;
+  final List<int> categoryIds;
+
+  const AutoCategorizationSelection({
+    required this.primaryCategoryId,
+    required this.categoryIds,
+  });
+
+  bool get isEmpty => categoryIds.isEmpty;
 }
 
 class AutoCategoryPromptDismissal {

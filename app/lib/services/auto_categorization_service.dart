@@ -53,12 +53,30 @@ class AutoCategorizationService {
       'auto_category_rules',
       where: normalizedFlow == null ? null : 'flow = ?',
       whereArgs: normalizedFlow == null ? null : [normalizedFlow],
-      orderBy: 'counterparty COLLATE NOCASE ASC, id ASC',
+      orderBy: 'counterparty COLLATE NOCASE ASC, isPrimary DESC, id ASC',
     );
-    return rows.map(AutoCategorizationRule.fromDb).toList(growable: false);
+    final rules =
+        rows.map(AutoCategorizationRule.fromDb).toList(growable: false);
+    return _sortRules(rules);
   }
 
-  Future<AutoCategorizationRule?> getRuleForCounterparty(
+  List<AutoCategorizationRule> _sortRules(List<AutoCategorizationRule> rules) {
+    rules.sort((a, b) {
+      final counterpartyComparison =
+          a.counterparty.toLowerCase().compareTo(b.counterparty.toLowerCase());
+      if (counterpartyComparison != 0) return counterpartyComparison;
+      if (a.flow != b.flow) {
+        return a.flow.compareTo(b.flow);
+      }
+      if (a.isPrimary != b.isPrimary) {
+        return a.isPrimary ? -1 : 1;
+      }
+      return a.categoryId.compareTo(b.categoryId);
+    });
+    return rules;
+  }
+
+  Future<List<AutoCategorizationRule>> getRulesForCounterparty(
     String counterparty,
     String flow,
   ) async {
@@ -70,16 +88,43 @@ class AutoCategorizationService {
         normalizeCounterparty(counterparty),
         normalizeFlow(flow),
       ],
-      limit: 1,
+      orderBy: 'isPrimary DESC, id ASC',
     );
-    if (rows.isEmpty) return null;
-    return AutoCategorizationRule.fromDb(rows.first);
+    final rules =
+        rows.map(AutoCategorizationRule.fromDb).toList(growable: false);
+    return _sortRules(rules);
+  }
+
+  Future<AutoCategorizationRule?> getRuleForCounterparty(
+    String counterparty,
+    String flow,
+  ) async {
+    final rules = await getRulesForCounterparty(counterparty, flow);
+    if (rules.isEmpty) return null;
+    for (final rule in rules) {
+      if (rule.isPrimary) return rule;
+    }
+    return rules.first;
   }
 
   Future<void> upsertRule({
     required String counterparty,
     required String flow,
     required int categoryId,
+  }) async {
+    await replaceRules(
+      counterparty: counterparty,
+      flow: flow,
+      categoryIds: <int>[categoryId],
+      primaryCategoryId: categoryId,
+    );
+  }
+
+  Future<void> replaceRules({
+    required String counterparty,
+    required String flow,
+    required Iterable<int> categoryIds,
+    int? primaryCategoryId,
   }) async {
     final db = await DatabaseHelper.instance.database;
     final normalizedCounterparty = normalizeCounterparty(counterparty);
@@ -88,26 +133,101 @@ class AutoCategorizationService {
           ' ',
         );
     final normalizedFlow = normalizeFlow(flow);
-    await db.insert(
+
+    final normalizedCategoryIds = <int>[];
+    for (final categoryId in categoryIds) {
+      if (categoryId <= 0 || normalizedCategoryIds.contains(categoryId)) {
+        continue;
+      }
+      normalizedCategoryIds.add(categoryId);
+    }
+
+    final resolvedPrimaryCategoryId = normalizedCategoryIds.isEmpty
+        ? null
+        : (primaryCategoryId != null &&
+                normalizedCategoryIds.contains(primaryCategoryId)
+            ? primaryCategoryId
+            : normalizedCategoryIds.first);
+
+    await db.transaction((txn) async {
+      await txn.delete(
+        'auto_category_rules',
+        where: 'normalizedCounterparty = ? AND flow = ?',
+        whereArgs: [normalizedCounterparty, normalizedFlow],
+      );
+
+      if (normalizedCategoryIds.isEmpty) return;
+
+      final createdAt = DateTime.now().toIso8601String();
+      for (final categoryId in normalizedCategoryIds) {
+        await txn.insert(
+          'auto_category_rules',
+          {
+            'counterparty': displayCounterparty,
+            'normalizedCounterparty': normalizedCounterparty,
+            'flow': normalizedFlow,
+            'categoryId': categoryId,
+            'isPrimary': categoryId == resolvedPrimaryCategoryId ? 1 : 0,
+            'createdAt': createdAt,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  Future<void> deleteRulesForCounterparty(
+    String counterparty,
+    String flow,
+  ) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.delete(
       'auto_category_rules',
-      {
-        'counterparty': displayCounterparty,
-        'normalizedCounterparty': normalizedCounterparty,
-        'flow': normalizedFlow,
-        'categoryId': categoryId,
-        'createdAt': DateTime.now().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      where: 'normalizedCounterparty = ? AND flow = ?',
+      whereArgs: [
+        normalizeCounterparty(counterparty),
+        normalizeFlow(flow),
+      ],
     );
   }
 
   Future<void> deleteRule(int id) async {
     final db = await DatabaseHelper.instance.database;
-    await db.delete(
+    final rows = await db.query(
       'auto_category_rules',
       where: 'id = ?',
       whereArgs: [id],
+      limit: 1,
     );
+    if (rows.isEmpty) return;
+
+    final rule = AutoCategorizationRule.fromDb(rows.first);
+    await db.transaction((txn) async {
+      await txn.delete(
+        'auto_category_rules',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+      if (!rule.isPrimary) return;
+
+      final remaining = await txn.query(
+        'auto_category_rules',
+        columns: ['id'],
+        where: 'normalizedCounterparty = ? AND flow = ?',
+        whereArgs: [rule.normalizedCounterparty, rule.flow],
+        orderBy: 'id ASC',
+        limit: 1,
+      );
+      if (remaining.isEmpty) return;
+
+      await txn.update(
+        'auto_category_rules',
+        {'isPrimary': 1},
+        where: 'id = ?',
+        whereArgs: [remaining.first['id']],
+      );
+    });
   }
 
   Future<void> dismissPrompt({
@@ -196,7 +316,7 @@ class AutoCategorizationService {
     );
   }
 
-  Future<int?> getCategoryForTransaction({
+  Future<AutoCategorizationSelection?> getCategorySelectionForTransaction({
     required String? type,
     String? receiver,
     String? creditor,
@@ -210,15 +330,52 @@ class AutoCategorizationService {
       creditor: creditor,
     );
     if (counterparty != null) {
-      final rule = await getRuleForCounterparty(counterparty, flow);
-      if (rule != null) {
-        return rule.categoryId;
+      final rules = await getRulesForCounterparty(counterparty, flow);
+      if (rules.isNotEmpty) {
+        final categoryIds = <int>[];
+        int? primaryCategoryId;
+        for (final rule in rules) {
+          if (rule.categoryId <= 0 || categoryIds.contains(rule.categoryId)) {
+            continue;
+          }
+          categoryIds.add(rule.categoryId);
+          if (primaryCategoryId == null && rule.isPrimary) {
+            primaryCategoryId = rule.categoryId;
+          }
+        }
+        if (categoryIds.isNotEmpty) {
+          primaryCategoryId ??= categoryIds.first;
+          return AutoCategorizationSelection(
+            primaryCategoryId: primaryCategoryId,
+            categoryIds: List<int>.unmodifiable(categoryIds),
+          );
+        }
       }
     }
 
-    return ReceiverCategoryService.instance.getCategoryForTransaction(
+    final fallbackCategoryId =
+        await ReceiverCategoryService.instance.getCategoryForTransaction(
       receiver: receiver,
       creditor: creditor,
     );
+    if (fallbackCategoryId == null || fallbackCategoryId <= 0) return null;
+
+    return AutoCategorizationSelection(
+      primaryCategoryId: fallbackCategoryId,
+      categoryIds: List<int>.unmodifiable(<int>[fallbackCategoryId]),
+    );
+  }
+
+  Future<int?> getCategoryForTransaction({
+    required String? type,
+    String? receiver,
+    String? creditor,
+  }) async {
+    final selection = await getCategorySelectionForTransaction(
+      type: type,
+      receiver: receiver,
+      creditor: creditor,
+    );
+    return selection?.primaryCategoryId;
   }
 }

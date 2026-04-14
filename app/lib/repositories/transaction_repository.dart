@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/transaction.dart';
@@ -82,6 +84,7 @@ class TransactionRepository {
       'transactionLink': map['transactionLink'],
       'accountNumber': map['accountNumber'],
       'categoryId': map['categoryId'],
+      'categoryIds': map['categoryIds'],
       'profileId': map['profileId'],
     });
   }
@@ -100,16 +103,19 @@ class TransactionRepository {
     // Skip if explicitly requested (e.g., when user clears category)
     Transaction transactionToSave = transaction;
     if (!skipAutoCategorization && transaction.categoryId == null) {
-      final categoryId =
-          await _autoCategorizationService.getCategoryForTransaction(
+      final selection =
+          await _autoCategorizationService.getCategorySelectionForTransaction(
         type: transaction.type,
         receiver: transaction.receiver,
         creditor: transaction.creditor,
       );
-      if (categoryId != null) {
-        transactionToSave = transaction.copyWith(categoryId: categoryId);
+      if (selection != null && !selection.isEmpty) {
+        transactionToSave = transaction.copyWith(
+          categoryId: selection.primaryCategoryId,
+          categoryIds: selection.categoryIds,
+        );
         print(
-            "debug: Auto-categorized transaction ${transaction.reference} with categoryId $categoryId");
+            "debug: Auto-categorized transaction ${transaction.reference} with categoryIds ${selection.categoryIds.join(',')}");
       }
     } else if (skipAutoCategorization) {
       print(
@@ -146,6 +152,9 @@ class TransactionRepository {
       'transactionLink': transactionToSave.transactionLink,
       'accountNumber': transactionToSave.accountNumber,
       'categoryId': transactionToSave.categoryId,
+      'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
+          ? null
+          : jsonEncode(transactionToSave.selectedCategoryIds),
       'year': year,
       'month': month,
       'day': day,
@@ -209,6 +218,9 @@ class TransactionRepository {
           'transactionLink': transaction.transactionLink,
           'accountNumber': transaction.accountNumber,
           'categoryId': transaction.categoryId,
+          'categoryIds': transaction.selectedCategoryIds.isEmpty
+              ? null
+              : jsonEncode(transaction.selectedCategoryIds),
           'profileId': profileId,
           'year': year,
           'month': month,

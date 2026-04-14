@@ -312,6 +312,9 @@ class TransactionsHandler {
       'transactionLink': transaction.transactionLink,
       'accountNumber': transaction.accountNumber,
       'categoryId': transaction.categoryId,
+      'categoryIds': transaction.selectedCategoryIds.isEmpty
+          ? null
+          : transaction.selectedCategoryIds,
     };
   }
 

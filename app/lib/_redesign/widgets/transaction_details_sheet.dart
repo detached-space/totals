@@ -63,6 +63,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _autoCategorizeFutureTransactions = false;
   String _draftColorKey = _kCategoryColorOptions.first.key;
   List<int> _quickCategoryIds = const [];
+  List<int> _autoCategorizationDraftCategoryIds = const [];
   late Transaction _transaction;
   final TextEditingController _counterpartyController = TextEditingController();
   final FocusNode _counterpartyFocus = FocusNode();
@@ -194,6 +195,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   }
 
   Category? get _currentCategory => _provider.getCategoryById(_tx.categoryId);
+  List<Category> get _currentCategories =>
+      _provider.categoriesForTransaction(_tx);
+  List<int> get _selectedCategoryIds => _tx.selectedCategoryIds;
 
   String? get _noteText {
     final note = _tx.note?.trim();
@@ -249,7 +253,178 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   void _syncAutoCategorizationCheckbox() {
     _autoCategorizeFutureTransactions =
-        _provider.findAutoCategorizationRuleForTransaction(_tx) != null;
+        _provider.autoCategorizationRulesForTransaction(_tx).isNotEmpty;
+    _autoCategorizationDraftCategoryIds =
+        _initialAutoCategorizationDraftCategoryIds(_tx);
+  }
+
+  List<int> _initialAutoCategorizationDraftCategoryIds(
+      Transaction transaction) {
+    if (!_autoCategorizeFutureTransactions) return const [];
+    final selectedIds = transaction.selectedCategoryIds
+        .where((id) => !_isSelfCategoryId(id))
+        .toList(growable: false);
+    if (selectedIds.isEmpty) return const [];
+
+    final existingIds = _provider
+        .autoCategorizationCategoryIdsForTransaction(transaction)
+        .where(selectedIds.contains)
+        .toList(growable: false);
+    return existingIds.isEmpty ? List<int>.from(selectedIds) : existingIds;
+  }
+
+  List<int> _nextAutoCategorizationDraftCategoryIds({
+    required Transaction previous,
+    required Transaction updated,
+  }) {
+    if (!_autoCategorizeFutureTransactions) return const [];
+
+    final previousSelectedIds = previous.selectedCategoryIds
+        .where((id) => !_isSelfCategoryId(id))
+        .toSet();
+    final nextSelectedIds = updated.selectedCategoryIds
+        .where((id) => !_isSelfCategoryId(id))
+        .toList(growable: false);
+    if (nextSelectedIds.isEmpty) return const [];
+
+    final rememberedIds = _autoCategorizationDraftCategoryIds
+        .where(nextSelectedIds.contains)
+        .toSet();
+    for (final categoryId in nextSelectedIds) {
+      if (!previousSelectedIds.contains(categoryId)) {
+        rememberedIds.add(categoryId);
+      }
+    }
+
+    return nextSelectedIds
+        .where(rememberedIds.contains)
+        .toList(growable: false);
+  }
+
+  int? _resolveAutoCategorizationPrimaryCategoryId(List<int> categoryIds) {
+    if (categoryIds.isEmpty) return null;
+    if (_tx.categoryId != null && categoryIds.contains(_tx.categoryId)) {
+      return _tx.categoryId;
+    }
+    return categoryIds.first;
+  }
+
+  List<Category> get _autoCategorizationDraftCategories {
+    final categories = <Category>[];
+    for (final categoryId in _autoCategorizationDraftCategoryIds) {
+      final category = _provider.getCategoryById(categoryId);
+      if (category != null) {
+        categories.add(category);
+      }
+    }
+    return categories;
+  }
+
+  Future<void> _persistAutoCategorizationDraft({
+    required bool hadExistingRules,
+  }) async {
+    if (_autoCategorizeFutureTransactions &&
+        _autoCategorizationDraftCategoryIds.isNotEmpty) {
+      await _provider.syncAutoCategorizationRulesForSelection(
+        transaction: _tx,
+        categoryIds: _autoCategorizationDraftCategoryIds,
+        primaryCategoryId: _resolveAutoCategorizationPrimaryCategoryId(
+          _autoCategorizationDraftCategoryIds,
+        ),
+        shouldAutoCategorize: true,
+      );
+    } else if (hadExistingRules) {
+      await _provider.clearAutoCategorizationRuleForTransaction(_tx);
+    }
+  }
+
+  Future<void> _toggleAutoCategorization() async {
+    if (_isApplyingCategory) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final hadExistingRules =
+        _provider.autoCategorizationRulesForTransaction(_tx).isNotEmpty;
+    final previousEnabled = _autoCategorizeFutureTransactions;
+    final previousDraftIds =
+        List<int>.from(_autoCategorizationDraftCategoryIds);
+    final nextEnabled = !previousEnabled;
+    final nextDraftIds = nextEnabled
+        ? _tx.selectedCategoryIds
+            .where((id) => !_isSelfCategoryId(id))
+            .toList(growable: false)
+        : const <int>[];
+    final shouldEnable = nextEnabled && nextDraftIds.isNotEmpty;
+
+    setState(() {
+      _isApplyingCategory = true;
+      _autoCategorizeFutureTransactions = shouldEnable;
+      _autoCategorizationDraftCategoryIds = nextDraftIds;
+    });
+
+    try {
+      await _persistAutoCategorizationDraft(
+        hadExistingRules: hadExistingRules,
+      );
+    } catch (_) {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not update auto-categorization. Changes were reverted.',
+          ),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _autoCategorizeFutureTransactions = previousEnabled;
+        _autoCategorizationDraftCategoryIds = previousDraftIds;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isApplyingCategory = false);
+      }
+    }
+  }
+
+  Future<void> _dismissAutoCategorizationCategory(Category category) async {
+    final categoryId = category.id;
+    if (categoryId == null || _isApplyingCategory) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final hadExistingRules =
+        _provider.autoCategorizationRulesForTransaction(_tx).isNotEmpty;
+    final previousEnabled = _autoCategorizeFutureTransactions;
+    final previousDraftIds =
+        List<int>.from(_autoCategorizationDraftCategoryIds);
+    final nextDraftIds = _autoCategorizationDraftCategoryIds
+        .where((id) => id != categoryId)
+        .toList(growable: false);
+
+    setState(() {
+      _isApplyingCategory = true;
+      _autoCategorizationDraftCategoryIds = nextDraftIds;
+      _autoCategorizeFutureTransactions = nextDraftIds.isNotEmpty;
+    });
+
+    try {
+      await _persistAutoCategorizationDraft(
+        hadExistingRules: hadExistingRules,
+      );
+    } catch (_) {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not update auto-categorization. Changes were reverted.',
+          ),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _autoCategorizeFutureTransactions = previousEnabled;
+        _autoCategorizationDraftCategoryIds = previousDraftIds;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isApplyingCategory = false);
+      }
+    }
   }
 
   Future<void> _loadQuickCategoryIds() async {
@@ -277,114 +452,112 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     });
   }
 
-  Future<void> _setCategory(Category category) async {
-    if (_isApplyingCategory || category.id == null) return;
+  bool _isSelfCategory(Category category) {
+    return category.name.trim().toLowerCase() == 'self';
+  }
+
+  bool _isSelfCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    if (category == null) return false;
+    return _isSelfCategory(category);
+  }
+
+  Future<void> _applyCategorySelection({
+    required List<int> categoryIds,
+    int? primaryCategoryId,
+  }) async {
+    if (_isApplyingCategory) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     final shouldAutoCategorize = _autoCategorizeFutureTransactions;
-    final existingRule =
-        _provider.findAutoCategorizationRuleForTransaction(_tx);
-    if (_currentCategory?.id == category.id) {
-      _dismissComposerState(clearDraft: true);
-      final shouldSyncRule = shouldAutoCategorize
-          ? existingRule?.categoryId != category.id
-          : existingRule != null;
-      if (!shouldSyncRule) {
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
-        return;
-      }
-      _isApplyingCategory = true;
-      Navigator.of(context).pop();
-      unawaited(
-        _completeCategorySelection(
-          saveAction: () => Future<void>.value(),
-          messenger: messenger,
-          category: category,
-          shouldAutoCategorize: shouldAutoCategorize,
-        ),
-      );
-      return;
-    }
-    final sheetNavigator = Navigator.of(context);
+    final previousTransaction = _tx;
+    final hadExistingRules = _provider
+        .autoCategorizationRulesForTransaction(previousTransaction)
+        .isNotEmpty;
     _dismissComposerState(clearDraft: true);
-    _isApplyingCategory = true;
-    sheetNavigator.pop();
-    unawaited(
-      _completeCategorySelection(
-        saveAction: () => _provider.setCategoryForTransaction(_tx, category),
-        messenger: messenger,
-        category: category,
-        shouldAutoCategorize: shouldAutoCategorize,
-      ),
-    );
-  }
-
-  Future<void> _clearCategory() async {
-    if (_isApplyingCategory) return;
-    _dismissComposerState(clearDraft: true);
-    _isApplyingCategory = true;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    Navigator.of(context).pop();
-    unawaited(
-      _completeClearCategory(
-        clearAction: () => _provider.clearCategoryForTransaction(_tx),
-        messenger: messenger,
-      ),
-    );
-  }
-
-  Future<void> _completeCategorySelection({
-    required Future<void> Function() saveAction,
-    required ScaffoldMessengerState? messenger,
-    required Category category,
-    required bool shouldAutoCategorize,
-  }) async {
-    await SchedulerBinding.instance.endOfFrame;
+    setState(() => _isApplyingCategory = true);
 
     try {
-      await saveAction();
+      final updated = await _provider.updateCategoriesForTransaction(
+        previousTransaction,
+        categoryIds: categoryIds,
+        primaryCategoryId: primaryCategoryId,
+      );
+      final nextAutoCategoryIds = _nextAutoCategorizationDraftCategoryIds(
+        previous: previousTransaction,
+        updated: updated,
+      );
+      final shouldPersistAutoCategorization =
+          shouldAutoCategorize && nextAutoCategoryIds.isNotEmpty;
+      if (!mounted) return;
+      setState(() {
+        _transaction = updated;
+        _autoCategorizeFutureTransactions = shouldPersistAutoCategorization;
+        _autoCategorizationDraftCategoryIds = nextAutoCategoryIds;
+      });
+
+      try {
+        await _persistAutoCategorizationDraft(
+          hadExistingRules: hadExistingRules,
+        );
+      } catch (_) {
+        messenger?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Category was saved, but auto-categorization could not be updated.',
+            ),
+          ),
+        );
+      }
     } catch (_) {
       messenger?.showSnackBar(
         const SnackBar(
           content: Text('Could not update category. Changes were reverted.'),
         ),
       );
-      return;
-    }
-
-    try {
-      await _provider.syncAutoCategorizationRuleForSelection(
-        transaction: _tx,
-        category: category,
-        shouldAutoCategorize: shouldAutoCategorize,
-      );
-    } catch (_) {
-      messenger?.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Category was saved, but auto-categorization could not be updated.',
-          ),
-        ),
-      );
+    } finally {
+      if (mounted) {
+        setState(() => _isApplyingCategory = false);
+      }
     }
   }
 
-  Future<void> _completeClearCategory({
-    required Future<void> Function() clearAction,
-    required ScaffoldMessengerState? messenger,
-  }) async {
-    await SchedulerBinding.instance.endOfFrame;
+  Future<void> _toggleCategory(Category category) async {
+    final categoryId = category.id;
+    if (_isApplyingCategory || categoryId == null) return;
 
-    try {
-      await clearAction();
-    } catch (_) {
-      messenger?.showSnackBar(
-        const SnackBar(
-          content: Text('Could not clear category. Changes were reverted.'),
-        ),
+    final isSelected = _selectedCategoryIds.contains(categoryId);
+    if (_isSelfCategory(category)) {
+      await _applyCategorySelection(
+        categoryIds: isSelected ? const <int>[] : <int>[categoryId],
+        primaryCategoryId: isSelected ? null : categoryId,
       );
+      return;
     }
+
+    final nextIds = _selectedCategoryIds
+        .where((id) => id != categoryId && !_isSelfCategoryId(id))
+        .toList(growable: true);
+
+    if (isSelected) {
+      final nextPrimary = _tx.categoryId == categoryId
+          ? (nextIds.isEmpty ? null : nextIds.first)
+          : _tx.categoryId;
+      await _applyCategorySelection(
+        categoryIds: nextIds,
+        primaryCategoryId: nextPrimary,
+      );
+      return;
+    }
+
+    nextIds.insert(0, categoryId);
+    await _applyCategorySelection(
+      categoryIds: nextIds,
+      primaryCategoryId: categoryId,
+    );
+  }
+
+  Future<void> _clearCategory() async {
+    await _applyCategorySelection(categoryIds: const <int>[]);
   }
 
   void _copyReference({String message = 'Reference copied'}) {
@@ -487,6 +660,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       transactionLink: _tx.transactionLink,
       accountNumber: _tx.accountNumber,
       categoryId: _tx.categoryId,
+      categoryIds: _tx.categoryIds,
       profileId: _tx.profileId,
       serviceCharge: _tx.serviceCharge,
       vat: _tx.vat,
@@ -623,7 +797,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final flow = _isCredit ? 'income' : 'expense';
     final existing = _findCategoryByNameAndFlow(name: selfName, flow: flow);
     if (existing != null) {
-      await _setCategory(existing);
+      await _applyCategorySelection(
+        categoryIds: existing.id == null ? const <int>[] : <int>[existing.id!],
+        primaryCategoryId: existing.id,
+      );
       return;
     }
 
@@ -649,7 +826,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final target =
         created ?? _findCategoryByNameAndFlow(name: selfName, flow: flow);
     if (target != null) {
-      await _setCategory(target);
+      await _applyCategorySelection(
+        categoryIds: target.id == null ? const <int>[] : <int>[target.id!],
+        primaryCategoryId: target.id,
+      );
     }
   }
 
@@ -692,7 +872,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       excludeIds: knownCategoryIds,
     );
     if (createdCategory != null) {
-      await _setCategory(createdCategory);
+      await _toggleCategory(createdCategory);
       return;
     }
     setState(() {
@@ -916,7 +1096,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
                       // Category picker chips
                       if (_categoryExpanded && !isLockedSelfTransfer)
-                        _buildCategoryPicker(category),
+                        _buildCategoryPicker(),
 
                       _buildNoteSection(),
 
@@ -1022,6 +1202,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final theme = Theme.of(context);
     final valueColumnWidth =
         (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+    final categoryLabel = _provider.categoryLabelForTransaction(
+      _tx,
+      uncategorizedLabel: 'Categorize',
+    );
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1035,7 +1219,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
           SizedBox(
             width: _kLabelWidth,
             child: Text(
-              'Category',
+              'Categories',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: AppColors.textSecondary(context),
               ),
@@ -1067,7 +1251,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        category.name,
+                        categoryLabel,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: _categoryColor(category),
                           fontWeight: FontWeight.w600,
@@ -1103,7 +1287,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     );
   }
 
-  Widget _buildCategoryPicker(Category? current) {
+  Widget _buildCategoryPicker() {
     final quickCategories = _quickAccessCategories;
     final categories = _remainingCategories;
 
@@ -1124,15 +1308,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
               runSpacing: 8,
               children: [
                 ...quickCategories.map((category) {
-                  final isSelected =
-                      current?.id != null && category.id == current!.id;
+                  final isSelected = category.id != null &&
+                      _selectedCategoryIds.contains(category.id);
                   return _CategoryPickerChip(
                     label: category.name,
                     color: _categoryColor(category),
                     isSelected: isSelected,
                     onTap: _isApplyingCategory
                         ? null
-                        : () => _setCategory(category),
+                        : () => _toggleCategory(category),
                   );
                 }),
               ],
@@ -1148,12 +1332,13 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
             runSpacing: 8,
             children: [
               ...categories.map((c) {
-                final isSelected = current?.id != null && c.id == current!.id;
+                final isSelected =
+                    c.id != null && _selectedCategoryIds.contains(c.id);
                 return _CategoryPickerChip(
                   label: c.name,
                   color: _categoryColor(c),
                   isSelected: isSelected,
-                  onTap: _isApplyingCategory ? null : () => _setCategory(c),
+                  onTap: _isApplyingCategory ? null : () => _toggleCategory(c),
                 );
               }),
             ],
@@ -1166,7 +1351,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
               _CategoryPickerChip(
                 label: 'Self',
                 color: _colorFromKey('gray'),
-                isSelected: current?.name.trim().toLowerCase() == 'self',
+                isSelected: _currentCategories.any(_isSelfCategory),
                 showColorDot: false,
                 onTap: _isApplyingCategory ? null : _setSelfCategory,
               ),
@@ -1180,9 +1365,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                 showColorDot: false,
                 onTap: _isApplyingCategory ? null : _toggleNewCategoryForm,
               ),
-              if (current != null)
+              if (_selectedCategoryIds.isNotEmpty)
                 _CategoryPickerChip(
-                  label: 'Remove',
+                  label: 'Clear',
                   color: AppColors.red,
                   isSelected: false,
                   isRemove: true,
@@ -1207,14 +1392,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         isChecked ? activeColor : AppColors.borderColor(context);
 
     return InkWell(
-      onTap: _isApplyingCategory
-          ? null
-          : () {
-              setState(() {
-                _autoCategorizeFutureTransactions =
-                    !_autoCategorizeFutureTransactions;
-              });
-            },
+      onTap: _isApplyingCategory ? null : () => _toggleAutoCategorization(),
       borderRadius: BorderRadius.circular(14),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
@@ -1224,56 +1402,89 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: borderColor),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: isChecked ? activeColor : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color:
-                      isChecked ? activeColor : AppColors.borderColor(context),
-                  width: 1.4,
+            Row(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 140),
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: isChecked ? activeColor : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isChecked
+                          ? activeColor
+                          : AppColors.borderColor(context),
+                      width: 1.4,
+                    ),
+                  ),
+                  child: isChecked
+                      ? const Icon(
+                          Icons.check,
+                          size: 14,
+                          color: Colors.white,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Auto-categorize future transactions',
+                        style: TextStyle(
+                          color: AppColors.textPrimary(context),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        counterparty,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColors.textSecondary(context),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (isChecked && _autoCategorizationDraftCategories.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Dismiss categories you do not want to remember',
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              child: isChecked
-                  ? const Icon(
-                      Icons.check,
-                      size: 14,
-                      color: Colors.white,
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _autoCategorizationDraftCategories
+                    .map(
+                      (category) => _CategoryPickerChip(
+                        label: category.name,
+                        color: _categoryColor(category),
+                        isSelected: true,
+                        onTap: () =>
+                            _dismissAutoCategorizationCategory(category),
+                      ),
                     )
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Auto-categorize future transactions',
-                    style: TextStyle(
-                      color: AppColors.textPrimary(context),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    counterparty,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppColors.textSecondary(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+                    .toList(growable: false),
               ),
-            ),
+            ],
           ],
         ),
       ),

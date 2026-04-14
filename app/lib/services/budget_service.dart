@@ -1,5 +1,4 @@
 import 'package:totals/models/budget.dart';
-import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 
@@ -14,7 +13,8 @@ class BudgetService {
     int? categoryId,
     List<int>? categoryIds,
   }) async {
-    final transactions = await _transactionRepository.getTransactionsByDateRange(
+    final transactions =
+        await _transactionRepository.getTransactionsByDateRange(
       startDate,
       endDate,
       type: 'DEBIT', // Only count expenses
@@ -30,7 +30,7 @@ class BudgetService {
 
     if (ids.isNotEmpty) {
       final filtered = transactions
-          .where((t) => t.categoryId != null && ids.contains(t.categoryId))
+          .where((t) => t.selectedCategoryIds.any(ids.contains))
           .toList();
       return filtered.fold<double>(0.0, (sum, t) => sum + t.amount.abs());
     }
@@ -51,7 +51,8 @@ class BudgetService {
     );
 
     final remaining = budget.amount - spent;
-    final percentageUsed = budget.amount > 0 ? (spent / budget.amount) * 100 : 0.0;
+    final percentageUsed =
+        budget.amount > 0 ? (spent / budget.amount) * 100 : 0.0;
     final isExceeded = spent > budget.amount;
     final isApproachingLimit = percentageUsed >= budget.alertThreshold;
 

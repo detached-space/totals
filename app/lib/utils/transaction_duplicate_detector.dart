@@ -304,6 +304,12 @@ Transaction _mergeTransactions(
   var merged = keeper;
   for (final transaction in transactions) {
     if (transaction.reference == keeper.reference) continue;
+    final mergedCategoryIds = <int>[
+      ...merged.selectedCategoryIds,
+      ...transaction.selectedCategoryIds.where(
+        (id) => !merged.selectedCategoryIds.contains(id),
+      ),
+    ];
     merged = merged.copyWith(
       creditor: _pickBetterText(merged.creditor, transaction.creditor),
       receiver: _pickBetterText(merged.receiver, transaction.receiver),
@@ -316,6 +322,7 @@ Transaction _mergeTransactions(
       accountNumber:
           _pickBetterText(merged.accountNumber, transaction.accountNumber),
       categoryId: merged.categoryId ?? transaction.categoryId,
+      categoryIds: mergedCategoryIds,
       profileId: merged.profileId ?? transaction.profileId,
       serviceCharge:
           _pickBetterNumber(merged.serviceCharge, transaction.serviceCharge),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 20,
+      version: 22,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -37,6 +39,7 @@ class DatabaseHelper {
     await _ensureProfileSchema(db);
     await _ensureTransactionFeesSchema(db);
     await _ensureTransactionNotesSchema(db);
+    await _ensureTransactionCategoryIdsSchema(db);
     await _ensureAutoCategorizationSchema(db);
     await _migrateLegacyReceiverMappingsToAutoRules(db);
 
@@ -86,6 +89,7 @@ class DatabaseHelper {
         transactionLink TEXT,
         accountNumber TEXT,
         categoryId INTEGER,
+        categoryIds TEXT,
         year INTEGER,
         month INTEGER,
         day INTEGER,
@@ -197,23 +201,7 @@ class DatabaseHelper {
       "CREATE INDEX idx_receiver_mappings_categoryId ON receiver_category_mappings(categoryId)",
     );
 
-    await db.execute('''
-      CREATE TABLE auto_category_rules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        counterparty TEXT NOT NULL,
-        normalizedCounterparty TEXT NOT NULL,
-        flow TEXT NOT NULL,
-        categoryId INTEGER NOT NULL,
-        createdAt TEXT NOT NULL,
-        UNIQUE(normalizedCounterparty, flow)
-      )
-    ''');
-    await db.execute(
-      "CREATE INDEX idx_auto_category_rules_flow ON auto_category_rules(flow)",
-    );
-    await db.execute(
-      "CREATE INDEX idx_auto_category_rules_categoryId ON auto_category_rules(categoryId)",
-    );
+    await _createAutoCategorizationRulesTable(db);
 
     await db.execute('''
       CREATE TABLE auto_category_prompt_dismissals (
@@ -747,6 +735,14 @@ class DatabaseHelper {
       await _ensureAutoCategorizationSchema(db);
       await _migrateLegacyReceiverMappingsToAutoRules(db);
     }
+
+    if (oldVersion < 21) {
+      await _ensureTransactionCategoryIdsSchema(db);
+    }
+
+    if (oldVersion < 22) {
+      await _ensureAutoCategorizationSchema(db);
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -1114,23 +1110,81 @@ class DatabaseHelper {
     } catch (_) {}
   }
 
+  Future<void> _ensureTransactionCategoryIdsSchema(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'",
+    );
+    if (tables.isEmpty) return;
+
+    final cols = await db.rawQuery('PRAGMA table_info(transactions)');
+    final names = cols
+        .map((r) => (r['name'] as String?)?.trim())
+        .whereType<String>()
+        .toSet();
+
+    Future<void> addColumn(String ddl) async {
+      try {
+        await db.execute(ddl);
+      } catch (_) {}
+    }
+
+    if (!names.contains('categoryIds')) {
+      await addColumn('ALTER TABLE transactions ADD COLUMN categoryIds TEXT');
+    }
+
+    final rows = await db.query(
+      'transactions',
+      columns: ['id', 'categoryId', 'categoryIds'],
+      where:
+          'categoryId IS NOT NULL AND (categoryIds IS NULL OR TRIM(categoryIds) = \'\')',
+    );
+    if (rows.isEmpty) return;
+
+    final batch = db.batch();
+    for (final row in rows) {
+      final id = row['id'];
+      final categoryId = row['categoryId'] as int?;
+      if (id == null || categoryId == null || categoryId <= 0) continue;
+      batch.update(
+        'transactions',
+        {
+          'categoryIds': jsonEncode(<int>[categoryId])
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
   Future<void> _ensureAutoCategorizationSchema(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS auto_category_rules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        counterparty TEXT NOT NULL,
-        normalizedCounterparty TEXT NOT NULL,
-        flow TEXT NOT NULL,
-        categoryId INTEGER NOT NULL,
-        createdAt TEXT NOT NULL,
-        UNIQUE(normalizedCounterparty, flow)
-      )
-    ''');
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='auto_category_rules'",
+    );
+    if (tables.isEmpty) {
+      await _createAutoCategorizationRulesTable(
+        db,
+        ifNotExists: true,
+      );
+    } else {
+      final cols = await db.rawQuery('PRAGMA table_info(auto_category_rules)');
+      final names = cols
+          .map((r) => (r['name'] as String?)?.trim())
+          .whereType<String>()
+          .toSet();
+      if (!names.contains('isPrimary')) {
+        await _rebuildAutoCategorizationRulesTable(db);
+      }
+    }
+
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_auto_category_rules_flow ON auto_category_rules(flow)",
     );
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_auto_category_rules_categoryId ON auto_category_rules(categoryId)",
+    );
+    await db.execute(
+      "CREATE INDEX IF NOT EXISTS idx_auto_category_rules_counterparty_flow ON auto_category_rules(normalizedCounterparty, flow)",
     );
 
     await db.execute('''
@@ -1146,6 +1200,74 @@ class DatabaseHelper {
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_auto_category_prompt_dismissals_flow ON auto_category_prompt_dismissals(flow)",
     );
+  }
+
+  Future<void> _createAutoCategorizationRulesTable(
+    Database db, {
+    bool ifNotExists = false,
+  }) async {
+    final ifNotExistsClause = ifNotExists ? ' IF NOT EXISTS' : '';
+    await db.execute('''
+      CREATE TABLE$ifNotExistsClause auto_category_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        counterparty TEXT NOT NULL,
+        normalizedCounterparty TEXT NOT NULL,
+        flow TEXT NOT NULL,
+        categoryId INTEGER NOT NULL,
+        isPrimary INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL,
+        UNIQUE(normalizedCounterparty, flow, categoryId)
+      )
+    ''');
+  }
+
+  Future<void> _rebuildAutoCategorizationRulesTable(Database db) async {
+    await db.execute('DROP TABLE IF EXISTS auto_category_rules_legacy');
+    await db.execute(
+      'ALTER TABLE auto_category_rules RENAME TO auto_category_rules_legacy',
+    );
+    await _createAutoCategorizationRulesTable(db);
+
+    final legacyRows = await db.query(
+      'auto_category_rules_legacy',
+      orderBy:
+          'normalizedCounterparty COLLATE NOCASE ASC, flow ASC, createdAt ASC, id ASC',
+    );
+
+    final batch = db.batch();
+    final seenKeys = <String>{};
+    final promotedGroups = <String>{};
+    for (final row in legacyRows) {
+      final normalizedCounterparty =
+          (row['normalizedCounterparty'] as String?)?.trim() ?? '';
+      final flow = (row['flow'] as String?)?.trim() ?? 'expense';
+      final categoryId = row['categoryId'] as int?;
+      if (normalizedCounterparty.isEmpty ||
+          categoryId == null ||
+          categoryId <= 0) {
+        continue;
+      }
+
+      final ruleKey = '$normalizedCounterparty|$flow|$categoryId';
+      if (!seenKeys.add(ruleKey)) continue;
+
+      final groupKey = '$normalizedCounterparty|$flow';
+      final isPrimary = promotedGroups.add(groupKey);
+      batch.insert(
+        'auto_category_rules',
+        {
+          'counterparty': row['counterparty'],
+          'normalizedCounterparty': normalizedCounterparty,
+          'flow': flow,
+          'categoryId': categoryId,
+          'isPrimary': isPrimary ? 1 : 0,
+          'createdAt': row['createdAt'] ?? DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+    await db.execute('DROP TABLE IF EXISTS auto_category_rules_legacy');
   }
 
   Future<void> _migrateLegacyReceiverMappingsToAutoRules(Database db) async {
@@ -1192,6 +1314,7 @@ class DatabaseHelper {
           'normalizedCounterparty': normalizeCounterparty(counterparty),
           'flow': flow == 'income' ? 'income' : 'expense',
           'categoryId': categoryId,
+          'isPrimary': 1,
           'createdAt': (row['createdAt'] as String?)?.trim().isNotEmpty == true
               ? row['createdAt']
               : DateTime.now().toIso8601String(),
