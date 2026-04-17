@@ -68,6 +68,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Set<int?> _selectedTodayExpenseCategoryIds = {};
   Set<String> _selectedTodayReferences = {};
 
+  // Search
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -192,6 +196,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _widgetLaunchIntentSub?.cancel();
     _pageController.dispose();
     _mainPageController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -771,7 +776,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildTodayRefreshButton(TransactionProvider provider) {
     final theme = Theme.of(context);
     final borderColor = theme.colorScheme.onSurfaceVariant.withOpacity(0.2);
-    final background = theme.colorScheme.surfaceVariant.withOpacity(0.3);
+    final background = theme.colorScheme.surfaceContainerHighest.withOpacity(0.3);
     final iconColor = theme.colorScheme.onSurfaceVariant;
 
     return Tooltip(
@@ -1181,13 +1186,52 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  void _startSearch() {
+    setState(() => _isSearching = true);
+  }
+
+  void _stopSearch() {
+    final provider =
+        Provider.of<TransactionProvider>(context, listen: false);
+    _searchController.clear();
+    provider.updateSearchKey('');
+    setState(() => _isSearching = false);
+  }
+
   PreferredSizeWidget _buildHomeAppBar() {
+    final theme = Theme.of(context);
     return AppBar(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       toolbarHeight: 70,
       scrolledUnderElevation: 0,
       elevation: 0,
-      title: Row(
+      title: _isSearching
+          ? Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search transactions...',
+                      border: InputBorder.none,
+                      hintStyle: TextStyle(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.5)),
+                    ),
+                    style: TextStyle(color: theme.colorScheme.onSurface),
+                    onChanged: (value) {
+                      Provider.of<TransactionProvider>(context, listen: false)
+                          .updateSearchKey(value);
+                    },
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: _stopSearch,
+                ),
+              ],
+            )
+          : Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1210,7 +1254,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     decoration: BoxDecoration(
                       color: Theme.of(context)
                           .colorScheme
-                          .surfaceVariant
+                          .surfaceContainerHighest
                           .withOpacity(0.5),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1275,7 +1319,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   decoration: BoxDecoration(
                     color: Theme.of(context)
                         .colorScheme
-                        .surfaceVariant
+                        .surfaceContainerHighest
                         .withOpacity(0.5),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1289,13 +1333,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ),
                 // Debug menu button
                 const SizedBox(width: 7),
+                // Search button
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest
+                        .withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: Icon(Icons.search,
+                        color: Theme.of(context).iconTheme.color, size: 22),
+                    onPressed: _startSearch,
+                    padding: const EdgeInsets.all(8),
+                    constraints: const BoxConstraints(),
+                  ),
+                ),
+                const SizedBox(width: 7),
                 // Lock button
                 Container(
                   decoration: BoxDecoration(
                     color: Theme.of(context)
                         .colorScheme
-                        .surfaceVariant
-                        .withOpacity(0.5),
+                        .surfaceContainerHighest
+                        .withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: IconButton(
