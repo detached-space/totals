@@ -311,6 +311,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
       ),
     );
   }
+
 }
 
 class _QrPreviewCard extends StatelessWidget {
