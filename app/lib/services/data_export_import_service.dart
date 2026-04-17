@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
@@ -522,6 +524,279 @@ class DataExportImportService {
     } catch (e) {
       throw Exception('Failed to import data: $e');
     }
+  }
+
+  /// Export transactions to CSV format
+  Future<String> exportTransactionsCsv() async {
+    try {
+      final transactions = await _transactionRepo.getTransactions();
+      final categories = await _categoryRepo.getCategories();
+      final categoryNames = {
+        for (final c in categories)
+          if (c.id != null) c.id!: c.name
+      };
+
+      final buffer = StringBuffer();
+      buffer.writeln(
+          'Date,Type,Amount (ETB),Creditor,Receiver,Account Number,Bank ID,Balance After,Category,Reference,Service Charge,VAT');
+
+      for (final t in transactions) {
+        buffer.writeln([
+          _csvField(t.time ?? ''),
+          _csvField(t.type ?? ''),
+          t.amount.toStringAsFixed(2),
+          _csvField(t.creditor ?? ''),
+          _csvField(t.receiver ?? ''),
+          _csvField(t.accountNumber ?? ''),
+          _csvField(t.bankId?.toString() ?? ''),
+          _csvField(t.currentBalance ?? ''),
+          _csvField(
+              t.categoryId != null ? (categoryNames[t.categoryId] ?? '') : ''),
+          _csvField(t.reference),
+          (t.serviceCharge ?? 0).toStringAsFixed(2),
+          (t.vat ?? 0).toStringAsFixed(2),
+        ].join(','));
+      }
+
+      return buffer.toString();
+    } catch (e) {
+      throw Exception('Failed to export transactions as CSV: $e');
+    }
+  }
+
+  /// Export transactions to a formatted PDF bank statement
+  Future<List<int>> exportTransactionsPdf() async {
+    try {
+      final transactions = await _transactionRepo.getTransactions();
+      final categories = await _categoryRepo.getCategories();
+      final categoryNames = {
+        for (final c in categories)
+          if (c.id != null) c.id!: c.name
+      };
+
+      final totalCredit = transactions
+          .where((t) => t.type == 'CREDIT')
+          .fold(0.0, (sum, t) => sum + t.amount);
+      final totalDebit = transactions
+          .where((t) => t.type == 'DEBIT')
+          .fold(0.0, (sum, t) => sum + t.amount);
+
+      final doc = pw.Document();
+      final exportDate = DateTime.now();
+      final dateStr =
+          '${exportDate.year}-${exportDate.month.toString().padLeft(2, '0')}-${exportDate.day.toString().padLeft(2, '0')}';
+
+      final headerStyle = pw.TextStyle(
+        fontSize: 18,
+        fontWeight: pw.FontWeight.bold,
+        color: PdfColors.blue800,
+      );
+      final subHeaderStyle = pw.TextStyle(
+        fontSize: 11,
+        color: PdfColors.grey700,
+      );
+      final tableHeaderStyle = pw.TextStyle(
+        fontSize: 9,
+        fontWeight: pw.FontWeight.bold,
+        color: PdfColors.white,
+      );
+      final cellStyle = pw.TextStyle(fontSize: 8);
+
+      final pageTheme = pw.PageTheme(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(24),
+      );
+
+      // Split into pages of 30 rows
+      const rowsPerPage = 30;
+      final pages = <List<Transaction>>[];
+      for (var i = 0; i < transactions.length; i += rowsPerPage) {
+        pages.add(transactions.sublist(
+          i,
+          i + rowsPerPage > transactions.length
+              ? transactions.length
+              : i + rowsPerPage,
+        ));
+      }
+      if (pages.isEmpty) pages.add([]);
+
+      for (var p = 0; p < pages.length; p++) {
+        final pageTransactions = pages[p];
+        doc.addPage(
+          pw.Page(
+            pageTheme: pageTheme,
+            build: (pw.Context context) {
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('TOTALS', style: headerStyle),
+                          pw.Text('Transaction Statement', style: subHeaderStyle),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text('Generated: $dateStr', style: subHeaderStyle),
+                          pw.Text(
+                              'Page ${p + 1} of ${pages.length}',
+                              style: subHeaderStyle),
+                        ],
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Divider(color: PdfColors.blue800, thickness: 1.5),
+                  pw.SizedBox(height: 8),
+
+                  // Summary (first page only)
+                  if (p == 0) ...[
+                    pw.Row(
+                      children: [
+                        _pdfSummaryCard('Total Transactions',
+                            '${transactions.length}', PdfColors.blue50),
+                        pw.SizedBox(width: 8),
+                        _pdfSummaryCard('Total Credit',
+                            'ETB ${totalCredit.toStringAsFixed(2)}',
+                            PdfColors.green50),
+                        pw.SizedBox(width: 8),
+                        _pdfSummaryCard('Total Debit',
+                            'ETB ${totalDebit.toStringAsFixed(2)}',
+                            PdfColors.red50),
+                        pw.SizedBox(width: 8),
+                        _pdfSummaryCard('Net',
+                            'ETB ${(totalCredit - totalDebit).toStringAsFixed(2)}',
+                            PdfColors.orange50),
+                      ],
+                    ),
+                    pw.SizedBox(height: 12),
+                  ],
+
+                  // Table
+                  pw.Table(
+                    border: pw.TableBorder.all(
+                        color: PdfColors.grey300, width: 0.5),
+                    columnWidths: {
+                      0: const pw.FixedColumnWidth(60),  // Date
+                      1: const pw.FixedColumnWidth(38),  // Type
+                      2: const pw.FixedColumnWidth(52),  // Amount
+                      3: const pw.FlexColumnWidth(1.2),  // Creditor/Receiver
+                      4: const pw.FlexColumnWidth(1),    // Category
+                      5: const pw.FixedColumnWidth(52),  // Balance
+                    },
+                    children: [
+                      // Header row
+                      pw.TableRow(
+                        decoration: const pw.BoxDecoration(
+                            color: PdfColors.blue800),
+                        children: [
+                          'Date', 'Type', 'Amount (ETB)',
+                          'Description', 'Category', 'Balance'
+                        ]
+                            .map((h) => pw.Padding(
+                                  padding: const pw.EdgeInsets.all(4),
+                                  child: pw.Text(h,
+                                      style: tableHeaderStyle),
+                                ))
+                            .toList(),
+                      ),
+                      // Data rows
+                      ...pageTransactions.asMap().entries.map((entry) {
+                        final i = entry.key;
+                        final t = entry.value;
+                        final isCredit = t.type == 'CREDIT';
+                        final description = isCredit
+                            ? (t.creditor ?? '')
+                            : (t.receiver ?? '');
+                        final categoryName = t.categoryId != null
+                            ? (categoryNames[t.categoryId] ?? '')
+                            : '';
+                        final bg = i % 2 == 0
+                            ? PdfColors.white
+                            : PdfColors.grey100;
+                        return pw.TableRow(
+                          decoration: pw.BoxDecoration(color: bg),
+                          children: [
+                            _pdfCell(t.time?.substring(0, 10) ?? '',
+                                cellStyle),
+                            _pdfCell(t.type ?? '', cellStyle,
+                                color: isCredit
+                                    ? PdfColors.green700
+                                    : PdfColors.red700),
+                            _pdfCell(
+                                t.amount.toStringAsFixed(2), cellStyle,
+                                align: pw.TextAlign.right),
+                            _pdfCell(description, cellStyle),
+                            _pdfCell(categoryName, cellStyle),
+                            _pdfCell(t.currentBalance ?? '', cellStyle,
+                                align: pw.TextAlign.right),
+                          ],
+                        );
+                      }),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      }
+
+      return doc.save();
+    } catch (e) {
+      throw Exception('Failed to export transactions as PDF: $e');
+    }
+  }
+
+  pw.Widget _pdfSummaryCard(String label, String value, PdfColor bg) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.all(8),
+        decoration: pw.BoxDecoration(
+          color: bg,
+          borderRadius: pw.BorderRadius.circular(4),
+          border: pw.Border.all(color: PdfColors.grey300),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(label,
+                style: pw.TextStyle(
+                    fontSize: 7, color: PdfColors.grey600)),
+            pw.SizedBox(height: 2),
+            pw.Text(value,
+                style: pw.TextStyle(
+                    fontSize: 9, fontWeight: pw.FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _pdfCell(String text, pw.TextStyle style,
+      {PdfColor? color, pw.TextAlign? align}) {
+    final s = color != null ? style.copyWith(color: color) : style;
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(3),
+      child: pw.Text(text, style: s,
+          textAlign: align ?? pw.TextAlign.left),
+    );
+  }
+
+  String _csvField(String value) {
+    if (value.contains(',') ||
+        value.contains('"') ||
+        value.contains('\n') ||
+        value.contains('\r')) {
+      return '"${value.replaceAll('"', '""')}"';
+    }
+    return value;
   }
 
   static Map<String, dynamic> normalizeImportPayload(String jsonData) {
