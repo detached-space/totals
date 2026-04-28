@@ -10,6 +10,7 @@ import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/categories_page.dart';
 import 'package:totals/screens/notification_settings_page.dart';
+import 'package:totals/screens/privacy_policy_page.dart';
 import 'package:totals/screens/profile_management_page.dart';
 import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/repositories/profile_repository.dart';
@@ -1069,6 +1070,19 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
 
               _SettingTile(
+                icon: AppIcons.shield_check,
+                iconColor: AppColors.primaryLight,
+                title: 'Privacy Policy',
+                subtitle: 'How Totals handles SMS, camera, and local data',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PrivacyPolicyPage(),
+                  ),
+                ),
+              ),
+
+              _SettingTile(
                 icon: AppIcons.help_outline_rounded,
                 iconColor: AppColors.incomeSuccess,
                 title: 'Help & FAQ',
@@ -1442,40 +1456,58 @@ class _RedesignAboutPage extends StatelessWidget {
             ),
 
             _AboutFeatureCard(
-              icon: AppIcons.wifi_off,
-              title: '100% Offline',
+              icon: AppIcons.sms_outlined,
+              title: 'SMS Stays On Device',
               description:
-                  'Totals never connects to any server. Your financial data '
-                  'stays on your device, nowhere else.',
+                  'For core transaction tracking, Totals reads and parses '
+                  'supported bank SMS messages locally on your device. '
+                  'Those SMS contents are not sent to our servers.',
             ),
             _AboutFeatureCard(
-              icon: AppIcons.person_outline,
-              title: 'No Accounts, No Sign-up',
+              icon: AppIcons.cloud_download,
+              title: 'Optional Online Features',
               description:
-                  'No registration, no email, no phone number. There is no '
-                  'user account because there is no server. You are anonymous.',
+                  'Payment verification and remote config updates can connect '
+                  'to online services. Verification may transmit images, '
+                  'payment references, selected account numbers, and bank '
+                  'identifiers that you submit.',
+            ),
+            _AboutFeatureCard(
+              icon: AppIcons.qr_code_scanner_rounded,
+              title: 'Camera By Feature',
+              description:
+                  'Camera access is used for account QR scanning and payment '
+                  'verification capture. QR scanning is handled on-device. '
+                  'Verification images are uploaded only when you choose to '
+                  'verify them.',
             ),
             _AboutFeatureCard(
               icon: AppIcons.visibility_off_outlined,
-              title: 'No Tracking or Analytics',
+              title: 'No Ads or Analytics',
               description:
-                  'Zero analytics, zero telemetry, zero third-party SDKs. No '
-                  'one, including us, can see how you use the app or what '
-                  'your data looks like.',
-            ),
-            _AboutFeatureCard(
-              icon: AppIcons.code_rounded,
-              title: 'Fully Open Source',
-              description:
-                  'Every line of code is public. You can audit exactly what '
-                  'the app does. No hidden behavior, no obfuscation.',
+                  'Totals does not include advertising SDKs or analytics '
+                  'telemetry to profile you or sell your data.',
             ),
             _AboutFeatureCard(
               icon: AppIcons.shield_check,
               title: 'Your Data, Your Control',
               description:
-                  'You can export, back up, or delete your data at any time, '
-                  'for free.',
+                  'Most app data stays on your device until you export, clear, '
+                  'or uninstall it. If you manually start the local web '
+                  'dashboard, your data becomes reachable on your local '
+                  'network until you stop the server.',
+            ),
+
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const PrivacyPolicyPage(),
+                ),
+              ),
+              icon: const Icon(AppIcons.shield_check),
+              label: const Text('Read Full Privacy Policy'),
             ),
 
             const SizedBox(height: 28),

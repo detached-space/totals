@@ -10,6 +10,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/screens/categories_page.dart';
 import 'package:totals/screens/notification_settings_page.dart';
+import 'package:totals/screens/privacy_policy_page.dart';
 import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/screens/profile_management_page.dart';
 // import 'package:totals/screens/telebirr_bank_transfer_matches_page.dart';
@@ -1259,6 +1260,18 @@ class _SettingsPageState extends State<SettingsPage>
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (_) => const AboutPage(),
+                                  ),
+                                );
+                              },
+                            ),
+                            _buildDivider(context),
+                            _buildSettingTile(
+                              icon: Icons.privacy_tip_outlined,
+                              title: 'Privacy Policy',
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const PrivacyPolicyPage(),
                                   ),
                                 );
                               },
