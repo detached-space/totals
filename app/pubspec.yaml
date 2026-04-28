@@ -104,6 +104,7 @@ flutter:
     - assets/webapp/
     - assets/webapp/assets/
     - assets/icon/totals_icon.png
+    - PRIVACY_POLICY.md
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
