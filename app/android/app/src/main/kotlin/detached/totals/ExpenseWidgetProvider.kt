@@ -1,4 +1,4 @@
-package com.example.offline_gateway
+package detached.totals
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -24,9 +24,9 @@ import kotlin.math.roundToInt
 class ExpenseWidgetProvider : HomeWidgetProvider() {
     companion object {
         private const val ACTION_TOGGLE_VISIBILITY =
-            "com.example.offline_gateway.widget.TOGGLE_VISIBILITY"
+            "detached.totals.widget.TOGGLE_VISIBILITY"
         private const val ACTION_TOGGLE_FLOW =
-            "com.example.offline_gateway.widget.TOGGLE_FLOW"
+            "detached.totals.widget.TOGGLE_FLOW"
         private const val PREF_KEY_HIDDEN_PREFIX = "expense_widget_hidden_"
         private const val PREF_KEY_FLOW_PREFIX = "expense_widget_show_income_"
     }

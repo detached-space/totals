@@ -6,15 +6,15 @@ import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_state_service.dart';
 
 class WidgetService {
-  static const String appGroupId = 'group.com.example.totals.widget';
+  static const String appGroupId = 'group.detached.totals.widget';
 
   static const String expenseAndroidWidgetName = 'ExpenseWidgetProvider';
   static const String expenseAndroidWidgetQualifiedName =
-      'com.example.offline_gateway.$expenseAndroidWidgetName';
+      'detached.totals.$expenseAndroidWidgetName';
 
   static const String budgetAndroidWidgetName = 'BudgetWidgetProvider';
   static const String budgetAndroidWidgetQualifiedName =
-      'com.example.offline_gateway.$budgetAndroidWidgetName';
+      'detached.totals.$budgetAndroidWidgetName';
   static const int maxBudgetWidgetBudgets = 3;
 
   static const String _budgetWidgetSelectedIdsKey =

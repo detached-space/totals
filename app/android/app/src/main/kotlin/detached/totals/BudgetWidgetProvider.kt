@@ -1,4 +1,4 @@
-package com.example.offline_gateway
+package detached.totals
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager

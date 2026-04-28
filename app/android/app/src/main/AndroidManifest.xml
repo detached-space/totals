@@ -1,9 +1,16 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.READ_SMS"/>
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
-    <uses-permission android:name="android.permission.SEND_SMS"/>
-    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-    <uses-permission android:name="android.permission.CALL_PHONE"/>
+    <uses-permission
+        android:name="android.permission.SEND_SMS"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_PHONE_STATE"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.CALL_PHONE"
+        tools:node="remove"/>
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -25,7 +32,7 @@
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data android:name="flutterEmbedding" android:value="2" />
 
-        <receiver android:name="com.example.offline_gateway.ExpenseWidgetProvider"
+        <receiver android:name=".ExpenseWidgetProvider"
             android:label="@string/widget_expense_name"
             android:exported="true">
             <intent-filter>
@@ -36,7 +43,7 @@
                 android:resource="@xml/expense_widget_info" />
         </receiver>
 
-        <receiver android:name="com.example.offline_gateway.BudgetWidgetProvider"
+        <receiver android:name=".BudgetWidgetProvider"
             android:label="@string/widget_budget_name"
             android:exported="true">
             <intent-filter>

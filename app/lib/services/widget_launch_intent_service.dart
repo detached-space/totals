@@ -13,7 +13,7 @@ class WidgetLaunchIntentService {
       WidgetLaunchIntentService._();
 
   static const MethodChannel _channel =
-      MethodChannel('com.example.offline_gateway/widget_launch');
+      MethodChannel('detached.totals/widget_launch');
 
   final StreamController<WidgetLaunchTarget> _controller =
       StreamController<WidgetLaunchTarget>.broadcast();
