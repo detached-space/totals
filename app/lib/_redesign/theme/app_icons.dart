@@ -12,7 +12,8 @@ class AppIcons {
   static const IconData account_balance_outlined = PhosphorIconsRegular.bank;
   static const IconData account_balance_rounded = PhosphorIconsRegular.bank;
   static const IconData account_balance_wallet = PhosphorIconsFill.wallet;
-  static const IconData account_balance_wallet_outlined = PhosphorIconsRegular.wallet;
+  static const IconData account_balance_wallet_outlined =
+      PhosphorIconsRegular.wallet;
   static const IconData add = PhosphorIconsRegular.plus;
   static const IconData add_circle_outline = PhosphorIconsRegular.plusCircle;
   static const IconData add_rounded = PhosphorIconsRegular.plus;
@@ -20,7 +21,8 @@ class AppIcons {
   static const IconData arrow_forward = PhosphorIconsRegular.arrowRight;
   static const IconData auto_graph_rounded = PhosphorIconsRegular.chartLineUp;
   static const IconData bolt_rounded = PhosphorIconsRegular.lightning;
-  static const IconData calendar_today_outlined = PhosphorIconsRegular.calendarBlank;
+  static const IconData calendar_today_outlined =
+      PhosphorIconsRegular.calendarBlank;
   static const IconData category = PhosphorIconsRegular.shapes;
   static const IconData check_circle_rounded = PhosphorIconsRegular.checkCircle;
   static const IconData check_rounded = PhosphorIconsRegular.check;
@@ -48,7 +50,8 @@ class AppIcons {
   static const IconData home_outlined = PhosphorIconsRegular.house;
   static const IconData info_outline_rounded = PhosphorIconsRegular.info;
   static const IconData keyboard_arrow_down = PhosphorIconsRegular.caretDown;
-  static const IconData keyboard_arrow_down_rounded = PhosphorIconsRegular.caretDown;
+  static const IconData keyboard_arrow_down_rounded =
+      PhosphorIconsRegular.caretDown;
   static const IconData keyboard_arrow_up = PhosphorIconsRegular.caretUp;
   static const IconData light_mode_rounded = PhosphorIconsRegular.sun;
   static const IconData lightbulb_outline = PhosphorIconsRegular.lightbulb;
@@ -58,12 +61,15 @@ class AppIcons {
   static const IconData palette_rounded = PhosphorIconsRegular.palette;
   static const IconData person = PhosphorIconsFill.user;
   static const IconData person_outline = PhosphorIconsRegular.user;
-  static const IconData person_outline_rounded = PhosphorIconsRegular.userCircle;
-  static const IconData phone_iphone_rounded = PhosphorIconsRegular.deviceMobile;
+  static const IconData person_outline_rounded =
+      PhosphorIconsRegular.userCircle;
+  static const IconData phone_iphone_rounded =
+      PhosphorIconsRegular.deviceMobile;
   static const IconData qr_code_scanner_rounded = PhosphorIconsRegular.scan;
   static const IconData receipt_long_rounded = PhosphorIconsRegular.receipt;
   static const IconData refresh = PhosphorIconsRegular.arrowClockwise;
-  static const IconData remove_circle_outline = PhosphorIconsRegular.minusCircle;
+  static const IconData remove_circle_outline =
+      PhosphorIconsRegular.minusCircle;
   static const IconData savings = PhosphorIconsFill.piggyBank;
   static const IconData savings_outlined = PhosphorIconsRegular.piggyBank;
   static const IconData schedule_rounded = PhosphorIconsRegular.clock;
@@ -73,6 +79,8 @@ class AppIcons {
   static const IconData trending_up_rounded = PhosphorIconsRegular.trendUp;
   static const IconData tune = PhosphorIconsRegular.slidersHorizontal;
   static const IconData upload_rounded = PhosphorIconsRegular.uploadSimple;
+  static const IconData usersThree = PhosphorIconsRegular.usersThree;
+  static const IconData usersThreeFilled = PhosphorIconsFill.usersThree;
   static const IconData visibility_off_outlined = PhosphorIconsRegular.eyeSlash;
   static const IconData visibility_outlined = PhosphorIconsRegular.eye;
   static const IconData zoom_out_map_rounded = PhosphorIconsRegular.cornersOut;

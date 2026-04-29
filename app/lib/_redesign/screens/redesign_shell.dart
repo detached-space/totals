@@ -15,7 +15,7 @@ import 'package:totals/_redesign/screens/lock_screen.dart';
 import 'package:totals/_redesign/screens/money/money_page.dart';
 import 'package:totals/_redesign/screens/budget_page.dart';
 import 'package:totals/_redesign/screens/settings_page.dart';
-import 'package:totals/_redesign/screens/tools_page.dart';
+import 'package:totals/_redesign/screens/shared_expenses_page.dart';
 import 'package:totals/_redesign/widgets/redesign_bottom_nav.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -734,7 +734,7 @@ class RedesignShellState extends State<RedesignShell>
               const RedesignHomePage(),
               RedesignMoneyPage(key: _moneyPageKey),
               RedesignBudgetPage(key: _budgetPageKey),
-              const RedesignToolsPage(),
+              const RedesignSharedExpensesPage(),
               RedesignSettingsPage(
                 key: ValueKey('settings-${_activeProfileId ?? 'none'}'),
               ),
@@ -745,7 +745,7 @@ class RedesignShellState extends State<RedesignShell>
             pageController: _pageController,
             onTap: _onTabSelected,
             onMoneyLongPress: _showQuickCashSheet,
-            onToolsLongPress: _showQuickAccessAccountsSheet,
+            onSharedLongPress: _showQuickAccessAccountsSheet,
             onProfileLongPressAt: _onProfileLongPressAt,
           ),
         ),
@@ -1097,7 +1097,7 @@ class _QuickAccessAccountsTab extends StatelessWidget {
           _EmptyAccountsState(
             title: 'Nothing saved for quick access',
             subtitle:
-                'Add bank accounts from the Tools screen and they will show up here.',
+                'Add bank accounts from You > Tools and they will show up here.',
             actionLabel: 'Add Accounts',
             onAction: onManageAccounts,
           ),
@@ -1302,7 +1302,7 @@ class _AccountsQrCard extends StatelessWidget {
               ),
               padding: const EdgeInsets.all(20),
               child: Text(
-                'Add accounts first, then long-press Tools again to see your QR here.',
+                'Add accounts first, then open Shared again to see your QR here.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary(context),
