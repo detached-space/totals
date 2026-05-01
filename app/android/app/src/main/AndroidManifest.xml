@@ -58,7 +58,7 @@
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />
 
-        <receiver android:name="com.shounakmulay.telephony.sms.IncomingSmsReceiver"
+        <receiver android:name=".SafeIncomingSmsReceiver"
             android:permission="android.permission.BROADCAST_SMS" android:exported="true">
             <intent-filter>
             <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
