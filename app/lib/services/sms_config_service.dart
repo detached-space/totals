@@ -48,7 +48,7 @@ class SmsConfigService {
     }
   }
 
-  Future<List<SmsPattern>> getPatterns() async {
+  Future<List<SmsPattern>> getPatterns({bool allowRemoteFetch = true}) async {
     final db = await DatabaseHelper.instance.database;
 
     // First, try to load from database
@@ -76,20 +76,22 @@ class SmsConfigService {
       }
     }
 
-    // If not in database, try to fetch from remote (only if internet available)
-    final hasInternet = await _hasInternetConnection();
-    if (hasInternet) {
-      try {
-        final patterns = await _fetchRemotePatterns();
-        if (patterns.isNotEmpty) {
-          await savePatterns(patterns);
-          return patterns;
+    if (allowRemoteFetch) {
+      // If not in database, try to fetch from remote (only if internet available)
+      final hasInternet = await _hasInternetConnection();
+      if (hasInternet) {
+        try {
+          final patterns = await _fetchRemotePatterns();
+          if (patterns.isNotEmpty) {
+            await savePatterns(patterns);
+            return patterns;
+          }
+        } catch (e) {
+          print("debug: Error fetching remote patterns: $e");
         }
-      } catch (e) {
-        print("debug: Error fetching remote patterns: $e");
+      } else {
+        print("debug: No internet connection, cannot fetch remote patterns");
       }
-    } else {
-      print("debug: No internet connection, cannot fetch remote patterns");
     }
 
     // Fallback to asset patterns
@@ -232,12 +234,14 @@ class SmsConfigService {
 
     final patterns = await _fetchRemotePatterns();
     if (patterns.isEmpty) {
-      print("debug: Manual SMS pattern refresh failed - remote returned 0 patterns");
+      print(
+          "debug: Manual SMS pattern refresh failed - remote returned 0 patterns");
       throw Exception('Could not download SMS patterns right now.');
     }
 
     await savePatterns(patterns);
-    print("debug: Manual SMS pattern refresh completed with ${patterns.length} patterns");
+    print(
+        "debug: Manual SMS pattern refresh completed with ${patterns.length} patterns");
     return patterns.length;
   }
 

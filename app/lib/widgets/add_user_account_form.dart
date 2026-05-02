@@ -5,6 +5,7 @@ import 'package:totals/models/bank.dart';
 import 'package:totals/models/user_account.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
 
@@ -93,11 +94,15 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
 
   Future<Set<int>> _loadSupportedBankIds() async {
     try {
-      final patterns = await _smsConfigService.getPatterns();
-      return patterns.map((pattern) => pattern.bankId).toSet();
+      final patterns =
+          await _smsConfigService.getPatterns(allowRemoteFetch: false);
+      return {
+        ...patterns.map((pattern) => pattern.bankId),
+        ...await FallbackSmsParser.supportedBankIds(),
+      };
     } catch (e) {
       debugPrint("debug: Error loading SMS patterns: $e");
-      return <int>{};
+      return FallbackSmsParser.supportedBankIds();
     }
   }
 

@@ -14,6 +14,7 @@ import 'package:totals/models/failed_parse.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:flutter/widgets.dart';
 import 'package:totals/services/failed_parse_review_service.dart';
+import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/budget_alert_service.dart';
@@ -23,6 +24,7 @@ import 'package:totals/services/widget_service.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 
 enum ParseStatus {
@@ -88,13 +90,19 @@ onBackgroundMessage(SmsMessage message) async {
     }
 
     print("debug: BG: Checking if relevant...");
-    if (await SmsService.isRelevantMessage(address)) {
+    if (await SmsService.isRelevantMessage(
+      address,
+      allowRemoteBankFetch: false,
+    )) {
       print("debug: BG: Message IS relevant. Processing...");
       final receivedAt = message.date == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(message.date!);
       final transaction = await SmsService.processMessage(body, address!,
-          notifyUser: true, messageDate: receivedAt);
+          notifyUser: true,
+          messageDate: receivedAt,
+          allowRemoteBankFetch: false,
+          allowRemotePatternFetch: false);
       if (transaction != null) {
         BackgroundRefreshSignalService.notifyDataChanged();
       }
@@ -112,6 +120,7 @@ class SmsService {
   final Telephony _telephony = Telephony.instance;
   static final BankConfigService _bankConfigService = BankConfigService();
   static List<Bank>? _cachedBanks;
+  static bool _cachedBanksLoadedWithRemoteFetch = false;
   static const String _atmCashCutoffPrefPrefix =
       'atm_cash_transfer_cutoff_iso_profile_';
   static const String _lastSmsCatchupPrefPrefix =
@@ -306,42 +315,34 @@ class SmsService {
   }
 
   /// Checks if the message address matches any of our known bank codes.
-  static Future<bool> isRelevantMessage(String? address) async {
+  static Future<bool> isRelevantMessage(
+    String? address, {
+    bool allowRemoteBankFetch = true,
+  }) async {
     if (address == null) return false;
-    final bank = await getRelevantBank(address);
+    final bank = await getRelevantBank(
+      address,
+      allowRemoteFetch: allowRemoteBankFetch,
+    );
     return bank != null;
   }
 
-  static String _normalizeSenderToken(String value) {
-    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-  }
-
-  static bool _addressMatchesCode(String normalizedAddress, String code) {
-    final normalizedCode = _normalizeSenderToken(code);
-    if (normalizedCode.isEmpty) return false;
-    return normalizedAddress.contains(normalizedCode);
-  }
-
   /// Identifies the bank associated with the sender address.
-  static Future<Bank?> getRelevantBank(String? address) async {
+  static Future<Bank?> getRelevantBank(
+    String? address, {
+    bool allowRemoteFetch = true,
+  }) async {
     if (address == null) return null;
 
     // Fetch banks from database (with static caching)
-    if (_cachedBanks == null) {
-      _cachedBanks = await _bankConfigService.getBanks();
+    if (_cachedBanks == null ||
+        (allowRemoteFetch && !_cachedBanksLoadedWithRemoteFetch)) {
+      _cachedBanks =
+          await _bankConfigService.getBanks(allowRemoteFetch: allowRemoteFetch);
+      _cachedBanksLoadedWithRemoteFetch = allowRemoteFetch;
     }
 
-    final normalizedAddress = _normalizeSenderToken(address);
-    if (normalizedAddress.isEmpty) return null;
-
-    for (var bank in _cachedBanks!) {
-      for (var code in bank.codes) {
-        if (_addressMatchesCode(normalizedAddress, code)) {
-          return bank;
-        }
-      }
-    }
-    return null;
+    return findBestBankForSenderAddress(address, _cachedBanks!);
   }
 
   static double sanitizeAmount(String? raw) {
@@ -715,6 +716,8 @@ class SmsService {
     bool notifyUser = false,
     bool skipDashenExpenseDuplicates = true,
     bool skipAutoCategorization = false,
+    bool allowRemoteBankFetch = true,
+    bool allowRemotePatternFetch = false,
   }) async {
     final result = await _processMessageInternal(
       messageBody,
@@ -723,6 +726,8 @@ class SmsService {
       notifyUser: notifyUser,
       skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
       skipAutoCategorization: skipAutoCategorization,
+      allowRemoteBankFetch: allowRemoteBankFetch,
+      allowRemotePatternFetch: allowRemotePatternFetch,
       recordFailure: true,
     );
     return result.transaction;
@@ -753,11 +758,16 @@ class SmsService {
     bool notifyUser = false,
     bool skipDashenExpenseDuplicates = true,
     bool skipAutoCategorization = false,
+    bool allowRemoteBankFetch = true,
+    bool allowRemotePatternFetch = false,
     bool recordFailure = true,
   }) async {
     print("debug: Processing message: $messageBody");
 
-    Bank? bank = await getRelevantBank(senderAddress);
+    Bank? bank = await getRelevantBank(
+      senderAddress,
+      allowRemoteFetch: allowRemoteBankFetch,
+    );
     if (bank == null) {
       print(
           "dubg: No bank found for address $senderAddress - skipping processing.");
@@ -782,16 +792,27 @@ class SmsService {
 
     // 1. Load Patterns
     final SmsConfigService configService = SmsConfigService();
-    final patterns = await configService.getPatterns();
+    final patterns = await configService.getPatterns(
+        allowRemoteFetch: allowRemotePatternFetch);
     final relevantPatterns =
         patterns.where((p) => p.bankId == bank.id).toList();
+    print(
+        "debug: Loaded ${relevantPatterns.length} native SMS patterns for ${bank.name}");
     // 2. Parse
     configService.debugSms(messageBody);
+    final cleanedMessageBody = configService.cleanSmsText(messageBody);
     var details = await PatternParser.extractTransactionDetails(
-        configService.cleanSmsText(messageBody),
-        senderAddress,
-        messageDate,
-        relevantPatterns);
+        cleanedMessageBody, senderAddress, messageDate, relevantPatterns);
+
+    if (details == null) {
+      print("debug: Trying fallback SMS parser for ${bank.name}");
+      details = await FallbackSmsParser.extractTransactionDetails(
+        messageBody: cleanedMessageBody,
+        senderAddress: senderAddress,
+        messageDate: messageDate,
+        bank: bank,
+      );
+    }
 
     if (details == null) {
       print("debug: No matching pattern found for message from $senderAddress");
@@ -905,7 +926,8 @@ class SmsService {
     // 4. Update Account Balance
     // We need to match the Bank ID from the pattern, not just assume 1 (CBE)
     int bankId = parsedBankId;
-    final banks = await _bankConfigService.getBanks();
+    final banks = await _bankConfigService.getBanks(
+        allowRemoteFetch: allowRemoteBankFetch);
     final currentBank = _bankById(banks, bankId);
     if (currentBank == null) {
       print("debug: No bank config found for bank $bankId");

@@ -101,6 +101,7 @@ flutter:
     - assets/images/
     - assets/banks.json
     - assets/sms_patterns.json
+    - assets/fallback_sms_patterns.json
     - assets/webapp/
     - assets/webapp/assets/
     - assets/icon/totals_icon.png

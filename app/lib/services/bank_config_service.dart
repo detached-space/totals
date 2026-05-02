@@ -10,16 +10,22 @@ import 'package:totals/constants/cash_constants.dart';
 class BankConfigService {
   static const String _banksAssetPath = 'assets/banks.json';
   static const int _mpesaBankId = 8;
+  static const Set<int> _retiredBankIds = {35, 38};
   List<Bank>? _assetBanksCache;
 
   List<Bank> _filterCashBanks(List<Bank> banks) {
-    return banks.where((bank) => bank.id != CashConstants.bankId).toList();
+    return banks
+        .where((bank) =>
+            bank.id != CashConstants.bankId &&
+            !_retiredBankIds.contains(bank.id))
+        .toList();
   }
 
   bool _isMpesaBank(Bank bank) {
-    final token = '${bank.name} ${bank.shortName} ${bank.codes.join(' ')} ${bank.image}'
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final token =
+        '${bank.name} ${bank.shortName} ${bank.codes.join(' ')} ${bank.image}'
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]'), '');
     return token.contains('mpesa');
   }
 
@@ -43,6 +49,57 @@ class BankConfigService {
       if (a[i] != b[i]) return false;
     }
     return true;
+  }
+
+  List<String> _mergeStringLists(List<String> primary, List<String> fallback) {
+    final merged = <String>[];
+
+    void add(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      if (merged.any((item) => item.toLowerCase() == trimmed.toLowerCase())) {
+        return;
+      }
+      merged.add(trimmed);
+    }
+
+    for (final value in primary) {
+      add(value);
+    }
+    for (final value in fallback) {
+      add(value);
+    }
+    return merged;
+  }
+
+  Bank _mergeBankDefinition(Bank existing, Bank asset) {
+    return Bank(
+      id: existing.id,
+      name: existing.name.trim().isNotEmpty ? existing.name : asset.name,
+      shortName: existing.shortName.trim().isNotEmpty
+          ? existing.shortName
+          : asset.shortName,
+      codes: _mergeStringLists(existing.codes, asset.codes),
+      image: existing.image.trim().isNotEmpty ? existing.image : asset.image,
+      maskPattern: existing.maskPattern ?? asset.maskPattern,
+      uniformMasking: existing.uniformMasking ?? asset.uniformMasking,
+      simBased: existing.simBased ?? asset.simBased,
+      colors: existing.colors ?? asset.colors,
+    );
+  }
+
+  List<Bank> _mergeAssetBankDefinitions(
+    List<Bank> banks,
+    List<Bank> assetBanks,
+  ) {
+    final mergedById = <int, Bank>{for (final bank in banks) bank.id: bank};
+    for (final assetBank in assetBanks) {
+      final existing = mergedById[assetBank.id];
+      mergedById[assetBank.id] = existing == null
+          ? assetBank
+          : _mergeBankDefinition(existing, assetBank);
+    }
+    return mergedById.values.toList(growable: false);
   }
 
   bool _sameBanks(Bank a, Bank b) {
@@ -110,8 +167,8 @@ class BankConfigService {
 
     try {
       final body = await rootBundle.loadString(_banksAssetPath);
-      final banks =
-          _normalizeKnownBankAliases(_filterCashBanks(_parseBanksFromJson(body)));
+      final banks = _normalizeKnownBankAliases(
+          _filterCashBanks(_parseBanksFromJson(body)));
       _assetBanksCache = banks;
       print("debug: Loaded ${banks.length} banks from assets");
       return banks;
@@ -121,8 +178,7 @@ class BankConfigService {
     }
   }
 
-
-  Future<List<Bank>> getBanks() async {
+  Future<List<Bank>> getBanks({bool allowRemoteFetch = true}) async {
     final db = await DatabaseHelper.instance.database;
 
     // First, try to load from database
@@ -147,7 +203,11 @@ class BankConfigService {
           });
         }).toList();
         final filteredBanks = _filterCashBanks(parsedBanks);
-        final banks = _normalizeKnownBankAliases(filteredBanks);
+        final normalizedBanks = _normalizeKnownBankAliases(filteredBanks);
+        final assetBanks = await _loadAssetBanks();
+        final banks = _normalizeKnownBankAliases(
+          _mergeAssetBankDefinitions(normalizedBanks, assetBanks),
+        );
         if (!_sameBankLists(filteredBanks, banks) ||
             filteredBanks.length != parsedBanks.length) {
           await saveBanks(banks);
@@ -160,20 +220,22 @@ class BankConfigService {
       }
     }
 
-    // If not in database, try to fetch from remote (only if internet available)
-    final hasInternet = await _hasInternetConnection();
-    if (hasInternet) {
-      try {
-        final banks = await _fetchRemoteBanks();
-        if (banks.isNotEmpty) {
-          await saveBanks(banks);
-          return banks;
+    if (allowRemoteFetch) {
+      // If not in database, try to fetch from remote (only if internet available)
+      final hasInternet = await _hasInternetConnection();
+      if (hasInternet) {
+        try {
+          final banks = await _fetchRemoteBanks();
+          if (banks.isNotEmpty) {
+            await saveBanks(banks);
+            return banks;
+          }
+        } catch (e) {
+          print("debug: Error fetching remote banks: $e");
         }
-      } catch (e) {
-        print("debug: Error fetching remote banks: $e");
+      } else {
+        print("debug: No internet connection, cannot fetch remote banks");
       }
-    } else {
-      print("debug: No internet connection, cannot fetch remote banks");
     }
 
     // Fallback to asset list if no banks found

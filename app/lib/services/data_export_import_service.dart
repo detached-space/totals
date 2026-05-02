@@ -49,7 +49,8 @@ class DataExportImportService {
       final autoCategoryRules = await _autoCategorizationService.getRules();
       final autoCategoryPromptDismissals =
           await _autoCategorizationService.getDismissals();
-      final smsPatterns = await _smsConfigService.getPatterns();
+      final smsPatterns =
+          await _smsConfigService.getPatterns(allowRemoteFetch: false);
 
       final exportData = {
         'schemaVersion': currentSchemaVersion,

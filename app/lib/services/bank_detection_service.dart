@@ -5,7 +5,9 @@ import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/utils/bank_sender_matcher.dart';
 
 /// Represents a bank detected from SMS messages
 class DetectedBank {
@@ -73,11 +75,15 @@ class BankDetectionService {
 
   Future<Set<int>> _getSupportedBankIds() async {
     try {
-      final patterns = await _smsConfigService.getPatterns();
-      return patterns.map((pattern) => pattern.bankId).toSet();
+      final patterns =
+          await _smsConfigService.getPatterns(allowRemoteFetch: false);
+      return {
+        ...patterns.map((pattern) => pattern.bankId),
+        ...await FallbackSmsParser.supportedBankIds(),
+      };
     } catch (e) {
       print("debug: Error loading supported bank IDs: $e");
-      return <int>{};
+      return FallbackSmsParser.supportedBankIds();
     }
   }
 
@@ -290,16 +296,6 @@ class BankDetectionService {
     return unregisteredBanks;
   }
 
-  String _normalizeSenderToken(String value) {
-    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-  }
-
-  bool _addressMatchesCode(String normalizedAddress, String code) {
-    final normalizedCode = _normalizeSenderToken(code);
-    if (normalizedCode.isEmpty) return false;
-    return normalizedAddress.contains(normalizedCode);
-  }
-
   /// Checks if the address matches any known bank and returns it
   Bank? _getMatchingBank(String address) {
     if (_cachedBanks == null) {
@@ -308,17 +304,7 @@ class BankDetectionService {
       return null;
     }
 
-    final normalizedAddress = _normalizeSenderToken(address);
-    if (normalizedAddress.isEmpty) return null;
-
-    for (var bank in _cachedBanks!) {
-      for (var code in bank.codes) {
-        if (_addressMatchesCode(normalizedAddress, code)) {
-          return bank;
-        }
-      }
-    }
-    return null;
+    return findBestBankForSenderAddress(address, _cachedBanks!);
   }
 
   /// Gets all banks detected from SMS (including those already registered)

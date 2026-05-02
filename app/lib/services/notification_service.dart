@@ -955,6 +955,17 @@ class NotificationService {
     for (final bank in AppConstants.banks) {
       if (bank.id == bankId) return bank;
     }
+    for (final bank in AllBanksFromAssets.getAllBanks()) {
+      if (bank.id == bankId) {
+        return Bank(
+          id: bank.id,
+          name: bank.name,
+          shortName: bank.shortName,
+          codes: bank.codes,
+          image: bank.image,
+        );
+      }
+    }
     return null;
   }
 

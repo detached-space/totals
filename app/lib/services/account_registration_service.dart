@@ -5,8 +5,10 @@ import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/account_sync_status_service.dart';
+import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/sms_handler/telephony.dart';
+import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
@@ -116,27 +118,34 @@ class AccountRegistrationService {
     final Telephony telephony = Telephony.instance;
     List<SmsMessage> allMessages = [];
 
-    // Query messages for each bank code
-    // Fetch all messages and filter by bank codes (since exact match may miss variations)
+    // Fetch all messages for every bank code and keep only the best sender match.
     try {
       print("debug: bankId: $bankId");
-      final allSms = await telephony.getInboxSms(
-        columns: const [
-          SmsColumn.ADDRESS,
-          SmsColumn.BODY,
-          SmsColumn.DATE,
-        ],
-        sortOrder: [
-          OrderBy(SmsColumn.DATE, sort: Sort.DESC),
-        ],
-        filter: SmsFilter.where(SmsColumn.ADDRESS).like('%${bankCodes[0]}%'),
-      );
+      final allSms = <SmsMessage>[];
+      for (final code in bankCodes.toSet()) {
+        final trimmedCode = code.trim();
+        if (trimmedCode.isEmpty) continue;
+        final batch = await telephony.getInboxSms(
+          columns: const [
+            SmsColumn.ADDRESS,
+            SmsColumn.BODY,
+            SmsColumn.DATE,
+          ],
+          sortOrder: [
+            OrderBy(SmsColumn.DATE, sort: Sort.DESC),
+          ],
+          filter: SmsFilter.where(SmsColumn.ADDRESS).like('%$trimmedCode%'),
+        );
+        allSms.addAll(batch);
+      }
 
       // Filter messages that match any bank code
       final filtered = allSms.where((message) {
-        if (message.address == null) return false;
-        final address = message.address!.toLowerCase();
-        return bankCodes.any((code) => address.contains(code.toLowerCase()));
+        return senderAddressMatchesBank(
+          bank,
+          message.address,
+          allBanks: _cachedBanks,
+        );
       }).toList();
 
       allMessages.addAll(filtered);
@@ -172,10 +181,12 @@ class AccountRegistrationService {
 
     // Load patterns for this bank
     final configService = SmsConfigService();
-    final patterns = await configService.getPatterns();
+    final patterns = await configService.getPatterns(allowRemoteFetch: false);
     final relevantPatterns = patterns.where((p) => p.bankId == bankId).toList();
+    final hasFallbackParser =
+        await FallbackSmsParser.supportsBankId(bankId, requirePatterns: true);
 
-    if (relevantPatterns.isEmpty) {
+    if (relevantPatterns.isEmpty && !hasFallbackParser) {
       print("debug: No patterns found for bank $bankId, skipping parsing");
       _syncStatusService.clearSyncStatus(accountNumber, bankId);
       onProgress?.call("No patterns found", 1.0);
@@ -220,21 +231,25 @@ class AccountRegistrationService {
           try {
             // Check if message matches any pattern
             final cleanedBody = configService.cleanSmsText(message.body!);
-            final details = await PatternParser.extractTransactionDetails(
-              cleanedBody,
-              message.address!,
-              DateTime.fromMillisecondsSinceEpoch(message.date!),
-              relevantPatterns,
+            final messageDate = message.date == null
+                ? null
+                : DateTime.fromMillisecondsSinceEpoch(message.date!);
+            var details = relevantPatterns.isEmpty
+                ? null
+                : await PatternParser.extractTransactionDetails(
+                    cleanedBody,
+                    message.address!,
+                    messageDate,
+                    relevantPatterns,
+                  );
+            details ??= await FallbackSmsParser.extractTransactionDetails(
+              messageBody: cleanedBody,
+              senderAddress: message.address!,
+              messageDate: messageDate,
+              bank: bank,
             );
 
             if (details != null) {
-              // Convert message date from milliseconds to DateTime
-              DateTime? messageDate;
-              if (message.date != null) {
-                messageDate =
-                    DateTime.fromMillisecondsSinceEpoch(message.date!);
-              }
-
               // Process the message using the existing SmsService logic with message date
               final transaction = await SmsService.processMessage(
                 message.body!,

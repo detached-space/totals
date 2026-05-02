@@ -13,10 +13,12 @@ import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
+import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/sms_handler/telephony.dart';
+import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/pattern_parser.dart';
 
 typedef _ReparseProgressCallback = Future<void> Function(
@@ -235,11 +237,14 @@ class AccountTransactionReparseService {
       orElse: () => throw StateError('Bank $bankId not found'),
     );
 
-    final patterns = await _smsConfigService.getPatterns();
+    final patterns =
+        await _smsConfigService.getPatterns(allowRemoteFetch: false);
     final relevantPatterns = patterns
         .where((pattern) => pattern.bankId == bankId)
         .toList(growable: false);
-    if (relevantPatterns.isEmpty) {
+    final hasFallbackParser =
+        await FallbackSmsParser.supportsBankId(bankId, requirePatterns: true);
+    if (relevantPatterns.isEmpty && !hasFallbackParser) {
       return _PreparedAccountTransactionReparse.failure(
         const AccountTransactionReparseResult(
           errorMessage: 'No parsing patterns are configured for this bank.',
@@ -385,11 +390,20 @@ class AccountTransactionReparseService {
       final messageDate = message.date == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(message.date!);
-      final details = await PatternParser.extractTransactionDetails(
-        _smsConfigService.cleanSmsText(body),
-        address,
-        messageDate,
-        relevantPatterns,
+      final cleanedBody = _smsConfigService.cleanSmsText(body);
+      var details = relevantPatterns.isEmpty
+          ? null
+          : await PatternParser.extractTransactionDetails(
+              cleanedBody,
+              address,
+              messageDate,
+              relevantPatterns,
+            );
+      details ??= await FallbackSmsParser.extractTransactionDetails(
+        messageBody: cleanedBody,
+        senderAddress: address,
+        messageDate: messageDate,
+        bank: bank,
       );
       if (details == null) continue;
       parsedMessages++;
@@ -699,18 +713,11 @@ class AccountTransactionReparseService {
   }
 
   bool _matchesBankAddress(Bank bank, String address) {
-    final normalizedAddress = _normalizeSenderToken(address);
-    if (normalizedAddress.isEmpty) return false;
-    for (final code in bank.codes) {
-      final normalizedCode = _normalizeSenderToken(code);
-      if (normalizedCode.isEmpty) continue;
-      if (normalizedAddress.contains(normalizedCode)) return true;
-    }
-    return false;
-  }
-
-  String _normalizeSenderToken(String value) {
-    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return senderAddressMatchesBank(
+      bank,
+      address,
+      allBanks: _cachedBanks,
+    );
   }
 
   bool _matchesAccount(

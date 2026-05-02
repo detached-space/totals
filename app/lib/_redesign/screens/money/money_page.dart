@@ -20,6 +20,7 @@ import 'package:totals/services/account_registration_service.dart';
 import 'package:totals/services/account_transaction_reparse_service.dart';
 import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/services/bank_detection_service.dart';
+import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
@@ -11463,11 +11464,15 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
 
   Future<Set<int>> _loadSupportedBankIds() async {
     try {
-      final patterns = await _smsConfigService.getPatterns();
-      return patterns.map((pattern) => pattern.bankId).toSet();
+      final patterns =
+          await _smsConfigService.getPatterns(allowRemoteFetch: false);
+      return {
+        ...patterns.map((pattern) => pattern.bankId),
+        ...await FallbackSmsParser.supportedBankIds(),
+      };
     } catch (e) {
       debugPrint("debug: Error loading SMS patterns: $e");
-      return <int>{};
+      return FallbackSmsParser.supportedBankIds();
     }
   }
 
