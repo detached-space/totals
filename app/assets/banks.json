@@ -318,7 +318,7 @@
         "apollo",
         "Apollo"
       ],
-      "image": "assets/images/global.png",
+      "image": "assets/images/apollo.png",
       "maskPattern": 2,
       "uniformMasking": true,
       "simBased": false,

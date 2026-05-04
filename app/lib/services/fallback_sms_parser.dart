@@ -5,27 +5,7 @@ import 'package:totals/models/bank.dart';
 
 class FallbackSmsParser {
   static const String _assetPath = 'assets/fallback_sms_patterns.json';
-
-  static const Map<int, List<String>> _fallbackProviderIdsByTotalsBankId = {
-    1: ['cbe_0'],
-    2: ['awash_0'],
-    3: ['boa_0'],
-    4: ['dashen_0'],
-    5: ['zemen_0'],
-    6: ['telebirr_0'],
-    8: ['mpesa_0'],
-    9: ['amhara_0'],
-    10: ['ahadu_0'],
-    12: ['berhan_0'],
-    13: ['bunna_0'],
-    14: ['coop_0'],
-    19: ['hibret_0'],
-    24: ['Oromia_0'],
-    30: ['tsedey_0'],
-    33: ['wegagen_0'],
-    36: ['apollo_0'],
-    37: ['cbe_birr_0'],
-  };
+  static const String _schema = 'totals.fallbackSmsPatterns.v1';
 
   static List<_FallbackBankConfig>? _cachedConfigs;
 
@@ -33,16 +13,12 @@ class FallbackSmsParser {
     bool requirePatterns = false,
   }) async {
     final configs = await _loadConfigs();
-    final configsById = {for (final config in configs) config.bankId: config};
     final supported = <int>{};
 
-    for (final entry in _fallbackProviderIdsByTotalsBankId.entries) {
-      final hasSupportedConfig = entry.value.any((fallbackProviderId) {
-        final config = configsById[fallbackProviderId];
-        if (config == null) return false;
-        return !requirePatterns || config.patterns.isNotEmpty;
-      });
-      if (hasSupportedConfig) supported.add(entry.key);
+    for (final config in configs) {
+      if (!requirePatterns || config.patterns.isNotEmpty) {
+        supported.add(config.bankId);
+      }
     }
 
     return supported;
@@ -68,6 +44,8 @@ class FallbackSmsParser {
     _FallbackMatch? bestMatch;
     for (final config in configs) {
       for (final pattern in config.patterns) {
+        if (!pattern.enabled) continue;
+
         final match = _matchPattern(
           config: config,
           pattern: pattern,
@@ -89,15 +67,9 @@ class FallbackSmsParser {
   static Future<List<_FallbackBankConfig>> _configsForTotalsBank(
     int totalsBankId,
   ) async {
-    final fallbackProviderIds =
-        _fallbackProviderIdsByTotalsBankId[totalsBankId];
-    if (fallbackProviderIds == null || fallbackProviderIds.isEmpty) {
-      return const [];
-    }
-
     final configs = await _loadConfigs();
     return configs
-        .where((config) => fallbackProviderIds.contains(config.bankId))
+        .where((config) => config.bankId == totalsBankId)
         .toList(growable: false);
   }
 
@@ -107,15 +79,18 @@ class FallbackSmsParser {
     try {
       final body = await rootBundle.loadString(_assetPath);
       final decoded = jsonDecode(body);
-      if (decoded is! List) {
+      if (decoded is! Map<String, dynamic> || decoded['schema'] != _schema) {
         _cachedConfigs = const [];
         return _cachedConfigs!;
       }
 
-      _cachedConfigs = decoded
-          .whereType<Map<String, dynamic>>()
-          .map(_FallbackBankConfig.fromJson)
-          .toList(growable: false);
+      final rawBanks = decoded['banks'];
+      _cachedConfigs = rawBanks is List
+          ? rawBanks
+              .whereType<Map<String, dynamic>>()
+              .map(_FallbackBankConfig.fromJson)
+              .toList(growable: false)
+          : const [];
       return _cachedConfigs!;
     } catch (_) {
       _cachedConfigs = const [];
@@ -137,9 +112,8 @@ class FallbackSmsParser {
     final amount = _parseAmount(amountText);
     if (amount == null) return null;
 
-    final creditMatched = _matches(pattern.creditRegex, messageBody);
-    final debitMatched = _matches(pattern.debitRegex, messageBody);
-    if (!creditMatched && !debitMatched) return null;
+    final type = _resolveTransactionType(pattern, messageBody);
+    if (type == null) return null;
 
     final currencyRegex = pattern.currencyRegex;
     final currencyMatched =
@@ -154,13 +128,13 @@ class FallbackSmsParser {
     final accountNumber = _normalizeAccountNumber(
       rawAccount,
       bank: bank,
-      phoneIsAccount: config.phoneIsAccount,
+      phoneIsAccount: _phoneIsAccount(bank),
     );
 
     if (hasAccountRegex &&
         accountNumber == null &&
         bank.uniformMasking != false &&
-        !config.phoneIsAccount) {
+        !_phoneIsAccount(bank)) {
       return null;
     }
 
@@ -176,19 +150,25 @@ class FallbackSmsParser {
         ? linkOrReference
         : _extractUrl(messageBody);
 
-    final type = creditMatched ? 'CREDIT' : 'DEBIT';
     final reference = _buildReference(
       messageBody: messageBody,
       bankId: bank.id,
-      patternId: pattern.id,
+      pattern: pattern,
       linkOrReference: linkOrReference,
       messageDate: messageDate,
+    );
+    final counterparty = _extractCounterparty(
+      type: type,
+      config: config,
+      pattern: pattern,
+      messageBody: messageBody,
     );
 
     var score = 0;
     score += 10;
-    score += creditMatched || debitMatched ? 6 : 0;
+    score += 6;
     score += accountNumber != null ? 4 : 0;
+    score += counterparty != null ? 4 : 0;
     score += balance != null ? 3 : 0;
     score += currencyMatched ? 2 : 0;
     score += linkOrReference != null ? 1 : 0;
@@ -197,7 +177,7 @@ class FallbackSmsParser {
       'type': type,
       'bankId': bank.id,
       'patternDescription':
-          'Fallback parser ${config.name} ${pattern.id} $type',
+          'Fallback parser ${config.displayName} ${pattern.id} $type',
       'amount': amount,
       'reference': reference,
       'time': (messageDate ?? DateTime.now()).toIso8601String(),
@@ -206,8 +186,46 @@ class FallbackSmsParser {
     if (balance != null) details['currentBalance'] = balance;
     if (accountNumber != null) details['accountNumber'] = accountNumber;
     if (transactionLink != null) details['transactionLink'] = transactionLink;
+    if (counterparty != null && type == 'CREDIT') {
+      details['creditor'] = counterparty;
+    } else if (counterparty != null) {
+      details['receiver'] = counterparty;
+    }
 
     return _FallbackMatch(score: score, details: details);
+  }
+
+  static String? _resolveTransactionType(
+    _FallbackPattern pattern,
+    String messageBody,
+  ) {
+    final creditHasMatcher = _isUsableRegex(pattern.creditRegex);
+    final debitHasMatcher = _isUsableRegex(pattern.debitRegex);
+    final creditMatched = creditHasMatcher
+        ? _matches(pattern.creditRegex, messageBody)
+        : pattern.declaredType == 'CREDIT';
+    final debitMatched = debitHasMatcher
+        ? _matches(pattern.debitRegex, messageBody)
+        : pattern.declaredType == 'DEBIT';
+
+    if (pattern.declaredType == 'CREDIT') {
+      return creditMatched ? 'CREDIT' : null;
+    }
+    if (pattern.declaredType == 'DEBIT') {
+      return debitMatched ? 'DEBIT' : null;
+    }
+    if (!creditMatched && !debitMatched) return null;
+    if (creditMatched && debitMatched) {
+      if (_isCatchAllRegex(pattern.creditRegex) &&
+          !_isCatchAllRegex(pattern.debitRegex)) {
+        return 'DEBIT';
+      }
+      if (_isCatchAllRegex(pattern.debitRegex) &&
+          !_isCatchAllRegex(pattern.creditRegex)) {
+        return 'CREDIT';
+      }
+    }
+    return creditMatched ? 'CREDIT' : 'DEBIT';
   }
 
   static RegExpMatch? _firstMatch(String? rawRegex, String body) {
@@ -233,6 +251,11 @@ class FallbackSmsParser {
     final trimmed = value?.trim();
     if (trimmed == null || trimmed.isEmpty) return false;
     return trimmed.toUpperCase() != 'N/A';
+  }
+
+  static bool _isCatchAllRegex(String? value) {
+    final normalized = value?.replaceAll(RegExp(r'\s+'), '').trim();
+    return normalized == '.*' || normalized == '^.*\$';
   }
 
   static String _normalizeRegex(String regex) {
@@ -268,6 +291,10 @@ class FallbackSmsParser {
     return cleaned.isEmpty ? null : cleaned;
   }
 
+  static bool _phoneIsAccount(Bank bank) {
+    return bank.simBased == true && bank.uniformMasking == false;
+  }
+
   static String? _normalizeAccountNumber(
     String? rawAccount, {
     required Bank bank,
@@ -291,22 +318,55 @@ class FallbackSmsParser {
   static String _buildReference({
     required String messageBody,
     required int bankId,
-    required String patternId,
+    required _FallbackPattern pattern,
     required String? linkOrReference,
     required DateTime? messageDate,
   }) {
-    final explicitReference = _cleanReference(linkOrReference) ??
+    final explicitReference = _extractPatternReference(pattern, messageBody) ??
+        _cleanReference(
+          linkOrReference,
+          rejectStatic: pattern.rejectStaticReference,
+        ) ??
         _extractReferenceFromBody(messageBody);
     if (explicitReference != null) return explicitReference;
 
     final timestamp = messageDate?.millisecondsSinceEpoch ?? 0;
-    return 'fallback_${bankId}_${patternId}_${timestamp}_${_stableHash(messageBody)}';
+    final strategy = pattern.referenceFallback;
+    if (strategy == 'timestamp_message_hash') {
+      return 'fallback_${bankId}_${pattern.id}_${timestamp}_${_stableHash(messageBody)}';
+    }
+    return 'fallback_${bankId}_${pattern.id}_${_stableHash(messageBody)}';
   }
 
-  static String? _cleanReference(String? value) {
+  static String? _extractPatternReference(
+    _FallbackPattern pattern,
+    String messageBody,
+  ) {
+    final match = _firstMatch(pattern.referenceRegex, messageBody);
+    final value = match == null ? null : _firstCapturedValue(match);
+    return _cleanReference(
+      value,
+      rejectStatic: pattern.rejectStaticReference,
+    );
+  }
+
+  static String? _cleanReference(
+    String? value, {
+    bool rejectStatic = false,
+  }) {
     final trimmed = value?.trim();
     if (trimmed == null || trimmed.isEmpty) return null;
+    if (rejectStatic && _looksStaticReference(trimmed)) return null;
     return trimmed.length > 160 ? trimmed.substring(0, 160) : trimmed;
+  }
+
+  static bool _looksStaticReference(String value) {
+    final lower = value.toLowerCase();
+    if (lower == 'n/a') return true;
+    if (lower.contains('ethiotelecom.et/telebirr')) return true;
+    if (lower.contains('t.me/')) return true;
+    if (lower.contains('forms.gle/')) return true;
+    return false;
   }
 
   static String? _extractReferenceFromBody(String body) {
@@ -327,6 +387,92 @@ class FallbackSmsParser {
       if (value != null && value.isNotEmpty) return value;
     }
     return null;
+  }
+
+  static String? _extractCounterparty({
+    required String type,
+    required _FallbackBankConfig config,
+    required _FallbackPattern pattern,
+    required String messageBody,
+  }) {
+    final candidates = type == 'CREDIT'
+        ? [
+            ...pattern.counterpartyExtractors.creditor,
+            ...config.counterpartyExtractors.creditor,
+          ]
+        : [
+            ...pattern.counterpartyExtractors.receiver,
+            ...config.counterpartyExtractors.receiver,
+          ];
+
+    for (final rawRegex in candidates) {
+      final match = _firstMatch(rawRegex, messageBody);
+      final value = match == null ? null : _firstCapturedValue(match);
+      final counterparty = _cleanCounterparty(value);
+      if (counterparty != null) return counterparty;
+    }
+
+    return null;
+  }
+
+  static String? _cleanCounterparty(String? value) {
+    var cleaned = value?.trim();
+    if (cleaned == null || cleaned.isEmpty) return null;
+
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(
+      RegExp(
+        r'\s+and\s+(?:credited|debited|transferred|posted)\b.*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\s+on\s*:?\s*\d.*$', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r',?\s*remarks?\b.*$', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\s+with\s+payment\b.*$', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'\s+through\s+cash deposit\b.*$', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(
+        r'\s*(?:your transaction|your current|thank you|txn id|transaction number|to download).*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    cleaned = cleaned.replaceAll(RegExp(r'\s*[.,;:]+$'), '').trim();
+
+    if (cleaned.length < 2) return null;
+    if (_looksLikeUrl(cleaned)) return null;
+    if (RegExp(
+      r'^[\d*Xx\s()\-+./]{4,}$',
+    ).hasMatch(cleaned)) {
+      return null;
+    }
+    if (RegExp(r'^\d{1,2}:\d{2}').hasMatch(cleaned)) return null;
+    if (RegExp(
+      r'(?:receive transaction notification|latest updates|for any support|\bdownload\b|transaction reference|transaction id|\bref(?:erence)?\b|new balance|avail(?:able)? balance|current balance|remaining balance|\bcharge\b|\bvat\b|\bdate\b|account transfer|using branch|bank ref|receipt|\bto download\b|\bwith etb\b|\bbank to\b|is made (?:from|to))',
+      caseSensitive: false,
+    ).hasMatch(cleaned)) {
+      return null;
+    }
+    if (RegExp(
+      r'^(?:etb|birr|br|transaction|txn|ref|reference|balance|receive|get|keep|pos|pos transaction|mobile banking|ethswitch|acount|acount transaction|tele-birr via mobile|withdraw.*|the m-pesa.*|using.*|additional information.*|on.*)$',
+      caseSensitive: false,
+    ).hasMatch(cleaned)) {
+      return null;
+    }
+    return cleaned.length > 120 ? cleaned.substring(0, 120) : cleaned;
   }
 
   static bool _looksLikeUrl(String? value) {
@@ -352,26 +498,31 @@ class FallbackSmsParser {
 }
 
 class _FallbackBankConfig {
-  final String bankId;
-  final String name;
-  final bool phoneIsAccount;
+  final int bankId;
+  final String bankKey;
+  final String displayName;
+  final _CounterpartyExtractors counterpartyExtractors;
   final List<_FallbackPattern> patterns;
 
   const _FallbackBankConfig({
     required this.bankId,
-    required this.name,
-    required this.phoneIsAccount,
+    required this.bankKey,
+    required this.displayName,
+    required this.counterpartyExtractors,
     required this.patterns,
   });
 
   factory _FallbackBankConfig.fromJson(Map<String, dynamic> json) {
-    final rawPatterns = json['regexPatterns'];
+    final rawRules = json['rules'];
     return _FallbackBankConfig(
-      bankId: (json['bankId'] ?? '').toString(),
-      name: (json['name'] ?? '').toString(),
-      phoneIsAccount: json['phoneIsAccount'] == true,
-      patterns: rawPatterns is List
-          ? rawPatterns
+      bankId: (json['bankId'] as num?)?.toInt() ?? -1,
+      bankKey: (json['bankKey'] ?? '').toString(),
+      displayName: (json['displayName'] ?? '').toString(),
+      counterpartyExtractors: _CounterpartyExtractors.fromJson(
+        json['counterparty'],
+      ),
+      patterns: rawRules is List
+          ? rawRules
               .whereType<Map<String, dynamic>>()
               .map(_FallbackPattern.fromJson)
               .toList(growable: false)
@@ -382,41 +533,104 @@ class _FallbackBankConfig {
 
 class _FallbackPattern {
   final String id;
+  final bool enabled;
+  final String declaredType;
   final String? amountRegex;
   final String? balanceRegex;
   final String? accountRegex;
   final String? linkRegex;
+  final String? referenceRegex;
+  final String referenceFallback;
+  final bool rejectStaticReference;
   final String? currencyRegex;
   final String? debitRegex;
   final String? creditRegex;
+  final _CounterpartyExtractors counterpartyExtractors;
 
   const _FallbackPattern({
     required this.id,
+    required this.enabled,
+    required this.declaredType,
     required this.amountRegex,
     required this.balanceRegex,
     required this.accountRegex,
     required this.linkRegex,
+    required this.referenceRegex,
+    required this.referenceFallback,
+    required this.rejectStaticReference,
     required this.currencyRegex,
     required this.debitRegex,
     required this.creditRegex,
+    required this.counterpartyExtractors,
   });
 
   factory _FallbackPattern.fromJson(Map<String, dynamic> json) {
+    final matchers = _mapOrNull(json['matchers']);
+    final extractors = _mapOrNull(json['extractors']);
+    final currency = _mapOrNull(json['currency']);
+    final reference = _mapOrNull(json['reference']);
+
     return _FallbackPattern(
       id: (json['id'] ?? 'unknown').toString(),
-      amountRegex: _stringOrNull(json['amount']),
-      balanceRegex: _stringOrNull(json['balance']),
-      accountRegex: _stringOrNull(json['account']),
-      linkRegex: _stringOrNull(json['link']),
-      currencyRegex: _stringOrNull(json['currencyRegex']),
-      debitRegex: _stringOrNull(json['debit']),
-      creditRegex: _stringOrNull(json['credit']),
+      enabled: json['enabled'] != false,
+      declaredType: (json['type'] ?? 'AUTO').toString().toUpperCase(),
+      amountRegex: _stringOrNull(extractors?['amount']),
+      balanceRegex: _stringOrNull(extractors?['balance']),
+      accountRegex: _stringOrNull(extractors?['account']),
+      linkRegex: _stringOrNull(extractors?['link']),
+      referenceRegex: _stringOrNull(reference?['extractor']),
+      referenceFallback:
+          (reference?['fallback'] ?? 'timestamp_message_hash').toString(),
+      rejectStaticReference: reference?['rejectStatic'] != false,
+      currencyRegex: _stringOrNull(currency?['matcher']),
+      debitRegex: _stringOrNull(matchers?['debit']),
+      creditRegex: _stringOrNull(matchers?['credit']),
+      counterpartyExtractors: _CounterpartyExtractors.fromJson(
+        json['counterparty'],
+      ),
     );
+  }
+
+  static Map<String, dynamic>? _mapOrNull(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    return null;
   }
 
   static String? _stringOrNull(dynamic value) {
     if (value == null) return null;
     return value.toString();
+  }
+}
+
+class _CounterpartyExtractors {
+  final List<String> creditor;
+  final List<String> receiver;
+
+  const _CounterpartyExtractors({
+    required this.creditor,
+    required this.receiver,
+  });
+
+  factory _CounterpartyExtractors.fromJson(dynamic json) {
+    if (json is! Map<String, dynamic>) {
+      return const _CounterpartyExtractors(
+        creditor: [],
+        receiver: [],
+      );
+    }
+    return _CounterpartyExtractors(
+      creditor: _stringList(json['creditor']),
+      receiver: _stringList(json['receiver']),
+    );
+  }
+
+  static List<String> _stringList(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .map((item) => item?.toString().trim())
+        .whereType<String>()
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
   }
 }
 

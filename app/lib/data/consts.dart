@@ -187,7 +187,7 @@ class AppConstants {
         "apollo",
         "Apollo",
       ],
-      image: "assets/images/global.png",
+      image: "assets/images/apollo.png",
     ),
     Bank(
       id: 37,

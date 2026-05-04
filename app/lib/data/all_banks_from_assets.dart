@@ -315,7 +315,7 @@ class AllBanksFromAssets {
         name: "Apollo",
         shortName: "Apollo",
         codes: ["Apollo", "apollo"],
-        image: "assets/images/global.png",
+        image: "assets/images/apollo.png",
         maskPattern: 2,
         uniformMasking: true,
       ),
