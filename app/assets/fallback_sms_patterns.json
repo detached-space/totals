@@ -3218,9 +3218,9 @@
           "id": "mpesa_fallback_044",
           "enabled": true,
           "priority": 44,
-          "type": "DEBIT",
+          "type": "CREDIT",
           "matchers": {
-            "debit": "ተቀብለዋል"
+            "credit": "ተቀብለዋል"
           },
           "currency": {
             "code": "ETB",
@@ -3296,29 +3296,6 @@
           }
         },
         {
-          "id": "mpesa_fallback_047",
-          "enabled": true,
-          "priority": 47,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "ወደ Overdraft አገልግሎት በተሳካ ሁኔታ መርጠው ገብተዋል"
-          },
-          "currency": {
-            "code": "ETB",
-            "matcher": "ETB|ብር"
-          },
-          "extractors": {
-            "amount": "መርጠው ገብተዋል። ገደብዎ ([\\d,.]+) ብር",
-            "balance": "ገደብዎ ([\\d,.]+) ብር ነው",
-            "account": "ወደ (\\w+|\\*+\\d+|\\d{4}[ -]?\\d{4})"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
           "id": "mpesa_fallback_048",
           "enabled": true,
           "priority": 48,
@@ -3385,28 +3362,6 @@
           },
           "reference": {
             "extractor": "(https?://[\\w.-]+)",
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_051",
-          "enabled": true,
-          "priority": 51,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "Shughuli imefeli, M-PESA haiwezi kukamilisha malipo ya Ksh([\\s]*[\\d,.]+)"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Ksh([\\s]*[\\d,.]+)",
-            "account": "account no (X+\\d+)"
-          },
-          "reference": {
-            "extractor": null,
             "fallback": "timestamp_message_hash",
             "rejectStatic": true
           }
@@ -3977,29 +3932,6 @@
           }
         },
         {
-          "id": "telebirr_fallback_025",
-          "enabled": true,
-          "priority": 25,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "Your outstanding credit balance of ETB [\\d,.]+ is"
-          },
-          "currency": {
-            "code": "ETB",
-            "matcher": "ETB"
-          },
-          "extractors": {
-            "amount": "Your outstanding credit balance of (ETB [\\d,.]+)",
-            "balance": "Your outstanding credit balance of (ETB [\\d,.]+) is",
-            "account": "account no (X+\\d+)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
           "id": "telebirr_fallback_026",
           "enabled": true,
           "priority": 26,
@@ -4023,33 +3955,12 @@
           }
         },
         {
-          "id": "telebirr_fallback_027",
-          "enabled": true,
-          "priority": 27,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "withdraw"
-          },
-          "currency": {
-            "code": "ETB",
-            "matcher": "ETB"
-          },
-          "extractors": {
-            "amount": "amount of ETB ([\\d,]+\\.\\d{2})"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
           "id": "telebirr_fallback_028",
           "enabled": true,
           "priority": 28,
-          "type": "DEBIT",
+          "type": "CREDIT",
           "matchers": {
-            "debit": "ተቀብለዋል"
+            "credit": "ተቀብለዋል"
           },
           "currency": {
             "code": "ETB",
@@ -4069,10 +3980,9 @@
           "id": "telebirr_fallback_029",
           "enabled": true,
           "priority": 29,
-          "type": "AUTO",
+          "type": "CREDIT",
           "matchers": {
-            "credit": "transferred to",
-            "debit": "transferred from"
+            "credit": "transferred from"
           },
           "currency": {
             "code": "ETB",
@@ -4184,9 +4094,9 @@
           "id": "telebirr_fallback_035",
           "enabled": true,
           "priority": 35,
-          "type": "DEBIT",
+          "type": "CREDIT",
           "matchers": {
-            "debit": "ክፍያ"
+            "credit": "ክፍያ"
           },
           "currency": {
             "code": "ETB",
@@ -4231,9 +4141,9 @@
           "id": "telebirr_fallback_037",
           "enabled": true,
           "priority": 37,
-          "type": "CREDIT",
+          "type": "DEBIT",
           "matchers": {
-            "credit": "paid"
+            "debit": "paid"
           },
           "currency": {
             "code": "ETB",
@@ -4330,9 +4240,9 @@
           "id": "telebirr_fallback_041",
           "enabled": true,
           "priority": 41,
-          "type": "DEBIT",
+          "type": "CREDIT",
           "matchers": {
-            "debit": "ተቀብለዋል"
+            "credit": "ተቀብለዋል"
           },
           "currency": {
             "code": "ETB",
