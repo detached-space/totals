@@ -1602,28 +1602,6 @@
           }
         },
         {
-          "id": "cbe_birr_fallback_012",
-          "enabled": true,
-          "priority": 12,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "Cash out the money"
-          },
-          "currency": {
-            "code": "ETB",
-            "matcher": "ETB|Br"
-          },
-          "extractors": {
-            "amount": "the voucher number is (\\d+), Amount ([\\d,.]+)Br",
-            "account": "account no (X+\\d+)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
           "id": "cbe_birr_fallback_013",
           "enabled": true,
           "priority": 13,
