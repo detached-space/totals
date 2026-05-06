@@ -1386,7 +1386,7 @@
             "amount": "sent ([\\d,.]+)Br\\.",
             "balance": "balance is ([\\d,.]+)Br\\.",
             "account": "account no (\\b\\w{10,}\\b)",
-            "link": "https?://[\\w.-]+(?:/[\\w.-]*)*"
+            "link": "https?://\\S+"
           },
           "reference": {
             "extractor": "https?://[\\w.-]+(?:/[\\w.-]*)*",
@@ -1540,10 +1540,10 @@
             "amount": "you paid ([\\d,.]+)Br",
             "balance": "account balance is ([\\d,.]+)Br",
             "account": "(\b(?:\b\\d{4}[- ]?\\d{4}\\b|\\b\\d{4} \\d{4}\\b|\\b\\*{5}\\d{4}\\b)\b)",
-            "link": "(https?://[\\w.-]+(?:\\.[\\w.-]+)+[/\\w.-?=&%]*)"
+            "link": "(https?://\\S+)"
           },
           "reference": {
-            "extractor": "(https?://[\\w.-]+(?:\\.[\\w.-]+)+[/\\w.-?=&%]*)",
+            "extractor": "(https?://\\S+)",
             "fallback": "timestamp_message_hash",
             "rejectStatic": true
           },
@@ -1569,7 +1569,7 @@
             "amount": "withdrawn ([\\d,.]+)Br",
             "balance": "balance is ([\\d,.]+)Br",
             "account": "your account no (\\b\\w{10,}\\b)",
-            "link": "https?://[\\w.-]+(?:/[\\w.-]*)*"
+            "link": "https?://\\S+"
           },
           "reference": {
             "extractor": "https?://[\\w.-]+(?:/[\\w.-]*)*",

@@ -146,9 +146,10 @@ class FallbackSmsParser {
     final linkMatch = _firstMatch(pattern.linkRegex, messageBody);
     final linkOrReference =
         linkMatch == null ? null : _firstCapturedValue(linkMatch);
-    final transactionLink = _looksLikeUrl(linkOrReference)
-        ? linkOrReference
-        : _extractUrl(messageBody);
+    final transactionLink = _resolveTransactionLink(
+      linkOrReference: linkOrReference,
+      messageBody: messageBody,
+    );
 
     final reference = _buildReference(
       messageBody: messageBody,
@@ -481,10 +482,37 @@ class FallbackSmsParser {
         (lower.startsWith('http://') || lower.startsWith('https://'));
   }
 
+  static String? _resolveTransactionLink({
+    required String? linkOrReference,
+    required String messageBody,
+  }) {
+    final fullUrl = _extractUrl(messageBody);
+    if (!_looksLikeUrl(linkOrReference)) return fullUrl;
+
+    final capturedUrl = _cleanUrl(linkOrReference);
+    if (capturedUrl == null) return fullUrl;
+
+    if (fullUrl != null &&
+        fullUrl.length > capturedUrl.length &&
+        fullUrl.toLowerCase().startsWith(capturedUrl.toLowerCase())) {
+      return fullUrl;
+    }
+
+    return capturedUrl;
+  }
+
   static String? _extractUrl(String body) {
-    final match =
-        RegExp(r'https?://\S+', caseSensitive: false).firstMatch(body);
-    return match?.group(0);
+    final match = RegExp(
+      r'''https?://[^\s<>"']+''',
+      caseSensitive: false,
+    ).firstMatch(body);
+    return _cleanUrl(match?.group(0));
+  }
+
+  static String? _cleanUrl(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed.replaceFirst(RegExp(r'[\].,;:)\s]+$'), '');
   }
 
   static String _stableHash(String value) {
