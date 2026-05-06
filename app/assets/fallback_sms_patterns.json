@@ -587,30 +587,6 @@
           }
         },
         {
-          "id": "awash_fallback_007",
-          "enabled": true,
-          "priority": 7,
-          "type": "AUTO",
-          "matchers": {
-            "credit": "(You have sent)",
-            "debit": "sent"
-          },
-          "currency": {
-            "code": "ETB",
-            "matcher": "ETB"
-          },
-          "extractors": {
-            "amount": "Dear Customer, You have sent\\s*(\\d+ ETB)",
-            "balance": "Your Balance (ETB [\\d,]+\\.\\d{2})",
-            "account": "From (\\d+\\*{6}\\d{4})\\/BANK"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
           "id": "awash_fallback_008",
           "enabled": true,
           "priority": 8,
@@ -2649,136 +2625,6 @@
           }
         },
         {
-          "id": "mpesa_fallback_020",
-          "enabled": true,
-          "priority": 20,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "imetumwa"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "\\bKsh([\\d,.]+)\\b",
-            "balance": "\\bBaki yako ya M-PESA ni Ksh([\\d,.]+)\\b",
-            "account": "\\b(\\d{10}|\\d{3,4}[ -]?\\d{4}[ -]?\\d{4}|\\*{5}\\d{4})\\b"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_021",
-          "enabled": true,
-          "priority": 21,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "paid"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Ksh([\\d,]+\\.\\d{2}) paid",
-            "balance": "New M-PESA balance is Ksh([\\d,]+\\.\\d{2})",
-            "account": "account no (\\b\\w{0,5}\\d{4}\\b)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          },
-          "counterparty": {
-            "receiver": [
-              "(?:paid|payment|sent|transfered|transferred|debited|recharged|bought|contributed|gifted|top-up).*?\\sto\\s+(.+?)(?=(?:\\s+on\\s*:?\\s*(?:\\d|[A-Z]{3})|\\s+at\\s+\\d|\\.\\s*(?:Your|Thank|Ref|Reference|Txn|Transaction|New|Current|Available|Avail|Remaining|Please|The)|\\s+(?:Your|Thank|Ref|Reference|Txn|Transaction|New balance|Current balance|Available balance|Avail balance|Remaining balance|Charge|VAT|Date|With Bank Ref|Bank Ref)|,\\s*(?:Txn|Reference|Ref)|\\s+with\\s+(?:transaction|reference|Bank Ref)|\\s+and\\s+(?:credited|debited|transferred|posted)|$))"
-            ]
-          }
-        },
-        {
-          "id": "mpesa_fallback_022",
-          "enabled": true,
-          "priority": 22,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "Umelipa"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Umelipa Ksh([\\d,]+\\.\\d{2})",
-            "balance": "M-PESA ni Ksh([\\d,]+\\.\\d{2})",
-            "account": "your account no (\\b\\w{0,5}\\d{4}\\b)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_024",
-          "enabled": true,
-          "priority": 24,
-          "type": "CREDIT",
-          "matchers": {
-            "credit": "received"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "You have received Ksh([\\d,.]+) from",
-            "balance": "New M-PESA balance is Ksh([\\d,.]+)",
-            "account": "account no (\\b\\d{10}\\b|\\b\\*{5}\\d{4}\\b|\\b\\d{4}[ -]?\\d{4}\\b)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          },
-          "counterparty": {
-            "creditor": [
-              "(?:received|credited|deposited|transfer(?:red|ed)? to|fund transfer).*?\\sfrom\\s+(.+?)(?=(?:\\s+on\\s*:?\\s*(?:\\d|[A-Z]{3})|\\s+at\\s+\\d|\\.\\s*(?:Your|Thank|Ref|Reference|Txn|Transaction|New|Current|Available|Avail|Remaining|Please|The)|\\s+(?:Your|Thank|Ref|Reference|Txn|Transaction|New balance|Current balance|Available balance|Avail balance|Remaining balance|Charge|VAT|Date|With Bank Ref|Bank Ref)|,\\s*(?:Txn|Reference|Ref)|\\s+with\\s+(?:transaction|reference|Bank Ref)|\\s+and\\s+(?:credited|debited|transferred|posted)|$))"
-            ]
-          }
-        },
-        {
-          "id": "mpesa_fallback_025",
-          "enabled": true,
-          "priority": 25,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "sent to"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "\\bKsh([\\d,.]+)\\b",
-            "balance": "\\bNew M-PESA balance is Ksh([\\d,.]+)\\b",
-            "account": "\\b(?:SAM\\s+JAMES|\\d{10}|\\d{3}[ -]?\\d{4}[ -]?\\d{3}|\\*{5}\\d{4})\\b"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          },
-          "counterparty": {
-            "receiver": [
-              "(?:paid|payment|sent|transfered|transferred|debited|recharged|bought|contributed|gifted|top-up).*?\\sto\\s+(.+?)(?=(?:\\s+on\\s*:?\\s*(?:\\d|[A-Z]{3})|\\s+at\\s+\\d|\\.\\s*(?:Your|Thank|Ref|Reference|Txn|Transaction|New|Current|Available|Avail|Remaining|Please|The)|\\s+(?:Your|Thank|Ref|Reference|Txn|Transaction|New balance|Current balance|Available balance|Avail balance|Remaining balance|Charge|VAT|Date|With Bank Ref|Bank Ref)|,\\s*(?:Txn|Reference|Ref)|\\s+with\\s+(?:transaction|reference|Bank Ref)|\\s+and\\s+(?:credited|debited|transferred|posted)|$))"
-            ]
-          }
-        },
-        {
           "id": "mpesa_fallback_026",
           "enabled": true,
           "priority": 26,
@@ -2793,29 +2639,6 @@
           "extractors": {
             "amount": "([\\d,.]+) ብር ለ",
             "balance": "ቀሪ ሂሳብ ([\\d,.]+) ብር",
-            "account": "([\\d\\s-]+|\\*{5}\\d{4})"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_027",
-          "enabled": true,
-          "priority": 27,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "You bought Ksh([\\d,.]+) of airtime"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "You bought Ksh([\\d,.]+) of airtime",
-            "balance": "New M-PESA balance is Ksh([\\d,.]+)",
             "account": "([\\d\\s-]+|\\*{5}\\d{4})"
           },
           "reference": {
@@ -2840,98 +2663,6 @@
             "amount": "received cashback of ([\\d,.]+) Birr",
             "balance": "Your new M-PESA balance is ([\\d,.]+) Birr",
             "account": "your account no (\\b\\w{0,5}\\d{4}\\b)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_029",
-          "enabled": true,
-          "priority": 29,
-          "type": "CREDIT",
-          "matchers": {
-            "credit": "Umepokea"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Umepokea Ksh([\\d,.]+) kutoka",
-            "balance": "Baki mpya ya M-PESA ni Ksh([\\d,.]+)",
-            "account": "account no (\\b\\w{0,5}\\d{4}\\b)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_030",
-          "enabled": true,
-          "priority": 30,
-          "type": "CREDIT",
-          "matchers": {
-            "credit": "Umepokea"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Umepokea Ksh([\\d,.]+) kutoka",
-            "balance": "Baki yako ya M-PESA ni Ksh([\\d,.]+)",
-            "account": "([0-9]{10}|[0-9]{3,4}[- ]?[0-9]{3,4}|\\*{5}[0-9]{4})"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_031",
-          "enabled": true,
-          "priority": 31,
-          "type": "CREDIT",
-          "matchers": {
-            "credit": "credited"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Ksh([\\d,]+\\.\\d{2}) is credited",
-            "balance": "New M-PESA account balance is Ksh([\\d,]+\\.\\d{2})",
-            "account": "your M-PESA account"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_032",
-          "enabled": true,
-          "priority": 32,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "debited"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Ksh([\\d,.]+) is debited",
-            "balance": "New M-PESA account balance is Ksh([\\d,.]+)",
-            "account": "your M-PESA account"
           },
           "reference": {
             "extractor": null,
@@ -3034,57 +2765,6 @@
           },
           "reference": {
             "extractor": "https?://[\\w.-]+(?:\\.[\\w.-]+)+[/\\w.-]*",
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_037",
-          "enabled": true,
-          "priority": 37,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "Give"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Give Ksh([\\d,.]+) cash",
-            "balance": "New M-PESA balance is Ksh([\\d,.]+)",
-            "account": "account no (X+\\d+)"
-          },
-          "reference": {
-            "extractor": null,
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          },
-          "counterparty": {
-            "receiver": [
-              "cash to\\s+(.+?)\\s+New"
-            ]
-          }
-        },
-        {
-          "id": "mpesa_fallback_038",
-          "enabled": true,
-          "priority": 38,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "Transaction cost, Ksh([\\d,.]+)"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "Transaction cost, Ksh([\\d,.]+)",
-            "balance": "Your account balance was: M-PESA Account : Ksh([\\d,.]+)",
-            "account": "M-PESA Account : (\\b\\d{1,3}(?:[ -]?\\d{3})*(?:\\.\\d{2})?\\b)"
-          },
-          "reference": {
-            "extractor": null,
             "fallback": "timestamp_message_hash",
             "rejectStatic": true
           }
@@ -3238,35 +2918,6 @@
           }
         },
         {
-          "id": "mpesa_fallback_045",
-          "enabled": true,
-          "priority": 45,
-          "type": "CREDIT",
-          "matchers": {
-            "credit": "received"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "received Ksh([\\d,.]+)",
-            "balance": "New M-PESA balance is Ksh([\\d,.]+)",
-            "account": "([\\d\\s-]+)",
-            "link": "(http[s]?://[\\w.-]+)"
-          },
-          "reference": {
-            "extractor": "(http[s]?://[\\w.-]+)",
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          },
-          "counterparty": {
-            "creditor": [
-              "(?:received|credited|deposited|transfer(?:red|ed)? to|fund transfer).*?\\sfrom\\s+(.+?)(?=(?:\\s+on\\s*:?\\s*(?:\\d|[A-Z]{3})|\\s+at\\s+\\d|\\.\\s*(?:Your|Thank|Ref|Reference|Txn|Transaction|New|Current|Available|Avail|Remaining|Please|The)|\\s+(?:Your|Thank|Ref|Reference|Txn|Transaction|New balance|Current balance|Available balance|Avail balance|Remaining balance|Charge|VAT|Date|With Bank Ref|Bank Ref)|,\\s*(?:Txn|Reference|Ref)|\\s+with\\s+(?:transaction|reference|Bank Ref)|\\s+and\\s+(?:credited|debited|transferred|posted)|$))"
-            ]
-          }
-        },
-        {
           "id": "mpesa_fallback_046",
           "enabled": true,
           "priority": 46,
@@ -3315,29 +2966,6 @@
           },
           "reference": {
             "extractor": "https?://\\S+",
-            "fallback": "timestamp_message_hash",
-            "rejectStatic": true
-          }
-        },
-        {
-          "id": "mpesa_fallback_049",
-          "enabled": true,
-          "priority": 49,
-          "type": "DEBIT",
-          "matchers": {
-            "debit": "kurudisha shughuli"
-          },
-          "currency": {
-            "code": "Ksh",
-            "matcher": "Ksh"
-          },
-          "extractors": {
-            "amount": "na\\s+Ksh([\\d,]+(?:\\.\\d{1,2})?)",
-            "balance": "Baki yako mpya ya akaunti ya M-PESA ni Ksh([\\d,.]+)",
-            "account": "akaunti yako ya M-PESA (\\d{10}|\\d{3,4}[- ]?\\d{4})"
-          },
-          "reference": {
-            "extractor": null,
             "fallback": "timestamp_message_hash",
             "rejectStatic": true
           }
@@ -3720,9 +3348,9 @@
           "id": "telebirr_fallback_016",
           "enabled": true,
           "priority": 16,
-          "type": "CREDIT",
+          "type": "DEBIT",
           "matchers": {
-            "credit": "credit"
+            "debit": "credit"
           },
           "currency": {
             "code": "ETB",
@@ -3730,7 +3358,6 @@
           },
           "extractors": {
             "amount": "ETB ([\\d,.]+) credit amount",
-            "balance": "outstanding amount is ETB ([\\d,.]+)",
             "account": "account no (\\b(?:\\*{5}\\d{4}|\\d{4}[ -]?\\d{4}|\\d{4} \\d{4})\\b)"
           },
           "reference": {
