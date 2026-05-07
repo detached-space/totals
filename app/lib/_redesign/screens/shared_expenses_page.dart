@@ -357,9 +357,8 @@ class _RedesignSharedExpensesPageState
     );
   }
 
-  Future<void> _createGroup({
+  Future<_CreatedGroupResult> _createGroup({
     required String name,
-    required List<String> members,
   }) async {
     final cleanName = name.trim().isEmpty ? 'Shared group' : name.trim();
     final now = DateTime.now();
@@ -368,20 +367,7 @@ class _RedesignSharedExpensesPageState
       name: cleanName,
       inviteCode:
           '${cleanName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-')}-${_random.nextInt(9999).toString().padLeft(4, '0')}',
-      members: [
-        _localMember(),
-        ...members
-            .map((member) => member.trim())
-            .where((member) => member.isNotEmpty)
-            .map(
-              (member) => _SharedMember(
-                id: _newId('member'),
-                name: member,
-                initial: _memberInitial(member),
-                colorValue: _memberColor(member),
-              ),
-            ),
-      ],
+      members: [_localMember()],
       expenses: const [],
       settlements: const [],
       activities: [
@@ -400,21 +386,35 @@ class _RedesignSharedExpensesPageState
       _view = _SharedView.overview;
     });
     await _saveGroups();
-    _queueSync(group);
+
+    try {
+      final syncedGroup = await _ensureEngineGroup(group);
+      _queueSync(syncedGroup);
+      return _CreatedGroupResult(
+        group: syncedGroup,
+        inviteLink: _inviteLink(syncedGroup),
+      );
+    } catch (error) {
+      _queueSync(group);
+      return _CreatedGroupResult(
+        group: group,
+        errorMessage: _syncErrorMessage(error),
+      );
+    }
   }
 
-  Future<void> _joinGroup(String invite) async {
+  Future<bool> _joinGroup(String invite) async {
     final parsed = _parseInvite(invite);
     if (parsed == null) {
       _showSnack('Paste a Totals invite link with a group key');
-      return;
+      return false;
     }
 
     try {
       await _sync.joinGroup(parsed.groupId);
     } catch (error) {
       _showSnack(_syncErrorMessage(error));
-      return;
+      return false;
     }
 
     final group = _SharedGroup(
@@ -443,6 +443,7 @@ class _RedesignSharedExpensesPageState
     await _saveGroups();
     await _syncGroup(group, showSuccess: false);
     _showSnack('Joined group');
+    return true;
   }
 
   _EngineInvite? _parseInvite(String invite) {
@@ -689,19 +690,6 @@ class _RedesignSharedExpensesPageState
     return 'Sync failed: $error';
   }
 
-  int _memberColor(String seed) {
-    const colors = [
-      0xFF0560B5,
-      0xFF2F7D1A,
-      0xFF6D5DF6,
-      0xFFB45309,
-      0xFF0F766E,
-      0xFFBE185D,
-    ];
-    final hash = seed.codeUnits.fold<int>(0, (sum, code) => sum + code);
-    return colors[hash % colors.length];
-  }
-
   String _memberInitial(String name) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '?';
@@ -869,7 +857,10 @@ class _RedesignSharedExpensesPageState
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _CreateGroupSheet(onCreate: _createGroup),
+      builder: (_) => _CreateGroupSheet(
+        onCreate: _createGroup,
+        onJoin: _joinGroup,
+      ),
     );
   }
 
@@ -3025,13 +3016,18 @@ class _ProfileColorSwatch extends StatelessWidget {
   }
 }
 
-class _CreateGroupSheet extends StatefulWidget {
-  final Future<void> Function({
-    required String name,
-    required List<String> members,
-  }) onCreate;
+enum _GroupSheetMode { create, join }
 
-  const _CreateGroupSheet({required this.onCreate});
+class _CreateGroupSheet extends StatefulWidget {
+  final Future<_CreatedGroupResult> Function({
+    required String name,
+  }) onCreate;
+  final Future<bool> Function(String invite) onJoin;
+
+  const _CreateGroupSheet({
+    required this.onCreate,
+    required this.onJoin,
+  });
 
   @override
   State<_CreateGroupSheet> createState() => _CreateGroupSheetState();
@@ -3039,49 +3035,136 @@ class _CreateGroupSheet extends StatefulWidget {
 
 class _CreateGroupSheetState extends State<_CreateGroupSheet> {
   final _nameController = TextEditingController();
-  final _membersController = TextEditingController();
+  final _inviteController = TextEditingController();
+  _GroupSheetMode _mode = _GroupSheetMode.create;
+  _CreatedGroupResult? _createdResult;
+  bool _isBusy = false;
+  String? _error;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _membersController.dispose();
+    _inviteController.dispose();
     super.dispose();
+  }
+
+  Future<void> _create() async {
+    setState(() {
+      _isBusy = true;
+      _error = null;
+    });
+    final result = await widget.onCreate(name: _nameController.text);
+    if (!mounted) return;
+    setState(() {
+      _createdResult = result;
+      _isBusy = false;
+      _error = result.errorMessage;
+    });
+  }
+
+  Future<void> _join() async {
+    setState(() {
+      _isBusy = true;
+      _error = null;
+    });
+    final joined = await widget.onJoin(_inviteController.text);
+    if (!mounted) return;
+    setState(() => _isBusy = false);
+    if (!joined || !context.mounted) return;
+    Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
+    final createdResult = _createdResult;
+
     return _BaseSheet(
-      title: 'Create group',
-      icon: AppIcons.usersThree,
+      title: createdResult == null ? 'Shared group' : 'Group details',
+      icon: createdResult == null
+          ? AppIcons.usersThree
+          : AppIcons.check_circle_rounded,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SheetTextField(
-            controller: _nameController,
-            label: 'Group name',
-            hint: 'Weekend trip',
-          ),
-          const SizedBox(height: 10),
-          _SheetTextField(
-            controller: _membersController,
-            label: 'Members',
-            hint: 'Brook, Yewe',
-          ),
-          const SizedBox(height: 14),
-          _CompactButton(
+          if (createdResult == null) ...[
+            _GroupSheetModeSwitch(
+              selected: _mode,
+              onChanged: (mode) => setState(() {
+                _mode = mode;
+                _error = null;
+              }),
+            ),
+            const SizedBox(height: 16),
+            if (_mode == _GroupSheetMode.create) ...[
+              _SheetTextField(
+                controller: _nameController,
+                label: 'Group name',
+                hint: 'Weekend trip',
+              ),
+              const SizedBox(height: 14),
+              _CompactButton(
+                icon: AppIcons.add,
+                label: _isBusy ? 'Creating...' : 'Create group',
+                filled: true,
+                onTap: _isBusy ? null : _create,
+              ),
+            ] else ...[
+              _SheetTextField(
+                controller: _inviteController,
+                label: 'Invite link',
+                hint: 'totals://join/group-id#key=...',
+              ),
+              const SizedBox(height: 14),
+              _CompactButton(
+                icon: AppIcons.check_rounded,
+                label: _isBusy ? 'Joining...' : 'Join group',
+                filled: true,
+                onTap: _isBusy ? null : _join,
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              _SheetNotice(message: _error!),
+            ],
+          ] else
+            _CreatedGroupDetails(result: createdResult),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupSheetModeSwitch extends StatelessWidget {
+  final _GroupSheetMode selected;
+  final ValueChanged<_GroupSheetMode> onChanged;
+
+  const _GroupSheetModeSwitch({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.mutedFill(context).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          _GroupSheetModeButton(
+            label: 'Create',
             icon: AppIcons.add,
-            label: 'Create group',
-            filled: true,
-            onTap: () async {
-              final members = _membersController.text
-                  .split(',')
-                  .map((item) => item.trim())
-                  .where((item) => item.isNotEmpty)
-                  .toList();
-              await widget.onCreate(
-                  name: _nameController.text, members: members);
-              if (!context.mounted) return;
-              Navigator.pop(context);
-            },
+            selected: selected == _GroupSheetMode.create,
+            onTap: () => onChanged(_GroupSheetMode.create),
+          ),
+          const SizedBox(width: 4),
+          _GroupSheetModeButton(
+            label: 'Join',
+            icon: AppIcons.qr_code_scanner_rounded,
+            selected: selected == _GroupSheetMode.join,
+            onTap: () => onChanged(_GroupSheetMode.join),
           ),
         ],
       ),
@@ -3089,8 +3172,219 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
   }
 }
 
+class _GroupSheetModeButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _GroupSheetModeButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Material(
+        color: selected ? AppColors.primaryLight : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: selected
+                      ? Colors.white
+                      : AppColors.textSecondary(context),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: selected
+                            ? Colors.white
+                            : AppColors.textSecondary(context),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CreatedGroupDetails extends StatelessWidget {
+  final _CreatedGroupResult result;
+
+  const _CreatedGroupDetails({required this.result});
+
+  Future<void> _copy(BuildContext context) async {
+    final inviteLink = result.inviteLink;
+    if (inviteLink == null || inviteLink.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: inviteLink));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Invite link copied'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inviteLink = result.inviteLink;
+    final group = result.group;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: AppColors.incomeSuccess.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                AppIcons.check_circle_rounded,
+                color: AppColors.incomeSuccess,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    group.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  Text(
+                    '${group.members.length} member - ${group.expenses.length} transactions',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary(context),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _GroupDetailRow(
+            label: 'Group ID', value: group.engineGroupId ?? group.inviteCode),
+        const SizedBox(height: 8),
+        _GroupDetailRow(
+          label: 'Invite link',
+          value: inviteLink ?? 'Totals Engine is not reachable yet',
+        ),
+        if (result.errorMessage != null) ...[
+          const SizedBox(height: 12),
+          _SheetNotice(message: result.errorMessage!),
+        ],
+        const SizedBox(height: 14),
+        _CompactButton(
+          icon: AppIcons.copy,
+          label: 'Copy invite link',
+          filled: true,
+          onTap: inviteLink == null ? null : () => _copy(context),
+        ),
+      ],
+    );
+  }
+}
+
+class _GroupDetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _GroupDetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppColors.textSecondary(context),
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            value,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetNotice extends StatelessWidget {
+  final String message;
+
+  const _SheetNotice({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        message,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.textPrimary(context),
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+}
+
 class _JoinGroupSheet extends StatefulWidget {
-  final Future<void> Function(String invite) onJoin;
+  final Future<bool> Function(String invite) onJoin;
 
   const _JoinGroupSheet({required this.onJoin});
 
@@ -3125,8 +3419,9 @@ class _JoinGroupSheetState extends State<_JoinGroupSheet> {
             label: 'Join locally',
             filled: true,
             onTap: () async {
-              await widget.onJoin(_inviteController.text);
+              final joined = await widget.onJoin(_inviteController.text);
               if (!context.mounted) return;
+              if (!joined) return;
               Navigator.pop(context);
             },
           ),
@@ -3845,6 +4140,18 @@ class _EngineInvite {
   const _EngineInvite({
     required this.groupId,
     required this.groupKeyHex,
+  });
+}
+
+class _CreatedGroupResult {
+  final _SharedGroup group;
+  final String? inviteLink;
+  final String? errorMessage;
+
+  const _CreatedGroupResult({
+    required this.group,
+    this.inviteLink,
+    this.errorMessage,
   });
 }
 
