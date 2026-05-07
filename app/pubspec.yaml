@@ -61,7 +61,8 @@ dependencies:
   google_fonts: 6.3.0
   pretty_qr_code: ^3.6.0
   phosphor_flutter: ^2.1.0
-    # background_sms: ^0.0.4
+  cryptography: ^2.9.0
+  # background_sms: ^0.0.4
   # background_sms:
   #   git:
   #     url: https://github.com/pheonixeye/flutter_background_sms.git
