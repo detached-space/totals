@@ -50,6 +50,26 @@
       }
     },
     {
+  "bankId": 1,
+  "senderId": "CBE",
+  "regex": "Dear\\s+(?<receiverName>.*?)\\s+You\\s+have\\s+received\\s+ETB\\s*(?<amount>[\\d,.]+)\\s+from\\s+account\\s+(?<senderAccount>[\\d\\*]+)\\s+\\((?<senderName>[^)]+)\\)\\s+to\\s+your\\s+account\\s+(?<receiverAccount>[\\d\\*]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+(?<balanceCurrency>[A-Z]{3})\\s*(?<balance>[\\d,.]+).*?(?<reference>https?:\\/\\/\\S+)",
+  "type": "CREDIT",
+  "description": "CBE Credit Received with Sender Account and Balance",
+  "refRequired": true,
+  "hasAccount": true,
+  "hasFees": false,
+  "mapping": {
+    "receiverName": 1,
+    "amount": 2,
+    "senderAccount": 3,
+    "senderName": 4,
+    "receiverAccount": 5,
+    "balanceCurrency": 6,
+    "balance": 7,
+    "reference": 8
+  }
+},
+    {
       "bankId": 1,
       "senderId": "CBE",
       "regex": "(?:Account|Acct)\\s+(?<account>[\\d\\*]+).*?debited\\s+with\\s+a\\s+(?:\\.?Service charge|\\.?S\\.charge|\\.?service charge|\\.?s\\.charge)\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+15%\\s+VAT\\s+of\\s+ETB\\s*(?<vat>[\\d,.]+)[,\\s]+with\\s+a\\s+total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,.]+).*?Balance\\s+is\\s+ETB\\s?(?<balance>[\\d,.]+).*?((id=|BranchReceipt/)(?<reference>FT\\w+))",
@@ -312,6 +332,23 @@
         "reference": 5
       }
     },
+    {
+  "bankId": 2,
+  "senderId": "Awash",
+  "regex": "Dear\\s+Customer,\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+has\\s+been\\s+credited\\s+to\\s+your\\s+account\\s+from\\s+(?<sender>.*?)\\s+on\\s*:\\s*(?<dateTime>\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})\\s+with\\s+Txn\\s+ID:\\s*(?<txnId>\\d+)\\s*\\.\\s+Your\\s+available\\s+balance\\s+is\\s+now\\s+ETB\\s+(?<balance>[\\d,.]+)\\.\\s+Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
+  "type": "CREDIT",
+  "description": "Awash Credit Received with Txn ID",
+  "refRequired": true,
+  "hasAccount": false,
+  "mapping": {
+    "amount": 1,
+    "sender": 2,
+    "dateTime": 3,
+    "txnId": 4,
+    "balance": 5,
+    "reference": 6
+  }
+},
     {
       "bankId": 2,
       "senderId": "Awash",
