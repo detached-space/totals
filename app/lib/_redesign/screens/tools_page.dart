@@ -11,64 +11,73 @@ class RedesignToolsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      appBar: AppBar(
-        title: const Text('Tools'),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Handy utilities at your fingertips.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.textSecondary(context),
-                  ),
-            ),
-            const SizedBox(height: 20),
-            _ToolTile(
-              icon: AppIcons.dashboard_outlined,
-              iconColor: AppColors.primaryLight,
-              title: 'Web Dashboard',
-              subtitle: 'View your finances in a browser',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WebPage()),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Tools',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary(context),
+                ),
               ),
-            ),
-            _ToolTile(
-              icon: AppIcons.account_balance_outlined,
-              iconColor: AppColors.blue,
-              title: 'Quick Accounts',
-              subtitle: 'Manage linked bank accounts',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AccountsPage()),
+              const SizedBox(height: 4),
+              Text(
+                'Handy utilities at your fingertips.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary(context),
+                ),
               ),
-            ),
-            _ToolTile(
-              icon: AppIcons.qr_code_scanner_rounded,
-              iconColor: AppColors.incomeSuccess,
-              title: 'Verify Payments',
-              subtitle: 'Scan and verify transaction receipts',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const VerifyPaymentsPage()),
+              const SizedBox(height: 20),
+              _ToolTile(
+                icon: AppIcons.dashboard_outlined,
+                iconColor: AppColors.primaryLight,
+                title: 'Web Dashboard',
+                subtitle: 'View your finances in a browser',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const WebPage()),
+                ),
               ),
-            ),
-            _ToolTile(
-              icon: AppIcons.sms_outlined,
-              iconColor: AppColors.amber,
-              title: 'Failed Parsings',
-              subtitle: 'Review bank transactions without patterns',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const FailedParsesPage()),
+              _ToolTile(
+                icon: AppIcons.account_balance_outlined,
+                iconColor: AppColors.blue,
+                title: 'Quick Accounts',
+                subtitle: 'Manage linked bank accounts',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AccountsPage()),
+                ),
               ),
-            ),
-          ],
+              _ToolTile(
+                icon: AppIcons.qr_code_scanner_rounded,
+                iconColor: AppColors.incomeSuccess,
+                title: 'Verify Payments',
+                subtitle: 'Scan and verify transaction receipts',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const VerifyPaymentsPage()),
+                ),
+              ),
+              _ToolTile(
+                icon: AppIcons.sms_outlined,
+                iconColor: AppColors.amber,
+                title: 'Failed Parsings',
+                subtitle: 'Review bank transactions without patterns',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const FailedParsesPage()),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

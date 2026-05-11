@@ -79,8 +79,6 @@ class AppIcons {
   static const IconData trending_up_rounded = PhosphorIconsRegular.trendUp;
   static const IconData tune = PhosphorIconsRegular.slidersHorizontal;
   static const IconData upload_rounded = PhosphorIconsRegular.uploadSimple;
-  static const IconData usersThree = PhosphorIconsRegular.usersThree;
-  static const IconData usersThreeFilled = PhosphorIconsFill.usersThree;
   static const IconData visibility_off_outlined = PhosphorIconsRegular.eyeSlash;
   static const IconData visibility_outlined = PhosphorIconsRegular.eye;
   static const IconData zoom_out_map_rounded = PhosphorIconsRegular.cornersOut;

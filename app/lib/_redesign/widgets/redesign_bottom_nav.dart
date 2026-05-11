@@ -11,7 +11,7 @@ class RedesignBottomNav extends StatelessWidget {
   final PageController pageController;
   final ValueChanged<int> onTap;
   final VoidCallback? onMoneyLongPress;
-  final VoidCallback? onSharedLongPress;
+  final VoidCallback? onToolsLongPress;
   final ValueChanged<Rect>? onProfileLongPressAt;
 
   const RedesignBottomNav({
@@ -20,7 +20,7 @@ class RedesignBottomNav extends StatelessWidget {
     required this.pageController,
     required this.onTap,
     this.onMoneyLongPress,
-    this.onSharedLongPress,
+    this.onToolsLongPress,
     this.onProfileLongPressAt,
   });
 
@@ -61,10 +61,10 @@ class RedesignBottomNav extends StatelessWidget {
         onLongPressAt: null,
       ),
       (
-        label: 'Shared',
-        activeIcon: AppIcons.usersThreeFilled,
-        inactiveIcon: AppIcons.usersThree,
-        onLongPress: onSharedLongPress,
+        label: 'Tools',
+        activeIcon: AppIcons.grid_view_rounded,
+        inactiveIcon: AppIcons.grid_view_outlined,
+        onLongPress: onToolsLongPress,
         onLongPressAt: null,
       ),
       (

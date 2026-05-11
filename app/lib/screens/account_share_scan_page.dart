@@ -131,7 +131,7 @@ class _AccountShareScanPageState extends State<AccountShareScanPage> {
           MobileScanner(
             controller: _controller,
             onDetect: _handleDetect,
-            errorBuilder: (context, error, child) {
+            errorBuilder: (context, error) {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -153,10 +153,10 @@ class _AccountShareScanPageState extends State<AccountShareScanPage> {
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: colorScheme.surface.withOpacity(0.9),
+                color: colorScheme.surface.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: colorScheme.outline.withOpacity(0.2),
+                  color: colorScheme.outline.withValues(alpha: 0.2),
                 ),
               ),
               child: Row(

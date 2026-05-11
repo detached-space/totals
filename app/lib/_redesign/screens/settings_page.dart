@@ -12,7 +12,6 @@ import 'package:totals/screens/categories_page.dart';
 import 'package:totals/screens/notification_settings_page.dart';
 import 'package:totals/screens/privacy_policy_page.dart';
 import 'package:totals/screens/profile_management_page.dart';
-import 'package:totals/_redesign/screens/tools_page.dart';
 import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/data_export_import_service.dart';
@@ -837,23 +836,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   );
                 },
               ),
-              const SizedBox(height: 24),
-
-              // ── Tools ──────────────────────────────────────────────────
-              const _SectionHeader(label: 'Tools'),
-              const SizedBox(height: 10),
-
-              _SettingTile(
-                icon: AppIcons.grid_view_outlined,
-                iconColor: AppColors.primaryLight,
-                title: 'Tools',
-                subtitle: 'Web Dashboard, Quick Accounts, Verify Payments',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const RedesignToolsPage()),
-                ),
-              ),
-
               const SizedBox(height: 24),
 
               // ── Preferences ─────────────────────────────────────────────
@@ -1798,9 +1780,9 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
       'icon': 'gesture',
       'question': 'Are there any shortcuts?',
       'answer': 'Long-press the bottom navigation bar items for quick actions. '
-          'Long-press Money to add a cash transaction, tap Shared to open '
-          'your quick-access accounts, and long-press You to switch between '
-          'profiles.',
+          'Long-press Money to add a cash transaction, long-press Tools '
+          'to open your quick-access accounts, and long-press You to '
+          'switch between profiles.',
     },
   ];
 
