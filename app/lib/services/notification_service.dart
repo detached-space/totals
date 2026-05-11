@@ -184,7 +184,11 @@ class NotificationService {
 
       // Save with new category
       await txRepo.saveTransaction(
-        transaction.copyWith(categoryId: categoryId),
+        transaction.copyWith(
+          categoryId: categoryId,
+          categoryIds: <int>[categoryId],
+        ),
+        skipAutoCategorization: true,
       );
 
       if (kDebugMode) {
@@ -400,7 +404,11 @@ class NotificationService {
 
       final bank = _findBank(bankId);
       final title = _buildTitle(bank, transaction);
-      final body = _buildBody(transaction);
+      final categoryLabel = await _categoryLabelForTransaction(transaction);
+      final body = _buildBody(
+        transaction,
+        categoryLabel: categoryLabel,
+      );
 
       final id = _notificationId(transaction);
       final payload = 'tx:${Uri.encodeComponent(transaction.reference)}';
@@ -566,6 +574,39 @@ class NotificationService {
         print('debug: Failed to build quick category actions: $e');
       }
       return [];
+    }
+  }
+
+  Future<String?> _categoryLabelForTransaction(Transaction transaction) async {
+    final categoryIds = transaction.selectedCategoryIds;
+    if (categoryIds.isEmpty) return null;
+
+    try {
+      final allCategories = await CategoryRepository().getCategories();
+      final labels = <String>[];
+
+      for (final categoryId in categoryIds) {
+        models.Category? category;
+        for (final candidate in allCategories) {
+          if (candidate.id == categoryId) {
+            category = candidate;
+            break;
+          }
+        }
+
+        final name = category?.name.trim();
+        if (name == null || name.isEmpty || labels.contains(name)) continue;
+        labels.add(name);
+      }
+
+      if (labels.isEmpty) return null;
+      if (labels.length == 1) return labels.first;
+      return '${labels.first} +${labels.length - 1}';
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to resolve notification category label: $e');
+      }
+      return null;
     }
   }
 
@@ -991,7 +1032,10 @@ class NotificationService {
     return '$bankLabel • $kind';
   }
 
-  String _buildBody(Transaction transaction) {
+  String _buildBody(
+    Transaction transaction, {
+    String? categoryLabel,
+  }) {
     final sign = switch (transaction.type) {
       'CREDIT' => '+',
       'DEBIT' => '-',
@@ -1005,6 +1049,14 @@ class NotificationService {
     }
 
     final counterparty = _notificationCounterpartyValue(transaction);
+    if (categoryLabel != null) {
+      final categoryText = 'Categorized as $categoryLabel';
+      if (counterparty == null) {
+        return '$amount \u2022 $categoryText';
+      }
+      return '$amount \u2022 $counterparty \u2022 $categoryText';
+    }
+
     if (counterparty == null) return '$amount • Tap to categorize';
     return '$amount • $counterparty • Tap to categorize';
   }
