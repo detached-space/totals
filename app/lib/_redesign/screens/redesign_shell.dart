@@ -351,6 +351,7 @@ class RedesignShellState extends State<RedesignShell>
       provider: provider,
       initiallyExpandCategory: true,
       showQuickAccessCategories: true,
+      allowAutoCategorizationRuleUpdates: false,
     );
   }
 

@@ -10,6 +10,7 @@ Future<void> showTransactionCategorySheet({
   required BuildContext context,
   required Transaction transaction,
   required TransactionProvider provider,
+  bool allowAutoCategorizationRuleUpdates = true,
 }) async {
   FocusManager.instance.primaryFocus?.unfocus();
   await showModalBottomSheet<void>(
@@ -19,6 +20,7 @@ Future<void> showTransactionCategorySheet({
     builder: (context) => _TransactionCategorySheet(
       transaction: transaction,
       provider: provider,
+      allowAutoCategorizationRuleUpdates: allowAutoCategorizationRuleUpdates,
     ),
   );
 }
@@ -26,10 +28,12 @@ Future<void> showTransactionCategorySheet({
 class _TransactionCategorySheet extends StatefulWidget {
   final Transaction transaction;
   final TransactionProvider provider;
+  final bool allowAutoCategorizationRuleUpdates;
 
   const _TransactionCategorySheet({
     required this.transaction,
     required this.provider,
+    this.allowAutoCategorizationRuleUpdates = true,
   });
 
   @override
@@ -62,6 +66,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       _provider.resolvePrimaryCounterparty(_tx);
 
   bool get _canShowAutoCategorizationOption =>
+      widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx);
 
   @override
@@ -83,6 +88,12 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   }
 
   void _syncAutoCategorizationCheckbox() {
+    if (!widget.allowAutoCategorizationRuleUpdates) {
+      _autoCategorizeFutureTransactions = false;
+      _autoCategorizationDraftCategoryIds = const [];
+      return;
+    }
+
     _autoCategorizeFutureTransactions =
         _provider.autoCategorizationRulesForTransaction(_tx).isNotEmpty;
     _autoCategorizationDraftCategoryIds =
@@ -92,16 +103,16 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   List<int> _initialAutoCategorizationDraftCategoryIds(
       Transaction transaction) {
     if (!_autoCategorizeFutureTransactions) return const [];
+    final existingIds = _provider
+        .autoCategorizationCategoryIdsForTransaction(transaction)
+        .where((id) => !_isSelfCategoryId(id))
+        .toList(growable: false);
+    if (existingIds.isNotEmpty) return existingIds;
+
     final selectedIds = transaction.selectedCategoryIds
         .where((id) => !_isSelfCategoryId(id))
         .toList(growable: false);
-    if (selectedIds.isEmpty) return const [];
-
-    final existingIds = _provider
-        .autoCategorizationCategoryIdsForTransaction(transaction)
-        .where(selectedIds.contains)
-        .toList(growable: false);
-    return existingIds.isEmpty ? List<int>.from(selectedIds) : existingIds;
+    return selectedIds.isEmpty ? const [] : selectedIds;
   }
 
   List<int> _nextAutoCategorizationDraftCategoryIds({
@@ -116,20 +127,26 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     final nextSelectedIds = updated.selectedCategoryIds
         .where((id) => !_isSelfCategoryId(id))
         .toList(growable: false);
-    if (nextSelectedIds.isEmpty) return const [];
 
-    final rememberedIds = _autoCategorizationDraftCategoryIds
-        .where(nextSelectedIds.contains)
-        .toSet();
+    final rememberedIds = <int>[];
+
+    void remember(int categoryId) {
+      if (categoryId <= 0 || rememberedIds.contains(categoryId)) return;
+      if (_isSelfCategoryId(categoryId)) return;
+      rememberedIds.add(categoryId);
+    }
+
+    for (final categoryId in _autoCategorizationDraftCategoryIds) {
+      remember(categoryId);
+    }
+
     for (final categoryId in nextSelectedIds) {
       if (!previousSelectedIds.contains(categoryId)) {
-        rememberedIds.add(categoryId);
+        remember(categoryId);
       }
     }
 
-    return nextSelectedIds
-        .where(rememberedIds.contains)
-        .toList(growable: false);
+    return rememberedIds;
   }
 
   int? _resolveAutoCategorizationPrimaryCategoryId(List<int> categoryIds) {
@@ -154,6 +171,8 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   Future<void> _persistAutoCategorizationDraft({
     required bool hadExistingRules,
   }) async {
+    if (!widget.allowAutoCategorizationRuleUpdates) return;
+
     if (_autoCategorizeFutureTransactions &&
         _autoCategorizationDraftCategoryIds.isNotEmpty) {
       await _provider.syncAutoCategorizationRulesForSelection(
@@ -170,7 +189,9 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   }
 
   Future<void> _toggleAutoCategorization() async {
-    if (_isApplyingCategory) return;
+    if (_isApplyingCategory || !widget.allowAutoCategorizationRuleUpdates) {
+      return;
+    }
     final messenger = ScaffoldMessenger.maybeOf(context);
     final hadExistingRules =
         _provider.autoCategorizationRulesForTransaction(_tx).isNotEmpty;
