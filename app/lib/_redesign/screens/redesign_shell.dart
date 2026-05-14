@@ -350,8 +350,8 @@ class RedesignShellState extends State<RedesignShell>
       transaction: match,
       provider: provider,
       initiallyExpandCategory: true,
-      showQuickAccessCategories: true,
-      allowAutoCategorizationRuleUpdates: false,
+      showQuickAccessCategories: false,
+      allowAutoCategorizationRuleUpdates: true,
     );
   }
 
