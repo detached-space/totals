@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
@@ -19,6 +18,9 @@ import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:kenat/kenat.dart';
 
 class _BudgetCategoryColorOption {
   final String key;
@@ -181,6 +183,89 @@ String _bankLabel(int? bankId) {
       return 'Bank $bankId';
     }
   }
+}
+
+const List<String> _kBudgetMonthKeys = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+bool _usesEthiopianCalendar(BuildContext context) {
+  try {
+    return Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+        AppCalendarOption.ethiopian;
+  } catch (_) {
+    return false;
+  }
+}
+
+String _budgetMonthLabel(BuildContext context, DateTime month) {
+  if (_usesEthiopianCalendar(context)) {
+    final ec =
+        Kenat.fromGregorian(month.year, month.month, month.day).getEthiopian();
+    return '${MonthNames.amharic[ec['month']! - 1]} ${ec['year']}';
+  }
+  return '${context.l10nText(_kBudgetMonthKeys[month.month - 1])} ${month.year}';
+}
+
+String _budgetDateLabel(BuildContext context, DateTime date) {
+  if (_usesEthiopianCalendar(context)) {
+    final ec =
+        Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+    return '${MonthNames.amharic[ec['month']! - 1]} ${ec['day']}, ${ec['year']}';
+  }
+  return '${context.l10nText(_kBudgetMonthKeys[date.month - 1])} ${date.day}, ${date.year}';
+}
+
+String _formatBudgetEtb(BuildContext context, double value) {
+  return '${context.l10nText('ETB')} ${_compactAmount(value)}';
+}
+
+String _formatBudgetEtbFull(BuildContext context, double value) {
+  return '${context.l10nText('ETB')} ${formatNumberWithComma(value)}';
+}
+
+String _formatBudgetTransactionCount(BuildContext context, int count) {
+  final unit = context.l10nText(count == 1 ? 'transaction' : 'transactions');
+  return '$count $unit';
+}
+
+String _localizedBankLabel(BuildContext context, int? bankId) {
+  final label = _bankLabel(bankId);
+  if (bankId != null && label == 'Bank $bankId') {
+    return '${context.l10nText('Bank')} $bankId';
+  }
+  return context.l10nText(label);
+}
+
+String _localizedBudgetCategoryLabel(BuildContext context, String label) {
+  return label
+      .split(' • ')
+      .map((part) => context.l10nText(part.trim()))
+      .join(' • ');
+}
+
+String _transactionDisplayName(
+  BuildContext context,
+  Transaction transaction, {
+  bool isSelfTransfer = false,
+}) {
+  if (isSelfTransfer) return context.l10nText('Self');
+  final receiver = transaction.receiver?.trim();
+  if (receiver != null && receiver.isNotEmpty) return receiver;
+  final creditor = transaction.creditor?.trim();
+  if (creditor != null && creditor.isNotEmpty) return creditor;
+  return context.l10nText('Unknown');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -617,7 +702,9 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     final groups = <String, List<Transaction>>{};
     for (final t in txns) {
       final dt = t.time != null ? DateTime.tryParse(t.time!) : null;
-      final key = dt != null ? _dateGroupLabel(dt) : 'Unknown';
+      final key = dt != null
+          ? _dateGroupLabel(context, dt)
+          : context.l10nText('Unknown');
       groups.putIfAbsent(key, () => []).add(t);
     }
 
@@ -652,7 +739,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Text(
-            'TRANSACTIONS (${txns.length})',
+            '${context.l10nText('TRANSACTIONS')} (${txns.length})',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -667,7 +754,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
             child: Text(
-              'No spending in ${budget.name} this month',
+              '${context.l10nText('No spending in')} ${context.l10nText(budget.name)} ${context.l10nText('this month')}',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 15,
@@ -690,22 +777,21 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                       return TransactionTile(
                         key: ValueKey(
                             'budget_txn_${t.reference}_${t.categoryId}'),
-                        bank: _bankLabel(t.bankId),
-                        category: tp.categoryLabelForTransaction(
-                          t,
-                          uncategorizedLabel: 'Uncategorized',
+                        bank: _localizedBankLabel(context, t.bankId),
+                        category: context.l10nText(
+                          tp.categoryLabelForTransaction(
+                            t,
+                            uncategorizedLabel: 'Uncategorized',
+                          ),
                         ),
                         categoryModel: transactionCategory,
                         isCategorized: t.selectedCategoryIds.isNotEmpty,
                         isDebit: t.type?.toUpperCase() == 'DEBIT',
-                        amount: formatNumberWithComma(t.amount),
+                        amount: _formatBudgetEtbFull(context, t.amount),
                         amountColor: t.type?.toUpperCase() == 'DEBIT'
                             ? AppColors.red
                             : AppColors.incomeSuccess,
-                        name: (t.receiver?.trim().isNotEmpty == true
-                                ? t.receiver!
-                                : t.creditor?.trim() ?? '')
-                            .trim(),
+                        name: _transactionDisplayName(context, t),
                         onCategoryTap: () => showTransactionCategorySheet(
                           context: context,
                           transaction: t,
@@ -727,14 +813,16 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
 
   // ── Date grouping helper ────────────────────────────────────────────────
 
-  String _dateGroupLabel(DateTime dt) {
+  String _dateGroupLabel(BuildContext context, DateTime dt) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final date = DateTime(dt.year, dt.month, dt.day);
 
-    if (date == today) return 'Today';
-    if (date == today.subtract(const Duration(days: 1))) return 'Yesterday';
-    return DateFormat('MMM d, yyyy').format(dt);
+    if (date == today) return context.l10nText('Today');
+    if (date == today.subtract(const Duration(days: 1))) {
+      return context.l10nText('Yesterday');
+    }
+    return _budgetDateLabel(context, dt);
   }
 
   // ── Form helpers ────────────────────────────────────────────────────────
@@ -785,7 +873,7 @@ class _MonthNavigator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = DateFormat('MMMM yyyy').format(month);
+    final label = _budgetMonthLabel(context, month);
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -850,17 +938,17 @@ class _SummaryCard extends StatelessWidget {
             children: [
               _SummaryColumn(
                 label: 'ASSIGNED',
-                value: 'ETB ${_compactAmount(assigned)}',
+                value: _formatBudgetEtb(context, assigned),
                 color: AppColors.textPrimary(context),
               ),
               _SummaryColumn(
                 label: 'ACTIVITY',
-                value: 'ETB ${_compactAmount(activity)}',
+                value: _formatBudgetEtb(context, activity),
                 color: AppColors.textPrimary(context),
               ),
               _SummaryColumn(
                 label: 'AVAILABLE',
-                value: 'ETB ${_compactAmount(available)}',
+                value: _formatBudgetEtb(context, available),
                 color: availableColor,
                 highlight: true,
               ),
@@ -996,7 +1084,7 @@ class _BudgetGroupSection extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(
-                  'ETB ${_compactAmount(totalAvailable)}',
+                  _formatBudgetEtb(context, totalAvailable),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -1075,7 +1163,7 @@ class _BudgetItemRow extends StatelessWidget {
                           children: [
                             Expanded(
                               child: Text(
-                                budget.name,
+                                context.l10nText(budget.name),
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
@@ -1100,7 +1188,10 @@ class _BudgetItemRow extends StatelessWidget {
                             categoryLabel!.trim().isNotEmpty) ...[
                           const SizedBox(height: 2),
                           _AutoMarqueeText(
-                            text: categoryLabel!,
+                            text: _localizedBudgetCategoryLabel(
+                              context,
+                              categoryLabel!,
+                            ),
                             style: TextStyle(
                               fontSize: 12,
                               color: AppColors.textSecondary(context),
@@ -1128,7 +1219,7 @@ class _BudgetItemRow extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    'Spent ETB ${_compactAmount(spent)}',
+                    '${context.l10nText('Spent')} ${_formatBudgetEtb(context, spent)}',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppColors.textSecondary(context),
@@ -1143,7 +1234,7 @@ class _BudgetItemRow extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      'ETB ${_compactAmount(budget.amount)}',
+                      _formatBudgetEtb(context, budget.amount),
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1187,7 +1278,7 @@ class _AddBudgetButton extends StatelessWidget {
         ),
         child: Center(
           child: Text(
-            '+ Add Budget',
+            context.l10nText('+ Add Budget'),
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
@@ -1235,7 +1326,7 @@ class _UnbudgetedSpendingCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'SPENDING WITHOUT A BUDGET',
+                    context.l10nText('SPENDING WITHOUT A BUDGET'),
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -1245,7 +1336,7 @@ class _UnbudgetedSpendingCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'ETB ${_compactAmount(amount)} from $transactionCount transactions',
+                    '${_formatBudgetEtb(context, amount)} ${context.l10nText('from')} ${_formatBudgetTransactionCount(context, transactionCount)}',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
@@ -1294,7 +1385,7 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
           icon: const Icon(AppIcons.arrow_back_rounded),
         ),
         title: Text(
-          'Unbudgeted Spending',
+          context.l10nText('Unbudgeted Spending'),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: AppColors.textPrimary(context),
@@ -1331,8 +1422,9 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: Text(
-                  'These transactions aren\'t tracked by any budget. '
-                  'Categorize them to include in your budgets.',
+                  context.l10nText(
+                    'These transactions aren\'t tracked by any budget. Categorize them to include in your budgets.',
+                  ),
                   style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textSecondary(context),
@@ -1344,7 +1436,9 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Text(
-                    'No unbudgeted transactions for this month.',
+                    context.l10nText(
+                      'No unbudgeted transactions for this month.',
+                    ),
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
@@ -1369,20 +1463,21 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                   final isCredit = t.type == 'CREDIT';
 
                   return TransactionTile(
-                    bank: _bankLabel(t.bankId),
-                    category: categoryLabel,
+                    bank: _localizedBankLabel(context, t.bankId),
+                    category: context.l10nText(categoryLabel),
                     categoryModel: cat,
                     isCategorized: isCategorized,
                     isDebit: !isCredit,
                     isSelfTransfer: isSelfTransfer,
                     isMisc: isMisc,
-                    amount: formatNumberWithComma(t.amount),
+                    amount: _formatBudgetEtbFull(context, t.amount),
                     amountColor:
                         isCredit ? AppColors.incomeSuccess : AppColors.red,
-                    name: (t.receiver?.trim().isNotEmpty == true
-                            ? t.receiver!
-                            : t.creditor?.trim() ?? '')
-                        .trim(),
+                    name: _transactionDisplayName(
+                      context,
+                      t,
+                      isSelfTransfer: isSelfTransfer,
+                    ),
                     onCategoryTap: () => showTransactionCategorySheet(
                       context: context,
                       transaction: t,
@@ -1496,7 +1591,7 @@ class _DetailSummaryCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  budget.name,
+                  context.l10nText(budget.name),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -1515,7 +1610,7 @@ class _DetailSummaryCard extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: _AutoMarqueeText(
-                text: categoryLabel!,
+                text: _localizedBudgetCategoryLabel(context, categoryLabel!),
                 style: TextStyle(
                   fontSize: 12,
                   color: AppColors.textSecondary(context),
@@ -1529,17 +1624,17 @@ class _DetailSummaryCard extends StatelessWidget {
             children: [
               _SummaryColumn(
                 label: 'ASSIGNED',
-                value: 'ETB ${_compactAmount(budget.amount)}',
+                value: _formatBudgetEtb(context, budget.amount),
                 color: AppColors.textPrimary(context),
               ),
               _SummaryColumn(
                 label: 'ACTIVITY',
-                value: 'ETB ${_compactAmount(spent)}',
+                value: _formatBudgetEtb(context, spent),
                 color: AppColors.textPrimary(context),
               ),
               _SummaryColumn(
                 label: 'AVAILABLE',
-                value: 'ETB ${_compactAmount(available)}',
+                value: _formatBudgetEtb(context, available),
                 color: availableColor,
                 highlight: true,
               ),
@@ -1561,7 +1656,7 @@ class _DetailSummaryCard extends StatelessWidget {
           const SizedBox(height: 10),
           // Daily rate
           Text(
-            'ETB ${_compactAmount(dailyRate)}/day for $daysLeft day${daysLeft == 1 ? '' : 's'} left',
+            '${_formatBudgetEtb(context, dailyRate)}/${context.l10nText('day')} ${context.l10nText('for')} $daysLeft ${context.l10nText(daysLeft == 1 ? 'day left' : 'days left')}',
             style: TextStyle(
               fontSize: 12,
               color: AppColors.textSecondary(context),
@@ -2075,7 +2170,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
           ),
           const SizedBox(height: 14),
           Text(
-            'Icon',
+            context.l10nText('Icon'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
               fontWeight: FontWeight.w700,
@@ -2098,7 +2193,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                 final option = _kBudgetWidgetIconOptions[index];
                 final selected = option.key == _selectedWidgetIconKey;
                 return Tooltip(
-                  message: option.label,
+                  message: context.l10nText(option.label),
                   child: Material(
                     color: selected
                         ? selectedColor.withValues(alpha: 0.15)
@@ -2136,14 +2231,14 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Swipe sideways to see more icons.',
+            context.l10nText('Swipe sideways to see more icons.'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
             ),
           ),
           const SizedBox(height: 14),
           Text(
-            'Color',
+            context.l10nText('Color'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
               fontWeight: FontWeight.w700,
@@ -2199,8 +2294,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selectedMonthLabel =
-        DateFormat('MMM yyyy').format(_selectedMonthStart);
+    final selectedMonthLabel = _budgetMonthLabel(context, _selectedMonthStart);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final expenseCategories = _filteredCategories;
     final keyboardScrollBuffer = bottomInset > 0 && _showNewCategoryComposer
@@ -2241,7 +2335,9 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                 child: Row(
                   children: [
                     Text(
-                      _isEdit ? 'Edit Budget' : 'Create Budget',
+                      _isEdit
+                          ? context.l10nText('Edit Budget')
+                          : context.l10nText('Create Budget'),
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary(context),
@@ -2272,7 +2368,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                       children: [
                         // Name
                         Text(
-                          'Name',
+                          context.l10nText('Name'),
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: AppColors.textSecondary(context),
                             fontWeight: FontWeight.w600,
@@ -2284,14 +2380,14 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                           decoration: _inputDecoration(
                               context, 'e.g. Monthly groceries'),
                           validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Required'
+                              ? context.l10nText('Required')
                               : null,
                         ),
                         const SizedBox(height: 16),
 
                         // Amount
                         Text(
-                          'Amount',
+                          context.l10nText('Amount'),
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: AppColors.textSecondary(context),
                             fontWeight: FontWeight.w600,
@@ -2302,14 +2398,15 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                           controller: _amountController,
                           keyboardType: TextInputType.number,
                           decoration: _inputDecoration(context, '0').copyWith(
-                            prefixText: 'ETB  ',
+                            prefixText: '${context.l10nText('ETB')}  ',
                           ),
                           validator: (v) {
-                            if (v == null || v.trim().isEmpty)
-                              return 'Required';
+                            if (v == null || v.trim().isEmpty) {
+                              return context.l10nText('Required');
+                            }
                             final n = double.tryParse(v.trim());
                             if (n == null || n <= 0) {
-                              return 'Enter a valid amount';
+                              return context.l10nText('Enter a valid amount');
                             }
                             return null;
                           },
@@ -2318,7 +2415,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
 
                         // Group (Needs / Wants)
                         Text(
-                          'Group',
+                          context.l10nText('Group'),
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: AppColors.textSecondary(context),
                             fontWeight: FontWeight.w600,
@@ -2428,14 +2525,16 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                             ),
                             child: SwitchListTile(
                               title: Text(
-                                'Only for $selectedMonthLabel',
+                                '${context.l10nText('Only for')} $selectedMonthLabel',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: AppColors.textPrimary(context),
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
                               subtitle: Text(
-                                'Keep this budget unique to this month only',
+                                context.l10nText(
+                                  'Keep this budget unique to this month only',
+                                ),
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: AppColors.textSecondary(context),
                                 ),
@@ -2462,14 +2561,16 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                             ),
                             child: SwitchListTile(
                               title: Text(
-                                'Make $selectedMonthLabel the last month',
+                                '${context.l10nText('Make')} $selectedMonthLabel ${context.l10nText('the last month')}',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: AppColors.textPrimary(context),
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
                               subtitle: Text(
-                                'Stop this recurring budget after this month',
+                                context.l10nText(
+                                  'Stop this recurring budget after this month',
+                                ),
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: AppColors.textSecondary(context),
                                 ),
@@ -2496,14 +2597,18 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                             ),
                             child: SwitchListTile(
                               title: Text(
-                                'Create for future months too',
+                                context.l10nText(
+                                  'Create for future months too',
+                                ),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: AppColors.textPrimary(context),
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
                               subtitle: Text(
-                                'Turn this into a recurring budget',
+                                context.l10nText(
+                                  'Turn this into a recurring budget',
+                                ),
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: AppColors.textSecondary(context),
                                 ),
@@ -2530,14 +2635,16 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                             ),
                             child: SwitchListTile(
                               title: Text(
-                                'Apply to future budgets too',
+                                context.l10nText(
+                                  'Apply to future budgets too',
+                                ),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: AppColors.textPrimary(context),
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
                               subtitle: Text(
-                                'Turn off to change only $selectedMonthLabel',
+                                '${context.l10nText('Turn off to change only')} $selectedMonthLabel',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: AppColors.textSecondary(context),
                                 ),
@@ -2560,7 +2667,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
 
                         // Alert threshold
                         Text(
-                          'Alert threshold',
+                          context.l10nText('Alert threshold'),
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: AppColors.textSecondary(context),
                             fontWeight: FontWeight.w600,
@@ -2574,10 +2681,13 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                             suffixText: '%',
                           ),
                           validator: (v) {
-                            if (v == null || v.trim().isEmpty)
-                              return 'Required';
+                            if (v == null || v.trim().isEmpty) {
+                              return context.l10nText('Required');
+                            }
                             final n = double.tryParse(v.trim());
-                            if (n == null || n < 1 || n > 100) return '1-100';
+                            if (n == null || n < 1 || n > 100) {
+                              return '1-100';
+                            }
                             return null;
                           },
                         ),
@@ -2591,14 +2701,16 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                           ),
                           child: SwitchListTile(
                             title: Text(
-                              'Rollover unused budget',
+                              context.l10nText('Rollover unused budget'),
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: AppColors.textPrimary(context),
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
                             subtitle: Text(
-                              'Carry remaining budget to the next period',
+                              context.l10nText(
+                                'Carry remaining budget to the next period',
+                              ),
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: AppColors.textSecondary(context),
                               ),
@@ -2624,7 +2736,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                             children: [
                               SwitchListTile(
                                 title: Text(
-                                  'Show on homescreen widget',
+                                  context.l10nText('Show on homescreen widget'),
                                   style: theme.textTheme.bodyMedium?.copyWith(
                                     color: AppColors.textPrimary(context),
                                     fontWeight: FontWeight.w500,
@@ -2632,8 +2744,10 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                                 ),
                                 subtitle: Text(
                                   _isHomescreenWidgetStateLoading
-                                      ? 'Checking available widget spots...'
-                                      : '${_draftWidgetSpotsLeft.toInt()} ${_draftWidgetSpotsLeft == 1 ? 'spot' : 'spots'} left on the homescreen widget',
+                                      ? context.l10nText(
+                                          'Checking available widget spots...',
+                                        )
+                                      : '${_draftWidgetSpotsLeft.toInt()} ${context.l10nText(_draftWidgetSpotsLeft == 1 ? 'spot' : 'spots')} ${context.l10nText('left on the homescreen widget')}',
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: AppColors.textSecondary(context),
                                   ),
@@ -2696,7 +2810,9 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                                     ),
                                   )
                                 : Text(
-                                    _isEdit ? 'Save Changes' : 'Create Budget',
+                                    _isEdit
+                                        ? context.l10nText('Save Changes')
+                                        : context.l10nText('Create Budget'),
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w600),
                                   ),
@@ -2901,7 +3017,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
 
   InputDecoration _inputDecoration(BuildContext context, String hint) {
     return InputDecoration(
-      hintText: hint,
+      hintText: context.l10nText(hint),
       hintStyle: TextStyle(color: AppColors.textTertiary(context)),
       filled: true,
       fillColor: AppColors.surfaceColor(context),
@@ -3007,7 +3123,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
       navigator.pop();
       if (widgetFeedback != null && widgetFeedback.trim().isNotEmpty) {
         messenger.showSnackBar(
-          SnackBar(content: Text(widgetFeedback)),
+          SnackBar(content: Text(context.l10nTextRead(widgetFeedback))),
         );
       }
     } catch (error, stackTrace) {
@@ -3119,7 +3235,7 @@ class _GroupToggle extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  label,
+                  context.l10nText(label),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -3173,7 +3289,7 @@ class _PeriodToggle extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  label,
+                  context.l10nText(label),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -3351,7 +3467,7 @@ class _BudgetRecurrenceBadge extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Text(
-        label,
+        context.l10nText(label),
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
@@ -3389,7 +3505,7 @@ class _BudgetWidgetBadge extends StatelessWidget {
             ),
           ),
           child: Text(
-            'Widget',
+            context.l10nText('Widget'),
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -3466,7 +3582,7 @@ class _BudgetWidgetStyleSheetState extends State<_BudgetWidgetStyleSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Widget Style',
+                      context.l10nText('Widget Style'),
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary(context),
@@ -3504,7 +3620,7 @@ class _BudgetWidgetStyleSheetState extends State<_BudgetWidgetStyleSheet> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      widget.budgetName,
+                      context.l10nText(widget.budgetName),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -3602,7 +3718,7 @@ class _BudgetWidgetStylePicker extends StatelessWidget {
             ),
           const SizedBox(height: 14),
           Text(
-            'Icon',
+            context.l10nText('Icon'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
               fontWeight: FontWeight.w700,
@@ -3625,7 +3741,7 @@ class _BudgetWidgetStylePicker extends StatelessWidget {
                 final option = _kBudgetWidgetIconOptions[index];
                 final selected = option.key == selectedIconKey;
                 return Tooltip(
-                  message: option.label,
+                  message: context.l10nText(option.label),
                   child: Material(
                     color: selected
                         ? selectedColor.withValues(alpha: 0.15)
@@ -3661,14 +3777,14 @@ class _BudgetWidgetStylePicker extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Swipe sideways to see more icons.',
+            context.l10nText('Swipe sideways to see more icons.'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
             ),
           ),
           const SizedBox(height: 14),
           Text(
-            'Color',
+            context.l10nText('Color'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
               fontWeight: FontWeight.w700,

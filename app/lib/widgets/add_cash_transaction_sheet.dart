@@ -232,8 +232,8 @@ class _AddCashTransactionContentState
                                 Expanded(
                                   child: Text(
                                     _isDebit
-                                        ? 'Add Cash Expense'
-                                        : 'Add Cash Income',
+                                        ? context.l10nText('Add Cash Expense')
+                                        : context.l10nText('Add Cash Income'),
                                     style: theme.textTheme.titleLarge?.copyWith(
                                       fontWeight: FontWeight.bold,
                                       color: colorScheme.onSurface,
@@ -304,7 +304,7 @@ class _AddCashTransactionContentState
                                   color: hintColor,
                                   fontWeight: FontWeight.w500,
                                 ),
-                                prefixText: 'ETB ',
+                                prefixText: '${context.l10nText('ETB')} ',
                                 prefixStyle:
                                     theme.textTheme.headlineSmall?.copyWith(
                                   fontWeight: FontWeight.bold,
