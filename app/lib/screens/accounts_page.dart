@@ -4,6 +4,7 @@ import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/user_account.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/widgets/add_user_account_form.dart';
 import 'package:totals/screens/account_share_qr_page.dart';
 import 'package:totals/screens/account_share_scan_page.dart';
@@ -141,10 +142,11 @@ class _AccountsPageState extends State<AccountsPage> {
     await Clipboard.setData(ClipboardData(text: accountNumber));
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Account number copied to clipboard'),
+        SnackBar(
+          content:
+              Text(context.l10nTextRead('Account number copied to clipboard')),
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -185,21 +187,21 @@ class _AccountsPageState extends State<AccountsPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Delete Selected Accounts?'),
+          title: Text(dialogContext.l10nText('Delete Selected Accounts?')),
           content: Text(
-            'Are you sure you want to delete ${selected.length} account${selected.length == 1 ? '' : 's'}?',
+            '${dialogContext.l10nText('Are you sure you want to delete')} ${selected.length} ${dialogContext.l10nText(selected.length == 1 ? 'account' : 'accounts')}?',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
+              child: Text(dialogContext.l10nText('Cancel')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
               style: TextButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.error,
               ),
-              child: const Text('Delete'),
+              child: Text(dialogContext.l10nText('Delete')),
             ),
           ],
         );
@@ -224,7 +226,7 @@ class _AccountsPageState extends State<AccountsPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Deleted ${selected.length} account${selected.length == 1 ? '' : 's'}',
+                '${context.l10nTextRead('Deleted')} ${selected.length} ${context.l10nTextRead(selected.length == 1 ? 'account' : 'accounts')}',
               ),
               behavior: SnackBarBehavior.floating,
             ),
@@ -234,7 +236,9 @@ class _AccountsPageState extends State<AccountsPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Error deleting accounts: $e'),
+              content: Text(
+                '${context.l10nTextRead('Error deleting accounts')}: $e',
+              ),
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -275,15 +279,15 @@ class _AccountsPageState extends State<AccountsPage> {
         backgroundColor: theme.scaffoldBackgroundColor,
         leading: _isSelectionMode
             ? IconButton(
-                tooltip: 'Clear selection',
+                tooltip: context.l10nText('Clear selection'),
                 icon: const Icon(Icons.close),
                 onPressed: _clearSelection,
               )
             : null,
         title: Text(
           _isSelectionMode
-              ? '${_selectedKeys.length} selected'
-              : 'Quick Access Accounts',
+              ? '${_selectedKeys.length} ${context.l10nText('selected')}'
+              : context.l10nText('Quick Access Accounts'),
         ),
         centerTitle: true,
         elevation: 0,
@@ -291,17 +295,17 @@ class _AccountsPageState extends State<AccountsPage> {
         actions: _isSelectionMode
             ? [
                 IconButton(
-                  tooltip: 'Clear selection',
+                  tooltip: context.l10nText('Clear selection'),
                   icon: const Icon(Icons.clear_all),
                   onPressed: _clearSelection,
                 ),
                 IconButton(
-                  tooltip: 'Select all',
+                  tooltip: context.l10nText('Select all'),
                   icon: const Icon(Icons.select_all),
                   onPressed: () => _selectAll(filteredAccounts),
                 ),
                 IconButton(
-                  tooltip: 'Delete selected',
+                  tooltip: context.l10nText('Delete selected'),
                   icon: const Icon(Icons.delete_outline),
                   color: colorScheme.error,
                   onPressed: _confirmDeleteSelected,
@@ -309,7 +313,7 @@ class _AccountsPageState extends State<AccountsPage> {
               ]
             : [
                 IconButton(
-                  tooltip: 'Share accounts',
+                  tooltip: context.l10nText('Share accounts'),
                   icon: const Icon(Icons.qr_code_rounded),
                   onPressed: _openShareQr,
                 ),
@@ -324,7 +328,7 @@ class _AccountsPageState extends State<AccountsPage> {
               controller: _searchController,
               autofocus: false,
               decoration: InputDecoration(
-                hintText: 'Search accounts...',
+                hintText: context.l10nText('Search accounts...'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -366,8 +370,8 @@ class _AccountsPageState extends State<AccountsPage> {
                             const SizedBox(height: 16),
                             Text(
                               _searchQuery.isNotEmpty
-                                  ? 'No accounts found'
-                                  : 'No accounts yet',
+                                  ? context.l10nText('No accounts found')
+                                  : context.l10nText('No accounts yet'),
                               style: theme.textTheme.titleLarge?.copyWith(
                                 color: colorScheme.onSurfaceVariant,
                               ),
@@ -375,7 +379,9 @@ class _AccountsPageState extends State<AccountsPage> {
                             const SizedBox(height: 8),
                             if (_searchQuery.isEmpty)
                               Text(
-                                'Tap + to add your first account',
+                                context.l10nText(
+                                  'Tap + to add your first account',
+                                ),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                 ),
@@ -386,7 +392,9 @@ class _AccountsPageState extends State<AccountsPage> {
                                 child: OutlinedButton.icon(
                                   onPressed: _openScanQr,
                                   icon: const Icon(Icons.qr_code_scanner),
-                                  label: const Text('Scan account QR'),
+                                  label: Text(
+                                    context.l10nText('Scan account QR'),
+                                  ),
                                 ),
                               ),
                           ],
@@ -537,7 +545,9 @@ class _AccountCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+                          context.l10nText(
+                            bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+                          ),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -565,7 +575,7 @@ class _AccountCard extends StatelessWidget {
                     IconButton(
                       icon: const Icon(Icons.copy_outlined),
                       onPressed: onCopy,
-                      tooltip: 'Copy account number',
+                      tooltip: context.l10nText('Copy account number'),
                       color: colorScheme.onSurfaceVariant,
                     ),
                 ],

@@ -539,7 +539,7 @@ class RedesignShellState extends State<RedesignShell>
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  '${account.accountNumber} copied to clipboard',
+                  '${account.accountNumber} ${context.l10nTextRead('copied to clipboard')}',
                 ),
                 behavior: SnackBarBehavior.floating,
                 duration: const Duration(seconds: 2),
@@ -555,7 +555,7 @@ class RedesignShellState extends State<RedesignShell>
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  '${account.accountNumber} copied to clipboard',
+                  '${account.accountNumber} ${context.l10nTextRead('copied to clipboard')}',
                 ),
                 behavior: SnackBarBehavior.floating,
                 duration: const Duration(seconds: 2),
@@ -935,7 +935,7 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Account Hub',
+                              context.l10nText('Account Hub'),
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w800,
                                 color: AppColors.textPrimary(context),
@@ -997,9 +997,9 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                           FocusScope.of(context).unfocus();
                         }
                       },
-                      tabs: const [
-                        Tab(height: 34, text: 'Quick'),
-                        Tab(height: 34, text: 'Mine'),
+                      tabs: [
+                        Tab(height: 34, text: context.l10nText('Quick')),
+                        Tab(height: 34, text: context.l10nText('Mine')),
                       ],
                     ),
                   ),
@@ -1078,8 +1078,10 @@ class _QuickAccessAccountsTab extends StatelessWidget {
         const SizedBox(height: 12),
         Text(
           hasAccounts
-              ? 'Saved quick-access accounts. Tap any row to copy and close.'
-              : 'No saved quick-access accounts yet.',
+              ? context.l10nText(
+                  'Saved quick-access accounts. Tap any row to copy and close.',
+                )
+              : context.l10nText('No saved quick-access accounts yet.'),
           style: theme.textTheme.bodySmall?.copyWith(
             color: AppColors.textSecondary(context),
           ),
@@ -1105,7 +1107,7 @@ class _QuickAccessAccountsTab extends StatelessWidget {
         if (hasAccounts) ...[
           const SizedBox(height: 12),
           Text(
-            'Showing ${accounts.length} of $totalAccountCount saved accounts.',
+            '${context.l10nText('Showing')} ${accounts.length} ${context.l10nText('of')} $totalAccountCount ${context.l10nText(totalAccountCount == 1 ? 'saved account' : 'saved accounts')}.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textTertiary(context),
             ),
@@ -1198,8 +1200,10 @@ class _UserAccountsTab extends StatelessWidget {
         const SizedBox(height: 14),
         Text(
           hasAccounts
-              ? 'Registered accounts used across your profile.'
-              : 'No registered accounts yet.',
+              ? context.l10nText(
+                  'Registered accounts used across your profile.',
+                )
+              : context.l10nText('No registered accounts yet.'),
           style: theme.textTheme.bodySmall?.copyWith(
             color: AppColors.textSecondary(context),
           ),
@@ -1228,7 +1232,7 @@ class _UserAccountsTab extends StatelessWidget {
         if (hasAccounts) ...[
           const SizedBox(height: 12),
           Text(
-            '$totalAccountCount registered account${totalAccountCount == 1 ? '' : 's'} available for sharing.',
+            '$totalAccountCount ${context.l10nText(totalAccountCount == 1 ? 'registered account' : 'registered accounts')} ${context.l10nText('available for sharing')}.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textTertiary(context),
             ),
@@ -1263,7 +1267,7 @@ class _AccountsQrCard extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            payload?.name ?? 'Share Your Accounts',
+            payload?.name ?? context.l10nText('Share Your Accounts'),
             textAlign: TextAlign.center,
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
@@ -1273,8 +1277,8 @@ class _AccountsQrCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             hasData
-                ? '$totalAccountCount account${totalAccountCount == 1 ? '' : 's'} included'
-                : 'No QR data available yet',
+                ? '$totalAccountCount ${context.l10nText(totalAccountCount == 1 ? 'account' : 'accounts')} ${context.l10nText('included')}'
+                : context.l10nText('No QR data available yet'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
             ),
@@ -1284,7 +1288,7 @@ class _AccountsQrCard extends StatelessWidget {
             AccountShareQrCode(
               data: AccountSharePayload.encode(payload!),
               fallback: Text(
-                'Too much data to render QR',
+                context.l10nText('Too much data to render QR'),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary(context),
@@ -1303,7 +1307,9 @@ class _AccountsQrCard extends StatelessWidget {
               ),
               padding: const EdgeInsets.all(20),
               child: Text(
-                'Add accounts first, then long-press Tools again to see your QR here.',
+                context.l10nText(
+                  'Add accounts first, then long-press Tools again to see your QR here.',
+                ),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary(context),
@@ -1373,7 +1379,9 @@ class _QuickAccessAccountTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+                      context.l10nText(
+                        bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -1477,7 +1485,9 @@ class _UserAccountTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+                  context.l10nText(
+                    bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(

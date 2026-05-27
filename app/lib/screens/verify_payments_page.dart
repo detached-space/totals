@@ -10,6 +10,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -58,8 +59,9 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
 
   Future<void> _loadAccounts() async {
     final accounts = await _accountRepo.getAccounts();
-    final filtered =
-        accounts.where((account) => account.bank != CashConstants.bankId).toList();
+    final filtered = accounts
+        .where((account) => account.bank != CashConstants.bankId)
+        .toList();
     if (mounted) {
       setState(() {
         _accounts = filtered;
@@ -102,21 +104,23 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('Camera Permission Required'),
-              content: const Text(
-                'Camera access is required to capture images. Please enable it in app settings.',
+              title: Text(context.l10nText('Camera Permission Required')),
+              content: Text(
+                context.l10nText(
+                  'Camera access is required to capture images. Please enable it in app settings.',
+                ),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
+                  child: Text(context.l10nText('Cancel')),
                 ),
                 TextButton(
                   onPressed: () {
                     Navigator.pop(context);
                     openAppSettings();
                   },
-                  child: const Text('Open Settings'),
+                  child: Text(context.l10nText('Open Settings')),
                 ),
               ],
             ),
@@ -155,8 +159,12 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
       if (!_hasCameraPermission) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Camera permission is required to capture images'),
+            SnackBar(
+              content: Text(
+                context.l10nTextRead(
+                  'Camera permission is required to capture images',
+                ),
+              ),
             ),
           );
         }
@@ -185,7 +193,9 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
         print('Error capturing image: $e');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error capturing image: ${e.toString()}'),
+            content: Text(
+              '${context.l10nTextRead('Error capturing image')}: ${e.toString()}',
+            ),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -206,13 +216,17 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
         if (mounted) {
           setState(() {
             _isUploading = false;
-            _uploadResponse = 'Error: Image file is too large (max 10MB)';
+            _uploadResponse = context
+                .l10nTextRead('Error: Image file is too large (max 10MB)');
           });
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content:
-                  Text('Image file is too large. Please use a smaller image.'),
-              duration: Duration(seconds: 4),
+            SnackBar(
+              content: Text(
+                context.l10nTextRead(
+                  'Image file is too large. Please use a smaller image.',
+                ),
+              ),
+              duration: const Duration(seconds: 4),
             ),
           );
         }
@@ -239,14 +253,19 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
         const Duration(seconds: 60), // 60 second timeout for large files
         onTimeout: () {
           throw TimeoutException(
-              'Upload timeout. Please check your connection and try again.');
+            context.l10nTextRead(
+              'Upload timeout. Please check your connection and try again.',
+            ),
+          );
         },
       );
 
       final response = await http.Response.fromStream(streamedResponse).timeout(
         const Duration(seconds: 30),
         onTimeout: () {
-          throw TimeoutException('Response timeout. Please try again.');
+          throw TimeoutException(
+            context.l10nTextRead('Response timeout. Please try again.'),
+          );
         },
       );
 
@@ -277,11 +296,11 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
       if (mounted) {
         setState(() {
           _isUploading = false;
-          _uploadResponse = 'Error: ${e.message}';
+          _uploadResponse = '${context.l10nTextRead('Error')}: ${e.message}';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.message ?? 'Upload timeout'),
+            content: Text(e.message ?? context.l10nTextRead('Upload timeout')),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -290,12 +309,14 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
       if (mounted) {
         setState(() {
           _isUploading = false;
-          _uploadResponse = 'Connection error: ${e.message}';
+          _uploadResponse =
+              '${context.l10nTextRead('Connection error')}: ${e.message}';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'Connection error: ${e.message}. Please check your internet connection.'),
+              '${context.l10nTextRead('Connection error')}: ${e.message}. ${context.l10nTextRead('Please check your internet connection.')}',
+            ),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -308,10 +329,12 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           if (errorMessage.contains('broken pipe') ||
               errorMessage.contains('connection reset') ||
               errorMessage.contains('connection closed')) {
-            _uploadResponse =
-                'Connection error: The server closed the connection during upload. Please try again with a smaller image or check your internet connection.';
+            _uploadResponse = context.l10nTextRead(
+              'Connection error: The server closed the connection during upload. Please try again with a smaller image or check your internet connection.',
+            );
           } else {
-            _uploadResponse = 'Error uploading image: $e';
+            _uploadResponse =
+                '${context.l10nTextRead('Error uploading image')}: $e';
           }
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -319,8 +342,10 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             content: Text(
               e.toString().toLowerCase().contains('broken pipe') ||
                       e.toString().toLowerCase().contains('connection reset')
-                  ? 'Connection error: Please try again with a smaller image or check your internet connection.'
-                  : 'Error uploading image: ${e.toString()}',
+                  ? context.l10nTextRead(
+                      'Connection error: Please try again with a smaller image or check your internet connection.',
+                    )
+                  : '${context.l10nTextRead('Error uploading image')}: ${e.toString()}',
             ),
             duration: const Duration(seconds: 5),
           ),
@@ -335,9 +360,11 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
     if (_selectedAccount == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please select an account first'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(
+              context.l10nTextRead('Please select an account first'),
+            ),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -369,7 +396,9 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           .timeout(
         const Duration(seconds: 30),
         onTimeout: () {
-          throw TimeoutException('Verification timeout. Please try again.');
+          throw TimeoutException(
+            context.l10nTextRead('Verification timeout. Please try again.'),
+          );
         },
       );
 
@@ -425,11 +454,12 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           _isSearching = false;
           _verificationSuccess = false;
           _verificationData = null;
-          _uploadResponse = 'Error: ${e.message}';
+          _uploadResponse = '${context.l10nTextRead('Error')}: ${e.message}';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.message ?? 'Verification timeout'),
+            content:
+                Text(e.message ?? context.l10nTextRead('Verification timeout')),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -440,12 +470,14 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           _isSearching = false;
           _verificationSuccess = false;
           _verificationData = null;
-          _uploadResponse = 'Connection error: ${e.message}';
+          _uploadResponse =
+              '${context.l10nTextRead('Connection error')}: ${e.message}';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'Connection error: ${e.message}. Please check your internet connection.'),
+              '${context.l10nTextRead('Connection error')}: ${e.message}. ${context.l10nTextRead('Please check your internet connection.')}',
+            ),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -456,11 +488,14 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           _isSearching = false;
           _verificationSuccess = false;
           _verificationData = null;
-          _uploadResponse = 'Error verifying reference: $e';
+          _uploadResponse =
+              '${context.l10nTextRead('Error verifying reference')}: $e';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error verifying reference: ${e.toString()}'),
+            content: Text(
+              '${context.l10nTextRead('Error verifying reference')}: ${e.toString()}',
+            ),
             duration: const Duration(seconds: 4),
           ),
         );
@@ -484,7 +519,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
-        title: const Text('Verify Payments'),
+        title: Text(context.l10nText('Verify Payments')),
         centerTitle: true,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -503,7 +538,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                   _selectedAccount = null;
                 });
               },
-              tooltip: 'Clear',
+              tooltip: context.l10nText('Clear'),
             ),
         ],
       ),
@@ -520,7 +555,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
               children: [
                 Expanded(
                   child: _ModeTab(
-                    label: 'Enter Reference',
+                    label: context.l10nText('Enter Reference'),
                     icon: Icons.edit,
                     isSelected: _selectedMode == 1,
                     onTap: () => _onModeChanged(1),
@@ -528,7 +563,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                 ),
                 Expanded(
                   child: _ModeTab(
-                    label: 'Capture Image',
+                    label: context.l10nText('Capture Image'),
                     icon: Icons.camera_alt,
                     isSelected: _selectedMode == 0,
                     onTap: () => _onModeChanged(0),
@@ -574,7 +609,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Capture Payment Image',
+              context.l10nText('Capture Payment Image'),
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: colorScheme.onSurface,
@@ -582,7 +617,9 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Take a photo of the payment receipt or QR code',
+              context.l10nText(
+                'Take a photo of the payment receipt or QR code',
+              ),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
@@ -592,7 +629,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             ElevatedButton.icon(
               onPressed: _captureImage,
               icon: const Icon(Icons.camera_alt),
-              label: const Text('Capture Image'),
+              label: Text(context.l10nText('Capture Image')),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 32,
@@ -637,8 +674,8 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           if (_isUploading) ...[
             const Center(child: CircularProgressIndicator()),
             const SizedBox(height: 16),
-            const Center(
-              child: Text('Uploading image...'),
+            Center(
+              child: Text(context.l10nText('Uploading image...')),
             ),
           ] else if (_uploadResponse != null) ...[
             Container(
@@ -662,7 +699,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        'Upload Response',
+                        context.l10nText('Upload Response'),
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: colorScheme.onSurface,
@@ -704,7 +741,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                 });
               },
               icon: const Icon(Icons.camera_alt),
-              label: const Text('Capture Another Image'),
+              label: Text(context.l10nText('Capture Another Image')),
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
@@ -722,7 +759,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Enter Transaction Reference',
+            context.l10nText('Enter Transaction Reference'),
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold,
               color: colorScheme.onSurface,
@@ -730,7 +767,9 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Enter the transaction reference number to verify payment details',
+            context.l10nText(
+              'Enter the transaction reference number to verify payment details',
+            ),
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
@@ -739,7 +778,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
           // Bank Account Selection
           if (_accounts.isNotEmpty) ...[
             Text(
-              'Select Account',
+              context.l10nText('Select Account'),
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: colorScheme.onSurfaceVariant,
@@ -759,7 +798,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                 value: _selectedAccount,
                 isExpanded: true,
                 hint: Text(
-                  'Select Account',
+                  context.l10nText('Select Account'),
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -807,7 +846,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                bank.shortName,
+                                context.l10nText(bank.shortName),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   color: colorScheme.onSurface,
@@ -840,7 +879,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             controller: _referenceController,
             autofocus: true,
             decoration: InputDecoration(
-              hintText: 'Enter transaction reference...',
+              hintText: context.l10nText('Enter transaction reference...'),
               prefixIcon: const Icon(Icons.receipt_long),
               suffixIcon: _referenceController.text.isNotEmpty
                   ? IconButton(
@@ -883,7 +922,11 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.verified),
-              label: Text(_isSearching ? 'Verifying...' : 'Verify'),
+              label: Text(
+                _isSearching
+                    ? context.l10nText('Verifying...')
+                    : context.l10nText('Verify'),
+              ),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 backgroundColor: colorScheme.primary,
@@ -951,8 +994,8 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                       children: [
                         Text(
                           isSuccess
-                              ? 'Verification Successful'
-                              : 'Verification Failed',
+                              ? context.l10nText('Verification Successful')
+                              : context.l10nText('Verification Failed'),
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.bold,
                             color: iconColor,
@@ -973,7 +1016,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
               ),
               const SizedBox(height: 24),
               Text(
-                'Reference:',
+                context.l10nText('Reference:'),
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: colorScheme.onSurfaceVariant,
@@ -1002,7 +1045,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
                   _verificationData!.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Text(
-                  'Details:',
+                  context.l10nText('Details:'),
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: colorScheme.onSurfaceVariant,
@@ -1030,7 +1073,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
               ] else if (_uploadResponse != null) ...[
                 const SizedBox(height: 24),
                 Text(
-                  'Response:',
+                  context.l10nText('Response:'),
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: colorScheme.onSurfaceVariant,
@@ -1073,7 +1116,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
               });
             },
             icon: const Icon(Icons.edit),
-            label: const Text('Verify Another Reference'),
+            label: Text(context.l10nText('Verify Another Reference')),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 16),
             ),
@@ -1097,7 +1140,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Camera Permission Required',
+              context.l10nText('Camera Permission Required'),
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: colorScheme.onSurface,
@@ -1105,7 +1148,9 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'We need camera access to capture images for payment verification.',
+              context.l10nText(
+                'We need camera access to capture images for payment verification.',
+              ),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
@@ -1115,7 +1160,7 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
             ElevatedButton.icon(
               onPressed: _requestCameraPermission,
               icon: const Icon(Icons.camera_alt),
-              label: const Text('Grant Camera Permission'),
+              label: Text(context.l10nText('Grant Camera Permission')),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
@@ -1260,7 +1305,7 @@ class _TransactionCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          bank.shortName,
+                          context.l10nText(bank.shortName),
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.bold,
                             color: colorScheme.onSurface,
@@ -1277,7 +1322,7 @@ class _TransactionCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '${isCredit ? '+' : '-'} ETB ${formatNumberWithComma(transaction.amount.abs())}',
+                    '${isCredit ? '+' : '-'} ${context.l10nText('ETB')} ${formatNumberWithComma(transaction.amount.abs())}',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: amountColor,
@@ -1295,7 +1340,7 @@ class _TransactionCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Reference',
+                          context.l10nText('Reference'),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -1318,7 +1363,7 @@ class _TransactionCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            isCredit ? 'From' : 'To',
+                            context.l10nText(isCredit ? 'From' : 'To'),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: colorScheme.onSurfaceVariant,
                             ),
@@ -1327,7 +1372,7 @@ class _TransactionCard extends StatelessWidget {
                           Text(
                             transaction.creditor ??
                                 transaction.receiver ??
-                                'N/A',
+                                context.l10nText('N/A'),
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: colorScheme.onSurface,
                             ),

@@ -10,6 +10,7 @@ import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/widget_refresh_settings_service.dart';
 import 'package:totals/services/widget_refresh_state_service.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/utils/category_icons.dart';
 
 class NotificationSettingsPage extends StatefulWidget {
@@ -148,12 +149,12 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       if (!mounted) return;
       _showSnack(
         shown
-            ? 'Test summary notification sent'
-            : 'Unable to send notification',
+            ? context.l10nTextRead('Test summary notification sent')
+            : context.l10nTextRead('Unable to send notification'),
       );
     } catch (_) {
       if (!mounted) return;
-      _showSnack('Failed to send test notification');
+      _showSnack(context.l10nTextRead('Failed to send test notification'));
     }
   }
 
@@ -169,12 +170,12 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       if (!mounted) return;
       _showSnack(
         shown
-            ? 'Test weekly summary notification sent'
-            : 'Unable to send notification',
+            ? context.l10nTextRead('Test weekly summary notification sent')
+            : context.l10nTextRead('Unable to send notification'),
       );
     } catch (_) {
       if (!mounted) return;
-      _showSnack('Failed to send test notification');
+      _showSnack(context.l10nTextRead('Failed to send test notification'));
     }
   }
 
@@ -192,12 +193,12 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       if (!mounted) return;
       _showSnack(
         shown
-            ? 'Test monthly summary notification sent'
-            : 'Unable to send notification',
+            ? context.l10nTextRead('Test monthly summary notification sent')
+            : context.l10nTextRead('Unable to send notification'),
       );
     } catch (_) {
       if (!mounted) return;
-      _showSnack('Failed to send test notification');
+      _showSnack(context.l10nTextRead('Failed to send test notification'));
     }
   }
 
@@ -287,8 +288,8 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   ),
                   Text(
                     flow == 'income'
-                        ? 'Quick Income Categories'
-                        : 'Quick Expense Categories',
+                        ? ctx.l10nText('Quick Income Categories')
+                        : ctx.l10nText('Quick Expense Categories'),
                     style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary(ctx),
@@ -296,7 +297,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Select up to 3 categories for quick actions',
+                    ctx.l10nText('Select up to 3 categories for quick actions'),
                     style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary(ctx),
                         ),
@@ -370,7 +371,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Text(
-                                      cat.name,
+                                      ctx.l10nText(cat.name),
                                       style: TextStyle(
                                         fontWeight: FontWeight.w600,
                                         color: atLimit
@@ -424,7 +425,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           child: Text(
-                            'Cancel',
+                            ctx.l10nText('Cancel'),
                             style:
                                 TextStyle(color: AppColors.textSecondary(ctx)),
                           ),
@@ -454,9 +455,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
-                          child: const Text(
-                            'Save',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                          child: Text(
+                            ctx.l10nText('Save'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -479,7 +480,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     if (!mounted) return;
 
     if (status.isGranted) {
-      _showSnack('Notifications permission already granted');
+      _showSnack(
+        context.l10nTextRead('Notifications permission already granted'),
+      );
       return;
     }
 
@@ -488,8 +491,8 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       if (!mounted) return;
       _showSnack(
         opened
-            ? 'Open Settings to enable notifications'
-            : 'Enable notifications in system settings',
+            ? context.l10nTextRead('Open Settings to enable notifications')
+            : context.l10nTextRead('Enable notifications in system settings'),
       );
       return;
     }
@@ -498,12 +501,16 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     if (!mounted) return;
 
     if (requested.isGranted) {
-      _showSnack('Notifications enabled');
+      _showSnack(context.l10nTextRead('Notifications enabled'));
     } else if (requested.isPermanentlyDenied) {
-      _showSnack('Notifications are blocked; enable them in Settings');
+      _showSnack(
+        context.l10nTextRead(
+          'Notifications are blocked; enable them in Settings',
+        ),
+      );
       await openAppSettings();
     } else {
-      _showSnack('Notifications permission denied');
+      _showSnack(context.l10nTextRead('Notifications permission denied'));
     }
   }
 
@@ -512,7 +519,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     if (!mounted) return;
 
     if (status.isGranted) {
-      _showSnack('Already excluded from battery optimization');
+      _showSnack(
+        context.l10nTextRead('Already excluded from battery optimization'),
+      );
       return;
     }
 
@@ -520,9 +529,13 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     if (!mounted) return;
 
     if (result.isGranted) {
-      _showSnack('Battery optimization disabled for Totals');
+      _showSnack(
+        context.l10nTextRead('Battery optimization disabled for Totals'),
+      );
     } else {
-      _showSnack('Battery optimization exemption denied');
+      _showSnack(
+        context.l10nTextRead('Battery optimization exemption denied'),
+      );
     }
   }
 
@@ -532,7 +545,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     final selected = _selectedCategoriesFor(flow);
     if (selected.isEmpty) {
       return Text(
-        'None selected',
+        context.l10nText('None selected'),
         style: TextStyle(
           fontSize: 12,
           color: AppColors.textTertiary(context),
@@ -559,7 +572,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
               ),
               const SizedBox(width: 4),
               Text(
-                cat.name,
+                context.l10nText(cat.name),
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -593,7 +606,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Notifications',
+          context.l10nText('Notifications'),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: AppColors.textPrimary(context),
@@ -613,14 +626,15 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ── Alerts ──────────────────────────────────────────
-                  _SectionHeader(label: 'Alerts'),
+                  _SectionHeader(label: context.l10nText('Alerts')),
                   const SizedBox(height: 10),
 
                   _SettingTile(
                     icon: Icons.swap_vert_rounded,
                     iconColor: AppColors.primaryLight,
-                    title: 'Transaction alerts',
-                    subtitle: 'Notify when a new transaction is detected',
+                    title: context.l10nText('Transaction alerts'),
+                    subtitle: context
+                        .l10nText('Notify when a new transaction is detected'),
                     trailing: Switch(
                       value: _transactionEnabled,
                       onChanged: _setTransactionEnabled,
@@ -644,9 +658,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.sms_failed_rounded,
                     iconColor: AppColors.amber,
-                    title: 'Failed parsing review',
-                    subtitle:
-                        'Ask whether an unparsed registered-bank message was a transaction',
+                    title: context.l10nText('Failed parsing review'),
+                    subtitle: context.l10nText(
+                      'Ask whether an unparsed registered-bank message was a transaction',
+                    ),
                     trailing: Switch(
                       value: _failedParseReviewEnabled,
                       onChanged: _setFailedParseReviewEnabled,
@@ -657,8 +672,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.pie_chart_outline_rounded,
                     iconColor: AppColors.amber,
-                    title: 'Budget alerts',
-                    subtitle: 'Notify when budget limits are reached',
+                    title: context.l10nText('Budget alerts'),
+                    subtitle: context
+                        .l10nText('Notify when budget limits are reached'),
                     trailing: Switch(
                       value: _budgetEnabled,
                       onChanged: _setBudgetEnabled,
@@ -669,13 +685,13 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   const SizedBox(height: 20),
 
                   // ── Quick categorize ────────────────────────────────
-                  _SectionHeader(label: 'Quick Categorize'),
+                  _SectionHeader(label: context.l10nText('Quick Categorize')),
                   const SizedBox(height: 10),
 
                   _SettingTile(
                     icon: Icons.arrow_downward_rounded,
                     iconColor: AppColors.incomeSuccess,
-                    title: 'Income categories',
+                    title: context.l10nText('Income categories'),
                     subtitle: null,
                     customSubtitle: _buildQuickCategoryChips('income'),
                     enabled: _transactionEnabled,
@@ -687,7 +703,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.arrow_upward_rounded,
                     iconColor: AppColors.red,
-                    title: 'Expense categories',
+                    title: context.l10nText('Expense categories'),
                     subtitle: null,
                     customSubtitle: _buildQuickCategoryChips('expense'),
                     enabled: _transactionEnabled,
@@ -699,14 +715,17 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   const SizedBox(height: 20),
 
                   // ── Spending summaries ──────────────────────────────
-                  _SectionHeader(label: 'Spending Summaries'),
+                  _SectionHeader(
+                    label: context.l10nText('Spending Summaries'),
+                  ),
                   const SizedBox(height: 10),
 
                   _SettingTile(
                     icon: Icons.summarize_outlined,
                     iconColor: AppColors.blue,
-                    title: 'Daily summary',
-                    subtitle: "Daily 'Today's spending' notification",
+                    title: context.l10nText('Daily summary'),
+                    subtitle: context
+                        .l10nText("Daily 'Today's spending' notification"),
                     trailing: Switch(
                       value: _dailyEnabled,
                       onChanged: _setDailyEnabled,
@@ -717,8 +736,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.view_week_outlined,
                     iconColor: AppColors.amber,
-                    title: 'Weekly summary',
-                    subtitle: "Weekly 'Last week's spending' notification",
+                    title: context.l10nText('Weekly summary'),
+                    subtitle: context
+                        .l10nText("Weekly 'Last week's spending' notification"),
                     trailing: Switch(
                       value: _weeklyEnabled,
                       onChanged: _setWeeklyEnabled,
@@ -729,8 +749,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.calendar_month_outlined,
                     iconColor: AppColors.incomeSuccess,
-                    title: 'Monthly summary',
-                    subtitle: "Monthly 'Last month's spending' notification",
+                    title: context.l10nText('Monthly summary'),
+                    subtitle: context.l10nText(
+                      "Monthly 'Last month's spending' notification",
+                    ),
                     trailing: Switch(
                       value: _monthlyEnabled,
                       onChanged: _setMonthlyEnabled,
@@ -741,9 +763,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.schedule_rounded,
                     iconColor: AppColors.primaryLight,
-                    title: 'Summary time',
+                    title: context.l10nText('Summary time'),
                     subtitle:
-                        '${_dailyTime.format(context)} • shared for all summaries',
+                        '${_dailyTime.format(context)} ${context.l10nText('shared for all summaries')}',
                     enabled: _dailyEnabled || _weeklyEnabled || _monthlyEnabled,
                     showChevron: false,
                     onTap: (_dailyEnabled || _weeklyEnabled || _monthlyEnabled)
@@ -754,8 +776,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.notification_add_rounded,
                     iconColor: AppColors.incomeSuccess,
-                    title: 'Send test daily summary',
-                    subtitle: 'Send a sample daily summary notification now',
+                    title: context.l10nText('Send test daily summary'),
+                    subtitle: context.l10nText(
+                      'Send a sample daily summary notification now',
+                    ),
                     enabled: _dailyEnabled,
                     showChevron: false,
                     onTap: _dailyEnabled ? _sendTestDailySummary : null,
@@ -764,8 +788,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.notification_add_rounded,
                     iconColor: AppColors.amber,
-                    title: 'Send test weekly summary',
-                    subtitle: 'Send a sample weekly summary notification now',
+                    title: context.l10nText('Send test weekly summary'),
+                    subtitle: context.l10nText(
+                      'Send a sample weekly summary notification now',
+                    ),
                     enabled: _weeklyEnabled,
                     showChevron: false,
                     onTap: _weeklyEnabled ? _sendTestWeeklySummary : null,
@@ -774,8 +800,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.notification_add_rounded,
                     iconColor: AppColors.primaryLight,
-                    title: 'Send test monthly summary',
-                    subtitle: 'Send a sample monthly summary notification now',
+                    title: context.l10nText('Send test monthly summary'),
+                    subtitle: context.l10nText(
+                      'Send a sample monthly summary notification now',
+                    ),
                     enabled: _monthlyEnabled,
                     showChevron: false,
                     onTap: _monthlyEnabled ? _sendTestMonthlySummary : null,
@@ -784,13 +812,13 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   const SizedBox(height: 20),
 
                   // ── Widget ──────────────────────────────────────────
-                  _SectionHeader(label: 'Widget'),
+                  _SectionHeader(label: context.l10nText('Widget')),
                   const SizedBox(height: 10),
 
                   _SettingTile(
                     icon: Icons.widgets_outlined,
                     iconColor: AppColors.amber,
-                    title: 'Widget refresh time',
+                    title: context.l10nText('Widget refresh time'),
                     subtitle: _widgetRefreshTime.format(context),
                     showChevron: false,
                     onTap: _pickWidgetRefreshTime,
@@ -799,14 +827,15 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   const SizedBox(height: 20),
 
                   // ── Permissions ─────────────────────────────────────
-                  _SectionHeader(label: 'Permissions'),
+                  _SectionHeader(label: context.l10nText('Permissions')),
                   const SizedBox(height: 10),
 
                   _SettingTile(
                     icon: Icons.notifications_active_outlined,
                     iconColor: AppColors.primaryLight,
-                    title: 'Request permission',
-                    subtitle: 'Enable notifications if blocked',
+                    title: context.l10nText('Request permission'),
+                    subtitle:
+                        context.l10nText('Enable notifications if blocked'),
                     showChevron: false,
                     onTap: _requestNotificationPermission,
                   ),
@@ -814,9 +843,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                   _SettingTile(
                     icon: Icons.battery_saver_rounded,
                     iconColor: AppColors.incomeSuccess,
-                    title: 'Battery optimization',
-                    subtitle: 'Exclude from battery optimization to ensure '
-                        'background notifications are delivered',
+                    title: context.l10nText('Battery optimization'),
+                    subtitle: context.l10nText(
+                      'Exclude from battery optimization to ensure background notifications are delivered',
+                    ),
                     showChevron: false,
                     onTap: _requestBatteryOptimizationExemption,
                   ),

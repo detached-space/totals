@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/profile.dart';
 import 'package:totals/repositories/profile_repository.dart';
 
@@ -78,8 +79,10 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
   Future<void> _deleteProfile(Profile profile) async {
     if (_profiles.length <= 1) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You must have at least one profile'),
+        SnackBar(
+          content: Text(
+            context.l10nTextRead('You must have at least one profile'),
+          ),
         ),
       );
       return;
@@ -88,19 +91,21 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Profile'),
-        content: Text('Are you sure you want to delete "${profile.name}"? This action cannot be undone.'),
+        title: Text(context.l10nText('Delete Profile')),
+        content: Text(
+          '${context.l10nText('Are you sure you want to delete')} "${profile.name}"? ${context.l10nText('This action cannot be undone.')}',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10nText('Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(
               foregroundColor: Colors.red,
             ),
-            child: const Text('Delete'),
+            child: Text(context.l10nText('Delete')),
           ),
         ],
       ),
@@ -109,15 +114,16 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
     if (confirmed == true && profile.id != null) {
       final wasActive = profile.id == _activeProfileId;
       await _profileRepo.deleteProfile(profile.id!);
-      
+
       // If we deleted the active profile, set the first remaining profile as active
       if (wasActive) {
         final remainingProfiles = await _profileRepo.getProfiles();
-        if (remainingProfiles.isNotEmpty && remainingProfiles.first.id != null) {
+        if (remainingProfiles.isNotEmpty &&
+            remainingProfiles.first.id != null) {
           await _profileRepo.setActiveProfile(remainingProfiles.first.id!);
         }
       }
-      
+
       _loadProfiles();
     }
   }
@@ -129,7 +135,7 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Profiles'),
+        title: Text(context.l10nText('Profiles')),
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
@@ -143,14 +149,16 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                     delegate: SliverChildListDelegate([
                       // Header
                       Text(
-                        'Manage your profiles',
+                        context.l10nText('Manage your profiles'),
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Switch between different profiles to organize your finances',
+                        context.l10nText(
+                          'Switch between different profiles to organize your finances',
+                        ),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurface.withOpacity(0.6),
                         ),
@@ -169,7 +177,8 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                               color: theme.colorScheme.primary.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: theme.colorScheme.primary.withOpacity(0.2),
+                                color:
+                                    theme.colorScheme.primary.withOpacity(0.2),
                                 width: 1.5,
                               ),
                             ),
@@ -191,20 +200,26 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                                 const SizedBox(width: 16),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        'Create New Profile',
-                                        style: theme.textTheme.titleMedium?.copyWith(
+                                        context.l10nText('Create New Profile'),
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
                                           fontWeight: FontWeight.w600,
                                           color: theme.colorScheme.primary,
                                         ),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'Add a new profile to organize your finances',
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: theme.colorScheme.onSurface.withOpacity(0.6),
+                                        context.l10nText(
+                                          'Add a new profile to organize your finances',
+                                        ),
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: theme.colorScheme.onSurface
+                                              .withOpacity(0.6),
                                         ),
                                       ),
                                     ],
@@ -231,20 +246,25 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                               Icon(
                                 Icons.person_outline,
                                 size: 64,
-                                color: theme.colorScheme.onSurface.withOpacity(0.3),
+                                color: theme.colorScheme.onSurface
+                                    .withOpacity(0.3),
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                'No profiles yet',
+                                context.l10nText('No profiles yet'),
                                 style: theme.textTheme.titleMedium?.copyWith(
-                                  color: theme.colorScheme.onSurface.withOpacity(0.6),
+                                  color: theme.colorScheme.onSurface
+                                      .withOpacity(0.6),
                                 ),
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Create your first profile to get started',
+                                context.l10nText(
+                                  'Create your first profile to get started',
+                                ),
                                 style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurface.withOpacity(0.5),
+                                  color: theme.colorScheme.onSurface
+                                      .withOpacity(0.5),
                                 ),
                                 textAlign: TextAlign.center,
                               ),
@@ -256,9 +276,10 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                           final index = entry.key;
                           final profile = entry.value;
                           final isActive = profile.id == _activeProfileId;
-                          
+
                           return Padding(
-                            padding: EdgeInsets.only(bottom: index < _profiles.length - 1 ? 12 : 0),
+                            padding: EdgeInsets.only(
+                                bottom: index < _profiles.length - 1 ? 12 : 0),
                             child: _buildProfileItem(
                               context: context,
                               profile: profile,
@@ -371,7 +392,7 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  'Active',
+                                  context.l10nText('Active'),
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: theme.colorScheme.onPrimary,
                                     fontWeight: FontWeight.w600,
@@ -384,7 +405,9 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Tap to activate this profile',
+                      isActive
+                          ? context.l10nText('Active profile')
+                          : context.l10nText('Tap to activate this profile'),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurface.withOpacity(0.6),
                       ),
@@ -413,7 +436,7 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                           color: theme.colorScheme.onSurface,
                         ),
                         const SizedBox(width: 12),
-                        const Text('Rename'),
+                        Text(context.l10nText('Rename')),
                       ],
                     ),
                   ),
@@ -429,7 +452,7 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            'Delete',
+                            context.l10nText('Delete'),
                             style: TextStyle(
                               color: theme.colorScheme.error,
                             ),
@@ -481,7 +504,7 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Dialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
@@ -514,7 +537,7 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: Text(
-                    'Create Profile',
+                    context.l10nText('Create Profile'),
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -535,8 +558,8 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
                 controller: _controller,
                 autofocus: true,
                 decoration: InputDecoration(
-                  labelText: 'Profile Name',
-                  hintText: 'e.g., Personal, Business',
+                  labelText: context.l10nText('Profile Name'),
+                  hintText: context.l10nText('e.g., Personal, Business'),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -545,7 +568,7 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'Please enter a profile name';
+                    return context.l10nText('Please enter a profile name');
                   }
                   return null;
                 },
@@ -563,7 +586,7 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Cancel'),
+                    child: Text(context.l10nText('Cancel')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -582,7 +605,7 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Create'),
+                    child: Text(context.l10nText('Create')),
                   ),
                 ),
               ],
@@ -622,7 +645,7 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Dialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
@@ -655,7 +678,7 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: Text(
-                    'Rename Profile',
+                    context.l10nText('Rename Profile'),
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -676,8 +699,8 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
                 controller: _controller,
                 autofocus: true,
                 decoration: InputDecoration(
-                  labelText: 'Profile Name',
-                  hintText: 'Enter new profile name',
+                  labelText: context.l10nText('Profile Name'),
+                  hintText: context.l10nText('Enter new profile name'),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -686,7 +709,7 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'Please enter a profile name';
+                    return context.l10nText('Please enter a profile name');
                   }
                   return null;
                 },
@@ -704,7 +727,7 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Cancel'),
+                    child: Text(context.l10nText('Cancel')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -723,7 +746,7 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Save'),
+                    child: Text(context.l10nText('Save')),
                   ),
                 ),
               ],
@@ -734,4 +757,3 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
     );
   }
 }
-

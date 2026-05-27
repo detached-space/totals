@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -74,7 +75,11 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load failed parsings: $e')),
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Failed to load failed parsings')}: $e',
+          ),
+        ),
       );
     }
   }
@@ -218,16 +223,20 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
       builder: (dialogContext) {
         final similarCount = similarIds.length;
         return AlertDialog(
-          title: const Text('Delete similar failed texts too?'),
+          title: Text(
+            dialogContext.l10nText('Delete similar failed texts too?'),
+          ),
           content: Text(
             similarCount == 1
-                ? 'We found 1 other failed parsing text from the same sender with a very similar message body. Delete it too?'
-                : 'We found $similarCount other failed parsing texts from the same sender with very similar message bodies. Delete them too?',
+                ? dialogContext.l10nText(
+                    'We found 1 other failed parsing text from the same sender with a very similar message body. Delete it too?',
+                  )
+                : '${dialogContext.l10nText('We found')} $similarCount ${dialogContext.l10nText('other failed parsing texts from the same sender with very similar message bodies. Delete them too?')}',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
+              child: Text(dialogContext.l10nText('Cancel')),
             ),
             TextButton(
               onPressed: () => Navigator.pop(
@@ -236,8 +245,8 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
               ),
               child: Text(
                 selectedIds.length == 1
-                    ? 'Delete this only'
-                    : 'Delete selected only',
+                    ? dialogContext.l10nText('Delete this only')
+                    : dialogContext.l10nText('Delete selected only'),
               ),
             ),
             FilledButton(
@@ -247,8 +256,8 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
               ),
               child: Text(
                 similarCount == 1
-                    ? 'Delete both'
-                    : 'Delete all ${selectedIds.length + similarCount}',
+                    ? dialogContext.l10nText('Delete both')
+                    : '${dialogContext.l10nText('Delete all')} ${selectedIds.length + similarCount}',
               ),
             ),
           ],
@@ -289,9 +298,9 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
     final similarCount = max(0, targetIds.length - selectedIds.length);
     final message = similarCount == 0
         ? (targetIds.length == 1
-            ? 'Cleared 1 item'
-            : 'Cleared ${targetIds.length} items')
-        : 'Cleared ${targetIds.length} items, including $similarCount similar text${similarCount == 1 ? '' : 's'}';
+            ? context.l10nTextRead('Cleared 1 item')
+            : '${context.l10nTextRead('Cleared')} ${targetIds.length} ${context.l10nTextRead('items')}')
+        : '${context.l10nTextRead('Cleared')} ${targetIds.length} ${context.l10nTextRead('items, including')} $similarCount ${context.l10nTextRead(similarCount == 1 ? 'similar text' : 'similar texts')}';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -313,7 +322,7 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Copied to clipboard')),
+      SnackBar(content: Text(context.l10nTextRead('Copied to clipboard'))),
     );
   }
 
@@ -328,8 +337,11 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
     if (!mounted) return;
     if (bank == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('No bank available for a test notification')),
+        SnackBar(
+          content: Text(
+            context.l10nTextRead('No bank available for a test notification'),
+          ),
+        ),
       );
       return;
     }
@@ -360,13 +372,17 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
       await FailedParseReviewService.instance.discardCandidate(reviewId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send test notification')),
+        SnackBar(
+          content: Text(
+            context.l10nTextRead('Failed to send test notification'),
+          ),
+        ),
       );
       return;
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Test notification sent')),
+      SnackBar(content: Text(context.l10nTextRead('Test notification sent'))),
     );
   }
 
@@ -422,13 +438,14 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
     if (!mounted) return;
     String message;
     if (error != null) {
-      message = 'Retry failed: $error';
+      message = '${context.l10nTextRead('Retry failed')}: $error';
     } else if (result?.status == ParseStatus.success) {
-      message = 'Retry succeeded';
+      message = context.l10nTextRead('Retry succeeded');
     } else if (result?.status == ParseStatus.duplicate) {
-      message = 'Duplicate still exists';
+      message = context.l10nTextRead('Duplicate still exists');
     } else {
-      message = 'Retry failed: ${result?.reason ?? 'Unknown error'}';
+      message =
+          '${context.l10nTextRead('Retry failed')}: ${result?.reason ?? context.l10nTextRead('Unknown error')}';
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
@@ -484,18 +501,20 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
     if (!mounted) return;
     if (batchError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Retry failed: $batchError')),
+        SnackBar(
+          content: Text('${context.l10nTextRead('Retry failed')}: $batchError'),
+        ),
       );
       return;
     }
 
     final total = items.length;
     final summary = [
-      'Retried $total',
-      if (success > 0) 'success: $success',
-      if (duplicate > 0) 'duplicates: $duplicate',
-      if (failed > 0) 'failed: $failed',
-      if (errors > 0) 'errors: $errors',
+      '${context.l10nTextRead('Retried')} $total',
+      if (success > 0) '${context.l10nTextRead('success')}: $success',
+      if (duplicate > 0) '${context.l10nTextRead('duplicates')}: $duplicate',
+      if (failed > 0) '${context.l10nTextRead('failed')}: $failed',
+      if (errors > 0) '${context.l10nTextRead('errors')}: $errors',
     ].join(', ');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(summary)),
@@ -542,7 +561,7 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'No failed parsings',
+              context.l10nText('No failed parsings'),
               style: theme.textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: AppColors.textSecondary(context),
@@ -550,7 +569,7 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
             ),
             const SizedBox(height: 4),
             Text(
-              'All transaction messages are being parsed.',
+              context.l10nText('All transaction messages are being parsed.'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: AppColors.textTertiary(context),
               ),
@@ -594,7 +613,7 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
             onChanged: (_) => setState(() {}),
             style: TextStyle(color: AppColors.textPrimary(context)),
             decoration: InputDecoration(
-              hintText: 'Filter messages\u2026',
+              hintText: context.l10nText('Filter messages...'),
               hintStyle: TextStyle(color: AppColors.textTertiary(context)),
               prefixIcon: Icon(
                 AppIcons.filter_list,
@@ -603,7 +622,7 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
               suffixIcon: _searchController.text.isEmpty
                   ? null
                   : IconButton(
-                      tooltip: 'Clear',
+                      tooltip: context.l10nText('Clear'),
                       onPressed: () {
                         _searchController.clear();
                         setState(() {});
@@ -646,8 +665,10 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
               ? Center(
                   child: Text(
                     hasSearch
-                        ? 'No transactions match your search.'
-                        : 'No transactions without patterns for this bank.',
+                        ? context.l10nText('No transactions match your search.')
+                        : context.l10nText(
+                            'No transactions without patterns for this bank.',
+                          ),
                     style: TextStyle(
                       color: AppColors.textSecondary(context),
                     ),
@@ -719,8 +740,8 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
       ..showSnackBar(SnackBar(
         content: Text(
           items.length == 1
-              ? 'Copied 1 message'
-              : 'Copied ${items.length} messages',
+              ? context.l10nTextRead('Copied 1 message')
+              : '${context.l10nTextRead('Copied')} ${items.length} ${context.l10nTextRead('messages')}',
         ),
       ));
   }
@@ -757,16 +778,18 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
     final theme = Theme.of(context);
     final selectedGroup = _selectedGroup;
     final visibleItems = _visibleItems;
+    final selectedGroupLabel =
+        selectedGroup == null ? null : context.l10nText(selectedGroup.label);
     final retryTooltip = selectedGroup == null
-        ? 'Retry all banks'
+        ? context.l10nText('Retry all banks')
         : _searchController.text.trim().isNotEmpty
-            ? 'Retry filtered'
-            : 'Retry ${selectedGroup.label}';
+            ? context.l10nText('Retry filtered')
+            : '${context.l10nText('Retry')} $selectedGroupLabel';
     final clearTooltip = selectedGroup == null
-        ? 'Clear all banks'
+        ? context.l10nText('Clear all banks')
         : _searchController.text.trim().isNotEmpty
-            ? 'Clear filtered'
-            : 'Clear ${selectedGroup.label}';
+            ? context.l10nText('Clear filtered')
+            : '${context.l10nText('Clear')} $selectedGroupLabel';
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -783,10 +806,10 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
         ),
         title: Text(
           _isSelecting
-              ? '${_selectedCardIds.length} selected'
+              ? '${_selectedCardIds.length} ${context.l10nText('selected')}'
               : selectedGroup == null
-                  ? 'Failed Parsings'
-                  : '${selectedGroup.label} Patterns',
+                  ? context.l10nText('Failed Parsings')
+                  : '$selectedGroupLabel ${context.l10nText('Patterns')}',
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
             color: AppColors.textPrimary(context),
@@ -814,7 +837,7 @@ class _FailedParsesPageState extends State<FailedParsesPage> {
                     });
                   },
                   child: Text(
-                    'All',
+                    context.l10nText('All'),
                     style: TextStyle(
                       color: AppColors.primaryLight,
                       fontWeight: FontWeight.w600,
@@ -1082,7 +1105,9 @@ class _FailedParseCardState extends State<_FailedParseCard> {
 
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(const SnackBar(content: Text('Transaction copied')));
+      ..showSnackBar(
+        SnackBar(content: Text(context.l10nTextRead('Transaction copied'))),
+      );
   }
 
   Future<void> _shareToTelegram() async {
@@ -1101,9 +1126,11 @@ class _FailedParseCardState extends State<_FailedParseCard> {
     final messenger = ScaffoldMessenger.of(context)..clearSnackBars();
     if (opened) {
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Telegram opened with the message loaded. The text was also copied to the clipboard.',
+            context.l10nTextRead(
+              'Telegram opened with the message loaded. The text was also copied to the clipboard.',
+            ),
           ),
         ),
       );
@@ -1111,20 +1138,27 @@ class _FailedParseCardState extends State<_FailedParseCard> {
     }
 
     try {
-      await Share.share(text, subject: 'Failed parsing message');
+      await Share.share(
+        text,
+        subject: context.l10nTextRead('Failed parsing message'),
+      );
       if (!mounted) return;
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Telegram could not be opened directly. A share sheet was opened and the text was copied to the clipboard.',
+            context.l10nTextRead(
+              'Telegram could not be opened directly. A share sheet was opened and the text was copied to the clipboard.',
+            ),
           ),
         ),
       );
     } catch (_) {
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Telegram could not be opened. The text was copied to the clipboard.',
+            context.l10nTextRead(
+              'Telegram could not be opened. The text was copied to the clipboard.',
+            ),
           ),
         ),
       );
@@ -1190,7 +1224,7 @@ class _FailedParseCardState extends State<_FailedParseCard> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    FailedParse.noMatchingPatternReason,
+                    context.l10nText(FailedParse.noMatchingPatternReason),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -1286,7 +1320,7 @@ class _FailedParseCardState extends State<_FailedParseCard> {
                 runSpacing: 6,
                 children: [
                   _QuickAction(
-                    label: 'Share to Telegram',
+                    label: context.l10nText('Share to Telegram'),
                     icon: Icons.share_outlined,
                     color: AppColors.primaryLight,
                     onTap: _shareToTelegram,
@@ -1294,14 +1328,14 @@ class _FailedParseCardState extends State<_FailedParseCard> {
                   if (_numberIndices.isNotEmpty &&
                       !_numberIndices.every(_hidden.contains))
                     _QuickAction(
-                      label: 'Scramble numbers',
+                      label: context.l10nText('Scramble numbers'),
                       icon: AppIcons.visibility_off_outlined,
                       color: AppColors.amber,
                       onTap: _scrambleNumbers,
                     ),
                   if (hasHidden)
                     _QuickAction(
-                      label: 'Unscramble all',
+                      label: context.l10nText('Unscramble all'),
                       icon: AppIcons.visibility_outlined,
                       color: AppColors.primaryLight,
                       onTap: _unscrambleAll,
@@ -1311,7 +1345,9 @@ class _FailedParseCardState extends State<_FailedParseCard> {
             if (!hasHidden && !widget.selecting) ...[
               const SizedBox(height: 6),
               Text(
-                'Tap to scramble \u00b7 Long-press to scramble similar',
+                context.l10nText(
+                  'Tap to scramble - Long-press to scramble similar',
+                ),
                 style: TextStyle(
                   fontSize: 11,
                   color: AppColors.textTertiary(context),
@@ -1360,7 +1396,7 @@ class _FailedParseCardState extends State<_FailedParseCard> {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              'Retry',
+                              context.l10nText('Retry'),
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -1419,22 +1455,22 @@ class _SelectionBottomBar extends StatelessWidget {
         children: [
           _BottomBarAction(
             icon: AppIcons.copy,
-            label: 'Copy',
+            label: context.l10nText('Copy'),
             onTap: count > 0 ? onCopy : null,
           ),
           _BottomBarAction(
             icon: AppIcons.swap,
-            label: 'Invert',
+            label: context.l10nText('Invert'),
             onTap: onInvert,
           ),
           _BottomBarAction(
             icon: AppIcons.refresh,
-            label: 'Retry',
+            label: context.l10nText('Retry'),
             onTap: count > 0 ? onRetry : null,
           ),
           _BottomBarAction(
             icon: AppIcons.delete_outline_rounded,
-            label: 'Delete',
+            label: context.l10nText('Delete'),
             color: AppColors.red,
             onTap: count > 0 ? onDelete : null,
           ),
@@ -1591,7 +1627,7 @@ class _FailedParseBankCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      group.label,
+                      context.l10nText(group.label),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -1602,8 +1638,8 @@ class _FailedParseBankCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       group.items.length == 1
-                          ? '1 unmatched transaction'
-                          : '${group.items.length} unmatched transactions',
+                          ? context.l10nText('1 unmatched transaction')
+                          : '${group.items.length} ${context.l10nText('unmatched transactions')}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -1675,7 +1711,7 @@ class _FailedParseSummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  group.label,
+                  context.l10nText(group.label),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: AppColors.textPrimary(context),
                     fontWeight: FontWeight.w700,
@@ -1684,8 +1720,10 @@ class _FailedParseSummaryCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   group.items.length == 1
-                      ? '1 transaction without a matching pattern'
-                      : '${group.items.length} transactions without matching patterns',
+                      ? context.l10nText(
+                          '1 transaction without a matching pattern',
+                        )
+                      : '${group.items.length} ${context.l10nText('transactions without matching patterns')}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: AppColors.textSecondary(context),
                     height: 1.35,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/local_server/server_service.dart';
 import 'package:totals/local_server/network_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -95,28 +96,33 @@ class _WebPageState extends State<WebPage> {
 
     try {
       if (_serverService.isRunning) {
-        _addSystemLog('Stopping server...');
+        _addSystemLog(context.l10nTextRead('Stopping server...'));
         _logSubscription?.cancel();
         await _serverService.stopServer();
-        _addSystemLog('Server stopped.', isSuccess: true);
+        _addSystemLog(context.l10nTextRead('Server stopped.'), isSuccess: true);
       } else {
-        _addSystemLog('Starting server...');
+        _addSystemLog(context.l10nTextRead('Starting server...'));
         await _serverService.startServer();
         await _loadNetworkInfo();
 
         // Subscribe to log stream
         _logSubscription = _serverService.logStream.listen(_addRequestLog);
 
-        _addSystemLog('Server started successfully!', isSuccess: true);
-        _addSystemLog('Listening on ${_serverService.serverUrl}');
-        _addSystemLog('API endpoints ready:');
+        _addSystemLog(
+          context.l10nTextRead('Server started successfully!'),
+          isSuccess: true,
+        );
+        _addSystemLog(
+          '${context.l10nTextRead('Listening on')} ${_serverService.serverUrl}',
+        );
+        _addSystemLog(context.l10nTextRead('API endpoints ready:'));
         _addSystemLog('  → /api/accounts');
         _addSystemLog('  → /api/transactions');
         _addSystemLog('  → /api/summary');
         _addSystemLog('  → /api/banks');
       }
     } catch (e) {
-      _addSystemLog('Error: $e', isError: true);
+      _addSystemLog('${context.l10nTextRead('Error')}: $e', isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -130,7 +136,7 @@ class _WebPageState extends State<WebPage> {
     setState(() {
       _consoleEntries.clear();
     });
-    _addSystemLog('Console cleared.');
+    _addSystemLog(context.l10nTextRead('Console cleared.'));
   }
 
   void _copyUrl() {
@@ -138,14 +144,14 @@ class _WebPageState extends State<WebPage> {
       Clipboard.setData(ClipboardData(text: _serverService.serverUrl!));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('URL copied to clipboard!'),
+          content: Text(context.l10nTextRead('URL copied to clipboard!')),
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           duration: const Duration(seconds: 2),
         ),
       );
-      _addSystemLog('URL copied to clipboard.');
+      _addSystemLog(context.l10nTextRead('URL copied to clipboard.'));
     }
   }
 
@@ -197,7 +203,7 @@ class _WebPageState extends State<WebPage> {
       appBar: AppBar(
         backgroundColor: isDark ? const Color(0xFF0A0E1A) : null,
         title: Text(
-          'Web Dashboard',
+          context.l10nText('Web Dashboard'),
           style: TextStyle(color: onSurfaceColor),
         ),
         centerTitle: true,
@@ -212,7 +218,7 @@ class _WebPageState extends State<WebPage> {
               color: onSurfaceVariantColor,
             ),
             label: Text(
-              'For Nerds',
+              context.l10nText('For Nerds'),
               style: TextStyle(
                 color: onSurfaceVariantColor,
                 fontSize: 12,
@@ -261,7 +267,9 @@ class _WebPageState extends State<WebPage> {
 
                 // Status text
                 Text(
-                  isRunning ? 'Your link is ready' : 'Visit your Web Dashboard',
+                  isRunning
+                      ? context.l10nText('Your link is ready')
+                      : context.l10nText('Visit your Web Dashboard'),
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: isRunning ? runningColor : onSurfaceColor,
@@ -274,8 +282,12 @@ class _WebPageState extends State<WebPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   child: Text(
                     isRunning
-                        ? 'Copy the link below and paste it into a browser on your computer to view your transactions.'
-                        : 'Step 1: Turn on your phone hotspot.\nStep 2: Connect your computer to that hotspot.\nStep 3: Tap "Create Link" below.',
+                        ? context.l10nText(
+                            'Copy the link below and paste it into a browser on your computer to view your transactions.',
+                          )
+                        : context.l10nText(
+                            'Step 1: Turn on your phone hotspot.\nStep 2: Connect your computer to that hotspot.\nStep 3: Tap "Create Link" below.',
+                          ),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: onSurfaceVariantColor,
@@ -304,9 +316,11 @@ class _WebPageState extends State<WebPage> {
                     label: Text(
                       _isLoading
                           ? (isRunning
-                              ? 'Turning off link...'
-                              : 'Creating link...')
-                          : (isRunning ? 'Turn Off Link' : 'Create Link'),
+                              ? context.l10nText('Turning off link...')
+                              : context.l10nText('Creating link...'))
+                          : (isRunning
+                              ? context.l10nText('Turn Off Link')
+                              : context.l10nText('Create Link')),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -366,7 +380,7 @@ class _WebPageState extends State<WebPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Your private link',
+                                    context.l10nText('Your private link'),
                                     style: TextStyle(
                                       color: onSurfaceVariantColor,
                                       fontSize: 12,
@@ -394,8 +408,10 @@ class _WebPageState extends State<WebPage> {
                                 onPressed: _copyUrl,
                                 icon: Icon(Icons.copy,
                                     size: 18, color: primaryColor),
-                                label: Text('Copy link',
-                                    style: TextStyle(color: primaryColor)),
+                                label: Text(
+                                  context.l10nText('Copy link'),
+                                  style: TextStyle(color: primaryColor),
+                                ),
                                 style: OutlinedButton.styleFrom(
                                   padding:
                                       const EdgeInsets.symmetric(vertical: 12),
@@ -435,7 +451,9 @@ class _WebPageState extends State<WebPage> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'On your computer, connect to your phone hotspot, then paste this link into a browser.',
+                            context.l10nText(
+                              'On your computer, connect to your phone hotspot, then paste this link into a browser.',
+                            ),
                             style: TextStyle(
                               color: isDark
                                   ? primaryColor.withOpacity(0.9)
@@ -516,7 +534,7 @@ class _WebPageState extends State<WebPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'Visualize Your Data',
+                                      context.l10nText('Visualize Your Data'),
                                       style: TextStyle(
                                         color: isDark
                                             ? Colors.white.withOpacity(0.95)
@@ -528,7 +546,9 @@ class _WebPageState extends State<WebPage> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      'Interactive API Explorer',
+                                      context.l10nText(
+                                        'Interactive API Explorer',
+                                      ),
                                       style: TextStyle(
                                         color: isDark
                                             ? Colors.white.withOpacity(0.7)
@@ -545,7 +565,9 @@ class _WebPageState extends State<WebPage> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'Explore the API documentation and visualize your financial data with interactive charts and graphs. Perfect for analyzing trends and patterns.',
+                            context.l10nText(
+                              'Explore the API documentation and visualize your financial data with interactive charts and graphs. Perfect for analyzing trends and patterns.',
+                            ),
                             style: TextStyle(
                               color: isDark
                                   ? Colors.white.withOpacity(0.8)
@@ -682,7 +704,7 @@ class _WebPageState extends State<WebPage> {
         children: [
           // Back to simple mode button
           Tooltip(
-            message: 'Back to Simple Mode',
+            message: context.l10nText('Back to Simple Mode'),
             child: Material(
               color: Colors.transparent,
               child: InkWell(
@@ -725,8 +747,8 @@ class _WebPageState extends State<WebPage> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Totals Server',
+              Text(
+                context.l10nText('Totals Server'),
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 16,
@@ -735,8 +757,8 @@ class _WebPageState extends State<WebPage> {
               ),
               Text(
                 _serverService.isRunning
-                    ? 'Running on port ${_serverService.port}'
-                    : 'Stopped',
+                    ? '${context.l10nText('Running on port')} ${_serverService.port}'
+                    : context.l10nText('Stopped'),
                 style: TextStyle(
                   color: _serverService.isRunning
                       ? Colors.greenAccent.withOpacity(0.8)
@@ -752,14 +774,14 @@ class _WebPageState extends State<WebPage> {
           // Action Buttons
           _buildHeaderButton(
             icon: Icons.delete_outline,
-            tooltip: 'Clear Console',
+            tooltip: context.l10nText('Clear Console'),
             onPressed: _clearConsole,
           ),
           const SizedBox(width: 8),
           if (_serverService.isRunning) ...[
             _buildHeaderButton(
               icon: Icons.copy,
-              tooltip: 'Copy URL',
+              tooltip: context.l10nText('Copy URL'),
               onPressed: _copyUrl,
             ),
             const SizedBox(width: 8),
@@ -848,7 +870,7 @@ class _WebPageState extends State<WebPage> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          'Start',
+                          context.l10nText('Start'),
                           style: TextStyle(
                             color: Colors.greenAccent,
                             fontSize: 13,
@@ -877,7 +899,7 @@ class _WebPageState extends State<WebPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'No logs yet',
+                    context.l10nText('No logs yet'),
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.3),
                       fontSize: 14,
@@ -885,7 +907,7 @@ class _WebPageState extends State<WebPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Start the server to see request logs',
+                    context.l10nText('Start the server to see request logs'),
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.2),
                       fontSize: 12,
@@ -1044,7 +1066,9 @@ class _WebPageState extends State<WebPage> {
               ),
               const SizedBox(width: 8),
               Text(
-                _serverService.isRunning ? 'ONLINE' : 'OFFLINE',
+                _serverService.isRunning
+                    ? context.l10nText('ONLINE')
+                    : context.l10nText('OFFLINE'),
                 style: TextStyle(
                   color: _serverService.isRunning
                       ? Colors.greenAccent
@@ -1066,7 +1090,9 @@ class _WebPageState extends State<WebPage> {
                 Clipboard.setData(ClipboardData(text: textToCopy));
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Copied $textToCopy to clipboard'),
+                    content: Text(
+                      '${context.l10nTextRead('Copied')} $textToCopy ${context.l10nTextRead('to clipboard')}',
+                    ),
                     behavior: SnackBarBehavior.floating,
                     duration: const Duration(seconds: 2),
                   ),
@@ -1122,7 +1148,7 @@ class _WebPageState extends State<WebPage> {
 
           // Log count (last item)
           Text(
-            '${_consoleEntries.length} logs',
+            '${_consoleEntries.length} ${context.l10nText('logs')}',
             style: TextStyle(
               color: Colors.white.withOpacity(0.4),
               fontSize: 11,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class PrivacyPolicyPage extends StatelessWidget {
   const PrivacyPolicyPage({super.key});
@@ -12,7 +13,7 @@ class PrivacyPolicyPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Privacy Policy'),
+        title: Text(context.l10nText('Privacy Policy')),
         centerTitle: true,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -29,7 +30,9 @@ class PrivacyPolicyPage extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  'Could not load the privacy policy right now.',
+                  context.l10nText(
+                    'Could not load the privacy policy right now.',
+                  ),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium,
                 ),
@@ -66,7 +69,7 @@ class PrivacyPolicyPage extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              trimmed.substring(2),
+              context.l10nText(trimmed.substring(2)),
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -81,7 +84,7 @@ class PrivacyPolicyPage extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 10, bottom: 8),
             child: Text(
-              trimmed.substring(3),
+              context.l10nText(trimmed.substring(3)),
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -105,7 +108,7 @@ class PrivacyPolicyPage extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    trimmed.substring(2),
+                    context.l10nText(trimmed.substring(2)),
                     style: theme.textTheme.bodyMedium?.copyWith(height: 1.45),
                   ),
                 ),
@@ -117,11 +120,12 @@ class PrivacyPolicyPage extends StatelessWidget {
       }
 
       final isMetaLine = trimmed.startsWith('Effective date:');
+      final text = context.l10nText(trimmed);
       widgets.add(
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Text(
-            trimmed,
+            text,
             style: isMetaLine
                 ? theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,

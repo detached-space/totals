@@ -4,6 +4,7 @@ import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/auto_categorization.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_style.dart';
 
@@ -86,7 +87,9 @@ class _CategoriesPageState extends State<CategoriesPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to save category: $e'),
+            content: Text(
+              '${context.l10nTextRead('Failed to save category')}: $e',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -112,7 +115,7 @@ class _CategoriesPageState extends State<CategoriesPage>
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Categories',
+          context.l10nText('Categories'),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: AppColors.textPrimary(context),
@@ -154,9 +157,9 @@ class _CategoriesPageState extends State<CategoriesPage>
                 fontWeight: FontWeight.w500,
                 fontSize: 13,
               ),
-              tabs: const [
-                Tab(text: 'Expenses'),
-                Tab(text: 'Income'),
+              tabs: [
+                Tab(text: context.l10nText('Expenses')),
+                Tab(text: context.l10nText('Income')),
               ],
             ),
           ),
@@ -204,7 +207,8 @@ class _CategoriesPageState extends State<CategoriesPage>
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        'Removed auto-categorization for ${rule.counterparty}.',
+                        '${context.l10nTextRead('Removed auto-categorization for')} '
+                        '${rule.counterparty}.',
                       ),
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -216,7 +220,8 @@ class _CategoriesPageState extends State<CategoriesPage>
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        'Totals can ask again for ${dismissal.counterparty}.',
+                        '${context.l10nTextRead('Totals can ask again for')} '
+                        '${dismissal.counterparty}.',
                       ),
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -245,7 +250,8 @@ class _CategoriesPageState extends State<CategoriesPage>
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        'Removed auto-categorization for ${rule.counterparty}.',
+                        '${context.l10nTextRead('Removed auto-categorization for')} '
+                        '${rule.counterparty}.',
                       ),
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -257,7 +263,8 @@ class _CategoriesPageState extends State<CategoriesPage>
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        'Totals can ask again for ${dismissal.counterparty}.',
+                        '${context.l10nTextRead('Totals can ask again for')} '
+                        '${dismissal.counterparty}.',
                       ),
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -390,7 +397,7 @@ class _CategoryList extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              emptyLabel,
+              context.l10nText(emptyLabel),
               style: TextStyle(
                 color: AppColors.textSecondary(context),
                 fontSize: 14,
@@ -500,10 +507,10 @@ class _AutoCategorizationRulesCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _AutomationCard(
-      title: 'Auto-Categorization',
+      title: context.l10nText('Auto-Categorization'),
       subtitle: isEnabled
-          ? 'Future transactions matched automatically'
-          : 'Auto-categorization is turned off',
+          ? context.l10nText('Future transactions matched automatically')
+          : context.l10nText('Auto-categorization is turned off'),
       count: rules.length,
       trailing: Switch.adaptive(
         value: isEnabled,
@@ -517,8 +524,8 @@ class _AutoCategorizationRulesCard extends StatelessWidget {
         curve: Curves.easeOut,
         opacity: isEnabled ? 1 : 0.45,
         child: rules.isEmpty
-            ? const _AutomationEmptyState(
-                label: 'No auto-categorization rules yet.',
+            ? _AutomationEmptyState(
+                label: context.l10nText('No auto-categorization rules yet.'),
               )
             : Column(
                 children: [
@@ -593,7 +600,9 @@ class _AutoCategorizationRuleRow extends StatelessWidget {
                     children: [
                       Flexible(
                         child: Text(
-                          category?.name ?? 'Deleted category',
+                          category == null
+                              ? context.l10nText('Deleted category')
+                              : context.l10nText(category!.name),
                           textAlign: TextAlign.right,
                           style: TextStyle(
                             fontSize: 14,
@@ -642,8 +651,10 @@ class _DismissedPromptsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _AutomationCard(
-      title: 'Dismissed Prompts',
-      subtitle: 'Addresses that should not trigger the popup again',
+      title: context.l10nText('Dismissed Prompts'),
+      subtitle: context.l10nText(
+        'Addresses that should not trigger the popup again',
+      ),
       count: dismissals.length,
       child: Column(
         children: [
@@ -704,7 +715,7 @@ class _DismissedPromptRow extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            child: const Text('Ask again'),
+            child: Text(context.l10nText('Ask again')),
           ),
         ],
       ),
@@ -738,7 +749,7 @@ class _SectionHeader extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      title.toUpperCase(),
+                      context.l10nText(title).toUpperCase(),
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -777,7 +788,7 @@ class _SectionHeader extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          subtitle,
+          context.l10nText(subtitle),
           style: TextStyle(
             fontSize: 13,
             color: AppColors.textSecondary(context),
@@ -821,7 +832,7 @@ class _EmptySectionCard extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Text(
-            label,
+            context.l10nText(label),
             style: TextStyle(
               color: AppColors.textSecondary(context),
               fontSize: 13,
@@ -951,7 +962,7 @@ class _CategoryRowChip extends StatelessWidget {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 120),
                 child: Text(
-                  category.name,
+                  context.l10nText(category.name),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -1077,26 +1088,27 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
-          'Delete category?',
+          ctx.l10nText('Delete category?'),
           style: TextStyle(color: AppColors.textPrimary(ctx)),
         ),
         content: Text(
-          'This will remove "${existing.name}" and uncategorize '
-          'any transactions using it.',
+          '${ctx.l10nText('This will remove')} '
+          '"${ctx.l10nText(existing.name)}" '
+          '${ctx.l10nText('and uncategorize any transactions using it.')}',
           style: TextStyle(color: AppColors.textSecondary(ctx)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(
-              'Cancel',
+              ctx.l10nText('Cancel'),
               style: TextStyle(color: AppColors.textSecondary(ctx)),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Delete',
+            child: Text(
+              ctx.l10nText('Delete'),
               style: TextStyle(color: AppColors.red),
             ),
           ),
@@ -1110,10 +1122,12 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
       final provider = Provider.of<TransactionProvider>(context, listen: false);
       await provider.deleteCategory(existing);
       if (!mounted) return;
+      final message = context.l10nTextRead('Category deleted');
+      final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Category deleted'),
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(message),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1121,7 +1135,9 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to delete category: $e'),
+          content: Text(
+            '${context.l10nTextRead('Failed to delete category')}: $e',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1176,7 +1192,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    isEdit ? 'Edit Category' : 'New Category',
+                    context.l10nText(isEdit ? 'Edit Category' : 'New Category'),
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary(context),
@@ -1189,7 +1205,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                     Icons.close_rounded,
                     color: AppColors.textSecondary(context),
                   ),
-                  tooltip: 'Close',
+                  tooltip: context.l10nText('Close'),
                 ),
               ],
             ),
@@ -1286,7 +1302,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
               children: categoryColorOptions.map((option) {
                 final selected = option.key == selectedColorKey;
                 return Tooltip(
-                  message: option.label,
+                  message: context.l10nText(option.label),
                   child: GestureDetector(
                     onTap: () => setState(() => _colorKey = option.key),
                     child: Container(
@@ -1338,14 +1354,16 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Recurring',
+                              context.l10nText('Recurring'),
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 fontWeight: FontWeight.w600,
                                 color: AppColors.textPrimary(context),
                               ),
                             ),
                             Text(
-                              'Monthly/weekly repeating expenses',
+                              context.l10nText(
+                                'Monthly/weekly repeating expenses',
+                              ),
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: AppColors.textSecondary(context),
                                 fontSize: 12,
@@ -1385,7 +1403,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                   final option = categoryIconOptions[index];
                   final selected = _iconKey == option.key;
                   return Tooltip(
-                    message: option.label,
+                    message: context.l10nText(option.label),
                     child: Material(
                       color: selected
                           ? selectedCategoryColor.withValues(alpha: 0.15)
@@ -1421,7 +1439,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Swipe sideways to see more icons.',
+              context.l10nText('Swipe sideways to see more icons.'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: AppColors.textSecondary(context),
               ),
@@ -1434,7 +1452,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   // icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  label: const Text('Delete category'),
+                  label: Text(context.l10nText('Delete category')),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.red,
                     side: const BorderSide(color: AppColors.red),
@@ -1461,8 +1479,8 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text(
-                  'Save',
+                child: Text(
+                  context.l10nText('Save'),
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
@@ -1487,8 +1505,8 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
       maxLines: maxLines,
       style: TextStyle(color: AppColors.textPrimary(context)),
       decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
+        labelText: context.l10nText(label),
+        hintText: hint == null ? null : context.l10nText(hint),
         labelStyle: TextStyle(color: AppColors.textSecondary(context)),
         hintStyle: TextStyle(color: AppColors.textTertiary(context)),
         filled: true,
@@ -1518,7 +1536,7 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
 
   Widget _buildLabel(BuildContext context, String text) {
     return Text(
-      text.toUpperCase(),
+      context.l10nText(text).toUpperCase(),
       style: TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w700,
@@ -1563,7 +1581,7 @@ class _FlowTab extends StatelessWidget {
         ),
         child: Center(
           child: Text(
-            label,
+            context.l10nText(label),
             style: TextStyle(
               fontSize: 13,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
@@ -1644,14 +1662,14 @@ class _TypeOption extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
+                      context.l10nText(title),
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary(context),
                       ),
                     ),
                     Text(
-                      subtitle,
+                      context.l10nText(subtitle),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: AppColors.textSecondary(context),
                         fontSize: 12,

@@ -3,6 +3,7 @@ import 'package:totals/screens/web_page.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class ToolsPage extends StatelessWidget {
   const ToolsPage({super.key});
@@ -21,7 +22,7 @@ class ToolsPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Available Tools',
+                context.l10nText('Available Tools'),
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: colorScheme.onSurface,
@@ -29,7 +30,7 @@ class ToolsPage extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'This page dedicated to handy tools',
+                context.l10nText('This page dedicated to handy tools'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -152,7 +153,7 @@ class _ToolCard extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                title,
+                context.l10nText(title),
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: colorScheme.onSurface,

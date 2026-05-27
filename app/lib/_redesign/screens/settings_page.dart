@@ -217,7 +217,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     ),
                   ),
                   Text(
-                    'Display Size',
+                    sheetCtx.l10nText('Display Size'),
                     style: Theme.of(sheetCtx).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary(sheetCtx),
@@ -225,7 +225,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Preview and adjust interface scale and top padding.',
+                    sheetCtx.l10nText(
+                      'Preview and adjust interface scale and top padding.',
+                    ),
                     style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary(sheetCtx),
                         ),
@@ -244,7 +246,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Preview',
+                          sheetCtx.l10nText('Preview'),
                           style: TextStyle(
                             fontSize: 16 * selectedScale,
                             fontWeight: FontWeight.w700,
@@ -253,7 +255,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Transaction categorized successfully.',
+                          sheetCtx.l10nText(
+                            'Transaction categorized successfully.',
+                          ),
                           style: TextStyle(
                             fontSize: 13 * selectedScale,
                             color: AppColors.textSecondary(sheetCtx),
@@ -261,7 +265,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Current size: ${_scaleLabel(selectedScale)}',
+                          '${sheetCtx.l10nText('Current size')}: ${_scaleLabel(selectedScale)}',
                           style: TextStyle(
                             fontSize: 12 * selectedScale,
                             color: AppColors.primaryLight,
@@ -270,7 +274,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Top padding: ${_paddingLabel(selectedTopPadding)}',
+                          '${sheetCtx.l10nText('Top padding')}: ${_paddingLabel(selectedTopPadding)}',
                           style: TextStyle(
                             fontSize: 12 * selectedScale,
                             color: AppColors.textSecondary(sheetCtx),
@@ -319,7 +323,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   ),
                   const SizedBox(height: 18),
                   Text(
-                    'Top Padding',
+                    sheetCtx.l10nText('Top Padding'),
                     style: Theme.of(sheetCtx).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary(sheetCtx),
@@ -327,7 +331,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Add extra space above the app content.',
+                    sheetCtx.l10nText(
+                      'Add extra space above the app content.',
+                    ),
                     style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary(sheetCtx),
                         ),
@@ -456,7 +462,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     ),
                   ),
                   Text(
-                    'Font',
+                    sheetCtx.l10nText('Font'),
                     style: Theme.of(sheetCtx).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary(sheetCtx),
@@ -502,7 +508,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           child: Text(
-                            'Cancel',
+                            sheetCtx.l10nText('Cancel'),
                             style: TextStyle(
                               color: AppColors.textSecondary(sheetCtx),
                             ),
@@ -734,7 +740,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     ),
                   ),
                   Text(
-                    'Calendar',
+                    sheetCtx.l10nText('Calendar'),
                     style: Theme.of(sheetCtx).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary(sheetCtx),
@@ -777,7 +783,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           child: Text(
-                            'Cancel',
+                            sheetCtx.l10nText('Cancel'),
                             style: TextStyle(
                               color: AppColors.textSecondary(sheetCtx),
                             ),
@@ -832,11 +838,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
-          'Export Data',
+          ctx.l10nText('Export Data'),
           style: TextStyle(color: AppColors.textPrimary(ctx)),
         ),
         content: Text(
-          'Choose how you want to export your data:',
+          ctx.l10nText('Choose how you want to export your data:'),
           style: TextStyle(color: AppColors.textSecondary(ctx)),
         ),
         actions: [
@@ -851,7 +857,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: Text(
-              'Cancel',
+              ctx.l10nText('Cancel'),
               style: TextStyle(color: AppColors.textSecondary(ctx)),
             ),
           ),
@@ -875,13 +881,19 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
             if (await directory.exists()) {
               final file = File('${directory.path}/$fileName');
               await file.writeAsString(jsonData);
-              if (mounted) _showSnack('Data saved to Downloads folder');
+              if (mounted) {
+                _showSnack(
+                  context.l10nTextRead('Data saved to Downloads folder'),
+                );
+              }
             } else {
               final appDir = await getApplicationDocumentsDirectory();
               final file = File('${appDir.path}/$fileName');
               await file.writeAsString(jsonData);
               if (mounted) {
-                _showSnack('Data saved to: ${appDir.path}/$fileName');
+                _showSnack(
+                  '${context.l10nTextRead('Data saved to')}: ${appDir.path}/$fileName',
+                );
               }
             }
           } catch (_) {
@@ -891,10 +903,12 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
             if (mounted) {
               await Share.shareXFiles(
                 [XFile(tempFile.path)],
-                text: 'Totals Data Export',
-                subject: 'Totals Backup',
+                text: context.l10nTextRead('Totals Data Export'),
+                subject: context.l10nTextRead('Totals Backup'),
               );
-              if (mounted) _showSnack('Use Share to save the file');
+              if (mounted) {
+                _showSnack(context.l10nTextRead('Use Share to save the file'));
+              }
             }
           }
         } else {
@@ -906,7 +920,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
           String? result;
           try {
             result = await FilePicker.platform.saveFile(
-              dialogTitle: 'Save Export File',
+              dialogTitle: context.l10nTextRead('Save Export File'),
               fileName: fileName,
               type: FileType.custom,
               allowedExtensions: ['json'],
@@ -916,7 +930,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
             try {
               if (await tempFile.exists()) await tempFile.delete();
             } catch (_) {}
-            if (mounted) _showErrorSnack('Failed to open file picker: $e');
+            if (mounted) {
+              _showErrorSnack(
+                '${context.l10nTextRead('Failed to open file picker')}: $e',
+              );
+            }
             return;
           }
 
@@ -933,19 +951,27 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               try {
                 if (await tempFile.exists()) await tempFile.delete();
               } catch (_) {}
-              if (mounted) _showSnack('Data saved successfully');
+              if (mounted) {
+                _showSnack(context.l10nTextRead('Data saved successfully'));
+              }
             } catch (_) {
               try {
                 await File(result).writeAsString(jsonData);
                 try {
                   if (await tempFile.exists()) await tempFile.delete();
                 } catch (_) {}
-                if (mounted) _showSnack('Data saved successfully');
+                if (mounted) {
+                  _showSnack(context.l10nTextRead('Data saved successfully'));
+                }
               } catch (writeErr) {
                 try {
                   if (await tempFile.exists()) await tempFile.delete();
                 } catch (_) {}
-                if (mounted) _showErrorSnack('Failed to save file: $writeErr');
+                if (mounted) {
+                  _showErrorSnack(
+                    '${context.l10nTextRead('Failed to save file')}: $writeErr',
+                  );
+                }
               }
             }
           } else {
@@ -962,13 +988,16 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
         if (!mounted) return;
         await Share.shareXFiles(
           [XFile(file.path)],
-          text: 'Totals Data Export',
-          subject: 'Totals Backup',
+          text: context.l10nTextRead('Totals Data Export'),
+          subject: context.l10nTextRead('Totals Backup'),
         );
-        if (mounted) _showSnack('Data exported successfully');
+        if (mounted)
+          _showSnack(context.l10nTextRead('Data exported successfully'));
       }
     } catch (e) {
-      if (mounted) _showErrorSnack('Export failed: $e');
+      if (mounted) {
+        _showErrorSnack('${context.l10nTextRead('Export failed')}: $e');
+      }
     } finally {
       if (mounted) setState(() => _isExporting = false);
     }
@@ -995,19 +1024,20 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               borderRadius: BorderRadius.circular(16),
             ),
             title: Text(
-              'Import Data',
+              ctx.l10nText('Import Data'),
               style: TextStyle(color: AppColors.textPrimary(ctx)),
             ),
             content: Text(
-              'This will add the imported data to your existing data. '
-              'Duplicates will be skipped.',
+              ctx.l10nText(
+                'This will add the imported data to your existing data. Duplicates will be skipped.',
+              ),
               style: TextStyle(color: AppColors.textSecondary(ctx)),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: Text(
-                  'Cancel',
+                  ctx.l10nText('Cancel'),
                   style: TextStyle(color: AppColors.textSecondary(ctx)),
                 ),
               ),
@@ -1030,12 +1060,14 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
           await _exportImportService.importAllData(jsonData);
           if (mounted) {
             Provider.of<TransactionProvider>(context, listen: false).loadData();
-            _showSnack('Data imported successfully');
+            _showSnack(context.l10nTextRead('Data imported successfully'));
           }
         }
       }
     } catch (e) {
-      if (mounted) _showErrorSnack('Import failed: $e');
+      if (mounted) {
+        _showErrorSnack('${context.l10nTextRead('Import failed')}: $e');
+      }
     } finally {
       if (mounted) setState(() => _isImporting = false);
     }
@@ -1110,7 +1142,8 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               FutureBuilder(
                 future: _profileRepo.getActiveProfile(),
                 builder: (context, snapshot) {
-                  final name = snapshot.data?.name ?? 'Personal';
+                  final name =
+                      snapshot.data?.name ?? context.l10nText('Personal');
                   final initials = _getProfileInitials(name);
                   return _ProfileCard(
                     name: name,
@@ -1775,7 +1808,7 @@ class _RedesignAboutPage extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'About',
+          context.l10nText('About'),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: AppColors.textPrimary(context),
@@ -1813,7 +1846,9 @@ class _RedesignAboutPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Personal finance tracker for Ethiopian banks',
+                    context.l10nText(
+                      'Personal finance tracker for Ethiopian banks',
+                    ),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppColors.textSecondary(context),
                     ),
@@ -1822,11 +1857,9 @@ class _RedesignAboutPage extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Text(
-                      'Totals is a personal finance app for Ethiopian banks. '
-                      'It automatically reads your bank SMS notifications, '
-                      'tracks your transactions, and gives you a clear picture '
-                      'of your money, balances, spending, budgets, and more, '
-                      'all in one place.',
+                      context.l10nText(
+                        'Totals is a personal finance app for Ethiopian banks. It automatically reads your bank SMS notifications, tracks your transactions, and gives you a clear picture of your money, balances, spending, budgets, and more, all in one place.',
+                      ),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: AppColors.textSecondary(context),
@@ -1907,7 +1940,7 @@ class _RedesignAboutPage extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 14),
               child: Text(
-                'HOW IT WORKS',
+                context.l10nText('HOW IT WORKS'),
                 style: theme.textTheme.labelSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.2,
@@ -1918,20 +1951,21 @@ class _RedesignAboutPage extends StatelessWidget {
 
             _AboutStepCard(
               step: 1,
-              description:
-                  'Totals reads your bank SMS notifications directly on '
-                  'your phone.',
+              description: context.l10nText(
+                'Totals reads your bank SMS notifications directly on your phone.',
+              ),
             ),
             _AboutStepCard(
               step: 2,
-              description:
-                  'Transactions are parsed locally and saved to your device.',
+              description: context.l10nText(
+                'Transactions are parsed locally and saved to your device.',
+              ),
             ),
             _AboutStepCard(
               step: 3,
-              description:
-                  'Totals organizes everything into your dashboard, all '
-                  'on-device.',
+              description: context.l10nText(
+                'Totals organizes everything into your dashboard, all on-device.',
+              ),
             ),
 
             const SizedBox(height: 32),
@@ -1939,7 +1973,7 @@ class _RedesignAboutPage extends StatelessWidget {
             // ── Footer ──
             Center(
               child: Text(
-                'Made by Detached',
+                context.l10nText('Made by Detached'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color:
                       AppColors.textSecondary(context).withValues(alpha: 0.6),
@@ -2222,7 +2256,7 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Help & FAQ',
+          context.l10nText('Help & FAQ'),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: AppColors.textPrimary(context),
@@ -2236,19 +2270,19 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── GETTING STARTED ──
-            _sectionHeader(theme, 'GETTING STARTED'),
+            _sectionHeader(theme, context.l10nText('GETTING STARTED')),
             ..._buildFaqItems(_gettingStarted, 0),
 
             const SizedBox(height: 28),
 
             // ── DATA & BACKUPS ──
-            _sectionHeader(theme, 'DATA & BACKUPS'),
+            _sectionHeader(theme, context.l10nText('DATA & BACKUPS')),
             ..._buildFaqItems(_dataManagement, _gettingStarted.length),
 
             const SizedBox(height: 28),
 
             // ── TIPS ──
-            _sectionHeader(theme, 'TIPS'),
+            _sectionHeader(theme, context.l10nText('TIPS')),
             ..._buildFaqItems(
                 _tips, _gettingStarted.length + _dataManagement.length),
 
@@ -2280,7 +2314,7 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Still need help?',
+                    context.l10nText('Still need help?'),
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary(context),
@@ -2288,7 +2322,9 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Reach out and we will point you in the right direction.',
+                    context.l10nText(
+                      'Reach out and we will point you in the right direction.',
+                    ),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppColors.textSecondary(context),
@@ -2381,7 +2417,7 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          item['question']!,
+                          context.l10nText(item['question']!),
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: AppColors.textPrimary(context),
@@ -2407,7 +2443,7 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
                       padding:
                           const EdgeInsets.only(left: 48, top: 8, right: 4),
                       child: Text(
-                        item['answer']!,
+                        context.l10nText(item['answer']!),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary(context),
                           height: 1.5,

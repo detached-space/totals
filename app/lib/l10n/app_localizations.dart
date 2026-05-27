@@ -267,7 +267,7 @@ class AppLocalizations {
     "settings.supportProject": "ፕሮጀክቱን ይደግፉ",
     "settings.contactUs": "ያግኙን",
     "settings.madeByDetached": "በDetached የተሰራ",
-    "settings.about": "ስለ",
+    "settings.about": "ስለ ቶታልስ",
     "settings.versionPrivacyCredits": "ስሪት፣ ግላዊነት እና ምስጋናዎች",
     "tools.verifyPayments": "ክፍያዎችን ያረጋግጡ",
     "tools.webDashboard": "የድር ዳሽቦርድ",
@@ -453,7 +453,10 @@ class AppLocalizations {
     "Search and copy saved quick-access accounts.":
         "የተቀመጡ የፈጣን መዳረሻ አካውንቶችን ይፈልጉ እና ይቅዱ።",
     "Account Hub": "አካውንት ማዕከል",
+    "Quick": "ፈጣን",
     "Account": "አካውንት",
+    "account": "አካውንት",
+    "accounts": "አካውንቶች",
     "Bank": "ባንክ",
     "All Banks": "ሁሉም ባንኮች",
     "Manage Accounts": "አካውንቶችን ያስተዳድሩ",
@@ -465,9 +468,28 @@ class AppLocalizations {
     "Account Holder Name": "የአካውንት ባለቤት ስም",
     "Enter account number": "የአካውንት ቁጥር ያስገቡ",
     "Enter account holder name": "የአካውንት ባለቤት ስም ያስገቡ",
+    "copied to clipboard": "ወደ ክሊፕቦርድ ተቀድቷል",
     "Registered accounts used across your profile.":
         "በፕሮፋይልዎ ውስጥ ጥቅም ላይ የዋሉ የተመዘገቡ አካውንቶች።",
     "No registered accounts yet.": "እስካሁን የተመዘገቡ አካውንቶች የሉም።",
+    "No registered accounts": "የተመዘገቡ አካውንቶች የሉም",
+    "Once your accounts are added to Totals, they will appear here and in the QR section above.":
+        "አካውንቶችዎ ወደ Totals ከታከሉ በኋላ፣ እዚህ እና ከላይ ባለው QR ክፍል ውስጥ ይታያሉ።",
+    "Add bank accounts from the Tools screen and they will show up here.":
+        "የባንክ አካውንቶችን ከመሳሪያዎች ገጽ ያክሉ፣ እዚህም ይታያሉ።",
+    "Showing": "በማሳየት ላይ",
+    "of": "ከ",
+    "saved account": "የተቀመጠ አካውንት",
+    "saved accounts": "የተቀመጡ አካውንቶች",
+    "registered account": "የተመዘገበ አካውንት",
+    "registered accounts": "የተመዘገቡ አካውንቶች",
+    "available for sharing": "ለማጋራት ዝግጁ",
+    "Share Your Accounts": "አካውንቶችዎን ያጋሩ",
+    "included": "ተካትቷል",
+    "Too much data to render QR": "QR ለማሳየት ዳታው በጣም ብዙ ነው",
+    "Add accounts first, then long-press Tools again to see your QR here.":
+        "መጀመሪያ አካውንቶችን ያክሉ፣ ከዚያ QRዎን እዚህ ለማየት መሳሪያዎችን እንደገና በረጅም ይጫኑ።",
+    "Unknown Bank": "ያልታወቀ ባንክ",
     "Account added successfully": "አካውንት በተሳካ ሁኔታ ታክሏል",
     "Account deleted successfully": "አካውንት በተሳካ ሁኔታ ተሰርዟል",
     "This account already exists": "ይህ አካውንት አስቀድሞ አለ",
@@ -705,7 +727,8 @@ class AppLocalizations {
     "Shared group": "የጋራ ቡድን",
     "Shared transaction": "የጋራ ትራንዛክሽን",
     "Personal funds": "የግል ገንዘብ",
-    "Personal": "የግል",
+    "Data": "ዳታ",
+    "Save": "አስቀምጥ",
     "Mine": "የእኔ",
     "Group": "ቡድን",
     "Group name": "የቡድን ስም",
@@ -785,8 +808,10 @@ class AppLocalizations {
     "Support the Project": "ፕሮጀክቱን ይደግፉ",
     "Contact us": "ያግኙን",
     "Made by Detached": "በDetached የተሰራ",
-    "About": "ስለ",
+    "About": "ስለ ቶታልስ",
     "Version, privacy and credits": "ስሪት፣ ግላዊነት እና ምስጋናዎች",
+    "Available Tools": "የሚገኙ መሳሪያዎች",
+    "This page dedicated to handy tools": "ይህ ገጽ ለጠቃሚ መሳሪያዎች የተዘጋጀ ነው",
     "Verify Payments": "ክፍያዎችን ያረጋግጡ",
     "Web Dashboard": "የድር ዳሽቦርድ",
     "Failed Parsings": "ያልተሳኩ ትንታኔዎች",
@@ -796,6 +821,418 @@ class AppLocalizations {
     "Scan and verify transaction receipts": "የትራንዛክሽን ደረሰኞችን ይቃኙ እና ያረጋግጡ",
     "View your finances in a browser": "የፋይናንስ መረጃዎን በብሮውዘር ላይ ይመልከቱ",
     "Handy utilities at your fingertips.": "ጠቃሚ መሳሪያዎች በእጅዎ ላይ።",
+    "For Nerds": "ለቴክኒክ ተጠቃሚዎች",
+    "Your link is ready": "ሊንኩ ዝግጁ ነው",
+    "Visit your Web Dashboard": "የድር ዳሽቦርድዎን ይጎብኙ",
+    "Copy the link below and paste it into a browser on your computer to view your transactions.":
+        "ትራንዛክሽኖችዎን ለማየት ከታች ያለውን ሊንክ ቅድተው በኮምፒዩተርዎ ብሮውዘር ውስጥ ይለጥፉ።",
+    "Step 1: Turn on your phone hotspot.\nStep 2: Connect your computer to that hotspot.\nStep 3: Tap \"Create Link\" below.":
+        "ደረጃ 1፦ የስልክዎን ሆትስፖት ያብሩ።\nደረጃ 2፦ ኮምፒዩተርዎን ከዚያ ሆትስፖት ጋር ያገናኙ።\nደረጃ 3፦ ከታች \"ሊንክ ፍጠር\" ይንኩ።",
+    "Turning off link...": "ሊንኩን በማጥፋት ላይ...",
+    "Creating link...": "ሊንክ በመፍጠር ላይ...",
+    "Turn Off Link": "ሊንኩን አጥፋ",
+    "Create Link": "ሊንክ ፍጠር",
+    "Your private link": "የግል ሊንክዎ",
+    "Copy link": "ሊንክ ቅዳ",
+    "On your computer, connect to your phone hotspot, then paste this link into a browser.":
+        "በኮምፒዩተርዎ ከስልክዎ ሆትስፖት ጋር ይገናኙ፣ ከዚያ ይህን ሊንክ በብሮውዘር ውስጥ ይለጥፉ።",
+    "Visualize Your Data": "ዳታዎን በቻርት ይመልከቱ",
+    "Interactive API Explorer": "ተግባራዊ API መመርመሪያ",
+    "Explore the API documentation and visualize your financial data with interactive charts and graphs. Perfect for analyzing trends and patterns.":
+        "የAPI ሰነዱን ይመልከቱ እና የፋይናንስ ዳታዎን በተግባራዊ ቻርቶች እና ግራፎች ይተንትኑ። አዝማሚያዎችን ለመመርመር ጠቃሚ ነው።",
+    "Back to Simple Mode": "ወደ ቀላል ሁነታ ተመለስ",
+    "Totals Server": "የTotals ሰርቨር",
+    "Running on port": "በዚህ ፖርት እየሰራ ነው",
+    "Stopped": "ቆሟል",
+    "Clear Console": "ኮንሶል አጽዳ",
+    "Copy URL": "URL ቅዳ",
+    "Start": "ጀምር",
+    "No logs yet": "እስካሁን ሎጎች የሉም",
+    "Start the server to see request logs": "የጥያቄ ሎጎችን ለማየት ሰርቨሩን ያስጀምሩ",
+    "ONLINE": "መስመር ላይ",
+    "OFFLINE": "ከመስመር ውጭ",
+    "logs": "ሎጎች",
+    "Stopping server...": "ሰርቨሩን በማቆም ላይ...",
+    "Server stopped.": "ሰርቨሩ ቆሟል።",
+    "Starting server...": "ሰርቨሩን በማስጀመር ላይ...",
+    "Server started successfully!": "ሰርቨሩ በተሳካ ሁኔታ ጀምሯል!",
+    "Listening on": "እየሰማ ያለው",
+    "API endpoints ready:": "የAPI መጨረሻ ነጥቦች ዝግጁ ናቸው፦",
+    "Console cleared.": "ኮንሶሉ ተጠርጓል።",
+    "URL copied to clipboard!": "URL ወደ ክሊፕቦርድ ተቀድቷል!",
+    "URL copied to clipboard.": "URL ወደ ክሊፕቦርድ ተቀድቷል።",
+    "Copied": "ተቀድቷል",
+    "to clipboard": "ወደ ክሊፕቦርድ",
+    "Quick Access Accounts": "የፈጣን መዳረሻ አካውንቶች",
+    "Account number copied to clipboard": "የአካውንት ቁጥሩ ወደ ክሊፕቦርድ ተቀድቷል",
+    "Delete Selected Accounts?": "የተመረጡ አካውንቶች ይሰረዙ?",
+    "Are you sure you want to delete": "እርግጠኛ ነዎት መሰረዝ ይፈልጋሉ፦",
+    "Error deleting accounts": "አካውንቶችን መሰረዝ አልተቻለም",
+    "Clear selection": "ምርጫውን አጽዳ",
+    "Select all": "ሁሉንም ምረጥ",
+    "Delete selected": "የተመረጡትን ሰርዝ",
+    "Share accounts": "አካውንቶችን አጋራ",
+    "Search accounts...": "አካውንቶችን ፈልግ...",
+    "No accounts found": "አካውንቶች አልተገኙም",
+    "No accounts yet": "እስካሁን አካውንቶች የሉም",
+    "Tap + to add your first account": "የመጀመሪያ አካውንትዎን ለማከል + ይንኩ",
+    "Scan account QR": "የአካውንት QR ይቃኙ",
+    "Copy account number": "የአካውንት ቁጥር ቅዳ",
+    "Enter Reference": "ማጣቀሻ ያስገቡ",
+    "Capture Image": "ምስል ያንሱ",
+    "Camera Permission Required": "የካሜራ ፈቃድ ያስፈልጋል",
+    "Camera access is required to capture images. Please enable it in app settings.":
+        "ምስሎችን ለማንሳት የካሜራ መዳረሻ ያስፈልጋል። እባክዎ በመተግበሪያ ቅንብሮች ውስጥ ያብሩት።",
+    "Open Settings": "ቅንብሮችን ክፈት",
+    "Camera permission is required to capture images":
+        "ምስሎችን ለማንሳት የካሜራ ፈቃድ ያስፈልጋል",
+    "Error capturing image": "ምስል ማንሳት አልተቻለም",
+    "Error: Image file is too large (max 10MB)":
+        "ስህተት፦ የምስሉ ፋይል በጣም ትልቅ ነው (ከፍተኛ 10MB)",
+    "Image file is too large. Please use a smaller image.":
+        "የምስሉ ፋይል በጣም ትልቅ ነው። እባክዎ ትንሽ ምስል ይጠቀሙ።",
+    "Connection error": "የግንኙነት ስህተት",
+    "Please check your internet connection.": "እባክዎ የኢንተርኔት ግንኙነትዎን ያረጋግጡ።",
+    "Connection error: The server closed the connection during upload. Please try again with a smaller image or check your internet connection.":
+        "የግንኙነት ስህተት፦ በሚሰቀልበት ጊዜ ሰርቨሩ ግንኙነቱን ዘግቷል። እባክዎ በትንሽ ምስል እንደገና ይሞክሩ ወይም የኢንተርኔት ግንኙነትዎን ያረጋግጡ።",
+    "Connection error: Please try again with a smaller image or check your internet connection.":
+        "የግንኙነት ስህተት፦ እባክዎ በትንሽ ምስል እንደገና ይሞክሩ ወይም የኢንተርኔት ግንኙነትዎን ያረጋግጡ።",
+    "Error uploading image": "ምስል መስቀል አልተቻለም",
+    "Please select an account first": "እባክዎ መጀመሪያ አካውንት ይምረጡ",
+    "Error verifying reference": "ማጣቀሻውን ማረጋገጥ አልተቻለም",
+    "Upload timeout": "መስቀሉ ጊዜው አልቋል",
+    "Upload timeout. Please check your connection and try again.":
+        "መስቀሉ ጊዜው አልቋል። እባክዎ ግንኙነትዎን ያረጋግጡ እና እንደገና ይሞክሩ።",
+    "Response timeout. Please try again.": "የምላሹ ጊዜ አልቋል። እባክዎ እንደገና ይሞክሩ።",
+    "Verification timeout": "ማረጋገጫው ጊዜው አልቋል",
+    "Verification timeout. Please try again.":
+        "የማረጋገጫው ጊዜ አልቋል። እባክዎ እንደገና ይሞክሩ።",
+    "Capture Payment Image": "የክፍያ ምስል ያንሱ",
+    "Take a photo of the payment receipt or QR code":
+        "የክፍያ ደረሰኝ ወይም QR ኮድ ፎቶ ያንሱ",
+    "Uploading image...": "ምስል በመስቀል ላይ...",
+    "Upload Response": "የመስቀል ምላሽ",
+    "Capture Another Image": "ሌላ ምስል ያንሱ",
+    "Enter Transaction Reference": "የትራንዛክሽን ማጣቀሻ ያስገቡ",
+    "Enter the transaction reference number to verify payment details":
+        "የክፍያ ዝርዝሮችን ለማረጋገጥ የትራንዛክሽን ማጣቀሻ ቁጥር ያስገቡ",
+    "Select Account": "አካውንት ይምረጡ",
+    "Enter transaction reference...": "የትራንዛክሽን ማጣቀሻ ያስገቡ...",
+    "Verifying...": "በማረጋገጥ ላይ...",
+    "Verify": "አረጋግጥ",
+    "Verification Successful": "ማረጋገጫው ተሳክቷል",
+    "Verification Failed": "ማረጋገጫው አልተሳካም",
+    "Reference:": "ማጣቀሻ፦",
+    "Details:": "ዝርዝሮች፦",
+    "Response:": "ምላሽ፦",
+    "Verify Another Reference": "ሌላ ማጣቀሻ ያረጋግጡ",
+    "We need camera access to capture images for payment verification.":
+        "ለክፍያ ማረጋገጫ ምስሎችን ለማንሳት የካሜራ መዳረሻ ያስፈልገናል።",
+    "Grant Camera Permission": "የካሜራ ፈቃድ ስጥ",
+    "N/A": "የለም",
+    "No failed parsings": "ያልተሳኩ ትንታኔዎች የሉም",
+    "All transaction messages are being parsed.":
+        "ሁሉም የትራንዛክሽን መልዕክቶች እየተተነተኑ ነው።",
+    "Failed to load failed parsings": "ያልተሳኩ ትንታኔዎችን መጫን አልተቻለም",
+    "Delete similar failed texts too?": "ተመሳሳይ ያልተሳኩ መልዕክቶችንም ይሰረዙ?",
+    "We found 1 other failed parsing text from the same sender with a very similar message body. Delete it too?":
+        "ከተመሳሳይ ላኪ በጣም ተመሳሳይ ይዘት ያለው 1 ሌላ ያልተሳካ መልዕክት አግኝተናል። እሱንም ይሰረዝ?",
+    "We found": "አግኝተናል",
+    "other failed parsing texts from the same sender with very similar message bodies. Delete them too?":
+        "ከተመሳሳይ ላኪ በጣም ተመሳሳይ ይዘት ያላቸው ሌሎች ያልተሳኩ መልዕክቶች። እነሱንም ይሰረዙ?",
+    "Delete this only": "ይህን ብቻ ሰርዝ",
+    "Delete selected only": "የተመረጡትን ብቻ ሰርዝ",
+    "Delete both": "ሁለቱንም ሰርዝ",
+    "Delete all": "ሁሉንም ሰርዝ",
+    "Cleared 1 item": "1 ንጥል ተጠርጓል",
+    "Cleared": "ተጠርጓል",
+    "items": "ንጥሎች",
+    "items, including": "ንጥሎች፣ ጨምሮ",
+    "similar text": "ተመሳሳይ መልዕክት",
+    "similar texts": "ተመሳሳይ መልዕክቶች",
+    "Copied to clipboard": "ወደ ክሊፕቦርድ ተቀድቷል",
+    "No bank available for a test notification": "ለሙከራ ማሳወቂያ የሚገኝ ባንክ የለም",
+    "Failed to send test notification": "የሙከራ ማሳወቂያ መላክ አልተቻለም",
+    "Test notification sent": "የሙከራ ማሳወቂያ ተልኳል",
+    "Retry": "እንደገና ሞክር",
+    "Retry failed": "እንደገና መሞከር አልተሳካም",
+    "Retry succeeded": "እንደገና መሞከር ተሳክቷል",
+    "Duplicate still exists": "ተደጋጋሚው አሁንም አለ",
+    "Unknown error": "ያልታወቀ ስህተት",
+    "Retried": "እንደገና ተሞክሯል",
+    "success": "ተሳክቷል",
+    "duplicates": "ተደጋጋሚዎች",
+    "failed": "አልተሳካም",
+    "errors": "ስህተቶች",
+    "Filter messages...": "መልዕክቶችን አጣራ...",
+    "No transactions match your search.": "ከፍለጋዎ ጋር የሚዛመዱ ትራንዛክሽኖች የሉም።",
+    "No transactions without patterns for this bank.":
+        "ለዚህ ባንክ ንድፍ የሌላቸው ትራንዛክሽኖች የሉም።",
+    "Copied 1 message": "1 መልዕክት ተቀድቷል",
+    "Retry all banks": "ሁሉንም ባንኮች እንደገና ሞክር",
+    "Retry filtered": "የተጣሩትን እንደገና ሞክር",
+    "Clear all banks": "ሁሉንም ባንኮች አጽዳ",
+    "Clear filtered": "የተጣሩትን አጽዳ",
+    "Patterns": "ንድፎች",
+    "Transaction copied": "ትራንዛክሽኑ ተቀድቷል",
+    "Telegram opened with the message loaded. The text was also copied to the clipboard.":
+        "Telegram መልዕክቱ ተጭኖ ተከፍቷል። ጽሁፉም ወደ ክሊፕቦርድ ተቀድቷል።",
+    "Failed parsing message": "ያልተሳካ የትንታኔ መልዕክት",
+    "Telegram could not be opened directly. A share sheet was opened and the text was copied to the clipboard.":
+        "Telegram በቀጥታ መከፈት አልቻለም። የማጋሪያ ሉህ ተከፍቷል እና ጽሁፉ ወደ ክሊፕቦርድ ተቀድቷል።",
+    "Telegram could not be opened. The text was copied to the clipboard.":
+        "Telegram መከፈት አልቻለም። ጽሁፉ ወደ ክሊፕቦርድ ተቀድቷል።",
+    "Share to Telegram": "ወደ Telegram አጋራ",
+    "Scramble numbers": "ቁጥሮችን ደብቅ",
+    "Unscramble all": "ሁሉንም መልስ",
+    "Tap to scramble - Long-press to scramble similar":
+        "ለመደበቅ ይንኩ - ተመሳሳይ ለመደበቅ በረጅም ይጫኑ",
+    "Copy": "ቅዳ",
+    "Invert": "ቀይር",
+    "No matching pattern": "የሚዛመድ ንድፍ የለም",
+    "Unknown bank": "ያልታወቀ ባንክ",
+    "1 unmatched transaction": "1 ያልተዛመደ ትራንዛክሽን",
+    "unmatched transactions": "ያልተዛመዱ ትራንዛክሽኖች",
+    "1 transaction without a matching pattern": "የሚዛመድ ንድፍ የሌለው 1 ትራንዛክሽን",
+    "transactions without matching patterns": "የሚዛመዱ ንድፎች የሌላቸው ትራንዛክሽኖች",
+    "Preview and adjust interface scale and top padding":
+        "የበይነገጽ መጠንን እና የላይኛውን ክፍተት አስቀድመው ይመልከቱ እና ያስተካክሉ",
+    "Preview and adjust interface scale and top padding.":
+        "የበይነገጽ መጠንን እና የላይኛውን ክፍተት አስቀድመው ይመልከቱ እና ያስተካክሉ።",
+    "Preview": "ቅድመ እይታ",
+    "Current size": "የአሁኑ መጠን",
+    "Top padding": "የላይኛው ክፍተት",
+    "Choose how you want to export your data:": "ዳታዎን እንዴት መላክ እንደሚፈልጉ ይምረጡ፦",
+    "Data saved to Downloads folder": "ዳታው ወደ Downloads ፎልደር ተቀምጧል",
+    "Data saved to": "ዳታው ተቀምጧል ወደ",
+    "Use Share to save the file": "ፋይሉን ለማስቀመጥ Shareን ይጠቀሙ",
+    "Save Export File": "የወጪ ፋይል አስቀምጥ",
+    "Failed to open file picker": "ፋይል መምረጫውን መክፈት አልተቻለም",
+    "Data saved successfully": "ዳታው በተሳካ ሁኔታ ተቀምጧል",
+    "Failed to save file": "ፋይል ማስቀመጥ አልተቻለም",
+    "Export failed": "ወደ ውጭ መላክ አልተሳካም",
+    "This will add the imported data to your existing data. Duplicates will be skipped.":
+        "ይህ የተገባውን ዳታ ወደ ነባር ዳታዎ ያክላል። ተደጋጋሚዎች ይዘለላሉ።",
+    "Totals Data Export": "የTotals ዳታ ወጪ",
+    "Totals Backup": "የTotals ምትኬ",
+    "Personal": "የግል",
+    "Totals is a personal finance app for Ethiopian banks. It automatically reads your bank SMS notifications, tracks your transactions, and gives you a clear picture of your money, balances, spending, budgets, and more, all in one place.":
+        "Totals ለኢትዮጵያ ባንኮች የተሰራ የግል ፋይናንስ መተግበሪያ ነው። የባንክዎን የኤስኤምኤስ ማሳወቂያዎች በራስ-ሰር ያነባል፣ ትራንዛክሽኖችዎን ይከታተላል፣ እና ገንዘብዎን፣ ቀሪ ሂሳቦችን፣ ወጪን፣ በጀቶችን እና ተጨማሪን በአንድ ቦታ ግልጽ ያደርጋል።",
+    "Totals reads your bank SMS notifications directly on your phone.":
+        "Totals የባንክዎን የኤስኤምኤስ ማሳወቂያዎች በስልክዎ ላይ በቀጥታ ያነባል።",
+    "Transactions are parsed locally and saved to your device.":
+        "ትራንዛክሽኖች በመሳሪያዎ ላይ ተተንትነው ይቀመጣሉ።",
+    "Totals organizes everything into your dashboard, all on-device.":
+        "Totals ሁሉንም ነገር በዳሽቦርድዎ ውስጥ ያደራጃል፣ ሁሉም በመሳሪያዎ ላይ።",
+    "TIPS": "ጠቃሚ ምክሮች",
+    "Totals reads SMS messages from your bank and automatically extracts transaction details like amount, date, and balance.":
+        "Totals ከባንክዎ የሚመጡ የኤስኤምኤስ መልዕክቶችን ያነባል እና መጠን፣ ቀን እና ቀሪ ሂሳብ ያሉ የትራንዛክሽን ዝርዝሮችን በራስ-ሰር ያወጣል።",
+    "Tap any transaction to open its details, then choose a category. Totals will remember and auto-categorize future transactions to the same recipient.":
+        "ዝርዝሩን ለመክፈት ማንኛውንም ትራንዛክሽን ይንኩ፣ ከዚያ ምድብ ይምረጡ። Totals ያስታውሳል እና ወደፊት ለዚያው ተቀባይ የሚሆኑ ትራንዛክሽኖችን በራስ-ሰር ይመድባል።",
+    "Yes. Totals automatically detects accounts from your SMS and tracks each one separately. You can view balances and transactions per account.":
+        "አዎ። Totals አካውንቶችን ከኤስኤምኤስዎ በራስ-ሰር ያገኛል እና እያንዳንዱን ለብቻ ይከታተላል። ቀሪ ሂሳቦችን እና ትራንዛክሽኖችን በአካውንት ማየት ይችላሉ።",
+    "Go to Settings > Export Data. You can save the file directly or share it with other apps.":
+        "ወደ ቅንብሮች > ዳታ ላክ ይሂዱ። ፋይሉን በቀጥታ ማስቀመጥ ወይም ከሌሎች መተግበሪያዎች ጋር ማጋራት ይችላሉ።",
+    "Yes. Use Export Data to create a backup, then use Import Data on your other device to restore it.":
+        "አዎ። ምትኬ ለመፍጠር ዳታ ላክን ይጠቀሙ፣ ከዚያ በሌላ መሳሪያዎ ላይ ዳታ አስገባን በመጠቀም ይመልሱት።",
+    "Open the Failed Parses page from the home screen. You can retry parsing from there. If it still fails, the bank format may not be supported yet.":
+        "ከመነሻ ገጽ የያልተሳኩ ትንታኔዎች ገጽን ይክፈቱ። ከዚያ እንደገና መተንተን ይችላሉ። አሁንም ካልተሳካ፣ የባንኩ ቅርጸት እስካሁን ያልተደገፈ ሊሆን ይችላል።",
+    "In Today's transactions, tap the refresh button to rescan today's bank SMS and pick up anything that was missed.":
+        "በየዛሬ ትራንዛክሽኖች ውስጥ የዛሬን የባንክ ኤስኤምኤስ እንደገና ለመቃኘት እና ያመለጠውን ለመያዝ የማደሻ አዝራሩን ይንኩ።",
+    "Create a budget in the Budget tab with a spending limit and time period. Totals tracks your spending against it and notifies you when you are close to your limit.":
+        "በበጀት ትር ውስጥ የወጪ ገደብ እና የጊዜ ወቅት ያለው በጀት ይፍጠሩ። Totals ወጪዎን ከዚያ ጋር ይከታተላል እና ወደ ገደብዎ ሲቀርቡ ያሳውቅዎታል።",
+    "Double-tap the lock icon on the home screen to instantly lock the app. You will need to authenticate to get back in.":
+        "መተግበሪያውን ወዲያውኑ ለመቆለፍ በመነሻ ገጽ ላይ የቁልፍ አዶውን ሁለቴ ይንኩ። እንደገና ለመግባት ራስዎን ማረጋገጥ ያስፈልግዎታል።",
+    "Long-press the bottom navigation bar items for quick actions. Long-press Money to add a cash transaction, long-press Tools to open your quick-access accounts, and long-press You to switch between profiles.":
+        "ፈጣን ተግባራትን ለማግኘት የታችኛውን የአሰሳ አሞሌ ንጥሎች በረጅም ይጫኑ። የጥሬ ገንዘብ ትራንዛክሽን ለማከል ገንዘብን፣ የፈጣን መዳረሻ አካውንቶችን ለመክፈት መሳሪያዎችን፣ እና በፕሮፋይሎች መካከል ለመቀያየር እርስዎን በረጅም ይጫኑ።",
+    "Profiles": "ፕሮፋይሎች",
+    "Manage your profiles": "ፕሮፋይሎችዎን ያስተዳድሩ",
+    "Switch between different profiles to organize your finances":
+        "ፋይናንስዎን ለማደራጀት በተለያዩ ፕሮፋይሎች መካከል ይቀያይሩ",
+    "Create New Profile": "አዲስ ፕሮፋይል ፍጠር",
+    "Add a new profile to organize your finances":
+        "ፋይናንስዎን ለማደራጀት አዲስ ፕሮፋይል ያክሉ",
+    "No profiles yet": "እስካሁን ፕሮፋይሎች የሉም",
+    "Create your first profile to get started": "ለመጀመር የመጀመሪያ ፕሮፋይልዎን ይፍጠሩ",
+    "Active": "ንቁ",
+    "Active profile": "ንቁ ፕሮፋይል",
+    "Tap to activate this profile": "ይህን ፕሮፋይል ለማንቃት ይንኩ",
+    "Rename": "ስም ቀይር",
+    "Create Profile": "ፕሮፋይል ፍጠር",
+    "Rename Profile": "ፕሮፋይል ስም ቀይር",
+    "Profile Name": "የፕሮፋይል ስም",
+    "e.g., Personal, Business": "ለምሳሌ፦ የግል፣ ቢዝነስ",
+    "Enter new profile name": "አዲስ የፕሮፋይል ስም ያስገቡ",
+    "Please enter a profile name": "እባክዎ የፕሮፋይል ስም ያስገቡ",
+    "You must have at least one profile": "ቢያንስ አንድ ፕሮፋይል መኖር አለበት",
+    "Delete Profile": "ፕሮፋይል ሰርዝ",
+    "Notifications permission already granted": "የማሳወቂያ ፈቃድ አስቀድሞ ተሰጥቷል",
+    "Open Settings to enable notifications": "ማሳወቂያዎችን ለማብራት ቅንብሮችን ይክፈቱ",
+    "Enable notifications in system settings": "በሲስተም ቅንብሮች ውስጥ ማሳወቂያዎችን ያብሩ",
+    "Notifications enabled": "ማሳወቂያዎች በርተዋል",
+    "Notifications are blocked; enable them in Settings":
+        "ማሳወቂያዎች ታግደዋል፤ በቅንብሮች ውስጥ ያብሩዋቸው",
+    "Notifications permission denied": "የማሳወቂያ ፈቃድ ተከልክሏል",
+    "Already excluded from battery optimization": "ከባትሪ ማመቻቸት አስቀድሞ ተነጥሏል",
+    "Battery optimization disabled for Totals": "ለTotals የባትሪ ማመቻቸት ተሰናክሏል",
+    "Battery optimization exemption denied": "ከባትሪ ማመቻቸት መነጠል ተከልክሏል",
+    "Test summary notification sent": "የሙከራ የዕለታዊ ማጠቃለያ ማሳወቂያ ተልኳል",
+    "Test weekly summary notification sent": "የሙከራ ሳምንታዊ ማጠቃለያ ማሳወቂያ ተልኳል",
+    "Test monthly summary notification sent": "የሙከራ ወርሃዊ ማጠቃለያ ማሳወቂያ ተልኳል",
+    "Unable to send notification": "ማሳወቂያ መላክ አልተቻለም",
+    "Quick Income Categories": "ፈጣን የገቢ ምድቦች",
+    "Quick Expense Categories": "ፈጣን የወጪ ምድቦች",
+    "Select up to 3 categories for quick actions":
+        "ለፈጣን ተግባራት እስከ 3 ምድቦችን ይምረጡ",
+    "None selected": "ምንም አልተመረጠም",
+    "Alerts": "ማስጠንቀቂያዎች",
+    "Transaction alerts": "የትራንዛክሽን ማሳወቂያዎች",
+    "Notify when a new transaction is detected": "አዲስ ትራንዛክሽን ሲገኝ ያሳውቅ",
+    "Failed parsing review": "ያልተሳካ ትንታኔ ግምገማ",
+    "Ask whether an unparsed registered-bank message was a transaction":
+        "ያልተተነተነ የተመዘገበ ባንክ መልዕክት ትራንዛክሽን እንደሆነ ይጠይቅ",
+    "Budget alerts": "የበጀት ማሳወቂያዎች",
+    "Notify when budget limits are reached": "የበጀት ገደቦች ሲደርሱ ያሳውቅ",
+    "Quick Categorize": "ፈጣን ምደባ",
+    "Income categories": "የገቢ ምድቦች",
+    "Expense categories": "የወጪ ምድቦች",
+    "Spending Summaries": "የወጪ ማጠቃለያዎች",
+    "Daily summary": "ዕለታዊ ማጠቃለያ",
+    "Daily 'Today's spending' notification": "ዕለታዊ 'የዛሬ ወጪ' ማሳወቂያ",
+    "Weekly summary": "ሳምንታዊ ማጠቃለያ",
+    "Weekly 'Last week's spending' notification": "ሳምንታዊ 'ያለፈው ሳምንት ወጪ' ማሳወቂያ",
+    "Monthly summary": "ወርሃዊ ማጠቃለያ",
+    "Monthly 'Last month's spending' notification": "ወርሃዊ 'ያለፈው ወር ወጪ' ማሳወቂያ",
+    "Summary time": "የማጠቃለያ ሰዓት",
+    "shared for all summaries": "ለሁሉም ማጠቃለያዎች የጋራ",
+    "Send test daily summary": "የሙከራ ዕለታዊ ማጠቃለያ ላክ",
+    "Send a sample daily summary notification now":
+        "አሁን የናሙና ዕለታዊ ማጠቃለያ ማሳወቂያ ላክ",
+    "Send test weekly summary": "የሙከራ ሳምንታዊ ማጠቃለያ ላክ",
+    "Send a sample weekly summary notification now":
+        "አሁን የናሙና ሳምንታዊ ማጠቃለያ ማሳወቂያ ላክ",
+    "Send test monthly summary": "የሙከራ ወርሃዊ ማጠቃለያ ላክ",
+    "Send a sample monthly summary notification now":
+        "አሁን የናሙና ወርሃዊ ማጠቃለያ ማሳወቂያ ላክ",
+    "Widget refresh time": "የዊጄት ማደሻ ሰዓት",
+    "Permissions": "ፈቃዶች",
+    "Request permission": "ፈቃድ ጠይቅ",
+    "Enable notifications if blocked": "ከታገዱ ማሳወቂያዎችን ያብሩ",
+    "Battery optimization": "የባትሪ ማመቻቸት",
+    "Exclude from battery optimization to ensure background notifications are delivered":
+        "የጀርባ ማሳወቂያዎች እንዲደርሱ ከባትሪ ማመቻቸት ይነጥሉ",
+    "Could not load the privacy policy right now.":
+        "የግላዊነት መመሪያውን አሁን መጫን አልተቻለም።",
+    "Privacy Policy for Totals": "የTotals የግላዊነት መመሪያ",
+    "Effective date: April 23, 2026": "የሚጸናበት ቀን፦ ኤፕሪል 23, 2026",
+    "Totals is a personal finance application published by Detached. This Privacy Policy explains how Totals accesses, uses, stores, and shares data when you use the Android application package `detached.totals`.":
+        "Totals በDetached የታተመ የግል ፋይናንስ መተግበሪያ ነው። ይህ የግላዊነት መመሪያ የAndroid መተግበሪያ ጥቅል `detached.totals`ን ሲጠቀሙ Totals ዳታን እንዴት እንደሚደርስበት፣ እንደሚጠቀምበት፣ እንደሚያስቀምጥ እና እንደሚያጋራ ያብራራል።",
+    "Summary": "ማጠቃለያ",
+    "Totals is designed to work primarily on-device.":
+        "Totals በዋናነት በመሳሪያዎ ላይ እንዲሰራ ተዘጋጅቷል።",
+    "For core SMS-based transaction tracking, supported bank SMS messages are read, parsed, and stored locally on your device. Those SMS contents are not sent to our servers for normal transaction tracking.":
+        "ለዋናው በኤስኤምኤስ የተመሰረተ የትራንዛክሽን ክትትል፣ የሚደገፉ የባንክ ኤስኤምኤስ መልዕክቶች በመሳሪያዎ ላይ ይነበባሉ፣ ይተነተናሉ እና ይቀመጣሉ። እነዚያ የኤስኤምኤስ ይዘቶች ለመደበኛ የትራንዛክሽን ክትትል ወደ ሰርቨሮቻችን አይላኩም።",
+    "Some optional features use the internet:":
+        "አንዳንድ አማራጭ ባህሪያት ኢንተርኔትን ይጠቀማሉ፦",
+    "Payment verification can send the image, payment reference, selected account number, and selected bank identifier you submit to our verification service to process your request.":
+        "የክፍያ ማረጋገጫ ጥያቄዎን ለማስኬድ ያስገቡትን ምስል፣ የክፍያ ማጣቀሻ፣ የተመረጠ አካውንት ቁጥር እና የተመረጠ የባንክ መለያ ወደ ማረጋገጫ አገልግሎታችን ሊልክ ይችላል።",
+    "The app may download updated SMS parsing patterns and bank configuration files from our servers during setup, refresh, or manual update actions. This does not upload your SMS contents.":
+        "መተግበሪያው በማዋቀር፣ በማደስ ወይም በእጅ የዝማኔ ተግባራት ጊዜ የተዘመኑ የኤስኤምኤስ መተንተኛ ንድፎችን እና የባንክ ውቅር ፋይሎችን ከሰርቨሮቻችን ሊያወርድ ይችላል። ይህ የኤስኤምኤስ ይዘትዎን አይሰቅልም።",
+    "Totals does not require account registration.":
+        "Totals የአካውንት ምዝገባ አይጠይቅም።",
+    "Totals does not use advertising SDKs or analytics telemetry to profile you.":
+        "Totals እርስዎን ለመግለጽ የማስታወቂያ SDKዎችን ወይም የትንታኔ ቴሌሜትሪን አይጠቀምም።",
+    "Data We Access": "የምንደርስበት ዳታ",
+    "SMS messages and SMS-derived transaction data from supported bank notifications.":
+        "ከሚደገፉ የባንክ ማሳወቂያዎች የኤስኤምኤስ መልዕክቶች እና ከኤስኤምኤስ የተገኘ የትራንዛክሽን ዳታ።",
+    "Financial information derived from those messages, such as transaction amount, balance, date, account numbers, sender or receiver labels, and references.":
+        "ከእነዚያ መልዕክቶች የተገኘ የፋይናንስ መረጃ፣ ለምሳሌ የትራንዛክሽን መጠን፣ ቀሪ ሂሳብ፣ ቀን፣ የአካውንት ቁጥሮች፣ የላኪ ወይም ተቀባይ መለያዎች እና ማጣቀሻዎች።",
+    "Camera access for QR scanning and for capturing an image in the payment verification feature.":
+        "ለQR ቅኝት እና በክፍያ ማረጋገጫ ባህሪ ውስጥ ምስል ለማንሳት የካሜራ መዳረሻ።",
+    "Images you choose to capture or submit for payment verification.":
+        "ለክፍያ ማረጋገጫ ለማንሳት ወይም ለማስገባት የሚመርጧቸው ምስሎች።",
+    "Payment verification inputs, such as payment references, selected account numbers, and bank identifiers.":
+        "የክፍያ ማረጋገጫ ግቤቶች፣ ለምሳሌ የክፍያ ማጣቀሻዎች፣ የተመረጡ የአካውንት ቁጥሮች እና የባንክ መለያዎች።",
+    "Notification settings and locally generated notifications.":
+        "የማሳወቂያ ቅንብሮች እና በአካባቢው የሚፈጠሩ ማሳወቂያዎች።",
+    "Local authentication prompts, if you use the app lock feature. Totals does not receive your raw fingerprint, face scan, or other biometric template; biometric verification is handled by your device operating system.":
+        "የመተግበሪያ መቆለፊያን ከተጠቀሙ የአካባቢ ማረጋገጫ ጥያቄዎች። Totals ጥሬ የጣት አሻራዎን፣ የፊት ቅኝትዎን ወይም ሌላ የባዮሜትሪክ አብነት አይቀበልም፤ የባዮሜትሪክ ማረጋገጫ በመሳሪያዎ ስርዓተ ክወና ይካሄዳል።",
+    "Exported or imported backup files that you choose to create or restore.":
+        "ለመፍጠር ወይም ለመመለስ የሚመርጧቸው የተላኩ ወይም የተገቡ የምትኬ ፋይሎች።",
+    "Optional local network access if you manually start the in-app local web dashboard or server.":
+        "በመተግበሪያው ውስጥ ያለውን የአካባቢ ድር ዳሽቦርድ ወይም ሰርቨር በእጅ ካስጀመሩ አማራጭ የአካባቢ ኔትወርክ መዳረሻ።",
+    "How We Use Data": "ዳታን እንዴት እንጠቀማለን",
+    "To detect and parse bank SMS messages into transactions.":
+        "የባንክ ኤስኤምኤስ መልዕክቶችን እንደ ትራንዛክሽን ለማግኘት እና ለመተንተን።",
+    "To display balances, transaction history, budgets, widgets, insights, and related finance features.":
+        "ቀሪ ሂሳቦችን፣ የትራንዛክሽን ታሪክን፣ በጀቶችን፣ ዊጄቶችን፣ ግንዛቤዎችን እና ተዛማጅ የፋይናንስ ባህሪያትን ለማሳየት።",
+    "To scan account-sharing QR codes and import account data locally.":
+        "የአካውንት መጋሪያ QR ኮዶችን ለመቃኘት እና የአካውንት ዳታን በአካባቢው ለማስገባት።",
+    "To verify payments when you manually use the verification feature.":
+        "የማረጋገጫ ባህሪውን በእጅ ሲጠቀሙ ክፍያዎችን ለማረጋገጥ።",
+    "To download updated SMS parsing patterns and bank configuration files.":
+        "የተዘመኑ የኤስኤምኤስ መተንተኛ ንድፎችን እና የባንክ ውቅር ፋይሎችን ለማውረድ።",
+    "To secure access to the app if you use device authentication or app lock.":
+        "የመሳሪያ ማረጋገጫ ወይም የመተግበሪያ መቆለፊያ ከተጠቀሙ ወደ መተግበሪያው መዳረሻን ለማስጠበቅ።",
+    "To export, import, or share data when you explicitly choose those actions.":
+        "እነዚያን ተግባራት በግልጽ ሲመርጡ ዳታን ለመላክ፣ ለማስገባት ወይም ለማጋራት።",
+    "When Data Leaves Your Device": "ዳታ ከመሳሪያዎ ሲወጣ",
+    "Core SMS tracking: SMS contents used for normal transaction tracking stay on your device.":
+        "ዋና የኤስኤምኤስ ክትትል፦ ለመደበኛ የትራንዛክሽን ክትትል የሚጠቀሙ የኤስኤምኤስ ይዘቶች በመሳሪያዎ ላይ ይቆያሉ።",
+    "Payment verification: If you use the payment verification feature, the data you submit may be transmitted over HTTPS to our verification service hosted at `sms-parsing-visualizer.vercel.app` to process your request.":
+        "የክፍያ ማረጋገጫ፦ የክፍያ ማረጋገጫ ባህሪውን ከተጠቀሙ፣ ያስገቡት ዳታ ጥያቄዎን ለማስኬድ በ`sms-parsing-visualizer.vercel.app` ወደሚስተናገደው የማረጋገጫ አገልግሎታችን በHTTPS ሊተላለፍ ይችላል።",
+    "Configuration updates: When Totals downloads updated SMS parsing patterns or bank configuration files, it connects to our hosted configuration endpoints. The app may also perform basic connectivity checks to confirm internet access. These requests are used to download configuration, not to upload your SMS contents for normal tracking.":
+        "የውቅር ዝማኔዎች፦ Totals የተዘመኑ የኤስኤምኤስ መተንተኛ ንድፎችን ወይም የባንክ ውቅር ፋይሎችን ሲያወርድ ከተስተናገዱ የውቅር መጨረሻ ነጥቦቻችን ጋር ይገናኛል። መተግበሪያው የኢንተርኔት መዳረሻን ለማረጋገጥ መሰረታዊ የግንኙነት ፍተሻዎችንም ሊያከናውን ይችላል። እነዚህ ጥያቄዎች ውቅርን ለማውረድ እንጂ የኤስኤምኤስ ይዘትዎን ለመደበኛ ክትትል ለመስቀል አይደሉም።",
+    "Support and external links: If you open external links from the app, such as support pages, Telegram, or bank links, those services receive information according to their own privacy policies.":
+        "ድጋፍ እና ውጫዊ ሊንኮች፦ ከመተግበሪያው ውጫዊ ሊንኮችን ከከፈቱ፣ ለምሳሌ የድጋፍ ገጾች፣ Telegram ወይም የባንክ ሊንኮች፣ እነዚያ አገልግሎቶች መረጃን በራሳቸው የግላዊነት መመሪያዎች መሰረት ይቀበላሉ።",
+    "Local network dashboard: If you manually start the optional local web dashboard or server, your financial data may be available to devices on the same local network using the URL shown in the app until you stop the server.":
+        "የአካባቢ ኔትወርክ ዳሽቦርድ፦ አማራጭ የአካባቢ ድር ዳሽቦርድ ወይም ሰርቨርን በእጅ ካስጀመሩ፣ ሰርቨሩን እስኪያቆሙ ድረስ የፋይናንስ ዳታዎ በመተግበሪያው የሚታየውን URL በመጠቀም በተመሳሳይ የአካባቢ ኔትወርክ ላይ ላሉ መሳሪያዎች ሊገኝ ይችላል።",
+    "Sharing": "ማጋራት",
+    "We do not sell your personal or financial data.":
+        "የግልዎን ወይም የፋይናንስ ዳታዎን አንሸጥም።",
+    "We do not share SMS contents or SMS-derived transaction data with advertisers.":
+        "የኤስኤምኤስ ይዘቶችን ወይም ከኤስኤምኤስ የተገኘ የትራንዛክሽን ዳታን ከማስታወቂያ አቅራቢዎች ጋር አናጋራም።",
+    "We may use hosting, content delivery, networking, security, or infrastructure providers to deliver the optional online features described above.":
+        "ከላይ የተገለጹትን አማራጭ የኦንላይን ባህሪያት ለማቅረብ የማስተናገጃ፣ የይዘት አቅርቦት፣ የኔትወርክ፣ የደህንነት ወይም የመሠረተ ልማት አቅራቢዎችን ልንጠቀም እንችላለን።",
+    "We may disclose information if required by law, to protect users, or to prevent fraud, abuse, or security issues.":
+        "በህግ ከተጠየቅን፣ ተጠቃሚዎችን ለመጠበቅ ወይም ማጭበርበርን፣ በደልን ወይም የደህንነት ችግኞችን ለመከላከል መረጃን ልናጋራ እንችላለን።",
+    "Storage and Retention": "ማከማቻ እና ማቆያ",
+    "Most Totals data is stored locally on your device until you delete it, clear app data, or uninstall the app.":
+        "አብዛኛው የTotals ዳታ እስኪሰርዙት፣ የመተግበሪያ ዳታ እስኪያጸዱ ወይም መተግበሪያውን እስኪያስወግዱ ድረስ በመሳሪያዎ ላይ ይቀመጣል።",
+    "Exported backup files remain wherever you save or share them.":
+        "የተላኩ የምትኬ ፋይሎች ባስቀመጡበት ወይም ባጋሩበት ቦታ ይቆያሉ።",
+    "QR scan results are processed locally in the app.":
+        "የQR ቅኝት ውጤቶች በመተግበሪያው ውስጥ በአካባቢው ይሰራሉ።",
+    "Payment verification submissions may be processed by the verification service and retained only for the period reasonably necessary to operate, secure, debug, and protect the service, or as required by law.":
+        "የክፍያ ማረጋገጫ ማስገባቶች በማረጋገጫ አገልግሎቱ ሊሰሩ ይችላሉ እና አገልግሎቱን ለማስኬድ፣ ለማስጠበቅ፣ ስህተት ለመፈለግ እና ለመጠበቅ በሚያስፈልግ ተገቢ ጊዜ ብቻ ወይም በህግ እንደሚጠየቀው ሊቆዩ ይችላሉ።",
+    "Downloaded SMS pattern files and bank configuration files may be cached on your device for future use.":
+        "የወረዱ የኤስኤምኤስ ንድፍ ፋይሎች እና የባንክ ውቅር ፋይሎች ለወደፊት ጥቅም በመሳሪያዎ ላይ ሊቀመጡ ይችላሉ።",
+    "Security": "ደህንነት",
+    "We rely on your device operating system and application sandbox for local storage protection.":
+        "ለአካባቢ ማከማቻ ጥበቃ በመሳሪያዎ ስርዓተ ክወና እና በመተግበሪያ ሳንድቦክስ እንመካለን።",
+    "In the current app implementation, online requests are sent over HTTPS.":
+        "በአሁኑ የመተግበሪያ አተገባበር፣ የኦንላይን ጥያቄዎች በHTTPS ይላካሉ።",
+    "No method of storage or transmission is completely secure, and we cannot guarantee absolute security.":
+        "ምንም የማከማቻ ወይም የማስተላለፊያ ዘዴ ፍጹም ደህንነቱ የተጠበቀ አይደለም፣ እኛም ፍጹም ደህንነትን ማረጋገጥ አንችልም።",
+    "Your Choices": "ምርጫዎችዎ",
+    "You can deny permissions, although some features may not work without them.":
+        "ፈቃዶችን መከልከል ይችላሉ፣ ግን አንዳንድ ባህሪያት ያለእነሱ ላይሰሩ ይችላሉ።",
+    "You can avoid optional online features if you do not want to send verification data or download remote configuration updates.":
+        "የማረጋገጫ ዳታ መላክ ወይም የሩቅ ውቅር ዝማኔዎችን ማውረድ ካልፈለጉ አማራጭ የኦንላይን ባህሪያትን መተው ይችላሉ።",
+    "You can export or import your data using in-app tools.":
+        "በመተግበሪያ ውስጥ ያሉ መሳሪያዎችን በመጠቀም ዳታዎን መላክ ወይም ማስገባት ይችላሉ።",
+    "You can clear local app data or uninstall the app to remove locally stored data.":
+        "በአካባቢው የተቀመጠ ዳታ ለማስወገድ የመተግበሪያ ዳታን ማጽዳት ወይም መተግበሪያውን ማስወገድ ይችላሉ።",
+    "You can stop the optional local web dashboard or server at any time.":
+        "አማራጭ የአካባቢ ድር ዳሽቦርድ ወይም ሰርቨርን በማንኛውም ጊዜ ማቆም ይችላሉ።",
+    "Children": "ልጆች",
+    "Totals is not directed to children.": "Totals ለልጆች የታሰበ አይደለም።",
+    "Changes to This Policy": "በዚህ መመሪያ ላይ ለውጦች",
+    "We may update this Privacy Policy from time to time. When we do, we will update the effective date above and the in-app copy where appropriate.":
+        "ይህን የግላዊነት መመሪያ ከጊዜ ወደ ጊዜ ልናዘምን እንችላለን። ሲሆንም ከላይ ያለውን የሚጸናበት ቀን እና በመተግበሪያ ውስጥ ያለውን ቅጂ በሚገባ እናዘምናለን።",
+    "Contact": "አግኙን",
+    "For privacy questions or requests, use one of the following support channels:":
+        "ለግላዊነት ጥያቄዎች ወይም ጥያቄዎች፣ ከሚከተሉት የድጋፍ መንገዶች አንዱን ይጠቀሙ፦",
     "Welcome to Totals": "ወደ Totals እንኳን በደህና መጡ",
     "Personal finance tracker for Ethiopian banks":
         "የኢትዮጵያ ባንኮች የግል ፋይናንስ መከታተያ",
@@ -1207,6 +1644,67 @@ class AppLocalizations {
     "Used Totals before? Import your backup to restore your accounts, transactions, budgets, and categories.":
         "ከዚህ በፊት Totalsን ተጠቅመዋል? አካውንቶችዎን፣ ትራንዛክሽኖችዎን፣ በጀቶችዎን እና ምድቦችዎን ለመመለስ ምትኬዎን ያስገቡ።",
     "No income or expense data yet.": "እስካሁን የገቢ ወይም የወጪ ዳታ የለም።",
+    "Failed to save category": "ምድብ ማስቀመጥ አልተቻለም",
+    "No expense categories yet": "እስካሁን የወጪ ምድቦች የሉም",
+    "No income categories yet": "እስካሁን የገቢ ምድቦች የሉም",
+    "Removed auto-categorization for": "ራስ-ሰር ምደባ ተወግዷል፦",
+    "Totals can ask again for": "Totals እንደገና መጠየቅ ይችላል፦",
+    "Built-in": "ነባር",
+    "Included by default": "በነባሪ የተካተተ",
+    "No built-in expense categories available.": "ምንም ነባር የወጪ ምድቦች አይገኙም።",
+    "No built-in income categories available.": "ምንም ነባር የገቢ ምድቦች አይገኙም።",
+    "Custom": "ብጁ",
+    "Created by you": "በእርስዎ የተፈጠረ",
+    "No custom expense categories yet.": "እስካሁን ብጁ የወጪ ምድቦች የሉም።",
+    "No custom income categories yet.": "እስካሁን ብጁ የገቢ ምድቦች የሉም።",
+    "Auto-Categorization": "ራስ-ሰር ምደባ",
+    "Future transactions matched automatically": "የወደፊት ትራንዛክሽኖች በራስ-ሰር ይዛመዳሉ",
+    "Auto-categorization is turned off": "ራስ-ሰር ምደባ ጠፍቷል",
+    "No auto-categorization rules yet.": "እስካሁን የራስ-ሰር ምደባ ደንቦች የሉም።",
+    "Deleted category": "የተሰረዘ ምድብ",
+    "Dismissed Prompts": "የተዘጉ ጥያቄዎች",
+    "Addresses that should not trigger the popup again":
+        "እንደገና ፖፕአፕ መነሳት የሌለባቸው አድራሻዎች",
+    "Ask again": "እንደገና ጠይቅ",
+    "Delete category?": "ምድቡ ይሰረዝ?",
+    "This will remove": "ይህ",
+    "and uncategorize any transactions using it.":
+        "ያስወግዳል እና የሚጠቀሙትን ትራንዛክሽኖች ከምድብ ውጭ ያደርጋል።",
+    "Category deleted": "ምድብ ተሰርዟል",
+    "Failed to delete category": "ምድብ መሰረዝ አልተቻለም",
+    "Edit Category": "ምድብ አርትዕ",
+    "New Category": "አዲስ ምድብ",
+    "Close": "ዝጋ",
+    "e.g. Groceries": "ለምሳሌ፦ ሸቀጣሸቀጥ",
+    "Description": "መግለጫ",
+    "Optional note about this category": "ስለዚህ ምድብ አማራጭ ማስታወሻ",
+    "Type": "አይነት",
+    "Primary income sources": "ዋና የገቢ ምንጮች",
+    "Needs — used for spending insights": "አስፈላጊ ፍላጎቶች፣ ለወጪ ትንተና ይጠቅማል",
+    "Secondary income sources": "ተጨማሪ የገቢ ምንጮች",
+    "Wants — discretionary spending": "ፍላጎቶች፣ አማራጭ ወጪዎች",
+    "Catch-all or mixed transactions": "ሌሎች ወይም የተቀላቀሉ ትራንዛክሽኖች",
+    "Monthly/weekly repeating expenses": "ወርሃዊ/ሳምንታዊ ተደጋጋሚ ወጪዎች",
+    "Delete category": "ምድብ ሰርዝ",
+    "Blue": "ሰማያዊ",
+    "Emerald": "ኤመራልድ",
+    "Amber": "አምበር",
+    "Red": "ቀይ",
+    "Rose": "ሮዝ",
+    "Magenta": "ማጀንታ",
+    "Violet": "ቫዮሌት",
+    "Indigo": "ኢንዲጎ",
+    "Teal": "ቲል",
+    "Mint": "ሚንት",
+    "Orange": "ብርቱካናማ",
+    "Tangerine": "ታንጀሪን",
+    "Yellow": "ቢጫ",
+    "Cyan": "ሳያን",
+    "Sky": "ሰማይ",
+    "Lime": "ላይም",
+    "Pink": "ሮዝ",
+    "Brown": "ቡናማ",
+    "Gray": "ግራጫ",
   };
 
   static String translate(
