@@ -10,6 +10,7 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/utils/account_share_payload.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
@@ -172,6 +173,8 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
   }
 
   Future<void> _shareQrCode() async {
+    final shareText =
+        context.l10nTextRead('Scan this QR code to add my account details');
     try {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
@@ -190,13 +193,13 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
 
       await Share.shareXFiles(
         [XFile(file.path)],
-        text: 'Scan this QR code to add my account details',
+        text: shareText,
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error sharing QR code: $e'),
+          content: Text('${context.l10nTextRead('Error sharing QR code')}: $e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -222,7 +225,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
-        title: const Text('Share Accounts'),
+        title: Text(context.l10nText('Share Accounts')),
         centerTitle: true,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -246,14 +249,16 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'No accounts yet',
+                            context.l10nText('No accounts yet'),
                             style: theme.textTheme.titleMedium?.copyWith(
                               color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Register accounts first, then generate a share QR.',
+                            context.l10nText(
+                              'Register accounts first, then generate a share QR.',
+                            ),
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodyMedium?.copyWith(
                               color: colorScheme.onSurfaceVariant,
@@ -279,7 +284,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
                       Row(
                         children: [
                           Text(
-                            '${_selectedKeys.length} of ${_accounts.length} selected',
+                            '${_selectedKeys.length} ${context.l10nText('of')} ${_accounts.length} ${context.l10nText('selected')}',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: colorScheme.onSurfaceVariant,
                             ),
@@ -287,11 +292,11 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
                           const Spacer(),
                           TextButton(
                             onPressed: _selectAllAccounts,
-                            child: const Text('Select all'),
+                            child: Text(context.l10nText('Select all')),
                           ),
                           TextButton(
                             onPressed: _clearAllAccounts,
-                            child: const Text('Clear'),
+                            child: Text(context.l10nText('Clear')),
                           ),
                         ],
                       ),
@@ -354,7 +359,7 @@ class _QrPreviewCard extends StatelessWidget {
               TextField(
                 controller: displayNameController,
                 decoration: InputDecoration(
-                  hintText: 'Name shown to recipient',
+                  hintText: context.l10nText('Name shown to recipient'),
                   hintStyle: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -380,7 +385,7 @@ class _QrPreviewCard extends StatelessWidget {
               child: AccountShareQrCode(
                 data: data!,
                 fallback: Text(
-                  'Too much data to render QR',
+                  context.l10nText('Too much data to render QR'),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -391,7 +396,7 @@ class _QrPreviewCard extends StatelessWidget {
             FilledButton.icon(
               onPressed: onShare,
               icon: const Icon(Icons.share),
-              label: const Text('Share QR Code'),
+              label: Text(context.l10nText('Share QR Code')),
               style: FilledButton.styleFrom(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -411,7 +416,9 @@ class _QrPreviewCard extends StatelessWidget {
               alignment: Alignment.center,
               padding: const EdgeInsets.all(16),
               child: Text(
-                'Select accounts and enter a name to generate your QR.',
+                context.l10nText(
+                  'Select accounts and enter a name to generate your QR.',
+                ),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
@@ -421,8 +428,10 @@ class _QrPreviewCard extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             sharedName == null || sharedName!.isEmpty
-                ? 'Select accounts below and enter a name to generate your QR.'
-                : 'Sharing as $sharedName. Let someone scan this QR to add your accounts.',
+                ? context.l10nText(
+                    'Select accounts below and enter a name to generate your QR.',
+                  )
+                : '${context.l10nText('Sharing as')} $sharedName. ${context.l10nText('Let someone scan this QR to add your accounts.')}',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
@@ -485,14 +494,16 @@ class _AccountShareTile extends StatelessWidget {
               ),
       ),
       title: Text(
-        account.accountNumber.isNotEmpty ? account.accountNumber : 'Account',
+        account.accountNumber.isNotEmpty
+            ? account.accountNumber
+            : context.l10nText('Account'),
         style: theme.textTheme.titleSmall?.copyWith(
           fontWeight: FontWeight.w600,
           color: colorScheme.onSurface,
         ),
       ),
       subtitle: Text(
-        bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+        context.l10nText(bank?.shortName ?? bank?.name ?? 'Unknown Bank'),
         style: theme.textTheme.bodySmall?.copyWith(
           color: colorScheme.onSurfaceVariant,
         ),

@@ -486,7 +486,22 @@ class AppLocalizations {
     "registered account": "የተመዘገበ አካውንት",
     "registered accounts": "የተመዘገቡ አካውንቶች",
     "available for sharing": "ለማጋራት ዝግጁ",
+    "Share Accounts": "አካውንቶችን አጋራ",
     "Share Your Accounts": "አካውንቶችዎን ያጋሩ",
+    "Name shown to recipient": "ለተቀባዩ የሚታይ ስም",
+    "Share QR Code": "የQR ኮድ አጋራ",
+    "Scan this QR code to add my account details":
+        "የእኔን የአካውንት ዝርዝሮች ለማከል ይህን QR ኮድ ይቃኙ",
+    "Error sharing QR code": "የQR ኮድ ማጋራት አልተቻለም",
+    "Register accounts first, then generate a share QR.":
+        "መጀመሪያ አካውንቶችን ይመዝግቡ፣ ከዚያ የማጋሪያ QR ይፍጠሩ።",
+    "Select accounts and enter a name to generate your QR.":
+        "QRዎን ለመፍጠር አካውንቶችን ይምረጡ እና ስም ያስገቡ።",
+    "Select accounts below and enter a name to generate your QR.":
+        "QRዎን ለመፍጠር ከታች አካውንቶችን ይምረጡ እና ስም ያስገቡ።",
+    "Sharing as": "በዚህ ስም በማጋራት ላይ",
+    "Let someone scan this QR to add your accounts.":
+        "አካውንቶችዎን ለማከል ሌላ ሰው ይህን QR እንዲቃኝ ያድርጉ።",
     "included": "ተካትቷል",
     "Too much data to render QR": "QR ለማሳየት ዳታው በጣም ብዙ ነው",
     "Add accounts first, then long-press Tools again to see your QR here.":
