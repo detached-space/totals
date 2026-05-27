@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:totals/theme/app_calendar_option.dart';
 
 enum AppLanguageOption {
   english(
@@ -26,7 +27,9 @@ enum AppLanguageOption {
   final String nativeLabel;
   final Locale locale;
 
-  bool get usesEthiopianCalendar => this == AppLanguageOption.amharic;
+  AppCalendarOption get defaultCalendar => this == AppLanguageOption.amharic
+      ? AppCalendarOption.ethiopian
+      : AppCalendarOption.gregorian;
 
   static AppLanguageOption fromStorage(String? value) {
     for (final option in AppLanguageOption.values) {

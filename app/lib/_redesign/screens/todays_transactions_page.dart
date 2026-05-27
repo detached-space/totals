@@ -8,6 +8,7 @@ import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -100,9 +101,8 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
         if (_isSelecting) {
           pageTitle = '${_selectedRefs.length} selected';
         } else if (isEC) {
-          final ecDate = Kenat.now().getEthiopian();
           pageTitle =
-              '${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['day']}, ${ecDate['year']}';
+              AppDateFormat.monthDayYear(DateTime.now(), context: context);
         } else {
           pageTitle = context.l10nText("Today's Transactions");
         }

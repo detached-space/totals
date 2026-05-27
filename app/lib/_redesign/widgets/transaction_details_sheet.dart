@@ -9,6 +9,7 @@ import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -155,43 +156,17 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         AppCalendarOption.ethiopian;
 
     if (isEC) {
-      final ecDate =
-          Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
-      final month = MonthNames.amharic[ecDate['month']! - 1];
-      final day = ecDate['day'].toString().padLeft(2, '0');
-      final currentEcYear = Kenat.now().getEthiopian()['year'];
-      final yearSuffix =
-          ecDate['year'] != currentEcYear ? ', ${ecDate['year']}' : '';
-
       final time = Time.fromGregorian(dt.hour, dt.minute);
       final timeStr = time.format({'useGeez': false, 'lang': 'amharic'});
 
-      return '$month $day$yearSuffix · $timeStr';
+      return '${AppDateFormat.monthDayMaybeYear(dt, context: context)} · $timeStr';
     } else {
       final hour = dt.hour;
       final minute = dt.minute.toString().padLeft(2, '0');
       final amPm = hour >= 12 ? 'PM' : 'AM';
       final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
       final timeStr = '$h12:$minute $amPm';
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      final month = months[dt.month - 1];
-      final day = dt.day.toString().padLeft(2, '0');
-      final now = DateTime.now();
-      final yearSuffix = dt.year != now.year ? ', ${dt.year}' : '';
-      return '$month $day$yearSuffix · $timeStr';
+      return '${AppDateFormat.monthDayMaybeYear(dt, context: context)} · $timeStr';
     }
   }
 

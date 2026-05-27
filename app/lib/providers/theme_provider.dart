@@ -55,9 +55,7 @@ class ThemeProvider extends ChangeNotifier {
   AppFontOption get appFont => _appFont;
   AppLanguageOption get appLanguage => _appLanguage;
   Locale get appLocale => _appLanguage.locale;
-  AppCalendarOption get appCalendar => _appLanguage.usesEthiopianCalendar
-      ? AppCalendarOption.ethiopian
-      : _appCalendar;
+  AppCalendarOption get appCalendar => _appCalendar;
   List<double> get availableUiScales =>
       List<double>.unmodifiable(_uiScaleOptions);
   List<double> get availableAppTopPaddings =>
@@ -172,11 +170,12 @@ class ThemeProvider extends ChangeNotifier {
   Future<void> _loadAppLanguage() async {
     final prefs = await SharedPreferences.getInstance();
     final savedLanguage = prefs.getString(_appLanguageKey);
+    final savedCalendar = prefs.getString(_appCalendarKey);
     final resolvedLanguage = AppLanguageOption.fromStorage(savedLanguage);
     if (_appLanguage == resolvedLanguage) return;
     _appLanguage = resolvedLanguage;
-    if (_appLanguage.usesEthiopianCalendar) {
-      _appCalendar = AppCalendarOption.ethiopian;
+    if (savedCalendar == null) {
+      _appCalendar = resolvedLanguage.defaultCalendar;
     }
     notifyListeners();
   }
@@ -184,9 +183,7 @@ class ThemeProvider extends ChangeNotifier {
   Future<void> setAppLanguage(AppLanguageOption language) async {
     if (_appLanguage == language) return;
     _appLanguage = language;
-    _appCalendar = language.usesEthiopianCalendar
-        ? AppCalendarOption.ethiopian
-        : AppCalendarOption.gregorian;
+    _appCalendar = language.defaultCalendar;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_appLanguageKey, language.storageValue);

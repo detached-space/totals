@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -13,10 +12,10 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
-import 'package:kenat/kenat.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
+import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/screens/todays_transactions_page.dart';
@@ -1992,17 +1991,7 @@ Widget _buildHomeTrendBottomAxisTitle(
   final endDate = DateTime(today.year, today.month, today.day);
   final date = endDate.subtract(Duration(days: pointCount - 1 - index));
 
-  String label;
-  if (isEC) {
-    final ecDate =
-        Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
-    final fullMonth = MonthNames.amharic[ecDate['month']! - 1];
-    final shortMonth =
-        fullMonth.length <= 3 ? fullMonth : fullMonth.substring(0, 3);
-    label = '$shortMonth ${ecDate['day']}';
-  } else {
-    label = DateFormat('MMM d').format(date);
-  }
+  final label = AppDateFormat.monthDay(date, context: context);
 
   return SideTitleWidget(
     axisSide: meta.axisSide,
@@ -2138,31 +2127,8 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
     return null;
   }
 
-  static const _months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-
   String _formatDateKey(DateTime dt) {
-    final isEC = context.read<ThemeProvider>().appCalendar ==
-        AppCalendarOption.ethiopian;
-    if (isEC) {
-      final ecDate =
-          Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
-      return '${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['day']}, ${ecDate['year']}';
-    } else {
-      return '${_months[dt.month - 1]} ${dt.day}, ${dt.year}';
-    }
+    return AppDateFormat.monthDayYear(dt, context: context);
   }
 
   String _formatTime(DateTime dt) {

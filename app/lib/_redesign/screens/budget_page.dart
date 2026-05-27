@@ -14,13 +14,11 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/budget_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/widget_service.dart';
+import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
-import 'package:totals/providers/theme_provider.dart';
-import 'package:totals/theme/app_calendar_option.dart';
-import 'package:kenat/kenat.dart';
 
 class _BudgetCategoryColorOption {
   final String key;
@@ -185,46 +183,12 @@ String _bankLabel(int? bankId) {
   }
 }
 
-const List<String> _kBudgetMonthKeys = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-
-bool _usesEthiopianCalendar(BuildContext context) {
-  try {
-    return Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
-        AppCalendarOption.ethiopian;
-  } catch (_) {
-    return false;
-  }
-}
-
 String _budgetMonthLabel(BuildContext context, DateTime month) {
-  if (_usesEthiopianCalendar(context)) {
-    final ec =
-        Kenat.fromGregorian(month.year, month.month, month.day).getEthiopian();
-    return '${MonthNames.amharic[ec['month']! - 1]} ${ec['year']}';
-  }
-  return '${context.l10nText(_kBudgetMonthKeys[month.month - 1])} ${month.year}';
+  return AppDateFormat.monthYear(month, context: context);
 }
 
 String _budgetDateLabel(BuildContext context, DateTime date) {
-  if (_usesEthiopianCalendar(context)) {
-    final ec =
-        Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
-    return '${MonthNames.amharic[ec['month']! - 1]} ${ec['day']}, ${ec['year']}';
-  }
-  return '${context.l10nText(_kBudgetMonthKeys[date.month - 1])} ${date.day}, ${date.year}';
+  return AppDateFormat.monthDayYear(date, context: context);
 }
 
 String _formatBudgetEtb(BuildContext context, double value) {

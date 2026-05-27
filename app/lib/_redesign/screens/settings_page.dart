@@ -601,7 +601,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   Text(
                     sheetCtx.l10n(
                       'settings.languageSubtitle',
-                      'Amharic uses Ethiopian calendar dates automatically.',
+                      'Choose the app language. Calendar can be changed separately.',
                     ),
                     style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary(sheetCtx),
@@ -626,7 +626,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                           ? Text(
                               sheetCtx.l10n(
                                 'settings.amharicCalendarNote',
-                                'Dates switch to the Ethiopian calendar.',
+                                'Defaults to Ethiopian dates. You can switch to Gregorian in Calendar.',
                               ),
                               style: TextStyle(
                                 color: AppColors.textSecondary(sheetCtx),
@@ -754,7 +754,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                       activeColor: AppColors.primaryLight,
                       contentPadding: EdgeInsets.zero,
                       title: Text(
-                        option.label,
+                        sheetCtx.l10nText(option.label),
                         style:
                             Theme.of(sheetCtx).textTheme.titleMedium?.copyWith(
                                   color: AppColors.textPrimary(sheetCtx),
@@ -1261,7 +1261,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                 title: context.l10n('settings.language', 'Language'),
                 subtitle: context.l10n(
                   'settings.languageSubtitle',
-                  'Amharic uses Ethiopian calendar dates automatically.',
+                  'Choose the app language. Calendar can be changed separately.',
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1288,15 +1288,10 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                 icon: Icons.calendar_today_rounded,
                 iconColor: AppColors.primaryLight,
                 title: context.l10n('settings.calendar', 'Calendar'),
-                subtitle: themeProvider.appLanguage.usesEthiopianCalendar
-                    ? context.l10n(
-                        'settings.calendarFollowsLanguage',
-                        'Amharic is selected, so dates use the Ethiopian calendar.',
-                      )
-                    : context.l10n(
-                        'settings.calendarSubtitle',
-                        'Switch between Gregorian and Ethiopian calendars',
-                      ),
+                subtitle: context.l10n(
+                  'settings.calendarSubtitle',
+                  'Switch between Gregorian and Ethiopian calendars',
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1317,9 +1312,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     ),
                   ],
                 ),
-                onTap: themeProvider.appLanguage.usesEthiopianCalendar
-                    ? null
-                    : () => _showCalendarSheet(themeProvider),
+                onTap: () => _showCalendarSheet(themeProvider),
               ),
 
               // if (!_isLoadingRedesign)
