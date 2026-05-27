@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/bank.dart';
 
 class BankSelectorOption {
@@ -147,8 +148,13 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
     }
 
     final normalized = _query.toLowerCase();
+    final localizedName = context.l10nText(option.bank.name).toLowerCase();
+    final localizedShortName =
+        context.l10nText(option.bank.shortName).toLowerCase();
     return option.bank.name.toLowerCase().contains(normalized) ||
-        option.bank.shortName.toLowerCase().contains(normalized);
+        option.bank.shortName.toLowerCase().contains(normalized) ||
+        localizedName.contains(normalized) ||
+        localizedShortName.contains(normalized);
   }
 
   void _toggleExpanded() {
@@ -204,15 +210,16 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
     final colorScheme = theme.colorScheme;
     final selectedOption = _selectedOption;
     final hasSupportedOptions = _supportedOptions.isNotEmpty;
-    final titleText = selectedOption?.bank.name ??
-        (hasSupportedOptions
-            ? 'Select a supported bank'
-            : 'No supported banks available');
+    final titleText = selectedOption != null
+        ? context.l10nText(selectedOption.bank.name)
+        : (hasSupportedOptions
+            ? context.l10nText('Select a supported bank')
+            : context.l10nText('No supported banks available'));
     final subtitleText = hasSupportedOptions
         ? selectedOption != null
-            ? '${selectedOption.bank.shortName} · Tap to change'
-            : 'Tap to browse supported banks'
-        : 'Banks without parsing patterns stay disabled';
+            ? '${context.l10nText(selectedOption.bank.shortName)} · ${context.l10nText('Tap to change')}'
+            : context.l10nText('Tap to browse supported banks')
+        : context.l10nText('Banks without parsing patterns stay disabled');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,7 +316,7 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  'Supported banks',
+                                  context.l10nText('Supported banks'),
                                   style: theme.textTheme.titleSmall?.copyWith(
                                     fontWeight: FontWeight.w700,
                                     color: colorScheme.onSurface,
@@ -359,7 +366,9 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Only banks with SMS parsing support can be selected right now.',
+                                  context.l10nText(
+                                    'Only banks with SMS parsing support can be selected right now.',
+                                  ),
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
                                   ),
@@ -377,7 +386,7 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
                                 });
                               },
                               decoration: InputDecoration(
-                                hintText: 'Search banks',
+                                hintText: context.l10nText('Search banks'),
                                 prefixIcon: const Icon(Icons.search),
                                 suffixIcon: _query.isEmpty
                                     ? null
@@ -421,7 +430,9 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
                                     const EdgeInsets.symmetric(vertical: 20),
                                 child: Center(
                                   child: Text(
-                                    'No banks match your search.',
+                                    context.l10nText(
+                                      'No banks match your search.',
+                                    ),
                                     style: theme.textTheme.bodyMedium?.copyWith(
                                       color: colorScheme.onSurfaceVariant,
                                     ),
@@ -510,7 +521,7 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
               ),
               const SizedBox(height: 10),
               Text(
-                option.bank.shortName,
+                context.l10nText(option.bank.shortName),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: colorScheme.onSurface,
@@ -522,7 +533,7 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
               if (showFullName) ...[
                 const SizedBox(height: 4),
                 Text(
-                  option.bank.name,
+                  context.l10nText(option.bank.name),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -541,7 +552,7 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    'Unsupported',
+                    context.l10nText('Unsupported'),
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: colorScheme.onErrorContainer,
                       fontWeight: FontWeight.w700,
@@ -563,7 +574,7 @@ class _InlineBankSelectorState extends State<InlineBankSelector> {
     }
 
     return Tooltip(
-      message: option.bank.name,
+      message: context.l10nText(option.bank.name),
       child: child,
     );
   }

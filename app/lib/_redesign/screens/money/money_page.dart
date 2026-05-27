@@ -2061,16 +2061,17 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     TransactionProvider provider,
     Transaction transaction,
   ) {
-    final bankLabel = _bankLabel(transaction.bankId);
+    final bankLabel = _localizedBankLabel(context, transaction.bankId);
     final category = provider.getCategoryById(transaction.categoryId);
     final isSelfTransfer = provider.isSelfTransfer(transaction);
     final isMisc = category?.uncategorized == true;
     final categoryLabel = isSelfTransfer
-        ? 'Self'
+        ? context.l10nText('Self')
         : provider.categoryLabelForTransaction(
             transaction,
             uncategorizedLabel: 'Categorize',
           );
+    final localizedCategoryLabel = context.l10nText(categoryLabel);
     final isCategorized =
         isSelfTransfer || transaction.selectedCategoryIds.isNotEmpty;
     final isCredit = transaction.type == 'CREDIT';
@@ -2078,16 +2079,23 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final selected = _selectedRefs.contains(transaction.reference);
     return TransactionTile(
       bank: bankLabel,
-      category: categoryLabel,
+      category: localizedCategoryLabel,
       categoryModel: category,
       isCategorized: isCategorized,
       isDebit: !isCredit,
       isSelfTransfer: isSelfTransfer,
       isMisc: isMisc,
-      amount: _amountLabel(transaction.amount, isCredit: isCredit),
+      amount: _amountLabel(
+        context,
+        transaction.amount,
+        isCredit: isCredit,
+      ),
       amountColor: isCredit ? AppColors.incomeSuccess : AppColors.red,
-      name:
-          _transactionCounterparty(transaction, isSelfTransfer: isSelfTransfer),
+      name: _localizedTransactionCounterparty(
+        context,
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      ),
       timestamp: _transactionTimeLabel(transaction, context),
       selected: selected,
       onTap: _isSelecting
@@ -2927,7 +2935,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     String? lastDateKey;
     for (final txn in filtered) {
       final dt = _parseTransactionTime(txn.time);
-      final key = dt != null ? _formatDateHeader(dt, context) : 'Unknown Date';
+      final key = dt != null
+          ? _formatDateHeader(dt, context)
+          : context.l10nText('Unknown Date');
       if (key != lastDateKey) {
         flatItems.add(key);
         lastDateKey = key;
@@ -3090,8 +3100,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     String? lastDateKey;
     for (final transaction in pageTransactions) {
       final dt = _parseTransactionTime(transaction.time);
-      final dateKey =
-          dt != null ? _formatDateHeader(dt, context) : 'Unknown Date';
+      final dateKey = dt != null
+          ? _formatDateHeader(dt, context)
+          : context.l10nText('Unknown Date');
       if (dateKey != lastDateKey) {
         flatItems.add(dateKey);
         lastDateKey = dateKey;
@@ -3178,8 +3189,16 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final selectedBankCredit = bankSummary?.totalCredit ?? 0.0;
     final selectedBankDebit = bankSummary?.totalDebit ?? 0.0;
     final balanceTitle = isOverview
-        ? 'TOTAL BALANCE'
-        : '${_bankLabel(_selectedBankId).toUpperCase()} BALANCE';
+        ? context.l10nText('TOTAL BALANCE')
+        : '${_localizedBankLabel(context, _selectedBankId)} ${context.l10nText('Balance')}';
+    final balanceSubtitle = isOverview
+        ? '${_formatLocalizedCount(context, bankCount, 'Bank', 'Banks')} | ${_formatLocalizedCount(context, accountCount, 'Account', 'Accounts')}'
+        : _formatLocalizedCount(
+            context,
+            selectedBankAccountCount,
+            'Account',
+            'Accounts',
+          );
 
     return RefreshIndicator(
       color: AppColors.primaryLight,
@@ -3193,9 +3212,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             _AccountsBalanceCard(
               title: balanceTitle,
               balance: isOverview ? totalBalance : selectedBankTotalBalance,
-              subtitle: isOverview
-                  ? '$bankCount Banks | $accountCount Accounts'
-                  : '$selectedBankAccountCount Account${selectedBankAccountCount == 1 ? '' : 's'}',
+              subtitle: balanceSubtitle,
               transactionCount: isOverview ? totalTxnCount : bankTxnCount,
               totalCredit: isOverview ? totalCredit : selectedBankCredit,
               totalDebit: isOverview ? totalDebit : selectedBankDebit,
@@ -3402,11 +3419,14 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         final note = t.note?.toLowerCase() ?? '';
         final reference = t.reference.toLowerCase();
         final bank = _bankLabel(t.bankId).toLowerCase();
+        final localizedBank =
+            _localizedBankLabel(context, t.bankId).toLowerCase();
         return receiver.contains(query) ||
             creditor.contains(query) ||
             note.contains(query) ||
             reference.contains(query) ||
-            bank.contains(query);
+            bank.contains(query) ||
+            localizedBank.contains(query);
       }).toList();
     }
 
@@ -3472,7 +3492,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         backgroundColor: AppColors.cardColor(dialogContext),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
-          'Clear Cash Wallet',
+          dialogContext.l10nText('Clear Cash Wallet'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -3480,7 +3500,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           ),
         ),
         content: Text(
-          'This will set your cash wallet balance to zero.',
+          dialogContext.l10nText(
+            'This will set your cash wallet balance to zero.',
+          ),
           style: TextStyle(
               fontSize: 14, color: AppColors.textSecondary(dialogContext)),
         ),
@@ -3540,7 +3562,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${context.l10nTextRead('Cash wallet')} $direction ${context.l10nTextRead('by')} ETB $amount',
+              '${context.l10nTextRead('Cash wallet')} $direction ${context.l10nTextRead('by')} ${context.l10nTextRead('ETB')} $amount',
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -3636,7 +3658,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       backgroundColor: Colors.transparent,
       builder: (_) => _ReparseAccountSheet(
         accountNumber: account.accountNumber,
-        bankName: _getBankName(account.bankId),
+        bankName: _localizedBankName(context, account.bankId),
       ),
     );
     if (selection == null) return;
@@ -3683,7 +3705,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       final message = result.started
           ? 'Reparse started in the background. Progress will appear on the account card.'
           : (result.errorMessage ?? 'Could not start reparse.');
-      messenger?.showSnackBar(SnackBar(content: Text(message)));
+      messenger?.showSnackBar(
+        SnackBar(content: Text(context.l10nTextRead(message))),
+      );
     } catch (e) {
       if (!mounted) return;
       messenger?.showSnackBar(
@@ -3709,7 +3733,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(
-            'Delete Account',
+            dialogContext.l10nText('Delete Account'),
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -3721,7 +3745,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Are you sure you want to delete this account?',
+                dialogContext.l10nText(
+                  'Are you sure you want to delete this account?',
+                ),
                 style: TextStyle(
                     fontSize: 14,
                     color: AppColors.textSecondary(dialogContext)),
@@ -3737,7 +3763,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Account: ${account.accountNumber}',
+                      '${dialogContext.l10nText('Account')}: ${account.accountNumber}',
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -3745,7 +3771,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Holder: ${account.accountHolderName}',
+                      '${dialogContext.l10nText('Holder')}: ${account.accountHolderName}',
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -3753,7 +3779,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Bank: ${_getBankName(account.bankId)}',
+                      '${dialogContext.l10nText('Bank')}: ${_localizedBankName(dialogContext, account.bankId)}',
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -3764,7 +3790,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
               ),
               const SizedBox(height: 8),
               Text(
-                'This action cannot be undone.',
+                dialogContext.l10nText('This action cannot be undone.'),
                 style: TextStyle(
                   fontSize: 12,
                   color: AppColors.red,
@@ -3777,7 +3803,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
               child: Text(
-                'Cancel',
+                dialogContext.l10nText('Cancel'),
                 style: TextStyle(color: AppColors.textSecondary(dialogContext)),
               ),
             ),
@@ -3787,7 +3813,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                 await _deleteAccount(account);
               },
               child: Text(
-                'Delete',
+                dialogContext.l10nText('Delete'),
                 style: TextStyle(
                   color: AppColors.red,
                   fontWeight: FontWeight.bold,
@@ -4076,9 +4102,36 @@ String _bankLabel(int? bankId) {
   }
 }
 
-String _amountLabel(double amount, {required bool isCredit}) {
+String _localizedBankLabel(BuildContext context, int? bankId) {
+  final label = _bankLabel(bankId);
+  if (bankId != null && label == 'Bank $bankId') {
+    return '${context.l10nText('Bank')} $bankId';
+  }
+  return context.l10nText(label);
+}
+
+String _localizedBankName(BuildContext context, int bankId) {
+  if (bankId == CashConstants.bankId) return context.l10nText('Cash Wallet');
+  try {
+    final bank = _assetBanks.firstWhere((b) => b.id == bankId);
+    return context.l10nText(bank.name);
+  } catch (_) {
+    try {
+      final bank = AppConstants.banks.firstWhere((b) => b.id == bankId);
+      return context.l10nText(bank.name);
+    } catch (_) {
+      return '${context.l10nText('Bank')} $bankId';
+    }
+  }
+}
+
+String _amountLabel(
+  BuildContext context,
+  double amount, {
+  required bool isCredit,
+}) {
   final formatted = formatNumberWithComma(amount);
-  return '${isCredit ? '+' : '-'} ETB $formatted';
+  return '${isCredit ? '+' : '-'} ${context.l10nText('ETB')} $formatted';
 }
 
 String _transactionCounterparty(Transaction transaction,
@@ -4090,9 +4143,34 @@ String _transactionCounterparty(Transaction transaction,
   return isSelfTransfer ? 'YOU' : 'UNKNOWN';
 }
 
+String _localizedTransactionCounterparty(
+  BuildContext context,
+  Transaction transaction, {
+  bool isSelfTransfer = false,
+}) {
+  final label =
+      _transactionCounterparty(transaction, isSelfTransfer: isSelfTransfer);
+  if (label == 'YOU' || label == 'UNKNOWN') return context.l10nText(label);
+  return label;
+}
+
+String _localizedSyncStatus(BuildContext context, String status) {
+  final progressMatch = RegExp(
+    r'^(Parsing|Reparsing)\s+(\d+)\s*/\s*(\d+)\s+messages\.\.\.$',
+  ).firstMatch(status);
+  if (progressMatch != null) {
+    final verb = context.l10nText(progressMatch.group(1)!);
+    final current = progressMatch.group(2)!;
+    final total = progressMatch.group(3)!;
+    final messages = context.l10nText('messages');
+    return '$verb $current/$total $messages...';
+  }
+  return context.l10nText(status);
+}
+
 String _transactionTimeLabel(Transaction transaction, [BuildContext? context]) {
   final dt = _parseTransactionTime(transaction.time);
-  if (dt == null) return 'Unknown time';
+  if (dt == null) return context?.l10nText('Unknown time') ?? 'Unknown time';
 
   if (context != null) {
     try {
@@ -4384,19 +4462,6 @@ String _getBankImage(int bankId) {
       return AppConstants.banks.firstWhere((b) => b.id == bankId).image;
     } catch (_) {
       return '';
-    }
-  }
-}
-
-String _getBankName(int bankId) {
-  if (bankId == CashConstants.bankId) return CashConstants.bankShortName;
-  try {
-    return _assetBanks.firstWhere((b) => b.id == bankId).shortName;
-  } catch (_) {
-    try {
-      return AppConstants.banks.firstWhere((b) => b.id == bankId).shortName;
-    } catch (_) {
-      return 'Bank $bankId';
     }
   }
 }
@@ -10680,7 +10745,7 @@ class _LedgerHeaderSummary extends StatelessWidget {
           TextSpan(
             children: [
               TextSpan(
-                text: 'Starting Date: ',
+                text: '${context.l10nText('Starting Date')}: ',
                 style: labelStyle,
               ),
               TextSpan(
@@ -10702,11 +10767,12 @@ class _LedgerHeaderSummary extends StatelessWidget {
           TextSpan(
             children: [
               TextSpan(
-                text: 'Starting Balance: ',
+                text: '${context.l10nText('Starting Balance')}: ',
                 style: labelStyle,
               ),
               TextSpan(
-                text: 'ETB ${formatNumberWithComma(startingBalance)}',
+                text:
+                    '${context.l10nText('ETB')} ${formatNumberWithComma(startingBalance)}',
                 style: valueStyle,
               ),
             ],
@@ -10751,7 +10817,7 @@ class _SelectionBar extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            '$count selected',
+            '$count ${context.l10nText('selected')}',
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.primaryDark,
               fontWeight: FontWeight.w600,
@@ -11286,8 +11352,10 @@ class _LedgerTransactionEntry extends StatelessWidget {
     final amount = transaction.amount;
     final amountStr = formatNumberAbbreviated(amount).replaceAll('k', 'K');
 
-    final name = isSelfTransfer ? 'YOU' : _transactionCounterparty(transaction);
-    final bankName = _bankLabel(transaction.bankId);
+    final name = isSelfTransfer
+        ? context.l10nText('YOU')
+        : _localizedTransactionCounterparty(context, transaction);
+    final bankName = _localizedBankLabel(context, transaction.bankId);
 
     final dt = _parseTransactionTime(transaction.time);
     final timeParts = dt != null
@@ -11413,12 +11481,16 @@ class _AccountsBalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final balanceLabel =
-        showBalance ? 'ETB ${_formatEtbAbbrev(balance)}' : 'ETB ***';
-    final creditLabel =
-        showBalance ? '+ETB ${_formatEtbAbbrev(totalCredit)}' : '+ETB ***';
-    final debitLabel =
-        showBalance ? '-ETB ${_formatEtbAbbrev(totalDebit)}' : '-ETB ***';
+    final currencyLabel = context.l10nText('ETB');
+    final balanceLabel = showBalance
+        ? '$currencyLabel ${_formatEtbAbbrev(balance)}'
+        : '$currencyLabel ***';
+    final creditLabel = showBalance
+        ? '+$currencyLabel ${_formatEtbAbbrev(totalCredit)}'
+        : '+$currencyLabel ***';
+    final debitLabel = showBalance
+        ? '-$currencyLabel ${_formatEtbAbbrev(totalDebit)}'
+        : '-$currencyLabel ***';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -11469,7 +11541,7 @@ class _AccountsBalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '$subtitle | ${_formatCount(transactionCount)} Txns',
+            '$subtitle | ${_formatLocalizedCount(context, transactionCount, 'Txn', 'Txns')}',
             style: TextStyle(
               color: AppColors.white.withValues(alpha: 0.8),
               fontSize: 13,
@@ -11661,13 +11733,16 @@ class _BankGridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bankName = isCash ? 'Cash Wallet' : _getBankName(bankId);
+    final bankName = isCash
+        ? context.l10nText('Cash Wallet')
+        : _localizedBankLabel(context, bankId);
     final bankImage = _getBankImage(bankId);
+    final currencyLabel = context.l10nText('ETB');
     final balanceLabel =
-        showBalance ? 'ETB ${_formatEtbAbbrev(balance)}' : '*****';
+        showBalance ? '$currencyLabel ${_formatEtbAbbrev(balance)}' : '*****';
     final subtitleLabel = isCash
-        ? 'On-hand cash'
-        : '$accountCount Account${accountCount == 1 ? '' : 's'}';
+        ? context.l10nText('On-hand cash')
+        : _formatLocalizedCount(context, accountCount, 'Account', 'Accounts');
     final isSyncing = syncProgress != null;
     final normalizedProgress = syncProgress?.clamp(0.0, 1.0).toDouble();
 
@@ -11718,7 +11793,7 @@ class _BankGridCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     isSyncing
-                        ? 'Syncing ${(normalizedProgress! * 100).round()}%'
+                        ? '${context.l10nText('Syncing')} ${(normalizedProgress! * 100).round()}%'
                         : balanceLabel,
                     style: TextStyle(
                       color: isSyncing
@@ -11775,7 +11850,7 @@ class _AddAccountCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Add\nAccount',
+                    context.l10nText('Add Account'),
                     style: TextStyle(
                       color: AppColors.textPrimary(context),
                       fontSize: 16,
@@ -11801,7 +11876,7 @@ class _AddAccountCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Register new',
+              context.l10nText('Register new'),
               style: TextStyle(
                 color: AppColors.textSecondary(context),
                 fontSize: 12,
@@ -11810,7 +11885,7 @@ class _AddAccountCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Bank Account',
+              context.l10nText('Bank Account'),
               style: TextStyle(
                 color: AppColors.textSecondary(context),
                 fontSize: 13,
@@ -11852,7 +11927,7 @@ class _DetectedBankCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    detected.bank.shortName,
+                    context.l10nText(detected.bank.shortName),
                     style: TextStyle(
                       color: AppColors.textSecondary(context),
                       fontSize: 16,
@@ -11865,7 +11940,12 @@ class _DetectedBankCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '${detected.messageCount} messages',
+              _formatLocalizedCount(
+                context,
+                detected.messageCount,
+                'message',
+                'messages',
+              ),
               style: TextStyle(
                 color: AppColors.textSecondary(context),
                 fontSize: 12,
@@ -11889,7 +11969,7 @@ class _DetectedBankCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 3),
                   Text(
-                    'Tap to add',
+                    context.l10nText('Tap to add'),
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -12034,13 +12114,16 @@ class _AccountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bankImage = _getBankImage(bankId);
+    final currencyLabel = context.l10nText('ETB');
     final balanceLabel = showBalance
-        ? 'ETB ${formatNumberWithComma(account.balance).replaceFirst(RegExp(r'\.00\$'), '')}'
+        ? '$currencyLabel ${formatNumberWithComma(account.balance).replaceFirst(RegExp(r'\.00\$'), '')}'
         : '*****';
-    final creditLabel =
-        showBalance ? '+ETB ${_formatEtbAbbrev(account.totalCredit)}' : '***';
-    final debitLabel =
-        showBalance ? '-ETB ${_formatEtbAbbrev(account.totalDebit)}' : '***';
+    final creditLabel = showBalance
+        ? '+$currencyLabel ${_formatEtbAbbrev(account.totalCredit)}'
+        : '***';
+    final debitLabel = showBalance
+        ? '-$currencyLabel ${_formatEtbAbbrev(account.totalDebit)}'
+        : '***';
     final normalizedProgress =
         syncProgress == null ? null : syncProgress!.clamp(0.0, 1.0).toDouble();
     final syncPercentLabel = normalizedProgress == null
@@ -12051,9 +12134,13 @@ class _AccountCard extends StatelessWidget {
     final isBusy = isReparsing || syncStatus != null;
     final canDelete = onDelete != null && !isBusy;
 
-    final accountLabel = isCash ? 'On-hand cash' : account.accountNumber;
-    final holderLabel =
-        isCash ? 'Personal funds' : account.accountHolderName.toUpperCase();
+    final accountLabel =
+        isCash ? context.l10nText('On-hand cash') : account.accountNumber;
+    final holderLabel = isCash
+        ? context.l10nText('Personal funds')
+        : account.accountHolderName.toUpperCase();
+    final localizedSyncStatus =
+        syncStatus == null ? null : _localizedSyncStatus(context, syncStatus!);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -12098,10 +12185,10 @@ class _AccountCard extends StatelessWidget {
                                 letterSpacing: 0.3,
                               ),
                             ),
-                            if (syncStatus != null) ...[
+                            if (localizedSyncStatus != null) ...[
                               const SizedBox(height: 4),
                               Text(
-                                syncStatus!,
+                                localizedSyncStatus,
                                 style: TextStyle(
                                   color: AppColors.primaryLight,
                                   fontSize: 11,
@@ -12172,7 +12259,7 @@ class _AccountCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'TRANSACTIONS',
+                              context.l10nText('TRANSACTIONS'),
                               style: TextStyle(
                                 color: AppColors.textSecondary(context),
                                 fontSize: 10,
@@ -12196,7 +12283,7 @@ class _AccountCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'IN & OUT',
+                              context.l10nText('IN & OUT'),
                               style: TextStyle(
                                 color: AppColors.textSecondary(context),
                                 fontSize: 10,
@@ -12268,7 +12355,7 @@ class _AccountCard extends StatelessWidget {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                'Remove Account',
+                                context.l10nText('Remove Account'),
                                 style: TextStyle(
                                   color: AppColors.red.withValues(
                                     alpha: canDelete ? 0.7 : 0.35,
@@ -12536,7 +12623,7 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
                   ),
                 ),
                 Text(
-                  'Set cash wallet amount',
+                  context.l10nText('Set cash wallet amount'),
                   style: TextStyle(
                     color: AppColors.textPrimary(context),
                     fontSize: 18,
@@ -12556,7 +12643,7 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
                   ),
                   decoration: InputDecoration(
                     labelText: context.l10nText('Target balance'),
-                    prefixText: 'ETB ',
+                    prefixText: '${context.l10nText('ETB')} ',
                     prefixStyle: TextStyle(
                       color: AppColors.textSecondary(context),
                       fontSize: 20,
@@ -12583,8 +12670,12 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
                   ),
                   validator: (value) {
                     final parsed = _parseAmount(value ?? '');
-                    if (parsed == null) return 'Enter a valid amount';
-                    if (parsed < 0) return 'Amount cannot be negative';
+                    if (parsed == null) {
+                      return context.l10nTextRead('Enter a valid amount');
+                    }
+                    if (parsed < 0) {
+                      return context.l10nTextRead('Amount cannot be negative');
+                    }
                     return null;
                   },
                 ),
@@ -12603,7 +12694,7 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
                           ),
                         ),
                         child: Text(
-                          'Cancel',
+                          context.l10nText('Cancel'),
                           style: TextStyle(
                               color: AppColors.textSecondary(context)),
                         ),
@@ -12783,7 +12874,9 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Only banks with parsing support can be selected right now. Unsupported banks stay visible in the selector but cannot be chosen.',
+              context.l10nText(
+                'Only banks with parsing support can be selected right now. Unsupported banks stay visible in the selector but cannot be chosen.',
+              ),
               style: TextStyle(
                 color: AppColors.textPrimary(context),
                 fontSize: 13,
@@ -12839,8 +12932,10 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
         SnackBar(
           content: Text(
             _syncPreviousSms
-                ? "Adding your account. You can leave the app, we'll notify you when it's done."
-                : 'Account added successfully',
+                ? context.l10nTextRead(
+                    "Adding your account. You can leave the app, we'll notify you when it's done.",
+                  )
+                : context.l10nTextRead('Account added successfully'),
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -12905,7 +13000,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Add Account',
+                          context.l10nText('Add Account'),
                           style: TextStyle(
                             color: AppColors.textPrimary(context),
                             fontSize: 20,
@@ -12933,7 +13028,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
 
                     // Bank selector
                     Text(
-                      'Bank',
+                      context.l10nText('Bank'),
                       style: TextStyle(
                         color: AppColors.isDark(context)
                             ? AppColors.slate400
@@ -13266,7 +13361,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Reparse SMS',
+                  context.l10nText('Reparse SMS'),
                   style: TextStyle(
                     color: AppColors.textPrimary(context),
                     fontSize: 20,
@@ -13292,7 +13387,9 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Choose what this scan should do for the selected account. Existing categories stay untouched; auto-categorization only fills uncategorized transactions.',
+              context.l10nText(
+                'Choose what this scan should do for the selected account. Existing categories stay untouched; auto-categorization only fills uncategorized transactions.',
+              ),
               style: TextStyle(
                 color: hintColor,
                 fontSize: 13,
@@ -13411,7 +13508,8 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                         children: [
                           Text(
                             _startDate == null
-                                ? 'All available bank messages'
+                                ? context
+                                    .l10nText('All available bank messages')
                                 : _formatDateHeader(_startDate!, context),
                             style: TextStyle(
                               color: AppColors.textPrimary(context),
@@ -13422,8 +13520,12 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                           const SizedBox(height: 2),
                           Text(
                             _startDate == null
-                                ? 'Leave blank to scan the full SMS history for this bank.'
-                                : 'Only scan messages from this date onward.',
+                                ? context.l10nText(
+                                    'Leave blank to scan the full SMS history for this bank.',
+                                  )
+                                : context.l10nText(
+                                    'Only scan messages from this date onward.',
+                                  ),
                             style: TextStyle(
                               color: hintColor,
                               fontSize: 12,
@@ -13872,7 +13974,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                       ),
                       for (final bankId in widget.bankIds)
                         _FilterChip(
-                          label: _bankLabel(bankId),
+                          label: _localizedBankLabel(context, bankId),
                           selected: _selectedBankId == bankId,
                           onTap: () => setState(() => _selectedBankId = bankId),
                         ),
@@ -14194,7 +14296,7 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    'Filter Ledger',
+                    context.l10nText('Filter Ledger'),
                     style: TextStyle(
                       color: AppColors.textPrimary(context),
                       fontSize: 20,
@@ -14268,7 +14370,7 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
                       ),
                       for (final bankId in widget.bankIds)
                         _FilterChip(
-                          label: _bankLabel(bankId),
+                          label: _localizedBankLabel(context, bankId),
                           selected: _selectedBankIds.contains(bankId),
                           onTap: () => _toggleBank(bankId),
                         ),
@@ -14641,7 +14743,7 @@ class _AnalyticsChartFilterSheetState
                         ),
                         for (final bankId in widget.bankIds)
                           _FilterChip(
-                            label: _bankLabel(bankId),
+                            label: _localizedBankLabel(context, bankId),
                             selected: _selectedBankId == bankId,
                             onTap: () =>
                                 setState(() => _selectedBankId = bankId),
