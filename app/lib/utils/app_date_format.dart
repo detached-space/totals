@@ -7,6 +7,38 @@ import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
 
 class AppDateFormat {
+  static const List<String> ethiopianMonthFull = <String>[
+    'Meskerem',
+    'Tikimt',
+    'Hidar',
+    'Tahsas',
+    'Tir',
+    'Yekatit',
+    'Megabit',
+    'Miazia',
+    'Ginbot',
+    'Sene',
+    'Hamle',
+    'Nehase',
+    'Pagume',
+  ];
+
+  static const List<String> ethiopianMonthFullAmharic = <String>[
+    'መስከረም',
+    'ጥቅምት',
+    'ኅዳር',
+    'ታኅሣሥ',
+    'ጥር',
+    'የካቲት',
+    'መጋቢት',
+    'ሚያዝያ',
+    'ግንቦት',
+    'ሰኔ',
+    'ሐምሌ',
+    'ነሐሴ',
+    'ጳጉሜን',
+  ];
+
   static const List<String> ethiopianMonthShort = <String>[
     'Mes',
     'Tik',
@@ -21,6 +53,22 @@ class AppDateFormat {
     'Ham',
     'Neh',
     'Pag',
+  ];
+
+  static const List<String> ethiopianMonthShortAmharic = <String>[
+    'መስከ',
+    'ጥቅም',
+    'ኅዳር',
+    'ታኅሣ',
+    'ጥር',
+    'የካቲ',
+    'መጋቢ',
+    'ሚያዝ',
+    'ግንቦ',
+    'ሰኔ',
+    'ሐምሌ',
+    'ነሐሴ',
+    'ጳጉሜ',
   ];
 
   static const List<String> gregorianMonthFullAmharic = <String>[
@@ -124,9 +172,40 @@ class AppDateFormat {
   static bool usesEthiopianCalendar(BuildContext? context) =>
       calendarOf(context) == AppCalendarOption.ethiopian;
 
-  static String ethiopianMonthName(int month) {
-    if (month < 1 || month > ethiopianMonthShort.length) return '';
-    return ethiopianMonthShort[month - 1];
+  static List<String> ethiopianMonthNames({
+    required AppLanguageOption language,
+    bool abbreviated = true,
+  }) {
+    if (language == AppLanguageOption.amharic) {
+      return abbreviated
+          ? ethiopianMonthShortAmharic
+          : ethiopianMonthFullAmharic;
+    }
+    return abbreviated ? ethiopianMonthShort : ethiopianMonthFull;
+  }
+
+  static String ethiopianMonthName(
+    int month, {
+    bool abbreviated = true,
+    AppLanguageOption language = AppLanguageOption.english,
+  }) {
+    final months = ethiopianMonthNames(
+      language: language,
+      abbreviated: abbreviated,
+    );
+    if (month < 1 || month > months.length) return '';
+    return months[month - 1];
+  }
+
+  static String ethiopianMonthFullName(
+    int month, {
+    AppLanguageOption language = AppLanguageOption.english,
+  }) {
+    return ethiopianMonthName(
+      month,
+      language: language,
+      abbreviated: false,
+    );
   }
 
   static String gregorianMonthName(
@@ -149,7 +228,10 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return ethiopianMonthName(ec['month']!);
+      return ethiopianMonthName(
+        ec['month']!,
+        language: languageOf(context),
+      );
     }
     return gregorianMonthName(
       date.month,
@@ -162,7 +244,10 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return ethiopianMonthName(ec['month']!);
+      return ethiopianMonthFullName(
+        ec['month']!,
+        language: languageOf(context),
+      );
     }
     return gregorianMonthName(
       date.month,
@@ -174,7 +259,7 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return '${ethiopianMonthName(ec['month']!)} ${ec['year']}';
+      return '${ethiopianMonthFullName(ec['month']!, language: languageOf(context))} ${ec['year']}';
     }
     return '${gregorianMonthName(date.month, language: languageOf(context))} ${date.year}';
   }
@@ -183,7 +268,7 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return '${ethiopianMonthName(ec['month']!)} ${ec['year']}';
+      return '${ethiopianMonthName(ec['month']!, language: languageOf(context))} ${ec['year']}';
     }
     return '${gregorianMonthName(date.month, language: languageOf(context), abbreviated: true)} ${date.year}';
   }
@@ -192,7 +277,7 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return '${ethiopianMonthName(ec['month']!)} ${ec['day']}';
+      return '${ethiopianMonthName(ec['month']!, language: languageOf(context))} ${ec['day']}';
     }
     return '${gregorianMonthName(date.month, language: languageOf(context), abbreviated: true)} ${date.day}';
   }
@@ -201,7 +286,7 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return '${ethiopianMonthName(ec['month']!)} ${ec['day']}, ${ec['year']}';
+      return '${ethiopianMonthName(ec['month']!, language: languageOf(context))} ${ec['day']}, ${ec['year']}';
     }
     final language = languageOf(context);
     return '${gregorianMonthName(date.month, language: language, abbreviated: language != AppLanguageOption.amharic)} ${date.day}, ${date.year}';
@@ -213,7 +298,7 @@ class AppDateFormat {
       final ec = _toEthiopian(date);
       final currentEcYear = Kenat.now().getEthiopian()['year'];
       final yearSuffix = ec['year'] != currentEcYear ? ', ${ec['year']}' : '';
-      return '${ethiopianMonthName(ec['month']!)} ${ec['day']}$yearSuffix';
+      return '${ethiopianMonthName(ec['month']!, language: languageOf(context))} ${ec['day']}$yearSuffix';
     }
     final now = DateTime.now();
     final yearSuffix = date.year != now.year ? ', ${date.year}' : '';
@@ -225,7 +310,10 @@ class AppDateFormat {
     final calendar = calendarOf(context);
     if (calendar == AppCalendarOption.ethiopian) {
       final ec = _toEthiopian(date);
-      return '${ethiopianMonthShort.first} - ${ethiopianMonthShort.last} ${ec['year']}';
+      final months = ethiopianMonthNames(
+        language: languageOf(context),
+      );
+      return '${months.first} - ${months.last} ${ec['year']}';
     }
     return languageOf(context) == AppLanguageOption.amharic
         ? '${gregorianMonthShortAmharic.first} - ${gregorianMonthShortAmharic.last} ${date.year}'
@@ -238,8 +326,15 @@ class AppDateFormat {
     if (calendar == AppCalendarOption.ethiopian) {
       final ecStart = _toEthiopian(start);
       final ecEnd = _toEthiopian(end);
-      final startMonth = ethiopianMonthName(ecStart['month']!);
-      final endMonth = ethiopianMonthName(ecEnd['month']!);
+      final language = languageOf(context);
+      final startMonth = ethiopianMonthName(
+        ecStart['month']!,
+        language: language,
+      );
+      final endMonth = ethiopianMonthName(
+        ecEnd['month']!,
+        language: language,
+      );
       if (ecStart['year'] == ecEnd['year']) {
         if (ecStart['month'] == ecEnd['month']) {
           return '$startMonth ${ecStart['day']} - ${ecEnd['day']}, ${ecEnd['year']}';

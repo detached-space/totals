@@ -1172,7 +1172,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return '${AppDateFormat.ethiopianMonthName(ecDate['month']!)} ${ecDate['year']}';
+            return '${_formatEthiopianMonthNameForContext(ecDate['month']!, context)} ${ecDate['year']}';
           }
         } catch (_) {}
         return AppDateFormat.monthYear(window.start, context: context);
@@ -1185,7 +1185,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return '${AppDateFormat.ethiopianMonthShort.first} - ${AppDateFormat.ethiopianMonthShort.last} ${ecDate['year']}';
+            return '${_formatEthiopianMonthRangeForContext(context)} ${ecDate['year']}';
           }
         } catch (_) {}
         return AppDateFormat.yearRangeLabel(window.start, context: context);
@@ -1255,7 +1255,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return '${context.l10nText('W1 - W5 in')} ${AppDateFormat.ethiopianMonthName(ecDate['month']!)} ${ecDate['year']}';
+            return '${context.l10nText('W1 - W5 in')} ${_formatEthiopianMonthNameForContext(ecDate['month']!, context)} ${ecDate['year']}';
           }
         } catch (_) {}
         return '${context.l10nText('W1 - W5 in')} ${AppDateFormat.monthYear(window.start, context: context)}';
@@ -1268,7 +1268,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return '${AppDateFormat.ethiopianMonthShort.first} - ${AppDateFormat.ethiopianMonthShort.last} ${ecDate['year']}';
+            return '${_formatEthiopianMonthRangeForContext(context)} ${ecDate['year']}';
           }
         } catch (_) {}
         return AppDateFormat.yearRangeLabel(window.start, context: context);
@@ -4221,6 +4221,25 @@ String _safePrefix(String value, int length) {
   return value.substring(0, safeLength);
 }
 
+String _formatEthiopianMonthNameForContext(
+  int month,
+  BuildContext? context, {
+  bool abbreviated = true,
+}) {
+  return AppDateFormat.ethiopianMonthName(
+    month,
+    language: AppDateFormat.languageOf(context),
+    abbreviated: abbreviated,
+  );
+}
+
+String _formatEthiopianMonthRangeForContext(BuildContext? context) {
+  final months = AppDateFormat.ethiopianMonthNames(
+    language: AppDateFormat.languageOf(context),
+  );
+  return '${months.first} - ${months.last}';
+}
+
 String _formatMonthYear(DateTime date, [BuildContext? context]) {
   if (context != null) {
     try {
@@ -4313,7 +4332,7 @@ String _formatAnalyticsSpendingPeriodLabel(
                   periodDate.month,
                   periodDate.day,
                 ).getEthiopian();
-                return '${AppDateFormat.ethiopianMonthShort.first} - ${AppDateFormat.ethiopianMonthShort.last} ${ec['year']}';
+                return '${_formatEthiopianMonthRangeForContext(context)} ${ec['year']}';
               }
             } catch (_) {}
           }
@@ -5840,12 +5859,16 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
         final ec = Kenat.fromGregorian(month.year, month.month, month.day)
             .getEthiopian();
         return widget.view == _AnalyticsHeatmapView.daily
-            ? AppDateFormat.ethiopianMonthName(ec['month']!)
+            ? _formatEthiopianMonthNameForContext(
+                ec['month']!,
+                context,
+                abbreviated: false,
+              )
             : '${ec['year']}';
       }
     } catch (_) {}
     return widget.view == _AnalyticsHeatmapView.daily
-        ? _formatFullMonthName(month)
+        ? _formatFullMonthName(month, context)
         : '${month.year}';
   }
 
@@ -5858,12 +5881,12 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
         final ec = Kenat.fromGregorian(month.year, month.month, month.day)
             .getEthiopian();
         return widget.view == _AnalyticsHeatmapView.daily
-            ? '${AppDateFormat.ethiopianMonthName(ec['month']!)} ${ec['year']}'
+            ? '${_formatEthiopianMonthNameForContext(ec['month']!, context)} ${ec['year']}'
             : '${ec['year']}';
       }
     } catch (_) {}
     return widget.view == _AnalyticsHeatmapView.daily
-        ? _formatMonthYear(month)
+        ? _formatMonthYear(month, context)
         : '${month.year}';
   }
 
@@ -6189,7 +6212,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
       if (isEC) {
         final ec = Kenat.fromGregorian(month.year, month.month, month.day)
             .getEthiopian();
-        return AppDateFormat.ethiopianMonthName(ec['month']!);
+        return _formatEthiopianMonthNameForContext(ec['month']!, context);
       }
       return AppDateFormat.monthShort(month, context: context);
     }
@@ -6408,13 +6431,21 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     BuildContext context,
     TextStyle style,
   ) {
-    final labels = List<String>.generate(
-      12,
-      (index) => AppDateFormat.monthShort(
-        DateTime(2024, index + 1, 1),
-        context: context,
-      ),
-    );
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
+    final labels = isEC
+        ? List<String>.generate(
+            13,
+            (index) => _formatEthiopianMonthNameForContext(index + 1, context),
+          )
+        : List<String>.generate(
+            12,
+            (index) => AppDateFormat.monthShort(
+              DateTime(2024, index + 1, 1),
+              context: context,
+            ),
+          );
     return _measureLabelViewportWidth(
       context: context,
       style: style,
@@ -6749,7 +6780,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
           isCurrentMonth =
               ec['year'] == ecNow['year'] && monthNumber == ecNow['month'];
           isSelectedMonth = monthNumber == ec['month'];
-          label = AppDateFormat.ethiopianMonthName(monthNumber);
+          label = _formatEthiopianMonthNameForContext(monthNumber, context);
           final gc =
               Kenat.fromEthiopian(ec['year']!, monthNumber, 1).getGregorian();
           monthDate = DateTime(gc['year']!, gc['month']!, gc['day']!);
@@ -7952,7 +7983,8 @@ Widget _buildAnalyticsTrendBottomAxisTitle(
     final ec = Kenat.fromGregorian(bucketDates[index].year,
             bucketDates[index].month, bucketDates[index].day)
         .getEthiopian();
-    final monthShort = AppDateFormat.ethiopianMonthName(ec['month']!);
+    final monthShort =
+        _formatEthiopianMonthNameForContext(ec['month']!, context);
     label = period == _AnalyticsLineChartPeriod.yearly
         ? monthShort
         : '$monthShort ${ec['day']}';
@@ -8039,13 +8071,17 @@ String _formatAnalyticsDateRange(DateTime start, DateTime end,
             .getEthiopian();
         final ecEnd =
             Kenat.fromGregorian(end.year, end.month, end.day).getEthiopian();
+        final startMonth =
+            _formatEthiopianMonthNameForContext(ecStart['month']!, context);
+        final endMonth =
+            _formatEthiopianMonthNameForContext(ecEnd['month']!, context);
         if (ecStart['year'] == ecEnd['year']) {
           if (ecStart['month'] == ecEnd['month']) {
-            return '${AppDateFormat.ethiopianMonthName(ecStart['month']!)} ${ecStart['day']} - ${ecEnd['day']}, ${ecEnd['year']}';
+            return '$startMonth ${ecStart['day']} - ${ecEnd['day']}, ${ecEnd['year']}';
           }
-          return '${AppDateFormat.ethiopianMonthName(ecStart['month']!)} ${ecStart['day']} - ${AppDateFormat.ethiopianMonthName(ecEnd['month']!)} ${ecEnd['day']}, ${ecEnd['year']}';
+          return '$startMonth ${ecStart['day']} - $endMonth ${ecEnd['day']}, ${ecEnd['year']}';
         }
-        return '${AppDateFormat.ethiopianMonthName(ecStart['month']!)} ${ecStart['day']}, ${ecStart['year']} - ${AppDateFormat.ethiopianMonthName(ecEnd['month']!)} ${ecEnd['day']}, ${ecEnd['year']}';
+        return '$startMonth ${ecStart['day']}, ${ecStart['year']} - $endMonth ${ecEnd['day']}, ${ecEnd['year']}';
       }
     } catch (_) {}
   }
@@ -8265,7 +8301,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
                     validDates.first.month, validDates.first.day)
                 .getEthiopian();
             rangeLabel =
-                '${context.l10nText('Week of')} ${AppDateFormat.ethiopianMonthName(ecStart['month']!)} ${ecStart['day']}';
+                '${context.l10nText('Week of')} ${_formatEthiopianMonthNameForContext(ecStart['month']!, context)} ${ecStart['day']}';
             break;
           }
         case _AnalyticsLineChartPeriod.monthly:
@@ -8286,7 +8322,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
             incomeValues = List<double>.filled(dayCount, 0.0);
             expenseValues = List<double>.filled(dayCount, 0.0);
             supportingText =
-                '${AppDateFormat.ethiopianMonthName(ecAnchor['month']!)} ${ecAnchor['year']}';
+                '${_formatEthiopianMonthNameForContext(ecAnchor['month']!, context)} ${ecAnchor['year']}';
             rangeLabel = supportingText;
             break;
           }
@@ -8300,7 +8336,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
             incomeValues = List<double>.filled(13, 0.0);
             expenseValues = List<double>.filled(13, 0.0);
             supportingText =
-                '${AppDateFormat.ethiopianMonthShort.first} - ${AppDateFormat.ethiopianMonthShort.last} ${ecAnchor['year']}';
+                '${_formatEthiopianMonthRangeForContext(context)} ${ecAnchor['year']}';
             rangeLabel = '${ecAnchor['year']}';
             break;
           }
@@ -8967,8 +9003,11 @@ class _AnalyticsBarChartCard extends StatelessWidget {
     final monthlyLabels = isEC && isAmharic
         ? ['ሳ1', 'ሳ2', 'ሳ3', 'ሳ4', 'ሳ5']
         : ['W1', 'W2', 'W3', 'W4', 'W5'];
-    final yearlyLabels =
-        isEC ? AppDateFormat.ethiopianMonthShort : yearlyLabelsDefault;
+    final yearlyLabels = isEC
+        ? AppDateFormat.ethiopianMonthNames(
+            language: AppDateFormat.languageOf(context),
+          )
+        : yearlyLabelsDefault;
 
     final labels = switch (filter.barPeriod) {
       _AnalyticsBarChartPeriod.weekly => weeklyLabels,
@@ -9119,9 +9158,9 @@ class _AnalyticsBarChartCard extends StatelessWidget {
             context: context,
           ),
         _AnalyticsBarChartPeriod.monthly =>
-          '${AppDateFormat.ethiopianMonthName(ecAnchor['month']!)} ${ecAnchor['year']}',
+          '${_formatEthiopianMonthNameForContext(ecAnchor['month']!, context)} ${ecAnchor['year']}',
         _AnalyticsBarChartPeriod.yearly =>
-          '${AppDateFormat.ethiopianMonthShort.first} - ${AppDateFormat.ethiopianMonthShort.last} ${ecAnchor['year']}',
+          '${_formatEthiopianMonthRangeForContext(context)} ${ecAnchor['year']}',
       };
     } else {
       final monthStart = DateTime(anchor.year, anchor.month, 1);
