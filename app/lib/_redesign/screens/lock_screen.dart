@@ -8,6 +8,7 @@ import 'package:totals/data/consts.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/bank_detection_startup_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignLockScreen extends StatefulWidget {
   final VoidCallback onUnlock;
@@ -106,9 +107,11 @@ class _RedesignLockScreenState extends State<RedesignLockScreen>
 
               // Subtitle
               Text(
-                isPrimingHome
-                    ? 'Preparing your latest totals...'
-                    : 'Your finances are locked',
+                context.l10nText(
+                  isPrimingHome
+                      ? 'Preparing your latest totals...'
+                      : 'Your finances are locked',
+                ),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
@@ -161,18 +164,18 @@ class _RedesignLockScreenState extends State<RedesignLockScreen>
                   color: AppColors.primaryLight.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
+                    const Icon(
                       AppIcons.fingerprint_rounded,
                       size: 18,
                       color: AppColors.primaryDark,
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     Text(
-                      'Tap to unlock',
-                      style: TextStyle(
+                      context.l10nText('Tap to unlock'),
+                      style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: AppColors.primaryDark,

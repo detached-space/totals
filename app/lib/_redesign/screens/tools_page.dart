@@ -5,6 +5,7 @@ import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
 import 'package:totals/screens/web_page.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignToolsPage extends StatelessWidget {
   const RedesignToolsPage({super.key});
@@ -22,7 +23,7 @@ class RedesignToolsPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Tools',
+                context.l10nText('Tools'),
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary(context),
@@ -30,7 +31,7 @@ class RedesignToolsPage extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Handy utilities at your fingertips.',
+                context.l10nText('Handy utilities at your fingertips.'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary(context),
                 ),
@@ -39,8 +40,8 @@ class RedesignToolsPage extends StatelessWidget {
               _ToolTile(
                 icon: AppIcons.dashboard_outlined,
                 iconColor: AppColors.primaryLight,
-                title: 'Web Dashboard',
-                subtitle: 'View your finances in a browser',
+                title: context.l10nText('Web Dashboard'),
+                subtitle: context.l10nText('View your finances in a browser'),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const WebPage()),
@@ -49,8 +50,8 @@ class RedesignToolsPage extends StatelessWidget {
               _ToolTile(
                 icon: AppIcons.account_balance_outlined,
                 iconColor: AppColors.blue,
-                title: 'Quick Accounts',
-                subtitle: 'Manage linked bank accounts',
+                title: context.l10nText('Quick Accounts'),
+                subtitle: context.l10nText('Manage linked bank accounts'),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const AccountsPage()),
@@ -59,8 +60,9 @@ class RedesignToolsPage extends StatelessWidget {
               _ToolTile(
                 icon: AppIcons.qr_code_scanner_rounded,
                 iconColor: AppColors.incomeSuccess,
-                title: 'Verify Payments',
-                subtitle: 'Scan and verify transaction receipts',
+                title: context.l10nText('Verify Payments'),
+                subtitle:
+                    context.l10nText('Scan and verify transaction receipts'),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const VerifyPaymentsPage()),
@@ -69,8 +71,9 @@ class RedesignToolsPage extends StatelessWidget {
               _ToolTile(
                 icon: AppIcons.sms_outlined,
                 iconColor: AppColors.amber,
-                title: 'Failed Parsings',
-                subtitle: 'Review bank transactions without patterns',
+                title: context.l10nText('Failed Parsings'),
+                subtitle: context
+                    .l10nText('Review bank transactions without patterns'),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const FailedParsesPage()),

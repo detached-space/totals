@@ -11,6 +11,9 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:kenat/kenat.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
@@ -21,6 +24,7 @@ import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignHomePage extends StatefulWidget {
   const RedesignHomePage({super.key});
@@ -73,10 +77,10 @@ class _RedesignHomePageState extends State<RedesignHomePage>
 
       if (result.permissionDenied) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('SMS permission denied.'),
+          SnackBar(
+            content: Text(context.l10nTextRead('SMS permission denied.')),
             behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
         return;
@@ -87,8 +91,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
       }
 
       final message = result.added > 0
-          ? 'Added ${result.added} new transactions'
-          : 'No missed transactions';
+          ? '${context.l10nTextRead('Added')} ${result.added} ${context.l10nTextRead('new transactions')}'
+          : context.l10nTextRead('No missed transactions');
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -100,10 +104,10 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to refresh SMS'),
+        SnackBar(
+          content: Text(context.l10nTextRead('Failed to refresh SMS')),
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     } finally {
@@ -117,16 +121,21 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete $count transaction${count > 1 ? 's' : ''}?'),
-        content: const Text('This cannot be undone.'),
+        title: Text(
+          '${ctx.l10nText('Delete')} $count ${ctx.l10nText(count > 1 ? 'transactions' : 'transaction')}?',
+        ),
+        content: Text(ctx.l10nText('This cannot be undone.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(ctx.l10nText('Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: TextStyle(color: AppColors.red)),
+            child: Text(
+              ctx.l10nText('Delete'),
+              style: const TextStyle(color: AppColors.red),
+            ),
           ),
         ],
       ),
@@ -227,7 +236,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Today ($todayCount)',
+                                '${context.l10nText('Today')} ($todayCount)',
                                 style: theme.textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   color: AppColors.textPrimary(context),
@@ -242,7 +251,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                       padding: EdgeInsets.zero,
                                       foregroundColor: AppColors.primaryLight,
                                     ),
-                                    child: const Text('See all'),
+                                    child: Text(context.l10nText('See all')),
                                   ),
                                   const SizedBox(width: 4),
                                   _RefreshButton(
@@ -287,6 +296,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                               final amountLabel = _amountLabel(
                                 transaction.amount,
                                 isCredit: isCredit,
+                                currencyLabel: context.l10nText('ETB'),
                               );
                               final selected =
                                   _selectedRefs.contains(transaction.reference);
@@ -412,7 +422,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('Import'),
+              child: Text(ctx.l10nText('Import')),
             ),
           ],
         ),
@@ -425,17 +435,17 @@ class _RedesignHomePageState extends State<RedesignHomePage>
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Backup imported successfully'),
+        SnackBar(
+          content: Text(context.l10nTextRead('Backup imported successfully')),
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Import failed: $e'),
+          content: Text('${context.l10nTextRead('Import failed')}: $e'),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 3),
         ),
@@ -578,25 +588,17 @@ Map<String, double> _deriveCashBalancesForHomeBreakdown({
   return derived;
 }
 
-String _formatEtbValue(double value) {
-  final rounded = value.roundToDouble();
-  final formatted =
-      formatNumberWithComma(rounded).replaceFirst(RegExp(r'\.00$'), '');
-  return formatted;
-}
-
 String _formatCompactEtbValue(double value) {
   return formatNumberAbbreviated(value).replaceAll(' ', '');
 }
 
-String _formatSignedEtb(double value) {
-  final prefix = value >= 0 ? '+' : '-';
-  return '$prefix ETB ${_formatEtbValue(value.abs())}';
-}
-
-String _amountLabel(double amount, {required bool isCredit}) {
+String _amountLabel(
+  double amount, {
+  required bool isCredit,
+  required String currencyLabel,
+}) {
   final formatted = formatNumberWithComma(amount);
-  return '${isCredit ? '+' : '-'} ETB $formatted';
+  return '${isCredit ? '+' : '-'} $currencyLabel $formatted';
 }
 
 String _transactionCounterparty(Transaction transaction,
@@ -643,6 +645,7 @@ class _TotalBalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currencyLabel = context.l10nText('ETB');
     final abbreviated =
         formatNumberAbbreviated(totalBalance).replaceAll('k', 'K');
     final displayBalance = showBalance ? abbreviated : '***';
@@ -669,7 +672,9 @@ class _TotalBalanceCard extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  hasAddedBankAccounts ? 'TOTAL BALANCE' : 'GET STARTED',
+                  context.l10nText(
+                    hasAddedBankAccounts ? 'TOTAL BALANCE' : 'GET STARTED',
+                  ),
                   style: TextStyle(
                     color: AppColors.white.withValues(alpha: 0.85),
                     fontSize: 12,
@@ -684,7 +689,7 @@ class _TotalBalanceCard extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    'ETB $displayBalance',
+                    '$currencyLabel $displayBalance',
                     style: const TextStyle(
                       color: AppColors.white,
                       fontSize: 32,
@@ -719,7 +724,7 @@ class _TotalBalanceCard extends StatelessWidget {
                   child: Row(
                     children: [
                       Text(
-                        'How did I get here?',
+                        context.l10nText('How did I get here?'),
                         style: TextStyle(
                           color: AppColors.white.withValues(alpha: 0.85),
                           fontSize: 13,
@@ -746,7 +751,7 @@ class _TotalBalanceCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _BalanceDelta(
-                      label: 'Today',
+                      label: context.l10nText('Today'),
                       income: todayIncomeLabel,
                       expense: todayExpenseLabel,
                     ),
@@ -754,7 +759,7 @@ class _TotalBalanceCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _BalanceDelta(
-                      label: 'This week',
+                      label: context.l10nText('This week'),
                       income: weekIncomeLabel,
                       expense: weekExpenseLabel,
                     ),
@@ -764,7 +769,7 @@ class _TotalBalanceCard extends StatelessWidget {
             ] else ...[
               const SizedBox(height: 14),
               Text(
-                'No bank accounts added yet.',
+                context.l10nText('No bank accounts added yet.'),
                 style: const TextStyle(
                   color: AppColors.white,
                   fontSize: 22,
@@ -774,7 +779,9 @@ class _TotalBalanceCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Tap this card to open Accounts and add your bank accounts.',
+                context.l10nText(
+                  'Tap this card to open Accounts and add your bank accounts.',
+                ),
                 style: TextStyle(
                   color: AppColors.white.withValues(alpha: 0.82),
                   fontSize: 14,
@@ -786,7 +793,7 @@ class _TotalBalanceCard extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    'Open Accounts',
+                    context.l10nText('Open Accounts'),
                     style: TextStyle(
                       color: AppColors.white.withValues(alpha: 0.95),
                       fontSize: 13,
@@ -967,7 +974,9 @@ class _InsightCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  showImportBackupPrompt ? 'RESTORE FROM BACKUP' : 'INSIGHT',
+                  context.l10nText(
+                    showImportBackupPrompt ? 'RESTORE FROM BACKUP' : 'INSIGHT',
+                  ),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.textSecondary(context),
                     letterSpacing: 0.8,
@@ -977,8 +986,9 @@ class _InsightCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 if (showImportBackupPrompt) ...[
                   Text(
-                    'Used Totals before? Import your backup to restore your '
-                    'accounts, transactions, budgets, and categories.',
+                    context.l10nText(
+                      'Used Totals before? Import your backup to restore your accounts, transactions, budgets, and categories.',
+                    ),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppColors.isDark(context)
                           ? AppColors.slate400
@@ -1011,7 +1021,9 @@ class _InsightCard extends StatelessWidget {
                           )
                         : const Icon(AppIcons.cloud_download, size: 16),
                     label: Text(
-                      isImportingBackup ? 'Importing...' : 'Import Backup',
+                      context.l10nText(
+                        isImportingBackup ? 'Importing...' : 'Import Backup',
+                      ),
                     ),
                   ),
                 ] else
@@ -1092,7 +1104,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
           Row(
             children: [
               Text(
-                'TOTAL BALANCE',
+                context.l10nText('TOTAL BALANCE'),
                 style: TextStyle(
                   color: AppColors.white.withValues(alpha: 0.82),
                   fontSize: 12,
@@ -1106,7 +1118,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
           Row(
             children: [
               Text(
-                'ETB ...',
+                '${context.l10nText('ETB')} ...',
                 style: TextStyle(
                   color: AppColors.white.withValues(alpha: 0.74),
                   fontSize: 32,
@@ -1124,7 +1136,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
           ),
           const SizedBox(height: 12),
           Text(
-            'How did I get here?',
+            context.l10nText('How did I get here?'),
             style: TextStyle(
               color: AppColors.white.withValues(alpha: 0.7),
               fontSize: 13,
@@ -1140,11 +1152,17 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
           Row(
             children: [
               Expanded(
-                child: _buildBalanceDeltaSkeleton(context, label: 'Today'),
+                child: _buildBalanceDeltaSkeleton(
+                  context,
+                  label: context.l10nText('Today'),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildBalanceDeltaSkeleton(context, label: 'This week'),
+                child: _buildBalanceDeltaSkeleton(
+                  context,
+                  label: context.l10nText('This week'),
+                ),
               ),
             ],
           ),
@@ -1260,7 +1278,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
-          'Today',
+          context.l10nText('Today'),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary(context),
@@ -1270,7 +1288,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'See all',
+              context.l10nText('See all'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.primaryLight.withValues(alpha: 0.7),
                     fontWeight: FontWeight.w500,
@@ -1369,7 +1387,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
           Row(
             children: [
               Text(
-                'Income vs Expense',
+                context.l10nText('Income vs Expense'),
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary(context),
@@ -1492,7 +1510,7 @@ class _StaticRangeToggleButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        label,
+        context.l10nText(label),
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w700,
@@ -1578,7 +1596,7 @@ class _EmptyTransactions extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'No transactions today',
+            context.l10nText('No transactions today'),
             style: theme.textTheme.bodyMedium?.copyWith(
               color: AppColors.isDark(context)
                   ? AppColors.slate400
@@ -1588,7 +1606,9 @@ class _EmptyTransactions extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'New transactions will appear here as they come in.',
+            context.l10nText(
+              'New transactions will appear here as they come in.',
+            ),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textTertiary(context),
@@ -1614,6 +1634,10 @@ class _IncomeExpenseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final currencyLabel = context.l10nText('ETB');
+    final rangeLabel = trendSeries.days == 7
+        ? context.l10nText('Last 7 days')
+        : context.l10nText('Last 30 days');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1628,7 +1652,7 @@ class _IncomeExpenseCard extends StatelessWidget {
           Row(
             children: [
               Text(
-                'Income vs Expense',
+                context.l10nText('Income vs Expense'),
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary(context),
@@ -1658,28 +1682,28 @@ class _IncomeExpenseCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Text(
-                  '+ ETB ${_formatCompactEtbValue(trendSeries.totalIncome)}',
+                  '+ $currencyLabel ${_formatCompactEtbValue(trendSeries.totalIncome)}',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.incomeSuccess,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
-                  '- ETB ${_formatCompactEtbValue(trendSeries.totalExpense)}',
+                  '- $currencyLabel ${_formatCompactEtbValue(trendSeries.totalExpense)}',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.red,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
-                  'Peak: ETB ${_formatCompactEtbValue(trendSeries.maxValue)}',
+                  '${context.l10nText('Peak')}: $currencyLabel ${_formatCompactEtbValue(trendSeries.maxValue)}',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.textSecondary(context),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 Text(
-                  'Last ${trendSeries.days} days',
+                  rangeLabel,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.textSecondary(context),
                   ),
@@ -1754,7 +1778,7 @@ class _RangeToggleButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
-          label,
+          context.l10nText(label),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
@@ -1777,10 +1801,13 @@ class _IncomeExpenseTrendChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isEC = context.watch<ThemeProvider>().appCalendar ==
+        AppCalendarOption.ethiopian;
+
     if (trendSeries.maxValue <= 0.001) {
       return Center(
         child: Text(
-          'No income or expense data yet.',
+          context.l10nText('No income or expense data yet.'),
           style: TextStyle(
             color: AppColors.textSecondary(context),
             fontSize: 13,
@@ -1838,6 +1865,7 @@ class _IncomeExpenseTrendChart extends StatelessWidget {
                 value,
                 meta,
                 pointCount,
+                isEC,
               ),
             ),
           ),
@@ -1946,6 +1974,7 @@ Widget _buildHomeTrendBottomAxisTitle(
   double value,
   TitleMeta meta,
   int pointCount,
+  bool isEC,
 ) {
   if ((value - value.roundToDouble()).abs() > 0.001) {
     return const SizedBox.shrink();
@@ -1962,7 +1991,18 @@ Widget _buildHomeTrendBottomAxisTitle(
   final today = DateTime.now();
   final endDate = DateTime(today.year, today.month, today.day);
   final date = endDate.subtract(Duration(days: pointCount - 1 - index));
-  final label = DateFormat('MMM d').format(date);
+
+  String label;
+  if (isEC) {
+    final ecDate =
+        Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+    final fullMonth = MonthNames.amharic[ecDate['month']! - 1];
+    final shortMonth =
+        fullMonth.length <= 3 ? fullMonth : fullMonth.substring(0, 3);
+    label = '$shortMonth ${ecDate['day']}';
+  } else {
+    label = DateFormat('MMM d').format(date);
+  }
 
   return SideTitleWidget(
     axisSide: meta.axisSide,
@@ -2113,8 +2153,17 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
     'Dec',
   ];
 
-  String _formatDateKey(DateTime dt) =>
-      '${_months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  String _formatDateKey(DateTime dt) {
+    final isEC = context.read<ThemeProvider>().appCalendar ==
+        AppCalendarOption.ethiopian;
+    if (isEC) {
+      final ecDate =
+          Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
+      return '${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['day']}, ${ecDate['year']}';
+    } else {
+      return '${_months[dt.month - 1]} ${dt.day}, ${dt.year}';
+    }
+  }
 
   String _formatTime(DateTime dt) {
     final h = dt.hour;
@@ -2130,6 +2179,9 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
     final flatItems = _showWeek ? _weekItems : _monthItems;
     final startBal = _showWeek ? _weekStartingBalance : _monthStartingBalance;
     final startDate = _showWeek ? _weekStartingDate : _monthStartingDate;
+    final transactionCount =
+        flatItems.where((entry) => entry is Transaction).length;
+    final currencyLabel = context.l10nText('ETB');
 
     return Container(
       constraints: BoxConstraints(
@@ -2158,7 +2210,7 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
               child: Row(
                 children: [
                   Text(
-                    'How did I get here?',
+                    context.l10nText('How did I get here?'),
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary(context),
@@ -2178,19 +2230,19 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
               child: Row(
                 children: [
                   _PeriodChip(
-                    label: 'Last 7 days',
+                    label: context.l10nText('Last 7 days'),
                     selected: _showWeek,
                     onTap: () => setState(() => _showWeek = true),
                   ),
                   const SizedBox(width: 8),
                   _PeriodChip(
-                    label: 'This month',
+                    label: context.l10nText('This month'),
                     selected: !_showWeek,
                     onTap: () => setState(() => _showWeek = false),
                   ),
                   const Spacer(),
                   Text(
-                    '${flatItems.where((e) => e is Transaction).length} txns',
+                    '$transactionCount ${context.l10nText('txns')}',
                     style: TextStyle(
                       color: AppColors.textTertiary(context),
                       fontSize: 12,
@@ -2205,7 +2257,7 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Text(
-                  '${startDate != null ? _formatDateKey(startDate) : ''} Starting Balance: ETB ${formatNumberWithComma(startBal)}',
+                  '${startDate != null ? '${_formatDateKey(startDate)} ' : ''}${context.l10nText('Starting Balance')}: $currencyLabel ${formatNumberWithComma(startBal)}',
                   style: TextStyle(
                     color: AppColors.textSecondary(context),
                     fontSize: 12,
@@ -2218,7 +2270,11 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
               child: flatItems.isEmpty
                   ? Center(
                       child: Text(
-                        'No transactions this ${_showWeek ? 'last 7 days' : 'month'}',
+                        context.l10nText(
+                          _showWeek
+                              ? 'No transactions this last 7 days'
+                              : 'No transactions this month',
+                        ),
                         style: TextStyle(
                           color: AppColors.textSecondary(context),
                           fontSize: 14,
@@ -2355,7 +2411,7 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
                                                 ),
                                                 const SizedBox(height: 3),
                                                 Text(
-                                                  '$arrow ${sign}ETB $amountStr',
+                                                  '$arrow $sign$currencyLabel $amountStr',
                                                   style: TextStyle(
                                                     color: amountColor,
                                                     fontSize: 12,

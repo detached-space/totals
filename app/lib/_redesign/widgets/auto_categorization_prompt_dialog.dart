@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/auto_categorization.dart';
 
 Future<bool?> showAutoCategorizationPromptDialog({
@@ -53,8 +54,8 @@ Future<bool?> showAutoCategorizationPromptDialog({
               const SizedBox(height: 16),
               Text(
                 updatesExistingRule
-                    ? 'Update auto-categorization?'
-                    : 'Auto-categorize this address?',
+                    ? dialogContext.l10nText('Update auto-categorization?')
+                    : dialogContext.l10nText('Auto-categorize this address?'),
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary(dialogContext),
@@ -68,7 +69,7 @@ Future<bool?> showAutoCategorizationPromptDialog({
                     height: 1.45,
                   ),
                   children: [
-                    const TextSpan(text: 'Use '),
+                    TextSpan(text: '${dialogContext.l10nText('Use')} '),
                     TextSpan(
                       text: categoryName,
                       style: TextStyle(
@@ -76,8 +77,10 @@ Future<bool?> showAutoCategorizationPromptDialog({
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const TextSpan(
-                        text: ' automatically for future transactions from '),
+                    TextSpan(
+                      text:
+                          ' ${dialogContext.l10nText('automatically for future transactions from')} ',
+                    ),
                     TextSpan(
                       text: decision.counterparty,
                       style: TextStyle(
@@ -105,7 +108,7 @@ Future<bool?> showAutoCategorizationPromptDialog({
                           ),
                         ),
                       ),
-                      child: const Text('No'),
+                      child: Text(dialogContext.l10nText('No')),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -121,7 +124,7 @@ Future<bool?> showAutoCategorizationPromptDialog({
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      child: const Text('Auto-categorize'),
+                      child: Text(dialogContext.l10nText('Auto-categorize')),
                     ),
                   ),
                 ],

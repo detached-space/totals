@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:kenat/kenat.dart';
+import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
@@ -8,6 +11,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class TodaysTransactionsPage extends StatefulWidget {
   const TodaysTransactionsPage({super.key});
@@ -57,16 +61,21 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete $count transaction${count > 1 ? 's' : ''}?'),
-        content: const Text('This cannot be undone.'),
+        title: Text(
+          '${ctx.l10nText('Delete')} $count ${ctx.l10nText(count > 1 ? 'transactions' : 'transaction')}?',
+        ),
+        content: Text(ctx.l10nText('This cannot be undone.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(ctx.l10nText('Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: TextStyle(color: AppColors.red)),
+            child: Text(
+              ctx.l10nText('Delete'),
+              style: const TextStyle(color: AppColors.red),
+            ),
           ),
         ],
       ),
@@ -80,10 +89,23 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isEC = context.watch<ThemeProvider>().appCalendar ==
+        AppCalendarOption.ethiopian;
 
     return Consumer<TransactionProvider>(
       builder: (context, provider, _) {
         final transactions = provider.todayTransactions;
+
+        String pageTitle;
+        if (_isSelecting) {
+          pageTitle = '${_selectedRefs.length} selected';
+        } else if (isEC) {
+          final ecDate = Kenat.now().getEthiopian();
+          pageTitle =
+              '${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['day']}, ${ecDate['year']}';
+        } else {
+          pageTitle = context.l10nText("Today's Transactions");
+        }
 
         return Scaffold(
           backgroundColor: AppColors.background(context),
@@ -100,9 +122,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                     icon: const Icon(AppIcons.arrow_back_rounded),
                   ),
             title: Text(
-              _isSelecting
-                  ? '${_selectedRefs.length} selected'
-                  : "Today's Transactions",
+              pageTitle,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: _isSelecting
@@ -131,7 +151,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'No transactions today',
+                        context.l10nText('No transactions today'),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: AppColors.textSecondary(context),
                           fontWeight: FontWeight.w500,
@@ -168,11 +188,15 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       isDebit: !isCredit,
                       isSelfTransfer: isSelfTransfer,
                       isMisc: isMisc,
-                      amount: _amountLabel(tx.amount, isCredit: isCredit),
+                      amount: _amountLabel(
+                        tx.amount,
+                        isCredit: isCredit,
+                        currencyLabel: context.l10nText('ETB'),
+                      ),
                       amountColor:
                           isCredit ? AppColors.incomeSuccess : AppColors.red,
                       name: _counterparty(tx, isSelfTransfer: isSelfTransfer),
-                      timestamp: _timeLabel(tx),
+                      timestamp: _timeLabel(tx, isEC),
                       selected: selected,
                       onTap: _isSelecting
                           ? () => _toggle(tx)
@@ -192,9 +216,13 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-String _amountLabel(double amount, {required bool isCredit}) {
+String _amountLabel(
+  double amount, {
+  required bool isCredit,
+  required String currencyLabel,
+}) {
   final formatted = formatNumberWithComma(amount);
-  return '${isCredit ? '+' : '-'} ETB $formatted';
+  return '${isCredit ? '+' : '-'} $currencyLabel $formatted';
 }
 
 String _counterparty(Transaction tx, {bool isSelfTransfer = false}) {
@@ -205,10 +233,14 @@ String _counterparty(Transaction tx, {bool isSelfTransfer = false}) {
   return isSelfTransfer ? 'YOU' : 'UNKNOWN';
 }
 
-String _timeLabel(Transaction tx) {
+String _timeLabel(Transaction tx, bool isEC) {
   if (tx.time == null || tx.time!.isEmpty) return '';
   try {
     final dt = DateTime.parse(tx.time!).toLocal();
+    if (isEC) {
+      final time = Time.fromGregorian(dt.hour, dt.minute);
+      return time.format({'useGeez': false, 'lang': 'amharic'});
+    }
     final hh = dt.hour.toString().padLeft(2, '0');
     final mm = dt.minute.toString().padLeft(2, '0');
     return '$hh:$mm';

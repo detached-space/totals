@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignBottomNav extends StatelessWidget {
   static const int _tabCount = 5;
@@ -40,35 +41,35 @@ class RedesignBottomNav extends StatelessWidget {
     const indicatorSize = 4.0;
     final items = [
       (
-        label: 'Home',
+        label: context.l10n('nav.home', 'Home'),
         activeIcon: AppIcons.home_filled,
         inactiveIcon: AppIcons.home_outlined,
         onLongPress: null,
         onLongPressAt: null,
       ),
       (
-        label: 'Money',
+        label: context.l10n('nav.money', 'Money'),
         activeIcon: AppIcons.account_balance_wallet,
         inactiveIcon: AppIcons.account_balance_wallet_outlined,
         onLongPress: onMoneyLongPress,
         onLongPressAt: null,
       ),
       (
-        label: 'Budget',
+        label: context.l10n('nav.budget', 'Budget'),
         activeIcon: AppIcons.savings,
         inactiveIcon: AppIcons.savings_outlined,
         onLongPress: null,
         onLongPressAt: null,
       ),
       (
-        label: 'Tools',
+        label: context.l10n('nav.tools', 'Tools'),
         activeIcon: AppIcons.grid_view_rounded,
         inactiveIcon: AppIcons.grid_view_outlined,
         onLongPress: onToolsLongPress,
         onLongPressAt: null,
       ),
       (
-        label: 'You',
+        label: context.l10n('nav.you', 'You'),
         activeIcon: AppIcons.person,
         inactiveIcon: AppIcons.person_outline,
         onLongPress: null,

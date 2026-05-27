@@ -18,6 +18,19 @@ allprojects {
     }
 }
 
+subprojects { subproject ->
+    subproject.configurations.configureEach {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'androidx.glance' &&
+                details.requested.name == 'glance-appwidget' &&
+                details.requested.version == '1.+') {
+                details.useVersion '1.1.1'
+                details.because 'home_widget uses a dynamic Glance version; newer alpha releases require AGP 9.1 and compileSdk 37.'
+            }
+        }
+    }
+}
+
 rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"

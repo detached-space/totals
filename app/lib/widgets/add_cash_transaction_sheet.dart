@@ -6,6 +6,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showAddCashTransactionSheet({
   required BuildContext context,
@@ -110,8 +111,8 @@ class _AddCashTransactionContentState
     if (amount == null || amount <= 0) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Enter a valid amount'),
+          SnackBar(
+            content: Text(context.l10nTextRead('Enter a valid amount')),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -155,7 +156,7 @@ class _AddCashTransactionContentState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text('${context.l10nTextRead('Error')}: $e'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -295,7 +296,7 @@ class _AddCashTransactionContentState
                                 fontWeight: FontWeight.bold,
                               ),
                               decoration: InputDecoration(
-                                labelText: 'Amount',
+                                labelText: context.l10nText('Amount'),
                                 hintText: '0.00',
                                 hintStyle: TextStyle(color: hintColor),
                                 labelStyle: TextStyle(color: hintColor),
@@ -340,10 +341,12 @@ class _AddCashTransactionContentState
                               controller: _noteController,
                               textCapitalization: TextCapitalization.sentences,
                               decoration: InputDecoration(
-                                labelText: _isDebit ? 'To' : 'From',
+                                labelText: _isDebit
+                                    ? context.l10nText('To')
+                                    : context.l10nText('From'),
                                 hintText: _isDebit
-                                    ? 'Where did you spend?'
-                                    : 'Who paid you?',
+                                    ? context.l10nText('Where did you spend?')
+                                    : context.l10nText('Who paid you?'),
                                 hintStyle: TextStyle(color: hintColor),
                                 labelStyle: TextStyle(color: hintColor),
                                 floatingLabelStyle: TextStyle(
@@ -385,7 +388,7 @@ class _AddCashTransactionContentState
                             Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
-                                'Category',
+                                context.l10nText('Category'),
                                 style: theme.textTheme.labelMedium?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                   fontWeight: FontWeight.w600,
@@ -446,7 +449,7 @@ class _AddCashTransactionContentState
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              child: const Text('Cancel'),
+                              child: Text(context.l10nText('Cancel')),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -474,7 +477,9 @@ class _AddCashTransactionContentState
                                       ),
                                     )
                                   : Text(
-                                      _isDebit ? 'Save Expense' : 'Save Income',
+                                      _isDebit
+                                          ? context.l10nText('Save Expense')
+                                          : context.l10nText('Save Income'),
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 16,
@@ -535,7 +540,7 @@ class _TypeButton extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                label,
+                context.l10nText(label),
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w600,
                   color:
@@ -592,7 +597,7 @@ class _CashCategoryChip extends StatelessWidget {
                 const SizedBox(width: 4),
               ],
               Text(
-                label,
+                context.l10nText(label),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,

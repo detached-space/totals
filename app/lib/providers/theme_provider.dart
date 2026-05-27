@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/theme/app_font_option.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/theme/app_language_option.dart';
 
 class ThemeProvider extends ChangeNotifier {
   static const String _themeKey = 'theme_mode';
   static const String _uiScaleKey = 'ui_scale';
   static const String _appTopPaddingKey = 'app_top_padding';
   static const String _appFontKey = 'app_font';
+  static const String _appCalendarKey = 'app_calendar';
+  static const String _appLanguageKey = 'app_language';
   static const double _defaultUiScale = 0.9;
   static const double _defaultAppTopPadding = 20.0;
   static const List<ThemeMode> _themeCycleOrder = <ThemeMode>[
@@ -42,20 +46,33 @@ class ThemeProvider extends ChangeNotifier {
   double _uiScale = _defaultUiScale;
   double _appTopPadding = _defaultAppTopPadding;
   AppFontOption _appFont = AppFontOption.appDefault;
+  AppLanguageOption _appLanguage = AppLanguageOption.english;
+  AppCalendarOption _appCalendar = AppCalendarOption.gregorian;
 
   ThemeMode get themeMode => _themeMode;
   double get uiScale => _uiScale;
   double get appTopPadding => _appTopPadding;
   AppFontOption get appFont => _appFont;
+  AppLanguageOption get appLanguage => _appLanguage;
+  Locale get appLocale => _appLanguage.locale;
+  AppCalendarOption get appCalendar => _appLanguage.usesEthiopianCalendar
+      ? AppCalendarOption.ethiopian
+      : _appCalendar;
   List<double> get availableUiScales =>
       List<double>.unmodifiable(_uiScaleOptions);
   List<double> get availableAppTopPaddings =>
       List<double>.unmodifiable(_appTopPaddingOptions);
   List<AppFontOption> get availableAppFonts =>
       List<AppFontOption>.unmodifiable(AppFontOption.values);
+  List<AppLanguageOption> get availableAppLanguages =>
+      List<AppLanguageOption>.unmodifiable(AppLanguageOption.values);
+  List<AppCalendarOption> get availableAppCalendars =>
+      List<AppCalendarOption>.unmodifiable(AppCalendarOption.values);
   String get uiScaleLabel => _formatUiScale(_uiScale);
   String get appTopPaddingLabel => _formatPixels(_appTopPadding);
   String get appFontLabel => _appFont.label;
+  String get appLanguageLabel => _appLanguage.nativeLabel;
+  String get appCalendarLabel => appCalendar.label;
   bool get isZoomedOut => (_uiScale - 0.75).abs() < 0.001;
   String get themeModeLabel {
     switch (_themeMode) {
@@ -73,6 +90,8 @@ class ThemeProvider extends ChangeNotifier {
     _loadUiScale();
     _loadAppTopPadding();
     _loadAppFont();
+    _loadAppCalendar();
+    _loadAppLanguage();
   }
 
   Future<void> _loadThemeMode() async {
@@ -148,6 +167,47 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_appFontKey, font.storageValue);
+  }
+
+  Future<void> _loadAppLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedLanguage = prefs.getString(_appLanguageKey);
+    final resolvedLanguage = AppLanguageOption.fromStorage(savedLanguage);
+    if (_appLanguage == resolvedLanguage) return;
+    _appLanguage = resolvedLanguage;
+    if (_appLanguage.usesEthiopianCalendar) {
+      _appCalendar = AppCalendarOption.ethiopian;
+    }
+    notifyListeners();
+  }
+
+  Future<void> setAppLanguage(AppLanguageOption language) async {
+    if (_appLanguage == language) return;
+    _appLanguage = language;
+    _appCalendar = language.usesEthiopianCalendar
+        ? AppCalendarOption.ethiopian
+        : AppCalendarOption.gregorian;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_appLanguageKey, language.storageValue);
+    await prefs.setString(_appCalendarKey, _appCalendar.storageValue);
+  }
+
+  Future<void> _loadAppCalendar() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedCalendar = prefs.getString(_appCalendarKey);
+    final resolvedCalendar = AppCalendarOption.fromStorage(savedCalendar);
+    if (_appCalendar == resolvedCalendar) return;
+    _appCalendar = resolvedCalendar;
+    notifyListeners();
+  }
+
+  Future<void> setAppCalendar(AppCalendarOption calendar) async {
+    if (_appCalendar == calendar) return;
+    _appCalendar = calendar;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_appCalendarKey, calendar.storageValue);
   }
 
   Future<void> setZoomedOut(bool value) async {

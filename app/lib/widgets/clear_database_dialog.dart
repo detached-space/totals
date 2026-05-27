@@ -6,6 +6,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showClearDatabaseDialog(BuildContext context) async {
   bool clearFinancialData = false;
@@ -73,7 +74,7 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                       const SizedBox(width: 16),
                       Expanded(
                         child: Text(
-                          'Clear Data',
+                          context.l10nText('Clear Data'),
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
@@ -89,7 +90,9 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'Select what you want to clear. This action cannot be undone.',
+                    context.l10nText(
+                      'Select what you want to clear. This action cannot be undone.',
+                    ),
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurface.withOpacity(0.7),
                     ),
@@ -145,7 +148,8 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'Please select at least one option',
+                            context
+                                .l10nText('Please select at least one option'),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.error,
                             ),
@@ -166,7 +170,7 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          child: const Text('Cancel'),
+                          child: Text(context.l10nText('Cancel')),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -203,8 +207,10 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                                       ScaffoldMessenger.of(parentContext)
                                           .showSnackBar(
                                         SnackBar(
-                                          content: const Text(
-                                            'Data cleared successfully',
+                                          content: Text(
+                                            parentContext.l10nTextRead(
+                                              'Data cleared successfully',
+                                            ),
                                           ),
                                           behavior: SnackBarBehavior.floating,
                                           shape: RoundedRectangleBorder(
@@ -220,8 +226,9 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                                       ScaffoldMessenger.of(parentContext)
                                           .showSnackBar(
                                         SnackBar(
-                                          content:
-                                              Text('Error clearing data: $e'),
+                                          content: Text(
+                                            '${parentContext.l10nTextRead('Error clearing data')}: $e',
+                                          ),
                                           behavior: SnackBarBehavior.floating,
                                           shape: RoundedRectangleBorder(
                                             borderRadius:
@@ -242,7 +249,7 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                             ),
                             elevation: 0,
                           ),
-                          child: const Text('Clear'),
+                          child: Text(context.l10nText('Clear')),
                         ),
                       ),
                     ],
@@ -309,14 +316,14 @@ Widget _buildClearOption({
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
+                    context.l10nText(title),
                     style: theme.textTheme.bodyLarge?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    subtitle,
+                    context.l10nText(subtitle),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurface.withOpacity(0.6),
                     ),

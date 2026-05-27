@@ -8,6 +8,7 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RegisterAccountForm extends StatefulWidget {
   final void Function() onSubmit;
@@ -165,8 +166,8 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
 
       if (account == null) {
         messenger.showSnackBar(
-          const SnackBar(
-            content: Text('This account already exists'),
+          SnackBar(
+            content: Text(context.l10nTextRead('This account already exists')),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -178,9 +179,11 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
 
       if (_syncPreviousSms) {
         messenger.showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              "Adding your account. You can leave the app, we'll notify you when it's done.",
+              context.l10nTextRead(
+                "Adding your account. You can leave the app, we'll notify you when it's done.",
+              ),
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -343,14 +346,14 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
           const SizedBox(height: 24),
           CustomTextField(
             controller: _accountNumber,
-            labelText: 'Account Number',
+            labelText: context.l10nText('Account Number'),
             keyboardType: TextInputType.number,
             validator: (value) {
               if (value == null || value.isEmpty) {
-                return 'Enter account number';
+                return context.l10nTextRead('Enter account number');
               }
               if (value.trim().isEmpty) {
-                return 'Enter account number';
+                return context.l10nTextRead('Enter account number');
               }
               return null;
             },
@@ -358,13 +361,13 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
           const SizedBox(height: 20),
           CustomTextField(
             controller: _accountHolderName,
-            labelText: 'Account Holder Name',
+            labelText: context.l10nText('Account Holder Name'),
             validator: (value) {
               if (value == null || value.isEmpty) {
-                return 'Enter account holder name';
+                return context.l10nTextRead('Enter account holder name');
               }
               if (value.trim().isEmpty) {
-                return 'Enter account holder name';
+                return context.l10nTextRead('Enter account holder name');
               }
               return null;
             },
@@ -389,14 +392,14 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Sync SMS History',
+                        context.l10nText('Sync SMS History'),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: colorScheme.onSurface,
                         ),
                       ),
                       Text(
-                        'Import past transactions',
+                        context.l10nText('Import past transactions'),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
@@ -426,7 +429,7 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     foregroundColor: colorScheme.onSurfaceVariant,
                   ),
-                  child: const Text('Cancel'),
+                  child: Text(context.l10nText('Cancel')),
                 ),
               ),
               const SizedBox(width: 16),
@@ -447,9 +450,9 @@ class _RegisterAccountFormState extends State<RegisterAccountForm> {
                         colorScheme.surfaceContainerHighest,
                     disabledForegroundColor: colorScheme.onSurfaceVariant,
                   ),
-                  child: const Text(
-                    'Save Account',
-                    style: TextStyle(
+                  child: Text(
+                    context.l10nText('Save Account'),
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),

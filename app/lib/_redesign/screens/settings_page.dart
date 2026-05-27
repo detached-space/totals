@@ -17,7 +17,10 @@ import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/theme/app_font_option.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/theme/app_language_option.dart';
 
 // ── Support links ───────────────────────────────────────────────────────────
 Future<void> _openSupportLink() async {
@@ -75,7 +78,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Fetched $count SMS patterns from the internet.'),
+          content: Text(
+            '${context.l10nTextRead('Fetched')} $count ${context.l10nTextRead('SMS patterns from the internet.')}',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -368,7 +373,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           child: Text(
-                            'Cancel',
+                            sheetCtx.l10nText('Cancel'),
                             style: TextStyle(
                                 color: AppColors.textSecondary(sheetCtx)),
                           ),
@@ -387,9 +392,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
-                          child: const Text(
-                            'Apply',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                          child: Text(
+                            sheetCtx.l10nText('Apply'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -518,9 +523,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
-                          child: const Text(
-                            'Apply',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                          child: Text(
+                            sheetCtx.l10nText('Apply'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -537,6 +542,281 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
 
     if (!mounted || pickedFont == null) return;
     await themeProvider.setAppFont(pickedFont);
+  }
+
+  Future<void> _showLanguageSheet(ThemeProvider themeProvider) async {
+    final options = themeProvider.availableAppLanguages;
+    AppLanguageOption selectedLanguage = themeProvider.appLanguage;
+
+    final pickedLanguage = await showModalBottomSheet<AppLanguageOption>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) {
+          return Container(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              0,
+              20,
+              20 +
+                  MediaQuery.of(sheetCtx).viewInsets.bottom +
+                  MediaQuery.of(sheetCtx).padding.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.cardColor(sheetCtx),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 16),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.slate400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    sheetCtx.l10n('settings.language', 'Language'),
+                    style: Theme.of(sheetCtx).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary(sheetCtx),
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    sheetCtx.l10n(
+                      'settings.languageSubtitle',
+                      'Amharic uses Ethiopian calendar dates automatically.',
+                    ),
+                    style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary(sheetCtx),
+                        ),
+                  ),
+                  const SizedBox(height: 16),
+                  for (final option in options) ...[
+                    RadioListTile<AppLanguageOption>(
+                      value: option,
+                      groupValue: selectedLanguage,
+                      activeColor: AppColors.primaryLight,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        option.nativeLabel,
+                        style:
+                            Theme.of(sheetCtx).textTheme.titleMedium?.copyWith(
+                                  color: AppColors.textPrimary(sheetCtx),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                      ),
+                      subtitle: option == AppLanguageOption.amharic
+                          ? Text(
+                              sheetCtx.l10n(
+                                'settings.amharicCalendarNote',
+                                'Dates switch to the Ethiopian calendar.',
+                              ),
+                              style: TextStyle(
+                                color: AppColors.textSecondary(sheetCtx),
+                              ),
+                            )
+                          : null,
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setSheetState(() => selectedLanguage = value);
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(sheetCtx).pop(),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: AppColors.borderColor(sheetCtx),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            sheetCtx.l10n('action.cancel', 'Cancel'),
+                            style: TextStyle(
+                              color: AppColors.textSecondary(sheetCtx),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () =>
+                              Navigator.of(sheetCtx).pop(selectedLanguage),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primaryDark,
+                            foregroundColor: AppColors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            sheetCtx.l10n('action.apply', 'Apply'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted || pickedLanguage == null) return;
+    await themeProvider.setAppLanguage(pickedLanguage);
+  }
+
+  Future<void> _showCalendarSheet(ThemeProvider themeProvider) async {
+    final options = themeProvider.availableAppCalendars;
+    AppCalendarOption selectedCalendar = themeProvider.appCalendar;
+
+    final pickedCalendar = await showModalBottomSheet<AppCalendarOption>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) {
+          return Container(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              0,
+              20,
+              20 +
+                  MediaQuery.of(sheetCtx).viewInsets.bottom +
+                  MediaQuery.of(sheetCtx).padding.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.cardColor(sheetCtx),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 16),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.slate400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Calendar',
+                    style: Theme.of(sheetCtx).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary(sheetCtx),
+                        ),
+                  ),
+                  const SizedBox(height: 16),
+                  for (final option in options) ...[
+                    RadioListTile<AppCalendarOption>(
+                      value: option,
+                      groupValue: selectedCalendar,
+                      activeColor: AppColors.primaryLight,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        option.label,
+                        style:
+                            Theme.of(sheetCtx).textTheme.titleMedium?.copyWith(
+                                  color: AppColors.textPrimary(sheetCtx),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                      ),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setSheetState(() => selectedCalendar = value);
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(sheetCtx).pop(),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: AppColors.borderColor(sheetCtx),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              color: AppColors.textSecondary(sheetCtx),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () =>
+                              Navigator.of(sheetCtx).pop(selectedCalendar),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primaryDark,
+                            foregroundColor: AppColors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            sheetCtx.l10nText('Apply'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted || pickedCalendar == null) return;
+    await themeProvider.setAppCalendar(pickedCalendar);
   }
 
   // ── Export / Import ─────────────────────────────────────────────────────
@@ -562,11 +842,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'save'),
-            child: const Text('Save to File'),
+            child: Text(ctx.l10nText('Save to File')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'share'),
-            child: const Text('Share'),
+            child: Text(ctx.l10nText('Share')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -740,7 +1020,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text('Import'),
+                child: Text(ctx.l10nText('Import')),
               ),
             ],
           ),
@@ -808,7 +1088,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'You',
+                context.l10n('nav.you', 'You'),
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary(context),
@@ -816,7 +1096,10 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Preferences & settings.',
+                context.l10n(
+                  'settings.preferencesSettings',
+                  'Preferences & settings.',
+                ),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary(context),
                 ),
@@ -839,14 +1122,19 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               const SizedBox(height: 24),
 
               // ── Preferences ─────────────────────────────────────────────
-              const _SectionHeader(label: 'Preferences'),
+              _SectionHeader(
+                label: context.l10n('settings.preferences', 'Preferences'),
+              ),
               const SizedBox(height: 10),
 
               _SettingTile(
                 icon: AppIcons.palette_outlined,
                 iconColor: AppColors.primaryLight,
-                title: 'Theme',
-                subtitle: 'Tap to cycle: System, Light, Dark',
+                title: context.l10n('settings.theme', 'Theme'),
+                subtitle: context.l10n(
+                  'settings.themeSubtitle',
+                  'Tap to cycle: System, Light, Dark',
+                ),
                 trailing: OutlinedButton.icon(
                   onPressed: themeProvider.cycleThemeMode,
                   icon: Icon(
@@ -879,8 +1167,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.zoom_out_map_rounded,
                 iconColor: AppColors.incomeSuccess,
-                title: 'Display Size',
-                subtitle: 'Preview and adjust interface scale and top padding',
+                title: context.l10n('settings.displaySize', 'Display Size'),
+                subtitle: context.l10n(
+                  'settings.previewScale',
+                  'Preview and adjust interface scale and top padding',
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -905,8 +1196,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: Icons.text_fields_rounded,
                 iconColor: AppColors.blue,
-                title: 'Font',
-                subtitle: 'Switch between the default font and Inter',
+                title: context.l10n('settings.font', 'Font'),
+                subtitle: context.l10n(
+                  'settings.fontSubtitle',
+                  'Switch between the default font and Inter',
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -928,6 +1222,73 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                 onTap: () => _showFontSheet(themeProvider),
               ),
 
+              _SettingTile(
+                icon: Icons.language_rounded,
+                iconColor: AppColors.incomeSuccess,
+                title: context.l10n('settings.language', 'Language'),
+                subtitle: context.l10n(
+                  'settings.languageSubtitle',
+                  'Amharic uses Ethiopian calendar dates automatically.',
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      themeProvider.appLanguageLabel,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      AppIcons.chevron_right,
+                      color: AppColors.textTertiary(context),
+                      size: 20,
+                    ),
+                  ],
+                ),
+                onTap: () => _showLanguageSheet(themeProvider),
+              ),
+
+              _SettingTile(
+                icon: Icons.calendar_today_rounded,
+                iconColor: AppColors.primaryLight,
+                title: context.l10n('settings.calendar', 'Calendar'),
+                subtitle: themeProvider.appLanguage.usesEthiopianCalendar
+                    ? context.l10n(
+                        'settings.calendarFollowsLanguage',
+                        'Amharic is selected, so dates use the Ethiopian calendar.',
+                      )
+                    : context.l10n(
+                        'settings.calendarSubtitle',
+                        'Switch between Gregorian and Ethiopian calendars',
+                      ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      themeProvider.appCalendar == AppCalendarOption.ethiopian
+                          ? 'EC'
+                          : 'GC',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      AppIcons.chevron_right,
+                      color: AppColors.textTertiary(context),
+                      size: 20,
+                    ),
+                  ],
+                ),
+                onTap: themeProvider.appLanguage.usesEthiopianCalendar
+                    ? null
+                    : () => _showCalendarSheet(themeProvider),
+              ),
+
               // if (!_isLoadingRedesign)
               //   _SettingTile(
               //     icon: AppIcons.palette_rounded,
@@ -944,8 +1305,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.toc_rounded,
                 iconColor: AppColors.blue,
-                title: 'Categories',
-                subtitle: 'Manage transaction categories',
+                title: context.l10n('category.categories', 'Categories'),
+                subtitle: context.l10n(
+                  'category.manageCategories',
+                  'Manage transaction categories',
+                ),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const CategoriesPage()),
@@ -968,8 +1332,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.notifications_outlined,
                 iconColor: AppColors.amber,
-                title: 'Notifications',
-                subtitle: 'Daily summary and budget alerts',
+                title: context.l10n('nav.notifications', 'Notifications'),
+                subtitle: context.l10n(
+                  'settings.notificationsSubtitle',
+                  'Daily summary and budget alerts',
+                ),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -981,14 +1348,22 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               const SizedBox(height: 24),
 
               // ── Data ────────────────────────────────────────────────────
-              _SectionHeader(label: 'Data'),
+              _SectionHeader(
+                label: context.l10n('settings.dataBackups', 'Data'),
+              ),
               const SizedBox(height: 10),
 
               _SettingTile(
                 icon: AppIcons.refresh,
                 iconColor: AppColors.blue,
-                title: 'Fetch SMS Patterns',
-                subtitle: 'Download the latest SMS parsing rules',
+                title: context.l10n(
+                  'settings.fetchSmsPatterns',
+                  'Fetch SMS Patterns',
+                ),
+                subtitle: context.l10n(
+                  'settings.fetchSmsPatternsSubtitle',
+                  'Download the latest SMS parsing rules',
+                ),
                 showChevron: false,
                 trailing: _isFetchingSmsPatterns
                     ? SizedBox(
@@ -1006,8 +1381,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.upload_rounded,
                 iconColor: AppColors.incomeSuccess,
-                title: 'Export Data',
-                subtitle: 'Save or share a backup',
+                title: context.l10n('settings.exportData', 'Export Data'),
+                subtitle: context.l10n(
+                  'settings.exportDataSubtitle',
+                  'Save or share a backup',
+                ),
                 showChevron: false,
                 trailing: _isExporting
                     ? SizedBox(
@@ -1025,8 +1403,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.download_rounded,
                 iconColor: AppColors.blue,
-                title: 'Import Data',
-                subtitle: 'Restore from a backup file',
+                title: context.l10n('action.importData', 'Import Data'),
+                subtitle: context.l10n(
+                  'settings.restoreBackup',
+                  'Restore from a backup file',
+                ),
                 showChevron: false,
                 trailing: _isImporting
                     ? SizedBox(
@@ -1044,8 +1425,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.delete_outline_rounded,
                 iconColor: AppColors.red,
-                title: 'Clear Data',
-                subtitle: 'Delete selected app data',
+                title: context.l10n('settings.clearData', 'Clear Data'),
+                subtitle: context.l10n(
+                  'settings.deleteSelectedData',
+                  'Delete selected app data',
+                ),
                 showChevron: false,
                 onTap: () => showClearDatabaseDialog(context),
               ),
@@ -1053,14 +1437,19 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               const SizedBox(height: 24),
 
               // ── Support ─────────────────────────────────────────────────
-              _SectionHeader(label: 'Support'),
+              _SectionHeader(
+                label: context.l10n('settings.support', 'Support'),
+              ),
               const SizedBox(height: 10),
 
               _SettingTile(
                 icon: AppIcons.info_outline_rounded,
                 iconColor: AppColors.primaryLight,
-                title: 'About',
-                subtitle: 'Version, privacy and credits',
+                title: context.l10n('settings.about', 'About'),
+                subtitle: context.l10n(
+                  'settings.versionPrivacyCredits',
+                  'Version, privacy and credits',
+                ),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1072,8 +1461,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.shield_check,
                 iconColor: AppColors.primaryLight,
-                title: 'Privacy Policy',
-                subtitle: 'How Totals handles SMS, camera, and local data',
+                title: context.l10n('settings.privacyPolicy', 'Privacy Policy'),
+                subtitle: context.l10n(
+                  'settings.privacyPolicySubtitle',
+                  'How Totals handles SMS, camera, and local data',
+                ),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1085,8 +1477,11 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               _SettingTile(
                 icon: AppIcons.help_outline_rounded,
                 iconColor: AppColors.incomeSuccess,
-                title: 'Help & FAQ',
-                subtitle: 'Common questions answered',
+                title: context.l10n('faq.helpFaq', 'Help & FAQ'),
+                subtitle: context.l10n(
+                  'faq.commonQuestions',
+                  'Common questions answered',
+                ),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1192,7 +1587,10 @@ class _ProfileCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Manage profiles',
+                      context.l10n(
+                        'settings.manageProfiles',
+                        'Manage profiles',
+                      ),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: AppColors.textSecondary(context),
                       ),
@@ -1338,7 +1736,7 @@ class _SupportDevelopersCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Text(
-                'Support the Project',
+                context.l10n('settings.supportProject', 'Support the Project'),
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: AppColors.primaryLight,
                   fontWeight: FontWeight.w700,
@@ -1446,7 +1844,7 @@ class _RedesignAboutPage extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 14),
               child: Text(
-                'PRIVACY',
+                context.l10nText('PRIVACY'),
                 style: theme.textTheme.labelSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.2,
@@ -1457,45 +1855,38 @@ class _RedesignAboutPage extends StatelessWidget {
 
             _AboutFeatureCard(
               icon: AppIcons.sms_outlined,
-              title: 'SMS Stays On Device',
-              description:
-                  'For core transaction tracking, Totals reads and parses '
-                  'supported bank SMS messages locally on your device. '
-                  'Those SMS contents are not sent to our servers.',
+              title: context.l10nText('SMS Stays On Device'),
+              description: context.l10nText(
+                'For core transaction tracking, Totals reads and parses supported bank SMS messages locally on your device. Those SMS contents are not sent to our servers.',
+              ),
             ),
             _AboutFeatureCard(
               icon: AppIcons.cloud_download,
-              title: 'Optional Online Features',
-              description:
-                  'Payment verification and remote config updates can connect '
-                  'to online services. Verification may transmit images, '
-                  'payment references, selected account numbers, and bank '
-                  'identifiers that you submit.',
+              title: context.l10nText('Optional Online Features'),
+              description: context.l10nText(
+                'Payment verification and remote config updates can connect to online services. Verification may transmit images, payment references, selected account numbers, and bank identifiers that you submit.',
+              ),
             ),
             _AboutFeatureCard(
               icon: AppIcons.qr_code_scanner_rounded,
-              title: 'Camera By Feature',
-              description:
-                  'Camera access is used for account QR scanning and payment '
-                  'verification capture. QR scanning is handled on-device. '
-                  'Verification images are uploaded only when you choose to '
-                  'verify them.',
+              title: context.l10nText('Camera By Feature'),
+              description: context.l10nText(
+                'Camera access is used for account QR scanning and payment verification capture. QR scanning is handled on-device. Verification images are uploaded only when you choose to verify them.',
+              ),
             ),
             _AboutFeatureCard(
               icon: AppIcons.visibility_off_outlined,
-              title: 'No Ads or Analytics',
-              description:
-                  'Totals does not include advertising SDKs or analytics '
-                  'telemetry to profile you or sell your data.',
+              title: context.l10nText('No Ads or Analytics'),
+              description: context.l10nText(
+                'Totals does not include advertising SDKs or analytics telemetry to profile you or sell your data.',
+              ),
             ),
             _AboutFeatureCard(
               icon: AppIcons.shield_check,
-              title: 'Your Data, Your Control',
-              description:
-                  'Most app data stays on your device until you export, clear, '
-                  'or uninstall it. If you manually start the local web '
-                  'dashboard, your data becomes reachable on your local '
-                  'network until you stop the server.',
+              title: context.l10nText('Your Data, Your Control'),
+              description: context.l10nText(
+                'Most app data stays on your device until you export, clear, or uninstall it. If you manually start the local web dashboard, your data becomes reachable on your local network until you stop the server.',
+              ),
             ),
 
             const SizedBox(height: 8),
@@ -1507,7 +1898,7 @@ class _RedesignAboutPage extends StatelessWidget {
                 ),
               ),
               icon: const Icon(AppIcons.shield_check),
-              label: const Text('Read Full Privacy Policy'),
+              label: Text(context.l10nText('Read Full Privacy Policy')),
             ),
 
             const SizedBox(height: 28),
@@ -1917,9 +2308,9 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text(
-                        'Contact us',
-                        style: TextStyle(fontWeight: FontWeight.w600),
+                      child: Text(
+                        context.l10nText('Contact us'),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),

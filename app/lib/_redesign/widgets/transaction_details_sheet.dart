@@ -12,6 +12,11 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
+import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:kenat/kenat.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 /// Shows the transaction details bottom sheet matching the redesign style.
 Future<void> showTransactionDetailsSheet({
@@ -145,29 +150,49 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   String? get _formattedDate {
     final dt = _parseTime(_tx.time);
     if (dt == null) return null;
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    final month = months[dt.month - 1];
-    final day = dt.day.toString().padLeft(2, '0');
-    final hour = dt.hour;
-    final minute = dt.minute.toString().padLeft(2, '0');
-    final amPm = hour >= 12 ? 'PM' : 'AM';
-    final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    final now = DateTime.now();
-    final yearSuffix = dt.year != now.year ? ', ${dt.year}' : '';
-    return '$month $day$yearSuffix · $h12:$minute $amPm';
+
+    final isEC = context.read<ThemeProvider>().appCalendar ==
+        AppCalendarOption.ethiopian;
+
+    if (isEC) {
+      final ecDate =
+          Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
+      final month = MonthNames.amharic[ecDate['month']! - 1];
+      final day = ecDate['day'].toString().padLeft(2, '0');
+      final currentEcYear = Kenat.now().getEthiopian()['year'];
+      final yearSuffix =
+          ecDate['year'] != currentEcYear ? ', ${ecDate['year']}' : '';
+
+      final time = Time.fromGregorian(dt.hour, dt.minute);
+      final timeStr = time.format({'useGeez': false, 'lang': 'amharic'});
+
+      return '$month $day$yearSuffix · $timeStr';
+    } else {
+      final hour = dt.hour;
+      final minute = dt.minute.toString().padLeft(2, '0');
+      final amPm = hour >= 12 ? 'PM' : 'AM';
+      final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+      final timeStr = '$h12:$minute $amPm';
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      final month = months[dt.month - 1];
+      final day = dt.day.toString().padLeft(2, '0');
+      final now = DateTime.now();
+      final yearSuffix = dt.year != now.year ? ', ${dt.year}' : '';
+      return '$month $day$yearSuffix · $timeStr';
+    }
   }
 
   String? get _formattedBalance {
@@ -387,9 +412,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       );
     } catch (_) {
       messenger?.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Could not update auto-categorization. Changes were reverted.',
+            context.l10nTextRead(
+              'Could not update auto-categorization. Changes were reverted.',
+            ),
           ),
         ),
       );
@@ -430,9 +457,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       );
     } catch (_) {
       messenger?.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Could not update auto-categorization. Changes were reverted.',
+            context.l10nTextRead(
+              'Could not update auto-categorization. Changes were reverted.',
+            ),
           ),
         ),
       );
@@ -531,8 +560,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       }
     } catch (_) {
       messenger?.showSnackBar(
-        const SnackBar(
-          content: Text('Could not update category. Changes were reverted.'),
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'Could not update category. Changes were reverted.',
+            ),
+          ),
         ),
       );
     } finally {
@@ -714,7 +747,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       if (!mounted) return;
       setState(() => _isSavingCounterparty = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save $_counterpartyRole')),
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not save')} $_counterpartyRole',
+          ),
+        ),
       );
     }
   }
@@ -746,7 +783,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       if (!mounted) return;
       setState(() => _isSavingNote = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not save note')),
+        SnackBar(content: Text(context.l10nTextRead('Could not save note'))),
       );
     }
   }
@@ -882,7 +919,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not create category')),
+        SnackBar(
+            content: Text(context.l10nTextRead('Could not create category'))),
       );
       return;
     }
@@ -908,20 +946,22 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete transaction?'),
-        content: const Text(
-          'This will permanently remove this transaction. This cannot be undone.',
+        title: Text(ctx.l10nText('Delete transaction?')),
+        content: Text(
+          ctx.l10nText(
+            'This will permanently remove this transaction. This cannot be undone.',
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(ctx.l10nText('Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: AppColors.red),
+            child: Text(
+              ctx.l10nText('Delete'),
+              style: const TextStyle(color: AppColors.red),
             ),
           ),
         ],
@@ -1050,7 +1090,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                             FocusManager.instance.primaryFocus?.unfocus();
                           },
                           decoration: InputDecoration(
-                            hintText: 'Tap to add $_counterpartyRole',
+                            hintText:
+                                '${context.l10nText('Tap to add')} $_counterpartyRole',
                             hintStyle: TextStyle(
                               color: AppColors.textTertiary(context),
                             ),
@@ -1128,7 +1169,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         width: double.infinity,
                         child: TextButton.icon(
                           onPressed: _deleteTransaction,
-                          label: const Text('Delete transaction'),
+                          label: Text(context.l10nText('Delete transaction')),
                           style: TextButton.styleFrom(
                             foregroundColor: AppColors.red,
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1204,7 +1245,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                 FocusManager.instance.primaryFocus?.unfocus();
               },
               decoration: InputDecoration(
-                hintText: 'Add a note..',
+                hintText: context.l10nText('Add a note..'),
                 hintStyle: TextStyle(color: AppColors.textTertiary(context)),
                 isCollapsed: true,
                 border: InputBorder.none,
@@ -1555,7 +1596,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                     fontSize: 14,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Category name',
+                    hintText: context.l10nText('Category name'),
                     hintStyle:
                         TextStyle(color: AppColors.textTertiary(context)),
                     filled: true,
@@ -1630,9 +1671,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: const Text(
-                    'Add',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  child: Text(
+                    context.l10nText('Add'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -1769,7 +1810,7 @@ class _DetailRow extends StatelessWidget {
           SizedBox(
             width: _kLabelWidth,
             child: Text(
-              label,
+              context.l10nText(label),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: AppColors.textSecondary(context),
               ),
@@ -1954,7 +1995,7 @@ class _CategoryPickerChip extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 120),
               child: Text(
-                label,
+                context.l10nText(label),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,

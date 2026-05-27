@@ -8,6 +8,7 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class AddUserAccountForm extends StatefulWidget {
   final void Function() onAccountAdded;
@@ -163,8 +164,9 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
       if (accountExists) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('This account already exists'),
+            SnackBar(
+              content:
+                  Text(context.l10nTextRead('This account already exists')),
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -185,8 +187,8 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
         Navigator.of(context).pop();
         widget.onAccountAdded();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account added successfully'),
+          SnackBar(
+            content: Text(context.l10nTextRead('Account added successfully')),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -195,7 +197,9 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error adding account: $e'),
+            content: Text(
+              '${context.l10nTextRead('Error adding account')}: $e',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -352,14 +356,14 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
             const SizedBox(height: 24),
             CustomTextField(
               controller: _accountNumber,
-              labelText: 'Account Number',
+              labelText: context.l10nText('Account Number'),
               keyboardType: TextInputType.number,
               validator: (value) {
                 if (value == null || value.isEmpty) {
-                  return 'Enter account number';
+                  return context.l10nTextRead('Enter account number');
                 }
                 if (value.trim().isEmpty) {
-                  return 'Enter account number';
+                  return context.l10nTextRead('Enter account number');
                 }
                 return null;
               },
@@ -367,13 +371,13 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
             const SizedBox(height: 20),
             CustomTextField(
               controller: _accountHolderName,
-              labelText: 'Account Holder Name',
+              labelText: context.l10nText('Account Holder Name'),
               validator: (value) {
                 if (value == null || value.isEmpty) {
-                  return 'Enter account holder name';
+                  return context.l10nTextRead('Enter account holder name');
                 }
                 if (value.trim().isEmpty) {
-                  return 'Enter account holder name';
+                  return context.l10nTextRead('Enter account holder name');
                 }
                 return null;
               },
@@ -391,7 +395,7 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text('Cancel'),
+                    child: Text(context.l10nText('Cancel')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -410,9 +414,9 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
                           colorScheme.surfaceContainerHighest,
                       disabledForegroundColor: colorScheme.onSurfaceVariant,
                     ),
-                    child: const Text(
-                      'Add Account',
-                      style: TextStyle(
+                    child: Text(
+                      context.l10nText('Add Account'),
+                      style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),

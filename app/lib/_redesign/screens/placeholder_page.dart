@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignPlaceholderPage extends StatefulWidget {
   final String title;
@@ -46,8 +47,10 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
     setState(() => _useRedesign = value);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Restart the app to apply the new design.'),
+      SnackBar(
+        content: Text(
+          context.l10nTextRead('Restart the app to apply the new design.'),
+        ),
       ),
     );
   }
@@ -96,11 +99,14 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
               20,
               0,
               20,
-              20 + MediaQuery.of(sheetContext).viewInsets.bottom + MediaQuery.of(sheetContext).padding.bottom,
+              20 +
+                  MediaQuery.of(sheetContext).viewInsets.bottom +
+                  MediaQuery.of(sheetContext).padding.bottom,
             ),
             decoration: BoxDecoration(
               color: AppColors.cardColor(sheetContext),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -138,7 +144,8 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
                   decoration: BoxDecoration(
                     color: AppColors.surfaceColor(sheetContext),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.borderColor(sheetContext)),
+                    border:
+                        Border.all(color: AppColors.borderColor(sheetContext)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,7 +224,8 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
                       child: OutlinedButton(
                         onPressed: () => Navigator.of(sheetContext).pop(false),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: AppColors.borderColor(sheetContext)),
+                          side: BorderSide(
+                              color: AppColors.borderColor(sheetContext)),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -225,7 +233,8 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
                         ),
                         child: Text(
                           'Cancel',
-                          style: TextStyle(color: AppColors.textSecondary(sheetContext)),
+                          style: TextStyle(
+                              color: AppColors.textSecondary(sheetContext)),
                         ),
                       ),
                     ),
@@ -242,9 +251,9 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                        child: const Text(
-                          'Apply',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                        child: Text(
+                          context.l10nText('Apply'),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
                     ),
@@ -278,7 +287,7 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'You',
+                context.l10nText('You'),
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary(context),
@@ -286,7 +295,7 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Preferences & settings.',
+                context.l10nText('Preferences & settings.'),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary(context),
                 ),
@@ -297,8 +306,9 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
               _SettingTile(
                 icon: AppIcons.dark_mode_outlined,
                 iconColor: AppColors.primaryLight,
-                title: 'Dark Mode',
-                subtitle: 'Switch between light and dark theme',
+                title: context.l10nText('Dark Mode'),
+                subtitle:
+                    context.l10nText('Switch between light and dark theme'),
                 trailing: Switch(
                   value: isDark,
                   onChanged: (_) => themeProvider.toggleTheme(),
@@ -309,8 +319,9 @@ class _RedesignPlaceholderPageState extends State<RedesignPlaceholderPage> {
               _SettingTile(
                 icon: AppIcons.zoom_out_map_rounded,
                 iconColor: AppColors.incomeSuccess,
-                title: 'Display Size',
-                subtitle: 'Preview and adjust interface scale',
+                title: context.l10nText('Display Size'),
+                subtitle:
+                    context.l10nText('Preview and adjust interface scale'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

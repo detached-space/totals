@@ -5,6 +5,7 @@ import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showTransactionCategorySheet({
   required BuildContext context,
@@ -218,9 +219,11 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       );
     } catch (_) {
       messenger?.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Could not update auto-categorization. Changes were reverted.',
+            context.l10nTextRead(
+              'Could not update auto-categorization. Changes were reverted.',
+            ),
           ),
         ),
       );
@@ -261,9 +264,11 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       );
     } catch (_) {
       messenger?.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Could not update auto-categorization. Changes were reverted.',
+            context.l10nTextRead(
+              'Could not update auto-categorization. Changes were reverted.',
+            ),
           ),
         ),
       );
@@ -352,8 +357,12 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       }
     } catch (_) {
       messenger?.showSnackBar(
-        const SnackBar(
-          content: Text('Could not update category. Changes were reverted.'),
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'Could not update category. Changes were reverted.',
+            ),
+          ),
         ),
       );
     } finally {
@@ -568,7 +577,8 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not create category')),
+        SnackBar(
+            content: Text(context.l10nTextRead('Could not create category'))),
       );
       return;
     }
@@ -904,7 +914,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
                     fontSize: 14,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Category name',
+                    hintText: context.l10nText('Category name'),
                     hintStyle:
                         TextStyle(color: AppColors.textTertiary(context)),
                     filled: true,
@@ -979,9 +989,9 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: const Text(
-                    'Add',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  child: Text(
+                    context.l10nText('Add'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -1132,7 +1142,7 @@ class _CategoryPickerChip extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 120),
               child: Text(
-                label,
+                context.l10nText(label),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,

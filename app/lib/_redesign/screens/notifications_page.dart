@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignNotificationsPage extends StatefulWidget {
   const RedesignNotificationsPage({super.key});
@@ -39,10 +40,10 @@ class _RedesignNotificationsPageState extends State<RedesignNotificationsPage> {
     return Scaffold(
       backgroundColor: AppColors.background(context),
       appBar: AppBar(
-        title: const Text('Notifications'),
+        title: Text(context.l10nText('Notifications')),
         actions: [
           IconButton(
-            tooltip: 'Clear',
+            tooltip: context.l10nText('Clear'),
             onPressed: _clearHistory,
             icon: const Icon(AppIcons.delete_outline_rounded),
           ),
@@ -60,10 +61,10 @@ class _RedesignNotificationsPageState extends State<RedesignNotificationsPage> {
             final items = snapshot.data ?? const <NotificationHistoryEntry>[];
             if (items.isEmpty) {
               return ListView(
-                children: const [
-                  SizedBox(height: 120),
+                children: [
+                  const SizedBox(height: 120),
                   Center(
-                    child: Text('No notifications yet'),
+                    child: Text(context.l10nText('No notifications yet')),
                   ),
                 ],
               );

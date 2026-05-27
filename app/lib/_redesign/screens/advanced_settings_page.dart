@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignAdvancedSettingsPage extends StatefulWidget {
   const RedesignAdvancedSettingsPage({super.key});
@@ -37,7 +38,8 @@ class _RedesignAdvancedSettingsPageState
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return Container(
-          padding: EdgeInsets.fromLTRB(16, 12, 16, 20 + MediaQuery.of(ctx).padding.bottom),
+          padding: EdgeInsets.fromLTRB(
+              16, 12, 16, 20 + MediaQuery.of(ctx).padding.bottom),
           decoration: BoxDecoration(
             color: AppColors.cardColor(ctx),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -55,13 +57,13 @@ class _RedesignAdvancedSettingsPageState
                 ),
               ),
               _OptionTile(
-                title: 'Lock app',
+                title: ctx.l10nText('Lock app'),
                 selected: _selected == ProfileDoubleTapAction.lock,
                 onTap: () => Navigator.pop(ctx, ProfileDoubleTapAction.lock),
               ),
               const SizedBox(height: 8),
               _OptionTile(
-                title: 'Do nothing',
+                title: ctx.l10nText('Do nothing'),
                 selected: _selected == ProfileDoubleTapAction.doNothing,
                 onTap: () =>
                     Navigator.pop(ctx, ProfileDoubleTapAction.doNothing),
@@ -83,7 +85,7 @@ class _RedesignAdvancedSettingsPageState
     return Scaffold(
       backgroundColor: AppColors.background(context),
       appBar: AppBar(
-        title: const Text('Advanced'),
+        title: Text(context.l10nText('Advanced')),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

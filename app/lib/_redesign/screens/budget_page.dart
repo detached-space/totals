@@ -18,6 +18,7 @@ import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class _BudgetCategoryColorOption {
   final String key;
@@ -325,7 +326,11 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update widget style: $error')),
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update widget style')}: $error',
+          ),
+        ),
       );
     }
   }
@@ -900,7 +905,7 @@ class _SummaryColumn extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            label,
+            context.l10nText(label),
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w500,
@@ -981,7 +986,7 @@ class _BudgetGroupSection extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  title,
+                  context.l10nText(title),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -1417,7 +1422,7 @@ class _DetailTopBar extends StatelessWidget {
           TextButton.icon(
             onPressed: onBack,
             icon: const Icon(AppIcons.chevron_left, size: 20),
-            label: const Text('Back'),
+            label: Text(context.l10nText('Back')),
             style: TextButton.styleFrom(
               foregroundColor: AppColors.primaryLight,
               textStyle:
@@ -1432,7 +1437,7 @@ class _DetailTopBar extends StatelessWidget {
               textStyle:
                   const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
-            child: const Text('Edit'),
+            child: Text(context.l10nText('Edit')),
           ),
         ],
       ),
@@ -2030,7 +2035,8 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not create category')),
+        SnackBar(
+            content: Text(context.l10nTextRead('Could not create category'))),
       );
       return;
     }
@@ -2358,7 +2364,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
 
                         // Category
                         Text(
-                          'Categories (optional)',
+                          context.l10nText('Categories (optional)'),
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: AppColors.textSecondary(context),
                             fontWeight: FontWeight.w600,
@@ -2714,9 +2720,10 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
-                              child: const Text(
-                                'Delete budget',
-                                style: TextStyle(fontWeight: FontWeight.w600),
+                              child: Text(
+                                context.l10nText('Delete budget'),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600),
                               ),
                             ),
                           ),
@@ -2765,7 +2772,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                     fontSize: 14,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Category name',
+                    hintText: context.l10nText('Category name'),
                     hintStyle:
                         TextStyle(color: AppColors.textTertiary(context)),
                     filled: true,
@@ -2840,9 +2847,9 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: const Text(
-                    'Add',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  child: Text(
+                    context.l10nText('Add'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -3008,7 +3015,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
       debugPrintStack(stackTrace: stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not save budget')),
+        SnackBar(content: Text(context.l10nTextRead('Could not save budget'))),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -3022,19 +3029,19 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Delete budget?'),
+          title: Text(ctx.l10nText('Delete budget?')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('This cannot be undone.'),
+              Text(ctx.l10nText('This cannot be undone.')),
               if (hasFutureBudgets) ...[
                 const SizedBox(height: 12),
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   dense: true,
-                  title: const Text('Delete future budgets too'),
+                  title: Text(ctx.l10nText('Delete future budgets too')),
                   value: deleteFutureBudgets,
                   onChanged: (value) {
                     setDialogState(() {
@@ -3048,13 +3055,13 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
+              child: Text(ctx.l10nText('Cancel')),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text(
-                'Delete',
-                style: TextStyle(color: AppColors.red),
+              child: Text(
+                ctx.l10nText('Delete'),
+                style: const TextStyle(color: AppColors.red),
               ),
             ),
           ],
@@ -3549,9 +3556,9 @@ class _BudgetWidgetStyleSheetState extends State<_BudgetWidgetStyleSheet> {
                     ),
                     elevation: 0,
                   ),
-                  child: const Text(
-                    'Save Style',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: Text(
+                    context.l10nText('Save Style'),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -3765,7 +3772,7 @@ class _CategoryChipButton extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 120),
               child: Text(
-                label,
+                context.l10nText(label),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,

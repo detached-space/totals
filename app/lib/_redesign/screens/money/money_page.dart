@@ -28,7 +28,11 @@ import 'package:totals/widgets/inline_bank_selector.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
+import 'package:kenat/kenat.dart';
+import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignMoneyPage extends StatefulWidget {
   const RedesignMoneyPage({super.key});
@@ -573,7 +577,32 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   DateTime _normalizeAnalyticsHeatmapMonth(DateTime date) {
+    try {
+      final isEC = context.read<ThemeProvider>().appCalendar ==
+          AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+        final gc =
+            Kenat.fromEthiopian(ec['year']!, ec['month']!, 1).getGregorian();
+        return DateTime(gc['year']!, gc['month']!, gc['day']!);
+      }
+    } catch (_) {}
     return DateTime(date.year, date.month, 1);
+  }
+
+  DateTime _normalizeYearStart(DateTime date) {
+    try {
+      final isEC = context.read<ThemeProvider>().appCalendar ==
+          AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+        final gc = Kenat.fromEthiopian(ec['year']!, 1, 1).getGregorian();
+        return DateTime(gc['year']!, gc['month']!, gc['day']!);
+      }
+    } catch (_) {}
+    return DateTime(date.year, 1, 1);
   }
 
   DateTime _resolveAnalyticsHeatmapFocusMonth(DateTime fallbackMonth) {
@@ -583,9 +612,52 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   void _shiftAnalyticsHeatmapPeriod(DateTime currentFocusMonth, int delta) {
-    final nextFocus = _analyticsHeatmapView == _AnalyticsHeatmapView.daily
-        ? DateTime(currentFocusMonth.year, currentFocusMonth.month + delta, 1)
-        : DateTime(currentFocusMonth.year + delta, currentFocusMonth.month, 1);
+    DateTime nextFocus;
+    try {
+      final isEC = context.read<ThemeProvider>().appCalendar ==
+          AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(
+          currentFocusMonth.year,
+          currentFocusMonth.month,
+          currentFocusMonth.day,
+        ).getEthiopian();
+        if (_analyticsHeatmapView == _AnalyticsHeatmapView.daily) {
+          var y = ec['year']!;
+          var m = ec['month']! + delta;
+          while (m > 13) {
+            m -= 13;
+            y++;
+          }
+          while (m < 1) {
+            m += 13;
+            y--;
+          }
+          final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+          nextFocus = DateTime(gc['year']!, gc['month']!, gc['day']!);
+        } else {
+          final gc = Kenat.fromEthiopian(ec['year']! + delta, ec['month']!, 1)
+              .getGregorian();
+          nextFocus = DateTime(gc['year']!, gc['month']!, gc['day']!);
+        }
+      } else {
+        if (_analyticsHeatmapView == _AnalyticsHeatmapView.daily) {
+          nextFocus = DateTime(
+              currentFocusMonth.year, currentFocusMonth.month + delta, 1);
+        } else {
+          nextFocus = DateTime(
+              currentFocusMonth.year + delta, currentFocusMonth.month, 1);
+        }
+      }
+    } catch (_) {
+      if (_analyticsHeatmapView == _AnalyticsHeatmapView.daily) {
+        nextFocus = DateTime(
+            currentFocusMonth.year, currentFocusMonth.month + delta, 1);
+      } else {
+        nextFocus = DateTime(
+            currentFocusMonth.year + delta, currentFocusMonth.month, 1);
+      }
+    }
     setState(() {
       _analyticsHeatmapFocusMonth = nextFocus;
     });
@@ -630,10 +702,114 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     return filter.startDate != null || filter.endDate != null;
   }
 
+  bool get _usesEthiopianCalendar =>
+      context.read<ThemeProvider>().appCalendar == AppCalendarOption.ethiopian;
+
+  DateTime _ethiopianDateFromParts(int year, int month, int day) {
+    final gc = Kenat.fromEthiopian(year, month, day).getGregorian();
+    return DateTime(gc['year']!, gc['month']!, gc['day']!);
+  }
+
+  _AnalyticsDateWindow _resolveAnalyticsMonthWindow(DateTime date) {
+    if (!_usesEthiopianCalendar) {
+      final start = DateTime(date.year, date.month, 1);
+      return _AnalyticsDateWindow(
+        start: start,
+        endExclusive: DateTime(start.year, start.month + 1, 1),
+      );
+    }
+
+    final ec =
+        Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+    final start = _ethiopianDateFromParts(ec['year']!, ec['month']!, 1);
+    var nextYear = ec['year']!;
+    var nextMonth = ec['month']! + 1;
+    if (nextMonth > 13) {
+      nextMonth = 1;
+      nextYear++;
+    }
+
+    return _AnalyticsDateWindow(
+      start: start,
+      endExclusive: _ethiopianDateFromParts(nextYear, nextMonth, 1),
+    );
+  }
+
+  _AnalyticsDateWindow _resolveAnalyticsYearWindow(DateTime date) {
+    if (!_usesEthiopianCalendar) {
+      final start = DateTime(date.year, 1, 1);
+      return _AnalyticsDateWindow(
+        start: start,
+        endExclusive: DateTime(start.year + 1, 1, 1),
+      );
+    }
+
+    final ec =
+        Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+    return _AnalyticsDateWindow(
+      start: _ethiopianDateFromParts(ec['year']!, 1, 1),
+      endExclusive: _ethiopianDateFromParts(ec['year']! + 1, 1, 1),
+    );
+  }
+
+  DateTime _shiftAnalyticsMonth(DateTime month, int offset) {
+    if (!_usesEthiopianCalendar) {
+      return DateTime(month.year, month.month + offset, 1);
+    }
+
+    final ec =
+        Kenat.fromGregorian(month.year, month.month, month.day).getEthiopian();
+    var year = ec['year']!;
+    var targetMonth = ec['month']! + offset;
+    while (targetMonth > 13) {
+      targetMonth -= 13;
+      year++;
+    }
+    while (targetMonth < 1) {
+      targetMonth += 13;
+      year--;
+    }
+    return _ethiopianDateFromParts(year, targetMonth, 1);
+  }
+
   int _analyticsMonthDelta(DateTime targetMonth, DateTime anchorMonth) {
+    if (_usesEthiopianCalendar) {
+      final targetEc = Kenat.fromGregorian(
+        targetMonth.year,
+        targetMonth.month,
+        targetMonth.day,
+      ).getEthiopian();
+      final anchorEc = Kenat.fromGregorian(
+        anchorMonth.year,
+        anchorMonth.month,
+        anchorMonth.day,
+      ).getEthiopian();
+      return (targetEc['year']! - anchorEc['year']!) * 13 +
+          targetEc['month']! -
+          anchorEc['month']!;
+    }
+
     return (targetMonth.year - anchorMonth.year) * 12 +
         targetMonth.month -
         anchorMonth.month;
+  }
+
+  int _analyticsYearDelta(DateTime targetDate, DateTime anchorDate) {
+    if (_usesEthiopianCalendar) {
+      final targetEc = Kenat.fromGregorian(
+        targetDate.year,
+        targetDate.month,
+        targetDate.day,
+      ).getEthiopian();
+      final anchorEc = Kenat.fromGregorian(
+        anchorDate.year,
+        anchorDate.month,
+        anchorDate.day,
+      ).getEthiopian();
+      return targetEc['year']! - anchorEc['year']!;
+    }
+
+    return targetDate.year - anchorDate.year;
   }
 
   DateTime _resolveChartVisibleMonth(
@@ -641,7 +817,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required int periodOffset,
   }) {
     final anchorMonth = _resolveAnalyticsChartAnchorMonth(transactions);
-    return DateTime(anchorMonth.year, anchorMonth.month + periodOffset, 1);
+    return _shiftAnalyticsMonth(anchorMonth, periodOffset);
   }
 
   int _resolveLineChartOffsetForVisibleStart(
@@ -660,11 +836,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         );
         return targetWeekStart.difference(anchorWeekStart).inDays ~/ 7;
       case _AnalyticsLineChartPeriod.monthly:
-        final anchorMonth = DateTime(anchorDate.year, anchorDate.month, 1);
-        final targetMonth = DateTime(visibleStart.year, visibleStart.month, 1);
+        final anchorMonth = _resolveAnalyticsMonthWindow(anchorDate).start;
+        final targetMonth = _resolveAnalyticsMonthWindow(visibleStart).start;
         return _analyticsMonthDelta(targetMonth, anchorMonth);
       case _AnalyticsLineChartPeriod.yearly:
-        return visibleStart.year - anchorDate.year;
+        return _analyticsYearDelta(visibleStart, anchorDate);
     }
   }
 
@@ -684,11 +860,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         );
         return targetWeekStart.difference(anchorWeekStart).inDays ~/ 7;
       case _AnalyticsBarChartPeriod.monthly:
-        final anchorMonth = DateTime(anchorDate.year, anchorDate.month, 1);
-        final targetMonth = DateTime(visibleStart.year, visibleStart.month, 1);
+        final anchorMonth = _resolveAnalyticsMonthWindow(anchorDate).start;
+        final targetMonth = _resolveAnalyticsMonthWindow(visibleStart).start;
         return _analyticsMonthDelta(targetMonth, anchorMonth);
       case _AnalyticsBarChartPeriod.yearly:
-        return visibleStart.year - anchorDate.year;
+        return _analyticsYearDelta(visibleStart, anchorDate);
     }
   }
 
@@ -888,7 +1064,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     Iterable<Transaction> transactions,
   ) {
     final anchorDate = _resolveAnalyticsChartAnchorDate(transactions);
-    return DateTime(anchorDate.year, anchorDate.month, 1);
+    return _resolveAnalyticsMonthWindow(anchorDate).start;
   }
 
   _AnalyticsCategoryChartPage _buildAnalyticsCategoryChartPage({
@@ -899,8 +1075,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     int periodOffset = 0,
   }) {
     final anchorMonth = _resolveAnalyticsChartAnchorMonth(transactions);
-    final targetMonth =
-        DateTime(anchorMonth.year, anchorMonth.month + periodOffset, 1);
+    final targetMonth = _shiftAnalyticsMonth(anchorMonth, periodOffset);
+
     final snapshot = _buildAnalyticsSnapshot(
       provider,
       sourceTransactions: transactions,
@@ -912,6 +1088,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     return _AnalyticsCategoryChartPage(
       snapshot: snapshot,
       periodLabel: _formatAnalyticsChartPeriodLabel(
+        context: context,
         filter: filter,
         fallbackMonthDate: targetMonth,
         expandedForDateRange: expandedForDateRange,
@@ -937,8 +1114,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required int periodOffset,
   }) {
     final anchorDate = _resolveAnalyticsChartAnchorDate(transactions);
-    final shiftedAnchor =
-        _shiftAnalyticsLineAnchorDate(anchorDate, period, periodOffset);
+    final shiftedAnchor = _shiftAnalyticsLineAnchorDate(
+      anchorDate,
+      period,
+      periodOffset,
+      context: context,
+    );
 
     switch (period) {
       case _AnalyticsLineChartPeriod.weekly:
@@ -950,12 +1131,18 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           endExclusive: start.add(const Duration(days: 7)),
         );
       case _AnalyticsLineChartPeriod.monthly:
+        if (_usesEthiopianCalendar) {
+          return _resolveAnalyticsMonthWindow(shiftedAnchor);
+        }
         final start = DateTime(shiftedAnchor.year, shiftedAnchor.month, 1);
         return _AnalyticsDateWindow(
           start: start,
           endExclusive: DateTime(start.year, start.month + 1, 1),
         );
       case _AnalyticsLineChartPeriod.yearly:
+        if (_usesEthiopianCalendar) {
+          return _resolveAnalyticsYearWindow(shiftedAnchor);
+        }
         final start = DateTime(shiftedAnchor.year, 1, 1);
         return _AnalyticsDateWindow(
           start: start,
@@ -973,10 +1160,33 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         return _formatAnalyticsDateRange(
           window.start,
           window.endExclusive.subtract(const Duration(days: 1)),
+          context: context,
         );
       case _AnalyticsLineChartPeriod.monthly:
+        try {
+          final isEC =
+              Provider.of<ThemeProvider>(context!, listen: false).appCalendar ==
+                  AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ecDate = Kenat.fromGregorian(
+                    window.start.year, window.start.month, window.start.day)
+                .getEthiopian();
+            return '${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['year']}';
+          }
+        } catch (_) {}
         return DateFormat('MMMM yyyy').format(window.start);
       case _AnalyticsLineChartPeriod.yearly:
+        try {
+          final isEC =
+              Provider.of<ThemeProvider>(context!, listen: false).appCalendar ==
+                  AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ecDate = Kenat.fromGregorian(
+                    window.start.year, window.start.month, window.start.day)
+                .getEthiopian();
+            return 'Meskerem - Pagume ${ecDate['year']}';
+          }
+        } catch (_) {}
         return 'Jan - Dec ${window.start.year}';
     }
   }
@@ -987,8 +1197,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required int periodOffset,
   }) {
     final anchorDate = _resolveAnalyticsChartAnchorDate(transactions);
-    final shiftedAnchor =
-        _shiftAnalyticsBarAnchorDate(anchorDate, period, periodOffset);
+    final shiftedAnchor = _shiftAnalyticsBarAnchorDate(
+      anchorDate,
+      period,
+      periodOffset,
+      context: context,
+    );
 
     switch (period) {
       case _AnalyticsBarChartPeriod.weekly:
@@ -1000,12 +1214,18 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           endExclusive: start.add(const Duration(days: 7)),
         );
       case _AnalyticsBarChartPeriod.monthly:
+        if (_usesEthiopianCalendar) {
+          return _resolveAnalyticsMonthWindow(shiftedAnchor);
+        }
         final start = DateTime(shiftedAnchor.year, shiftedAnchor.month, 1);
         return _AnalyticsDateWindow(
           start: start,
           endExclusive: DateTime(start.year, start.month + 1, 1),
         );
       case _AnalyticsBarChartPeriod.yearly:
+        if (_usesEthiopianCalendar) {
+          return _resolveAnalyticsYearWindow(shiftedAnchor);
+        }
         final start = DateTime(shiftedAnchor.year, 1, 1);
         return _AnalyticsDateWindow(
           start: start,
@@ -1023,10 +1243,33 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         return _formatAnalyticsDateRange(
           window.start,
           window.endExclusive.subtract(const Duration(days: 1)),
+          context: context,
         );
       case _AnalyticsBarChartPeriod.monthly:
+        try {
+          final isEC =
+              Provider.of<ThemeProvider>(context!, listen: false).appCalendar ==
+                  AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ecDate = Kenat.fromGregorian(
+                    window.start.year, window.start.month, window.start.day)
+                .getEthiopian();
+            return 'W1 - W5 in ${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['year']}';
+          }
+        } catch (_) {}
         return 'W1 - W5 in ${DateFormat('MMMM yyyy').format(window.start)}';
       case _AnalyticsBarChartPeriod.yearly:
+        try {
+          final isEC =
+              Provider.of<ThemeProvider>(context!, listen: false).appCalendar ==
+                  AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ecDate = Kenat.fromGregorian(
+                    window.start.year, window.start.month, window.start.day)
+                .getEthiopian();
+            return 'Meskerem - Pagume ${ecDate['year']}';
+          }
+        } catch (_) {}
         return 'Jan - Dec ${window.start.year}';
     }
   }
@@ -1040,10 +1283,41 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       case _AnalyticsChartSection.heatmap:
         final periodStart = _analyticsHeatmapView == _AnalyticsHeatmapView.daily
             ? _normalizeAnalyticsHeatmapMonth(heatmapFocusMonth)
-            : DateTime(heatmapFocusMonth.year, 1, 1);
-        final periodEnd = _analyticsHeatmapView == _AnalyticsHeatmapView.daily
-            ? DateTime(heatmapFocusMonth.year, heatmapFocusMonth.month + 1, 1)
-            : DateTime(heatmapFocusMonth.year + 1, 1, 1);
+            : _normalizeYearStart(heatmapFocusMonth);
+
+        DateTime periodEnd;
+        try {
+          final isEC = context.read<ThemeProvider>().appCalendar ==
+              AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ec = Kenat.fromGregorian(
+                    periodStart.year, periodStart.month, periodStart.day)
+                .getEthiopian();
+            if (_analyticsHeatmapView == _AnalyticsHeatmapView.daily) {
+              var y = ec['year']!;
+              var m = ec['month']! + 1;
+              if (m > 13) {
+                m = 1;
+                y++;
+              }
+              final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+              periodEnd = DateTime(gc['year']!, gc['month']!, gc['day']!);
+            } else {
+              final gc =
+                  Kenat.fromEthiopian(ec['year']! + 1, 1, 1).getGregorian();
+              periodEnd = DateTime(gc['year']!, gc['month']!, gc['day']!);
+            }
+          } else {
+            periodEnd = _analyticsHeatmapView == _AnalyticsHeatmapView.daily
+                ? DateTime(
+                    heatmapFocusMonth.year, heatmapFocusMonth.month + 1, 1)
+                : DateTime(heatmapFocusMonth.year + 1, 1, 1);
+          }
+        } catch (_) {
+          periodEnd = _analyticsHeatmapView == _AnalyticsHeatmapView.daily
+              ? DateTime(heatmapFocusMonth.year, heatmapFocusMonth.month + 1, 1)
+              : DateTime(heatmapFocusMonth.year + 1, 1, 1);
+        }
         return _AnalyticsSupportContext(
           transactions: _transactionsWithinDateWindow(
             heatmapTransactions,
@@ -1053,6 +1327,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           periodLabel: _formatAnalyticsSpendingPeriodLabel(
             _analyticsHeatmapView,
             _normalizeAnalyticsHeatmapMonth(heatmapFocusMonth),
+            context: context,
           ),
           periodKey:
               'heatmap-${_analyticsHeatmapView.name}-${periodStart.year}-${periodStart.month}',
@@ -1071,6 +1346,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           return _AnalyticsSupportContext(
             transactions: filteredTransactions,
             periodLabel: _formatAnalyticsChartPeriodLabel(
+              context: context,
               filter: filter,
               fallbackMonthDate:
                   _resolveAnalyticsChartAnchorMonth(filteredTransactions),
@@ -1081,25 +1357,60 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             showIncome: filter.mode == _AnalyticsHeatmapMode.income,
           );
         }
-        final targetMonth = DateTime(
-          _resolveAnalyticsChartAnchorMonth(filteredTransactions).year,
-          _resolveAnalyticsChartAnchorMonth(filteredTransactions).month +
-              _analyticsBubbleChartOffset,
-          1,
+        final anchorMonth = _resolveAnalyticsChartAnchorMonth(
+          filteredTransactions,
         );
+        DateTime targetMonth;
+        try {
+          final isEC = context.read<ThemeProvider>().appCalendar ==
+              AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ec = Kenat.fromGregorian(
+              anchorMonth.year,
+              anchorMonth.month,
+              anchorMonth.day,
+            ).getEthiopian();
+            var y = ec['year']!;
+            var m = ec['month']! + _analyticsBubbleChartOffset;
+            while (m > 13) {
+              m -= 13;
+              y++;
+            }
+            while (m < 1) {
+              m += 13;
+              y--;
+            }
+            final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+            targetMonth = DateTime(gc['year']!, gc['month']!, gc['day']!);
+          } else {
+            targetMonth = DateTime(
+              anchorMonth.year,
+              anchorMonth.month + _analyticsBubbleChartOffset,
+              1,
+            );
+          }
+        } catch (_) {
+          targetMonth = DateTime(
+            anchorMonth.year,
+            anchorMonth.month + _analyticsBubbleChartOffset,
+            1,
+          );
+        }
+        final monthWindow = _resolveAnalyticsMonthWindow(targetMonth);
         return _AnalyticsSupportContext(
           transactions: _transactionsWithinDateWindow(
             filteredTransactions,
-            start: targetMonth,
-            endExclusive: DateTime(targetMonth.year, targetMonth.month + 1, 1),
+            start: monthWindow.start,
+            endExclusive: monthWindow.endExclusive,
           ),
           periodLabel: _formatAnalyticsChartPeriodLabel(
+            context: context,
             filter: filter,
-            fallbackMonthDate: targetMonth,
+            fallbackMonthDate: monthWindow.start,
             expandedForDateRange: true,
           ),
           periodKey:
-              'bubble-${filter.mode.name}-${targetMonth.year}-${targetMonth.month}',
+              'bubble-${filter.mode.name}-${monthWindow.start.year}-${monthWindow.start.month}',
           showIncome: filter.mode == _AnalyticsHeatmapMode.income,
         );
       case _AnalyticsChartSection.lineChart:
@@ -1161,6 +1472,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           return _AnalyticsSupportContext(
             transactions: filteredTransactions,
             periodLabel: _formatAnalyticsChartPeriodLabel(
+              context: context,
               filter: filter,
               fallbackMonthDate:
                   _resolveAnalyticsChartAnchorMonth(filteredTransactions),
@@ -1170,24 +1482,59 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             showIncome: filter.mode == _AnalyticsHeatmapMode.income,
           );
         }
-        final targetMonth = DateTime(
-          _resolveAnalyticsChartAnchorMonth(filteredTransactions).year,
-          _resolveAnalyticsChartAnchorMonth(filteredTransactions).month +
-              _analyticsPieChartOffset,
-          1,
+        final anchorMonth = _resolveAnalyticsChartAnchorMonth(
+          filteredTransactions,
         );
+        DateTime targetMonth;
+        try {
+          final isEC = context.read<ThemeProvider>().appCalendar ==
+              AppCalendarOption.ethiopian;
+          if (isEC) {
+            final ec = Kenat.fromGregorian(
+              anchorMonth.year,
+              anchorMonth.month,
+              anchorMonth.day,
+            ).getEthiopian();
+            var y = ec['year']!;
+            var m = ec['month']! + _analyticsPieChartOffset;
+            while (m > 13) {
+              m -= 13;
+              y++;
+            }
+            while (m < 1) {
+              m += 13;
+              y--;
+            }
+            final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+            targetMonth = DateTime(gc['year']!, gc['month']!, gc['day']!);
+          } else {
+            targetMonth = DateTime(
+              anchorMonth.year,
+              anchorMonth.month + _analyticsPieChartOffset,
+              1,
+            );
+          }
+        } catch (_) {
+          targetMonth = DateTime(
+            anchorMonth.year,
+            anchorMonth.month + _analyticsPieChartOffset,
+            1,
+          );
+        }
+        final monthWindow = _resolveAnalyticsMonthWindow(targetMonth);
         return _AnalyticsSupportContext(
           transactions: _transactionsWithinDateWindow(
             filteredTransactions,
-            start: targetMonth,
-            endExclusive: DateTime(targetMonth.year, targetMonth.month + 1, 1),
+            start: monthWindow.start,
+            endExclusive: monthWindow.endExclusive,
           ),
           periodLabel: _formatAnalyticsChartPeriodLabel(
+            context: context,
             filter: filter,
-            fallbackMonthDate: targetMonth,
+            fallbackMonthDate: monthWindow.start,
           ),
           periodKey:
-              'pie-${filter.mode.name}-${targetMonth.year}-${targetMonth.month}',
+              'pie-${filter.mode.name}-${monthWindow.start.year}-${monthWindow.start.month}',
           showIncome: filter.mode == _AnalyticsHeatmapMode.income,
         );
     }
@@ -1405,12 +1752,17 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel',
-                style: TextStyle(color: AppColors.textSecondary(ctx))),
+            child: Text(
+              ctx.l10nText('Cancel'),
+              style: TextStyle(color: AppColors.textSecondary(ctx)),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Delete', style: TextStyle(color: AppColors.red)),
+            child: Text(
+              ctx.l10nText('Delete'),
+              style: const TextStyle(color: AppColors.red),
+            ),
           ),
         ],
       ),
@@ -1423,7 +1775,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Deleted $count transaction${count > 1 ? 's' : ''}'),
+          content: Text(
+            '${context.l10nTextRead('Deleted')} $count ${context.l10nTextRead(count > 1 ? 'transactions' : 'transaction')}',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1431,7 +1785,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to delete: $e'),
+          content: Text('${context.l10nTextRead('Failed to delete')}: $e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1734,7 +2088,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       amountColor: isCredit ? AppColors.incomeSuccess : AppColors.red,
       name:
           _transactionCounterparty(transaction, isSelfTransfer: isSelfTransfer),
-      timestamp: _transactionTimeLabel(transaction),
+      timestamp: _transactionTimeLabel(transaction, context),
       selected: selected,
       onTap: _isSelecting
           ? () => _toggleSelection(transaction)
@@ -1797,7 +2151,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'No transactions were recorded on ${_formatDateHeader(day)}.',
+            'No transactions were recorded on ${_formatDateHeader(day, context)}.',
           ),
         ),
       );
@@ -1928,6 +2282,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   constrainSeriesToAnchorMonth: false,
                 ),
                 periodLabel: _formatAnalyticsChartPeriodLabel(
+                  context: context,
                   filter: filter,
                   fallbackMonthDate:
                       _resolveAnalyticsChartAnchorMonth(filteredTransactions),
@@ -2051,6 +2406,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   constrainSeriesToAnchorMonth: false,
                 ),
                 periodLabel: _formatAnalyticsChartPeriodLabel(
+                  context: context,
                   filter: filter,
                   fallbackMonthDate:
                       _resolveAnalyticsChartAnchorMonth(filteredTransactions),
@@ -2132,8 +2488,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
 
     final anchor = anchorDate ?? latestTransactionTime ?? DateTime.now();
-    final monthStart = DateTime(anchor.year, anchor.month, 1);
-    final nextMonthStart = DateTime(anchor.year, anchor.month + 1, 1);
+    final monthWindow = _resolveAnalyticsMonthWindow(anchor);
+    final monthStart = monthWindow.start;
+    final nextMonthStart = monthWindow.endExclusive;
+    final isEthiopianCalendar = _usesEthiopianCalendar;
 
     final byDayIncome = <int, double>{};
     final byDayExpense = <int, double>{};
@@ -2153,12 +2511,19 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var largestDeposit = 0.0;
 
     for (final transaction in transactions) {
-      totalTransactions += 1;
-      totalFees +=
-          (transaction.serviceCharge ?? 0.0) + (transaction.vat ?? 0.0);
       final isCredit = transaction.type == 'CREDIT';
       final isDebit = transaction.type == 'DEBIT';
       final dt = _parseTransactionTime(transaction.time);
+      final isWithinAnchorMonth =
+          dt != null && !dt.isBefore(monthStart) && dt.isBefore(nextMonthStart);
+
+      if (constrainSeriesToAnchorMonth && !isWithinAnchorMonth) {
+        continue;
+      }
+
+      totalTransactions += 1;
+      totalFees +=
+          (transaction.serviceCharge ?? 0.0) + (transaction.vat ?? 0.0);
 
       final isSelfTransfer =
           isDebit ? provider.isSelfTransfer(transaction) : false;
@@ -2189,38 +2554,37 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       }
 
       if (dt == null) continue;
-      final isWithinAnchorMonth =
-          !dt.isBefore(monthStart) && dt.isBefore(nextMonthStart);
 
-      if (!constrainSeriesToAnchorMonth || isWithinAnchorMonth) {
-        final day = dt.day;
+      final day = isEthiopianCalendar
+          ? Kenat.fromGregorian(dt.year, dt.month, dt.day)
+              .getEthiopian()['day']!
+          : dt.day;
 
-        if (isCredit) {
-          byDayIncome[day] = (byDayIncome[day] ?? 0.0) + transaction.amount;
-          byDayNet[day] = (byDayNet[day] ?? 0.0) + transaction.amount;
-        } else if (isDebit) {
-          byDayExpense[day] = (byDayExpense[day] ?? 0.0) + transaction.amount;
-          byDayNet[day] = (byDayNet[day] ?? 0.0) - transaction.amount;
-        }
+      if (isCredit) {
+        byDayIncome[day] = (byDayIncome[day] ?? 0.0) + transaction.amount;
+        byDayNet[day] = (byDayNet[day] ?? 0.0) + transaction.amount;
+      } else if (isDebit) {
+        byDayExpense[day] = (byDayExpense[day] ?? 0.0) + transaction.amount;
+        byDayNet[day] = (byDayNet[day] ?? 0.0) - transaction.amount;
+      }
 
-        final includeBubbleCategory =
-            categoryMode == _AnalyticsHeatmapMode.income ? isCredit : isDebit;
-        final skipBubbleCategory = categoryMode == _AnalyticsHeatmapMode.income
-            ? isMisc
-            : isSelfTransfer || isMisc;
+      final includeBubbleCategory =
+          categoryMode == _AnalyticsHeatmapMode.income ? isCredit : isDebit;
+      final skipBubbleCategory = categoryMode == _AnalyticsHeatmapMode.income
+          ? isMisc
+          : isSelfTransfer || isMisc;
 
-        if (includeBubbleCategory && !skipBubbleCategory) {
-          final categoryName = (category?.name.trim().isNotEmpty ?? false)
-              ? category!.name.trim()
-              : 'Other';
-          categoryTotals[categoryName] =
-              (categoryTotals[categoryName] ?? 0.0) + transaction.amount;
-        }
+      if (includeBubbleCategory && !skipBubbleCategory) {
+        final categoryName = (category?.name.trim().isNotEmpty ?? false)
+            ? category!.name.trim()
+            : 'Other';
+        categoryTotals[categoryName] =
+            (categoryTotals[categoryName] ?? 0.0) + transaction.amount;
+      }
 
-        if (isDebit && !isSelfTransfer && !isMisc) {
-          final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
-          weekdayExpenseTotals[weekdayIndex] += transaction.amount;
-        }
+      if (isDebit && !isSelfTransfer && !isMisc) {
+        final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
+        weekdayExpenseTotals[weekdayIndex] += transaction.amount;
       }
     }
 
@@ -2563,7 +2927,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     String? lastDateKey;
     for (final txn in filtered) {
       final dt = _parseTransactionTime(txn.time);
-      final key = dt != null ? _formatDateHeader(dt) : 'Unknown Date';
+      final key = dt != null ? _formatDateHeader(dt, context) : 'Unknown Date';
       if (key != lastDateKey) {
         flatItems.add(key);
         lastDateKey = key;
@@ -2726,7 +3090,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     String? lastDateKey;
     for (final transaction in pageTransactions) {
       final dt = _parseTransactionTime(transaction.time);
-      final dateKey = dt != null ? _formatDateHeader(dt) : 'Unknown Date';
+      final dateKey =
+          dt != null ? _formatDateHeader(dt, context) : 'Unknown Date';
       if (dateKey != lastDateKey) {
         flatItems.add(dateKey);
         lastDateKey = dateKey;
@@ -3122,18 +3487,23 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: Text('Cancel',
-                style:
-                    TextStyle(color: AppColors.textSecondary(dialogContext))),
+            child: Text(
+              dialogContext.l10nText('Cancel'),
+              style: TextStyle(color: AppColors.textSecondary(dialogContext)),
+            ),
           ),
           TextButton(
             onPressed: () {
               Navigator.pop(dialogContext);
               _applyCashTarget(0);
             },
-            child: Text('Clear',
-                style: TextStyle(
-                    color: AppColors.red, fontWeight: FontWeight.bold)),
+            child: Text(
+              dialogContext.l10nText('Clear'),
+              style: const TextStyle(
+                color: AppColors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -3155,17 +3525,23 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
       if (delta.abs() < 0.0001) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cash wallet is already at that amount'),
+          SnackBar(
+            content: Text(
+              context.l10nTextRead('Cash wallet is already at that amount'),
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
       } else {
-        final direction = delta > 0 ? 'increased' : 'decreased';
+        final direction = delta > 0
+            ? context.l10nTextRead('increased')
+            : context.l10nTextRead('decreased');
         final amount = formatNumberWithComma(delta.abs());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Cash wallet $direction by ETB $amount'),
+            content: Text(
+              '${context.l10nTextRead('Cash wallet')} $direction ${context.l10nTextRead('by')} ETB $amount',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -3174,7 +3550,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update cash wallet: $e'),
+            content: Text(
+              '${context.l10nTextRead('Failed to update cash wallet')}: $e',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -3309,7 +3687,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     } catch (e) {
       if (!mounted) return;
       messenger?.showSnackBar(
-        SnackBar(content: Text('Could not reparse transactions: $e')),
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not reparse transactions')}: $e',
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -3426,10 +3808,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (mounted) {
         Provider.of<TransactionProvider>(context, listen: false).loadData();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account deleted successfully'),
+          SnackBar(
+            content: Text(context.l10nTextRead('Account deleted successfully')),
             behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -3437,7 +3819,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error deleting account: $e'),
+            content: Text(
+              '${context.l10nTextRead('Error deleting account')}: $e',
+            ),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 3),
           ),
@@ -3464,7 +3848,19 @@ const _months = [
   'Dec',
 ];
 
-String _formatDateHeader(DateTime date) {
+String _formatDateHeader(DateTime date, [BuildContext? context]) {
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ecDate =
+            Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+        return '${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['day']}, ${ecDate['year']}';
+      }
+    } catch (_) {}
+  }
   return '${_months[date.month - 1]} ${date.day}, ${date.year}';
 }
 
@@ -3694,9 +4090,21 @@ String _transactionCounterparty(Transaction transaction,
   return isSelfTransfer ? 'YOU' : 'UNKNOWN';
 }
 
-String _transactionTimeLabel(Transaction transaction) {
+String _transactionTimeLabel(Transaction transaction, [BuildContext? context]) {
   final dt = _parseTransactionTime(transaction.time);
   if (dt == null) return 'Unknown time';
+
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final time = Time.fromGregorian(dt.hour, dt.minute);
+        return time.format({'useGeez': false, 'lang': 'amharic'});
+      }
+    } catch (_) {}
+  }
   final hh = dt.hour.toString().padLeft(2, '0');
   final mm = dt.minute.toString().padLeft(2, '0');
   return '$hh:$mm';
@@ -3716,10 +4124,13 @@ String _formatRatioPercent(double ratio) {
   return '${(ratio * 100).round()}%';
 }
 
-String _formatRunwayMonths(double value) {
-  if (!value.isFinite) return 'No recent spend';
-  if (value >= 10) return '${value.round()} mo';
-  return '${value.toStringAsFixed(1)} mo';
+String _formatRunwayMonths(double value, [BuildContext? context]) {
+  if (!value.isFinite) {
+    return context?.l10nText('No recent spend') ?? 'No recent spend';
+  }
+  final monthLabel = context?.l10nText('mo') ?? 'mo';
+  if (value >= 10) return '${value.round()} $monthLabel';
+  return '${value.toStringAsFixed(1)} $monthLabel';
 }
 
 String _formatCompactSignedEtb(double value) {
@@ -3728,11 +4139,30 @@ String _formatCompactSignedEtb(double value) {
   return '$sign${_formatEtbAbbrev(value.abs())}';
 }
 
-String _formatMonthYear(DateTime date) {
+String _safePrefix(String value, int length) {
+  if (value.isEmpty || length <= 0) return '';
+  final safeLength = value.length < length ? value.length : length;
+  return value.substring(0, safeLength);
+}
+
+String _formatMonthYear(DateTime date, [BuildContext? context]) {
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+        return '${MonthNames.amharic[ec['month']! - 1]} ${ec['year']}';
+      }
+    } catch (_) {}
+  }
   return '${_months[date.month - 1]} ${date.year}';
 }
 
 String _formatAnalyticsChartPeriodLabel({
+  BuildContext? context,
   required _AnalyticsHeatmapFilter filter,
   required DateTime fallbackMonthDate,
   bool expandedForDateRange = false,
@@ -3740,43 +4170,138 @@ String _formatAnalyticsChartPeriodLabel({
   final startDate = filter.startDate;
   final endDate = filter.endDate;
   if (startDate != null && endDate != null) {
-    return '${_formatDateHeader(startDate)} - ${_formatDateHeader(endDate)}';
+    return '${_formatDateHeader(startDate, context)} - ${_formatDateHeader(endDate, context)}';
   }
   if (startDate != null) {
     return expandedForDateRange
-        ? 'Since ${_formatDateHeader(startDate)}'
-        : _formatDateHeader(startDate);
+        ? 'Since ${_formatDateHeader(startDate, context)}'
+        : _formatDateHeader(startDate, context);
   }
   if (endDate != null) {
     return expandedForDateRange
-        ? 'Until ${_formatDateHeader(endDate)}'
-        : _formatDateHeader(endDate);
+        ? 'Until ${_formatDateHeader(endDate, context)}'
+        : _formatDateHeader(endDate, context);
   }
 
   if (!expandedForDateRange) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context!, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(fallbackMonthDate.year,
+                fallbackMonthDate.month, fallbackMonthDate.day)
+            .getEthiopian();
+        return '${MonthNames.amharic[ec['month']! - 1]} ${ec['year']}';
+      }
+    } catch (_) {}
     return DateFormat('MMMM yyyy').format(fallbackMonthDate);
   }
 
-  final monthEnd =
-      DateTime(fallbackMonthDate.year, fallbackMonthDate.month + 1, 0);
-  return '${_formatDateHeader(fallbackMonthDate)} - ${_formatDateHeader(monthEnd)}';
+  DateTime monthEnd;
+  try {
+    final isEC =
+        Provider.of<ThemeProvider>(context!, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
+    if (isEC) {
+      final ec = Kenat.fromGregorian(fallbackMonthDate.year,
+              fallbackMonthDate.month, fallbackMonthDate.day)
+          .getEthiopian();
+      final dayCount = EthiopianCalendarUtils.getEthiopianDaysInMonth(
+          ec['year']!, ec['month']!);
+      final gc = Kenat.fromEthiopian(ec['year']!, ec['month']!, dayCount)
+          .getGregorian();
+      monthEnd = DateTime(gc['year']!, gc['month']!, gc['day']!);
+    } else {
+      monthEnd =
+          DateTime(fallbackMonthDate.year, fallbackMonthDate.month + 1, 0);
+    }
+  } catch (_) {
+    monthEnd = DateTime(fallbackMonthDate.year, fallbackMonthDate.month + 1, 0);
+  }
+
+  return '${_formatDateHeader(fallbackMonthDate, context)} - ${_formatDateHeader(monthEnd, context)}';
 }
 
 String _formatAnalyticsSpendingPeriodLabel(
   _AnalyticsHeatmapView view,
-  DateTime periodDate,
-) {
+  DateTime periodDate, {
+  BuildContext? context,
+}) {
   return view == _AnalyticsHeatmapView.daily
-      ? _formatMonthYear(periodDate)
-      : '${periodDate.year}';
+      ? _formatMonthYear(periodDate, context)
+      : () {
+          if (context != null) {
+            try {
+              final isEC = Provider.of<ThemeProvider>(context, listen: false)
+                      .appCalendar ==
+                  AppCalendarOption.ethiopian;
+              if (isEC) {
+                final ec = Kenat.fromGregorian(
+                  periodDate.year,
+                  periodDate.month,
+                  periodDate.day,
+                ).getEthiopian();
+                return 'Meskerem - Pagume ${ec['year']}';
+              }
+            } catch (_) {}
+          }
+          return '${periodDate.year}';
+        }();
 }
 
-String _formatFullMonthName(DateTime date) {
+String _formatFullMonthName(DateTime date, [BuildContext? context]) {
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+        return MonthNames.amharic[ec['month']! - 1];
+      }
+    } catch (_) {}
+  }
   return DateFormat('MMMM').format(date);
 }
 
-String _analyticsWeekdayLabel(int index) {
-  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+List<String> _analyticsWeekdayLabels(BuildContext context,
+    {bool short = false}) {
+  final isEC = Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+      AppCalendarOption.ethiopian;
+  if (!isEC) {
+    return short
+        ? const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        : const [
+            'Monday',
+            'Tuesday',
+            'Wednesday',
+            'Thursday',
+            'Friday',
+            'Saturday',
+            'Sunday',
+          ];
+  }
+
+  // Build labels from Kenat directly, Monday-first to match chart layout.
+  final mondayAnchor = DateTime(2024, 1, 1); // Monday
+  final names = List<String>.generate(7, (index) {
+    final dt = mondayAnchor.add(Duration(days: index));
+    return Kenat.fromGregorian(dt.year, dt.month, dt.day).getWeekdayName();
+  });
+  if (!short) return names;
+  return names
+      .map((name) => name.substring(0, name.length >= 3 ? 3 : name.length))
+      .toList(growable: false);
+}
+
+String _analyticsWeekdayLabel(
+  BuildContext context,
+  int index, {
+  bool short = false,
+}) {
+  final labels = _analyticsWeekdayLabels(context, short: short);
   return labels[index.clamp(0, labels.length - 1)];
 }
 
@@ -3794,12 +4319,46 @@ Color _analyticsPaletteColor(int index) {
   return palette[index % palette.length];
 }
 
-String _formatLedgerTime(DateTime dt) {
+String _formatLedgerTime(DateTime dt, [BuildContext? context]) {
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final time = Time.fromGregorian(dt.hour, dt.minute);
+        return time.format({'useGeez': false, 'lang': 'amharic'});
+      }
+    } catch (_) {}
+  }
   final hour = dt.hour;
   final minute = dt.minute;
   final period = hour >= 12 ? 'PM' : 'AM';
   final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
   return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+}
+
+Map<String, String?> _formatLedgerTimeParts(DateTime dt,
+    [BuildContext? context]) {
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final time = Time.fromGregorian(dt.hour, dt.minute);
+        final timeText = time.format({
+          'useGeez': false,
+          'lang': 'amharic',
+          'showPeriodLabel': false,
+        });
+        final periodText =
+            time.period == 'night' ? PeriodLabels.night : PeriodLabels.day;
+        return {'time': timeText, 'period': periodText};
+      }
+    } catch (_) {}
+  }
+  return {'time': _formatLedgerTime(dt, context), 'period': null};
 }
 
 String _getBankImage(int bankId) {
@@ -3888,7 +4447,7 @@ class _TopTabItem extends StatelessWidget {
               )
             : null,
         child: Text(
-          label,
+          context.l10nText(label),
           style: TextStyle(
             color: selected
                 ? AppColors.primaryLight
@@ -3918,6 +4477,7 @@ class _FinancialHealthCard extends StatelessWidget {
     final scoreColor = _healthColor(healthScore);
     final incomeFormatted = _formatEtbAbbrev(financialHealth.trailingIncome);
     final expenseFormatted = _formatEtbAbbrev(financialHealth.trailingExpense);
+    final currencyLabel = context.l10nText('ETB');
 
     return Material(
       color: Colors.transparent,
@@ -3938,7 +4498,7 @@ class _FinancialHealthCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'FINANCIAL HEALTH',
+                      context.l10nText('Financial Health').toUpperCase(),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: AppColors.textSecondary(context),
                         letterSpacing: 0.8,
@@ -3969,7 +4529,7 @@ class _FinancialHealthCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'CASH FLOW (90 DAYS)',
+                      context.l10nText('Cash Flow (90 Days)').toUpperCase(),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: AppColors.textSecondary(context),
                         letterSpacing: 0.8,
@@ -3981,7 +4541,7 @@ class _FinancialHealthCard extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '+ETB $incomeFormatted',
+                          '+$currencyLabel $incomeFormatted',
                           style: const TextStyle(
                             color: AppColors.incomeSuccess,
                             fontSize: 13,
@@ -3997,7 +4557,7 @@ class _FinancialHealthCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '-ETB $expenseFormatted',
+                          '-$currencyLabel $expenseFormatted',
                           style: const TextStyle(
                             color: AppColors.red,
                             fontSize: 13,
@@ -4017,7 +4577,9 @@ class _FinancialHealthCard extends StatelessWidget {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Tap to see how this score works',
+                            context.l10nText(
+                              'Tap to see how this score works',
+                            ),
                             style: TextStyle(
                               color: AppColors.textTertiary(context),
                               fontSize: 12,
@@ -4071,29 +4633,35 @@ class _FinancialHealthSheet extends StatelessWidget {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final scoreColor = _healthColor(financialHealth.score);
     final netFlow = financialHealth.trailingNet;
+    final currencyLabel = context.l10nText('ETB');
     final netFlowLabel =
-        '${netFlow >= 0 ? '+' : '-'}ETB ${_formatEtbAbbrev(netFlow.abs())}';
+        '${netFlow >= 0 ? '+' : '-'}$currencyLabel ${_formatEtbAbbrev(netFlow.abs())}';
     final netFlowColor = netFlow >= 0 ? AppColors.incomeSuccess : AppColors.red;
     final runwaySummary = financialHealth.averageMonthlyExpense <= 0
         ? (financialHealth.totalBalance > 0
-            ? 'No recent expense history, so runway stays favorable.'
-            : 'No recent expense history yet, so runway stays neutral.')
-        : 'ETB ${_formatEtbAbbrev(financialHealth.totalBalance)} balance'
-            ' / ETB ${_formatEtbAbbrev(financialHealth.averageMonthlyExpense)} avg monthly expense'
-            ' = ${_formatRunwayMonths(financialHealth.runwayMonths)}';
+            ? context.l10nText(
+                'No recent expense history, so runway stays favorable.',
+              )
+            : context.l10nText(
+                'No recent expense history yet, so runway stays neutral.',
+              ))
+        : '$currencyLabel ${_formatEtbAbbrev(financialHealth.totalBalance)} ${context.l10nText('balance')}'
+            ' / $currencyLabel ${_formatEtbAbbrev(financialHealth.averageMonthlyExpense)} ${context.l10nText('avg monthly expense')}'
+            ' = ${_formatRunwayMonths(financialHealth.runwayMonths, context)}';
     final stabilitySummary = financialHealth.hasStabilityHistory
-        ? 'Based on ${financialHealth.stabilitySampleCount} prior full months.'
-            ' Average savings-rate swing:'
+        ? '${context.l10nText('Based on')} ${financialHealth.stabilitySampleCount} ${context.l10nText('prior full months.')}'
+            ' ${context.l10nText('Average savings-rate swing:')}'
             ' ${_formatRatioPercent(financialHealth.stabilityAverageDeviation)}'
-        : 'Not enough full-month history yet, so stability stays neutral.';
+        : context.l10nText(
+            'Not enough full-month history yet, so stability stays neutral.',
+          );
     final fixedCostSummary = financialHealth.usesCategoryData
-        ? 'Essentials are ${_formatRatioPercent(financialHealth.essentialBurden)}'
-            ' of trailing income with'
+        ? '${context.l10nText('Essentials are')} ${_formatRatioPercent(financialHealth.essentialBurden)}'
+            ' ${context.l10nText('of trailing income with')}'
             ' ${_formatRatioPercent(financialHealth.categorizedCoverage)}'
-            ' categorized expense coverage.'
-        : 'Only ${_formatRatioPercent(financialHealth.categorizedCoverage)}'
-            ' of trailing expense is categorized, so fixed costs stay neutral'
-            ' until coverage reaches 40%.';
+            ' ${context.l10nText('categorized expense coverage.')}'
+        : '${_formatRatioPercent(financialHealth.categorizedCoverage)}'
+            ' ${context.l10nText('of trailing expense is categorized, so fixed costs stay neutral until coverage reaches 40%.')}';
 
     return Container(
       constraints: BoxConstraints(
@@ -4126,7 +4694,7 @@ class _FinancialHealthSheet extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Financial Health',
+                      context.l10nText('Financial Health'),
                       style: TextStyle(
                         color: AppColors.textPrimary(context),
                         fontSize: 22,
@@ -4144,7 +4712,9 @@ class _FinancialHealthSheet extends StatelessWidget {
                 ],
               ),
               Text(
-                'This score blends your last 90 days of cash flow with balance runway, recent consistency, and essential-cost pressure.',
+                context.l10nText(
+                  'This score blends your last 90 days of cash flow with balance runway, recent consistency, and essential-cost pressure.',
+                ),
                 style: TextStyle(
                   color: AppColors.textSecondary(context),
                   fontSize: 13,
@@ -4190,7 +4760,9 @@ class _FinancialHealthSheet extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Last 90 days cash flow used in this score',
+                            context.l10nText(
+                              'Last 90 days cash flow used in this score',
+                            ),
                             style: TextStyle(
                               color: AppColors.textSecondary(context),
                               fontSize: 12,
@@ -4200,8 +4772,8 @@ class _FinancialHealthSheet extends StatelessWidget {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            '+ETB ${_formatEtbAbbrev(financialHealth.trailingIncome)}'
-                            ' | -ETB ${_formatEtbAbbrev(financialHealth.trailingExpense)}',
+                            '+$currencyLabel ${_formatEtbAbbrev(financialHealth.trailingIncome)}'
+                            ' | -$currencyLabel ${_formatEtbAbbrev(financialHealth.trailingExpense)}',
                             style: TextStyle(
                               color: AppColors.textPrimary(context),
                               fontSize: 14,
@@ -4210,8 +4782,8 @@ class _FinancialHealthSheet extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Net $netFlowLabel'
-                            '  •  Savings rate ${_formatRatioPercent(financialHealth.savingsRate)}',
+                            '${context.l10nText('Net')} $netFlowLabel'
+                            '  •  ${context.l10nText('Savings Rate')} ${_formatRatioPercent(financialHealth.savingsRate)}',
                             style: TextStyle(
                               color: netFlowColor,
                               fontSize: 12,
@@ -4232,9 +4804,9 @@ class _FinancialHealthSheet extends StatelessWidget {
                 detail:
                     'Uses the last 90 days of income vs expense. Higher savings rate means a higher score.',
                 summary:
-                    '+ETB ${_formatEtbAbbrev(financialHealth.trailingIncome)}'
-                    ' | -ETB ${_formatEtbAbbrev(financialHealth.trailingExpense)}'
-                    ' | Net $netFlowLabel',
+                    '+$currencyLabel ${_formatEtbAbbrev(financialHealth.trailingIncome)}'
+                    ' | -$currencyLabel ${_formatEtbAbbrev(financialHealth.trailingExpense)}'
+                    ' | ${context.l10nText('Net')} $netFlowLabel',
               ),
               const SizedBox(height: 12),
               _FinancialHealthMetricTile(
@@ -4308,7 +4880,7 @@ class _FinancialHealthMetricTile extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        '$title ($weight)',
+                        '${context.l10nText(title)} ($weight)',
                         style: TextStyle(
                           color: AppColors.textPrimary(context),
                           fontSize: 15,
@@ -4338,7 +4910,7 @@ class _FinancialHealthMetricTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  detail,
+                  context.l10nText(detail),
                   style: TextStyle(
                     color: AppColors.textSecondary(context),
                     fontSize: 12,
@@ -4475,7 +5047,7 @@ class _SubTabButton extends StatelessWidget {
             fontSize: 13,
             fontWeight: FontWeight.w600,
           ),
-          child: Text(label),
+          child: Text(context.l10nText(label)),
         ),
       ),
     );
@@ -4847,7 +5419,7 @@ class _AnalyticsMetricCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
+                    context.l10nText(title),
                     style: TextStyle(
                       color: AppColors.textTertiary(context),
                       fontSize: 12,
@@ -5057,6 +5629,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   static const double _weekdayHeaderSpacing = 8;
   static const double _sectionFooterSpacing = 10;
   static const double _pageGridHorizontalInset = 12;
+  static const double _viewportOverflowSlack = 2;
 
   late final PageController _pageController;
   late DateTime _visibleMonth;
@@ -5072,12 +5645,16 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   @override
   void didUpdateWidget(covariant _AnalyticsHeatmapCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextVisibleMonth = _normalizeVisibleMonth(widget.focusMonth);
-    if (!_isSameVisibleMonth(_visibleMonth, nextVisibleMonth)) {
-      _visibleMonth = nextVisibleMonth;
-      if (_pageController.hasClients &&
-          (_pageController.page?.round() ?? 1) != 1) {
-        _pageController.jumpToPage(1);
+    if (widget.focusMonth != oldWidget.focusMonth) {
+      final nextVisibleMonth = _normalizeVisibleMonth(widget.focusMonth);
+      if (!_isSameVisibleMonth(_visibleMonth, nextVisibleMonth)) {
+        setState(() {
+          _visibleMonth = nextVisibleMonth;
+        });
+        if (_pageController.hasClients &&
+            (_pageController.page?.round() ?? 1) != 1) {
+          _pageController.jumpToPage(1);
+        }
       }
     }
   }
@@ -5114,14 +5691,62 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   }
 
   DateTime _normalizeVisibleMonth(DateTime date) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+        final gcStart =
+            Kenat.fromEthiopian(ec['year']!, ec['month']!, 1).getGregorian();
+        return DateTime(gcStart['year']!, gcStart['month']!, gcStart['day']!);
+      }
+    } catch (_) {}
     return DateTime(date.year, date.month, 1);
   }
 
   bool _isSameVisibleMonth(DateTime a, DateTime b) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ecA = Kenat.fromGregorian(a.year, a.month, a.day).getEthiopian();
+        final ecB = Kenat.fromGregorian(b.year, b.month, b.day).getEthiopian();
+        return ecA['year'] == ecB['year'] && ecA['month'] == ecB['month'];
+      }
+    } catch (_) {}
     return a.year == b.year && a.month == b.month;
   }
 
   DateTime _shiftVisibleMonth(DateTime month, int delta) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(month.year, month.month, month.day)
+            .getEthiopian();
+        if (widget.view == _AnalyticsHeatmapView.daily) {
+          var y = ec['year']!;
+          var m = ec['month']! + delta;
+          while (m > 13) {
+            m -= 13;
+            y++;
+          }
+          while (m < 1) {
+            m += 13;
+            y--;
+          }
+          final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+          return DateTime(gc['year']!, gc['month']!, gc['day']!);
+        }
+        final gc = Kenat.fromEthiopian(ec['year']! + delta, ec['month']!, 1)
+            .getGregorian();
+        return DateTime(gc['year']!, gc['month']!, gc['day']!);
+      }
+    } catch (_) {}
     if (widget.view == _AnalyticsHeatmapView.daily) {
       return DateTime(month.year, month.month + delta, 1);
     }
@@ -5129,12 +5754,36 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   }
 
   String _formatPeriodLabel(DateTime month) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(month.year, month.month, month.day)
+            .getEthiopian();
+        return widget.view == _AnalyticsHeatmapView.daily
+            ? MonthNames.amharic[ec['month']! - 1]
+            : '${ec['year']}';
+      }
+    } catch (_) {}
     return widget.view == _AnalyticsHeatmapView.daily
         ? _formatFullMonthName(month)
         : '${month.year}';
   }
 
   String _formatHeaderPeriodLabel(DateTime month) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(month.year, month.month, month.day)
+            .getEthiopian();
+        return widget.view == _AnalyticsHeatmapView.daily
+            ? '${MonthNames.amharic[ec['month']! - 1]} ${ec['year']}'
+            : '${ec['year']}';
+      }
+    } catch (_) {}
     return widget.view == _AnalyticsHeatmapView.daily
         ? _formatMonthYear(month)
         : '${month.year}';
@@ -5199,7 +5848,10 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
           (contentWidth - (spacing * (crossCount - 1))) / crossCount;
       final cellHeight = cellWidth / aspectRatio;
       gridHeight = (cellHeight * rowCount) + (spacing * (rowCount - 1));
-      return _weekdayHeaderHeight + _weekdayHeaderSpacing + gridHeight;
+      return _weekdayHeaderHeight +
+          _weekdayHeaderSpacing +
+          gridHeight +
+          _viewportOverflowSlack;
     } else {
       const crossCount = 4;
       const spacing = 6.0;
@@ -5209,7 +5861,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
           (contentWidth - (spacing * (crossCount - 1))) / crossCount;
       final cellHeight = cellWidth / aspectRatio;
       gridHeight = (cellHeight * rowCount) + (spacing * (rowCount - 1));
-      return gridHeight;
+      return gridHeight + _viewportOverflowSlack;
     }
   }
 
@@ -5283,7 +5935,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
                       final valuesByBucket =
                           widget.view == _AnalyticsHeatmapView.daily
                               ? _buildDailyValues(pageMonth)
-                              : _buildMonthlyValues(pageMonth.year);
+                              : _buildMonthlyValues(pageMonth);
                       final maxMagnitude = valuesByBucket.values.fold<double>(
                         0.0,
                         (currentMax, value) =>
@@ -5298,18 +5950,14 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
                           padding: const EdgeInsets.symmetric(
                             horizontal: _pageGridHorizontalInset,
                           ),
-                          child: Column(
-                            children: [
-                              _buildAnimatedHeatmapPageBody(
-                                context: context,
-                                pageMonth: pageMonth,
-                                now: now,
-                                valuesByBucket: valuesByBucket,
-                                maxMagnitude: maxMagnitude,
-                                onDaySelected:
-                                    index == 1 ? widget.onDaySelected : null,
-                              ),
-                            ],
+                          child: _buildAnimatedHeatmapPageBody(
+                            context: context,
+                            pageMonth: pageMonth,
+                            now: now,
+                            valuesByBucket: valuesByBucket,
+                            maxMagnitude: maxMagnitude,
+                            onDaySelected:
+                                index == 1 ? widget.onDaySelected : null,
                           ),
                         ),
                       );
@@ -5453,9 +6101,33 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
       );
     }
 
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
     final previousMonth = _shiftVisibleMonth(_visibleMonth, -1);
     final nextMonth = _shiftVisibleMonth(_visibleMonth, 1);
-    final currentYear = '${_visibleMonth.year}';
+
+    String getMonthLabel(DateTime month) {
+      if (isEC) {
+        final ec = Kenat.fromGregorian(month.year, month.month, month.day)
+            .getEthiopian();
+        return MonthNames.amharic[ec['month']! - 1];
+      }
+      return _months[month.month - 1];
+    }
+
+    String getYearLabel(DateTime month) {
+      if (isEC) {
+        final ec = Kenat.fromGregorian(month.year, month.month, month.day)
+            .getEthiopian();
+        return '${ec['year']}';
+      }
+      return '${month.year}';
+    }
+
+    final currentYearLabel = getYearLabel(_visibleMonth);
+    final prevYearLabel = getYearLabel(previousMonth);
+    final nextYearLabel = getYearLabel(nextMonth);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -5464,9 +6136,9 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
           textStyle: textStyle,
           labelWidth: _measureHeaderMonthViewportWidth(context, textStyle),
           labelHeight: 36,
-          previousLabel: _months[previousMonth.month - 1],
-          currentLabel: _months[_visibleMonth.month - 1],
-          nextLabel: _months[nextMonth.month - 1],
+          previousLabel: getMonthLabel(previousMonth),
+          currentLabel: getMonthLabel(_visibleMonth),
+          nextLabel: getMonthLabel(nextMonth),
           itemAlignment: Alignment.centerLeft,
           axis: Axis.vertical,
         ),
@@ -5475,17 +6147,17 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
           textStyle: textStyle,
           labelWidth: _measureHeaderYearViewportWidth(context, textStyle),
           labelHeight: 36,
-          previousLabel: previousMonth.year == _visibleMonth.year
-              ? currentYear
-              : '${previousMonth.year}',
-          currentLabel: currentYear,
-          nextLabel: nextMonth.year == _visibleMonth.year
-              ? currentYear
-              : '${nextMonth.year}',
+          previousLabel: prevYearLabel == currentYearLabel
+              ? currentYearLabel
+              : prevYearLabel,
+          currentLabel: currentYearLabel,
+          nextLabel: nextYearLabel == currentYearLabel
+              ? currentYearLabel
+              : nextYearLabel,
           itemAlignment: Alignment.centerLeft,
           axis: Axis.vertical,
-          animateNegative: previousMonth.year != _visibleMonth.year,
-          animatePositive: nextMonth.year != _visibleMonth.year,
+          animateNegative: prevYearLabel != currentYearLabel,
+          animatePositive: nextYearLabel != currentYearLabel,
         ),
       ],
     );
@@ -5715,7 +6387,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
       child: Align(
         alignment: alignment,
         child: Text(
-          label,
+          context.l10nText(label),
           maxLines: 1,
           overflow: TextOverflow.fade,
           softWrap: false,
@@ -5781,26 +6453,65 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
 
   Map<int, double> _buildDailyValues(DateTime month) {
     final values = <int, double>{};
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
+    final targetEc = isEC
+        ? Kenat.fromGregorian(month.year, month.month, month.day).getEthiopian()
+        : null;
+
     for (final transaction in widget.transactions) {
       final dt = _parseTransactionTime(transaction.time);
-      if (dt == null || dt.year != month.year || dt.month != month.month) {
-        continue;
+      if (dt == null) continue;
+
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
+        if (ec['year'] != targetEc!['year'] || ec['month'] != targetEc['month'])
+          continue;
+        final delta = _heatmapDelta(transaction);
+        if (delta.abs() < 0.001) continue;
+        values[ec['day']!] = (values[ec['day']!] ?? 0.0) + delta;
+      } else {
+        if (dt.year != month.year || dt.month != month.month) continue;
+        final delta = _heatmapDelta(transaction);
+        if (delta.abs() < 0.001) continue;
+        values[dt.day] = (values[dt.day] ?? 0.0) + delta;
       }
-      final delta = _heatmapDelta(transaction);
-      if (delta.abs() < 0.001) continue;
-      values[dt.day] = (values[dt.day] ?? 0.0) + delta;
     }
     return values;
   }
 
-  Map<int, double> _buildMonthlyValues(int year) {
+  Map<int, double> _buildMonthlyValues(DateTime visibleMonth) {
     final values = <int, double>{};
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
+    final targetEcYear = isEC
+        ? Kenat.fromGregorian(
+            visibleMonth.year,
+            visibleMonth.month,
+            visibleMonth.day,
+          ).getEthiopian()['year']
+        : null;
+
     for (final transaction in widget.transactions) {
       final dt = _parseTransactionTime(transaction.time);
-      if (dt == null || dt.year != year) continue;
-      final delta = _heatmapDelta(transaction);
-      if (delta.abs() < 0.001) continue;
-      values[dt.month] = (values[dt.month] ?? 0.0) + delta;
+      if (dt == null) continue;
+
+      if (isEC) {
+        final ec =
+            Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
+        if (ec['year'] != targetEcYear) continue;
+        final delta = _heatmapDelta(transaction);
+        if (delta.abs() < 0.001) continue;
+        values[ec['month']!] = (values[ec['month']!] ?? 0.0) + delta;
+      } else {
+        if (dt.year != visibleMonth.year) continue;
+        final delta = _heatmapDelta(transaction);
+        if (delta.abs() < 0.001) continue;
+        values[dt.month] = (values[dt.month] ?? 0.0) + delta;
+      }
     }
     return values;
   }
@@ -5813,6 +6524,62 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     required double maxMagnitude,
     ValueChanged<DateTime>? onDaySelected,
   }) {
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
+    if (isEC) {
+      final ec = Kenat.fromGregorian(
+              visibleMonth.year, visibleMonth.month, visibleMonth.day)
+          .getEthiopian();
+      final grid =
+          MonthGrid({'year': ec['year'], 'month': ec['month'], 'weekStart': 1})
+              .generate();
+      final List<Map<String, dynamic>?> days =
+          List<Map<String, dynamic>?>.from(grid['days']);
+      const totalCells = 42;
+
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: totalCells,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 7,
+          crossAxisSpacing: 4,
+          mainAxisSpacing: 4,
+          childAspectRatio: 1.04,
+        ),
+        itemBuilder: (context, index) {
+          if (index >= days.length || days[index] == null) {
+            return const SizedBox.shrink();
+          }
+
+          final dayData = days[index]!;
+          final day = dayData['ethiopian']['day'] as int;
+          final value = valuesByDay[day] ?? 0.0;
+
+          final ecNow =
+              Kenat.fromGregorian(now.year, now.month, now.day).getEthiopian();
+          final isCurrentDay = ec['year'] == ecNow['year'] &&
+              ec['month'] == ecNow['month'] &&
+              day == ecNow['day'];
+
+          return _buildHeatmapCell(
+            context: context,
+            label: '$day',
+            value: value,
+            maxMagnitude: maxMagnitude,
+            isCurrent: isCurrentDay,
+            onTap: onDaySelected == null
+                ? null
+                : () {
+                    final gc = dayData['gregorian'];
+                    onDaySelected(DateTime(gc['year'], gc['month'], gc['day']));
+                  },
+          );
+        },
+      );
+    }
+
     final daysInMonth =
         DateTime(visibleMonth.year, visibleMonth.month + 1, 0).day;
     final startOffset = visibleMonth.weekday - 1;
@@ -5862,10 +6629,15 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     required Map<int, double> valuesByMonth,
     required double maxMagnitude,
   }) {
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
+    final itemCount = isEC ? 13 : 12;
+
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: 12,
+      itemCount: itemCount,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 4,
         crossAxisSpacing: 6,
@@ -5874,15 +6646,37 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
       ),
       itemBuilder: (context, index) {
         final monthNumber = index + 1;
-        final monthDate = DateTime(visibleMonth.year, monthNumber, 1);
         final value = valuesByMonth[monthNumber] ?? 0.0;
-        final isCurrentMonth =
-            visibleMonth.year == now.year && monthNumber == now.month;
-        final isSelectedMonth = monthNumber == visibleMonth.month;
+
+        bool isCurrentMonth = false;
+        bool isSelectedMonth = false;
+        String label = '';
+        DateTime monthDate;
+
+        if (isEC) {
+          final ec = Kenat.fromGregorian(
+                  visibleMonth.year, visibleMonth.month, visibleMonth.day)
+              .getEthiopian();
+          final ecNow =
+              Kenat.fromGregorian(now.year, now.month, now.day).getEthiopian();
+          isCurrentMonth =
+              ec['year'] == ecNow['year'] && monthNumber == ecNow['month'];
+          isSelectedMonth = monthNumber == ec['month'];
+          label = MonthNames.amharic[monthNumber - 1];
+          final gc =
+              Kenat.fromEthiopian(ec['year']!, monthNumber, 1).getGregorian();
+          monthDate = DateTime(gc['year']!, gc['month']!, gc['day']!);
+        } else {
+          monthDate = DateTime(visibleMonth.year, monthNumber, 1);
+          isCurrentMonth =
+              visibleMonth.year == now.year && monthNumber == now.month;
+          isSelectedMonth = monthNumber == visibleMonth.month;
+          label = _months[monthNumber - 1];
+        }
 
         return _buildHeatmapCell(
           context: context,
-          label: _months[monthNumber - 1],
+          label: label,
           value: value,
           maxMagnitude: maxMagnitude,
           isCurrent: isCurrentMonth,
@@ -6291,7 +7085,7 @@ class _AnalyticsFlowModeToggleOption extends StatelessWidget {
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
           ),
-          child: Text(label),
+          child: Text(context.l10nText(label)),
         ),
       ),
     );
@@ -6515,7 +7309,7 @@ class _AnalyticsLegendDot extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         Text(
-          label,
+          context.l10nText(label),
           style: TextStyle(
             color: AppColors.textSecondary(context),
             fontSize: 12,
@@ -6531,7 +7325,7 @@ class _AnalyticsWeekdayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final labels = _analyticsWeekdayLabels(context, short: true);
     return Row(
       children: labels
           .map(
@@ -7064,9 +7858,22 @@ Widget _buildAnalyticsTrendBottomAxisTitle(
       index == 0 || index == bucketDates.length - 1 || index % labelStride == 0;
   if (!shouldShow) return const SizedBox.shrink();
 
-  final label = period == _AnalyticsLineChartPeriod.yearly
-      ? DateFormat('MMM').format(bucketDates[index])
-      : DateFormat('MMM d').format(bucketDates[index]);
+  final isEC = Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+      AppCalendarOption.ethiopian;
+  String label;
+  if (isEC) {
+    final ec = Kenat.fromGregorian(bucketDates[index].year,
+            bucketDates[index].month, bucketDates[index].day)
+        .getEthiopian();
+    final monthShort = _safePrefix(MonthNames.amharic[ec['month']! - 1], 3);
+    label = period == _AnalyticsLineChartPeriod.yearly
+        ? monthShort
+        : '$monthShort ${ec['day']}';
+  } else {
+    label = period == _AnalyticsLineChartPeriod.yearly
+        ? DateFormat('MMM').format(bucketDates[index])
+        : DateFormat('MMM d').format(bucketDates[index]);
+  }
 
   return SideTitleWidget(
     axisSide: meta.axisSide,
@@ -7133,7 +7940,29 @@ double _resolveAnalyticsTrendChartMax(double maxValue) {
   return step * 4;
 }
 
-String _formatAnalyticsDateRange(DateTime start, DateTime end) {
+String _formatAnalyticsDateRange(DateTime start, DateTime end,
+    {BuildContext? context}) {
+  if (context != null) {
+    try {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ecStart = Kenat.fromGregorian(start.year, start.month, start.day)
+            .getEthiopian();
+        final ecEnd =
+            Kenat.fromGregorian(end.year, end.month, end.day).getEthiopian();
+        if (ecStart['year'] == ecEnd['year']) {
+          if (ecStart['month'] == ecEnd['month']) {
+            return '${MonthNames.amharic[ecStart['month']! - 1]} ${ecStart['day']} - ${ecEnd['day']}, ${ecEnd['year']}';
+          }
+          return '${MonthNames.amharic[ecStart['month']! - 1]} ${ecStart['day']} - ${MonthNames.amharic[ecEnd['month']! - 1]} ${ecEnd['day']}, ${ecEnd['year']}';
+        }
+        return '${MonthNames.amharic[ecStart['month']! - 1]} ${ecStart['day']}, ${ecStart['year']} - ${MonthNames.amharic[ecEnd['month']! - 1]} ${ecEnd['day']}, ${ecEnd['year']}';
+      }
+    } catch (_) {}
+  }
+
   if (start.year == end.year) {
     if (start.month == end.month) {
       return '${DateFormat('MMM d').format(start)} - ${DateFormat('d, yyyy').format(end)}';
@@ -7146,8 +7975,43 @@ String _formatAnalyticsDateRange(DateTime start, DateTime end) {
 DateTime _shiftAnalyticsLineAnchorDate(
   DateTime anchor,
   _AnalyticsLineChartPeriod period,
-  int periodOffset,
-) {
+  int periodOffset, {
+  BuildContext? context,
+}) {
+  try {
+    if (context != null) {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(anchor.year, anchor.month, anchor.day)
+            .getEthiopian();
+        var y = ec['year']!;
+        var m = ec['month']!;
+        switch (period) {
+          case _AnalyticsLineChartPeriod.weekly:
+            return anchor.add(Duration(days: periodOffset * 7));
+          case _AnalyticsLineChartPeriod.monthly:
+            m += periodOffset;
+            while (m > 13) {
+              m -= 13;
+              y++;
+            }
+            while (m < 1) {
+              m += 13;
+              y--;
+            }
+            final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+            return DateTime(gc['year']!, gc['month']!, gc['day']!);
+          case _AnalyticsLineChartPeriod.yearly:
+            y += periodOffset;
+            final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+            return DateTime(gc['year']!, gc['month']!, gc['day']!);
+        }
+      }
+    }
+  } catch (_) {}
+
   switch (period) {
     case _AnalyticsLineChartPeriod.weekly:
       return DateTime(
@@ -7155,15 +8019,50 @@ DateTime _shiftAnalyticsLineAnchorDate(
     case _AnalyticsLineChartPeriod.monthly:
       return DateTime(anchor.year, anchor.month + periodOffset, 1);
     case _AnalyticsLineChartPeriod.yearly:
-      return DateTime(anchor.year + periodOffset, 1, 1);
+      return DateTime(anchor.year + periodOffset, anchor.month, 1);
   }
 }
 
 DateTime _shiftAnalyticsBarAnchorDate(
   DateTime anchor,
   _AnalyticsBarChartPeriod period,
-  int periodOffset,
-) {
+  int periodOffset, {
+  BuildContext? context,
+}) {
+  try {
+    if (context != null) {
+      final isEC =
+          Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+              AppCalendarOption.ethiopian;
+      if (isEC) {
+        final ec = Kenat.fromGregorian(anchor.year, anchor.month, anchor.day)
+            .getEthiopian();
+        var y = ec['year']!;
+        var m = ec['month']!;
+        switch (period) {
+          case _AnalyticsBarChartPeriod.weekly:
+            return anchor.add(Duration(days: periodOffset * 7));
+          case _AnalyticsBarChartPeriod.monthly:
+            m += periodOffset;
+            while (m > 13) {
+              m -= 13;
+              y++;
+            }
+            while (m < 1) {
+              m += 13;
+              y--;
+            }
+            final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+            return DateTime(gc['year']!, gc['month']!, gc['day']!);
+          case _AnalyticsBarChartPeriod.yearly:
+            y += periodOffset;
+            final gc = Kenat.fromEthiopian(y, m, 1).getGregorian();
+            return DateTime(gc['year']!, gc['month']!, gc['day']!);
+        }
+      }
+    }
+  } catch (_) {}
+
   switch (period) {
     case _AnalyticsBarChartPeriod.weekly:
       return DateTime(
@@ -7171,7 +8070,7 @@ DateTime _shiftAnalyticsBarAnchorDate(
     case _AnalyticsBarChartPeriod.monthly:
       return DateTime(anchor.year, anchor.month + periodOffset, 1);
     case _AnalyticsBarChartPeriod.yearly:
-      return DateTime(anchor.year + periodOffset, 1, 1);
+      return DateTime(anchor.year + periodOffset, anchor.month, 1);
   }
 }
 
@@ -7214,66 +8113,160 @@ class _AnalyticsLineChartCard extends StatelessWidget {
     return DateTime(anchor.year, anchor.month, anchor.day);
   }
 
-  _AnalyticsLineSeries _buildSeries(int effectivePeriodOffset) {
+  _AnalyticsLineSeries _buildSeries(
+      BuildContext context, int effectivePeriodOffset) {
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
     final anchorDate = _shiftAnalyticsLineAnchorDate(
       _anchorDate(),
       period,
       effectivePeriodOffset,
+      context: context,
     );
+
+    late final DateTime anchorMonth;
+    if (isEC) {
+      final ec =
+          Kenat.fromGregorian(anchorDate.year, anchorDate.month, anchorDate.day)
+              .getEthiopian();
+      final gc =
+          Kenat.fromEthiopian(ec['year']!, ec['month']!, 1).getGregorian();
+      anchorMonth = DateTime(gc['year']!, gc['month']!, gc['day']!);
+    } else {
+      anchorMonth = DateTime(anchorDate.year, anchorDate.month, 1);
+    }
+
     late final List<DateTime> bucketDates;
     late final List<double> incomeValues;
     late final List<double> expenseValues;
     late final String supportingText;
     late final String rangeLabel;
 
-    switch (period) {
-      case _AnalyticsLineChartPeriod.weekly:
-        {
-          final startDate = anchorDate.subtract(
-            Duration(days: anchorDate.weekday - DateTime.monday),
-          );
-          final endDate = startDate.add(const Duration(days: 6));
-          bucketDates = List<DateTime>.generate(
-            7,
-            (index) => startDate.add(Duration(days: index)),
-            growable: false,
-          );
-          incomeValues = List<double>.filled(7, 0.0);
-          expenseValues = List<double>.filled(7, 0.0);
-          supportingText = _formatAnalyticsDateRange(startDate, endDate);
-          rangeLabel = 'Week of ${DateFormat('MMM d').format(startDate)}';
-          break;
-        }
-      case _AnalyticsLineChartPeriod.monthly:
-        {
-          final startDate = DateTime(anchorDate.year, anchorDate.month, 1);
-          final dayCount =
-              DateTime(anchorDate.year, anchorDate.month + 1, 0).day;
-          bucketDates = List<DateTime>.generate(
-            dayCount,
-            (index) => startDate.add(Duration(days: index)),
-            growable: false,
-          );
-          incomeValues = List<double>.filled(dayCount, 0.0);
-          expenseValues = List<double>.filled(dayCount, 0.0);
-          supportingText = DateFormat('MMMM yyyy').format(startDate);
-          rangeLabel = DateFormat('MMM yyyy').format(startDate);
-          break;
-        }
-      case _AnalyticsLineChartPeriod.yearly:
-        {
-          final startMonth = DateTime(anchorDate.year, 1, 1);
-          bucketDates = List<DateTime>.generate(
-            12,
-            (index) => DateTime(startMonth.year, startMonth.month + index, 1),
-            growable: false,
-          );
-          incomeValues = List<double>.filled(12, 0.0);
-          expenseValues = List<double>.filled(12, 0.0);
-          supportingText = 'Jan - Dec ${startMonth.year}';
-          rangeLabel = '${startMonth.year}';
-          break;
-        }
+    if (isEC) {
+      final ecAnchor =
+          Kenat.fromGregorian(anchorDate.year, anchorDate.month, anchorDate.day)
+              .getEthiopian();
+      switch (period) {
+        case _AnalyticsLineChartPeriod.weekly:
+          {
+            final grid = MonthGrid({
+              'year': ecAnchor['year'],
+              'month': ecAnchor['month'],
+              'weekStart': 0
+            }).generate();
+            final List<Map<String, dynamic>?> allDays =
+                List<Map<String, dynamic>?>.from(grid['days']);
+            // Find the week that contains ecAnchor
+            final anchorIdx = allDays.indexWhere(
+                (d) => d != null && d['ethiopian']['day'] == ecAnchor['day']);
+            final startIdx = (anchorIdx ~/ 7) * 7;
+            final weekDays = allDays.sublist(startIdx, startIdx + 7);
+            bucketDates = weekDays.map((d) {
+              if (d == null) return DateTime(2000); // Placeholder
+              final g = d['gregorian'];
+              return DateTime(g['year'], g['month'], g['day']);
+            }).toList();
+
+            final validDates = bucketDates.where((d) => d.year > 2000).toList();
+            incomeValues = List<double>.filled(7, 0.0);
+            expenseValues = List<double>.filled(7, 0.0);
+            supportingText = _formatAnalyticsDateRange(
+                validDates.first, validDates.last,
+                context: context);
+            final ecStart = Kenat.fromGregorian(validDates.first.year,
+                    validDates.first.month, validDates.first.day)
+                .getEthiopian();
+            rangeLabel =
+                'Week of ${MonthNames.amharic[ecStart['month']! - 1]} ${ecStart['day']}';
+            break;
+          }
+        case _AnalyticsLineChartPeriod.monthly:
+          {
+            final gcStartMap =
+                Kenat.fromEthiopian(ecAnchor['year']!, ecAnchor['month']!, 1)
+                    .getGregorian();
+            final startDate = DateTime(
+                gcStartMap['year']!, gcStartMap['month']!, gcStartMap['day']!);
+            final dayCount = EthiopianCalendarUtils.getEthiopianDaysInMonth(
+                ecAnchor['year']!, ecAnchor['month']!);
+            bucketDates = List<DateTime>.generate(dayCount, (index) {
+              final g = Kenat.fromEthiopian(
+                      ecAnchor['year']!, ecAnchor['month']!, index + 1)
+                  .getGregorian();
+              return DateTime(g['year']!, g['month']!, g['day']!);
+            });
+            incomeValues = List<double>.filled(dayCount, 0.0);
+            expenseValues = List<double>.filled(dayCount, 0.0);
+            supportingText =
+                '${MonthNames.amharic[ecAnchor['month']! - 1]} ${ecAnchor['year']}';
+            rangeLabel = supportingText;
+            break;
+          }
+        case _AnalyticsLineChartPeriod.yearly:
+          {
+            bucketDates = List<DateTime>.generate(13, (index) {
+              final g = Kenat.fromEthiopian(ecAnchor['year']!, index + 1, 1)
+                  .getGregorian();
+              return DateTime(g['year']!, g['month']!, g['day']!);
+            });
+            incomeValues = List<double>.filled(13, 0.0);
+            expenseValues = List<double>.filled(13, 0.0);
+            supportingText = 'Meskerem - Pagume ${ecAnchor['year']}';
+            rangeLabel = '${ecAnchor['year']}';
+            break;
+          }
+      }
+    } else {
+      switch (period) {
+        case _AnalyticsLineChartPeriod.weekly:
+          {
+            final startDate = anchorDate.subtract(
+              Duration(days: anchorDate.weekday - DateTime.monday),
+            );
+            final endDate = startDate.add(const Duration(days: 6));
+            bucketDates = List<DateTime>.generate(
+              7,
+              (index) => startDate.add(Duration(days: index)),
+              growable: false,
+            );
+            incomeValues = List<double>.filled(7, 0.0);
+            expenseValues = List<double>.filled(7, 0.0);
+            supportingText = _formatAnalyticsDateRange(startDate, endDate);
+            rangeLabel = 'Week of ${DateFormat('MMM d').format(startDate)}';
+            break;
+          }
+        case _AnalyticsLineChartPeriod.monthly:
+          {
+            final startDate = DateTime(anchorDate.year, anchorDate.month, 1);
+            final dayCount =
+                DateTime(anchorDate.year, anchorDate.month + 1, 0).day;
+            bucketDates = List<DateTime>.generate(
+              dayCount,
+              (index) => startDate.add(Duration(days: index)),
+              growable: false,
+            );
+            incomeValues = List<double>.filled(dayCount, 0.0);
+            expenseValues = List<double>.filled(dayCount, 0.0);
+            supportingText = DateFormat('MMMM yyyy').format(startDate);
+            rangeLabel = DateFormat('MMM yyyy').format(startDate);
+            break;
+          }
+        case _AnalyticsLineChartPeriod.yearly:
+          {
+            final startMonth = DateTime(anchorDate.year, 1, 1);
+            bucketDates = List<DateTime>.generate(
+              12,
+              (index) => DateTime(startMonth.year, startMonth.month + index, 1),
+              growable: false,
+            );
+            incomeValues = List<double>.filled(12, 0.0);
+            expenseValues = List<double>.filled(12, 0.0);
+            supportingText = 'Jan - Dec ${startMonth.year}';
+            rangeLabel = '${startMonth.year}';
+            break;
+          }
+      }
     }
 
     for (final transaction in transactions) {
@@ -7288,45 +8281,85 @@ class _AnalyticsLineChartCard extends StatelessWidget {
       if (amount <= 0.001) continue;
 
       int? bucketIndex;
-      switch (period) {
-        case _AnalyticsLineChartPeriod.weekly:
-          {
-            final dateOnly = DateTime(dt.year, dt.month, dt.day);
-            final startDate = bucketDates.first;
-            final endDate = bucketDates.last;
-            if (dateOnly.isBefore(startDate) || dateOnly.isAfter(endDate)) {
-              continue;
+      if (isEC) {
+        final ecDt =
+            Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
+        switch (period) {
+          case _AnalyticsLineChartPeriod.weekly:
+            {
+              final dateOnly = DateTime(dt.year, dt.month, dt.day);
+              bucketIndex = bucketDates.indexWhere((d) =>
+                  d.year == dateOnly.year &&
+                  d.month == dateOnly.month &&
+                  d.day == dateOnly.day);
+              break;
             }
-            bucketIndex = dateOnly.difference(startDate).inDays;
-            break;
-          }
-        case _AnalyticsLineChartPeriod.monthly:
-          {
-            final dateOnly = DateTime(dt.year, dt.month, dt.day);
-            final startDate = bucketDates.first;
-            final endDate = bucketDates.last;
-            if (dateOnly.isBefore(startDate) || dateOnly.isAfter(endDate)) {
-              continue;
+          case _AnalyticsLineChartPeriod.monthly:
+            {
+              final ecAnchor = Kenat.fromGregorian(bucketDates.first.year,
+                      bucketDates.first.month, bucketDates.first.day)
+                  .getEthiopian();
+              if (ecDt['year'] == ecAnchor['year'] &&
+                  ecDt['month'] == ecAnchor['month']) {
+                bucketIndex = ecDt['day']! - 1;
+              }
+              break;
             }
-            bucketIndex = dateOnly.difference(startDate).inDays;
-            break;
-          }
-        case _AnalyticsLineChartPeriod.yearly:
-          {
-            final monthDate = DateTime(dt.year, dt.month, 1);
-            final startMonth = bucketDates.first;
-            final endMonth = bucketDates.last;
-            if (monthDate.isBefore(startMonth) || monthDate.isAfter(endMonth)) {
-              continue;
+          case _AnalyticsLineChartPeriod.yearly:
+            {
+              final ecAnchor = Kenat.fromGregorian(bucketDates.first.year,
+                      bucketDates.first.month, bucketDates.first.day)
+                  .getEthiopian();
+              if (ecDt['year'] == ecAnchor['year']) {
+                bucketIndex = ecDt['month']! - 1;
+              }
+              break;
             }
-            bucketIndex = (monthDate.year - startMonth.year) * 12 +
-                monthDate.month -
-                startMonth.month;
-            break;
-          }
+        }
+      } else {
+        switch (period) {
+          case _AnalyticsLineChartPeriod.weekly:
+            {
+              final dateOnly = DateTime(dt.year, dt.month, dt.day);
+              final startDate = bucketDates.first;
+              final endDate = bucketDates.last;
+              if (dateOnly.isBefore(startDate) || dateOnly.isAfter(endDate)) {
+                continue;
+              }
+              bucketIndex = dateOnly.difference(startDate).inDays;
+              break;
+            }
+          case _AnalyticsLineChartPeriod.monthly:
+            {
+              final dateOnly = DateTime(dt.year, dt.month, dt.day);
+              final startDate = bucketDates.first;
+              final endDate = bucketDates.last;
+              if (dateOnly.isBefore(startDate) || dateOnly.isAfter(endDate)) {
+                continue;
+              }
+              bucketIndex = dateOnly.difference(startDate).inDays;
+              break;
+            }
+          case _AnalyticsLineChartPeriod.yearly:
+            {
+              final monthDate = DateTime(dt.year, dt.month, 1);
+              final startMonth = bucketDates.first;
+              final endMonth = bucketDates.last;
+              if (monthDate.isBefore(startMonth) ||
+                  monthDate.isAfter(endMonth)) {
+                continue;
+              }
+              bucketIndex = (monthDate.year - startMonth.year) * 12 +
+                  monthDate.month -
+                  startMonth.month;
+              break;
+            }
+        }
       }
 
-      if (bucketIndex < 0 || bucketIndex >= bucketDates.length) continue;
+      if (bucketIndex == null ||
+          bucketIndex < 0 ||
+          bucketIndex >= bucketDates.length) continue;
 
       if (transaction.type == 'CREDIT') {
         incomeValues[bucketIndex] += amount;
@@ -7539,11 +8572,12 @@ class _AnalyticsLineChartCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final previousSeries = _buildSeries(periodOffset - 1);
-    final currentSeries = _buildSeries(periodOffset);
+    final previousSeries = _buildSeries(context, periodOffset - 1);
+    final currentSeries = _buildSeries(context, periodOffset);
     final hasNewerPeriod = periodOffset < 0;
-    final nextSeries =
-        hasNewerPeriod ? _buildSeries(periodOffset + 1) : currentSeries;
+    final nextSeries = hasNewerPeriod
+        ? _buildSeries(context, periodOffset + 1)
+        : currentSeries;
     final viewportHeight = math.max(
       _pageHeight(previousSeries),
       math.max(_pageHeight(currentSeries), _pageHeight(nextSeries)),
@@ -7561,8 +8595,12 @@ class _AnalyticsLineChartCard extends StatelessWidget {
         children: [
           _AnalyticsPrimaryChartHeader(
             chartLabel: 'Line Chart',
-            headline: '',
-            supportingText: '',
+            headline: period == _AnalyticsLineChartPeriod.weekly
+                ? 'Weekly Spending'
+                : period == _AnalyticsLineChartPeriod.monthly
+                    ? 'Monthly Spending'
+                    : 'Yearly Spending',
+            supportingText: currentSeries.supportingText,
             activeFilterCount: activeFilterCount,
             onOpenFilterSheet: onOpenFilterSheet,
             onChartPickerTap: onChartPickerTap,
@@ -7801,24 +8839,19 @@ class _AnalyticsBarChartCard extends StatelessWidget {
     }
   }
 
-  _AnalyticsBarSeries _buildSeries(int effectivePeriodOffset) {
+  _AnalyticsBarSeries _buildSeries(
+      BuildContext context, int effectivePeriodOffset) {
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
     final mode = _effectiveMode;
     final anchor = _shiftAnalyticsBarAnchorDate(
       _anchorDate(),
       filter.barPeriod,
       effectivePeriodOffset,
+      context: context,
     );
-    const weeklyLabels = <String>[
-      'Mon',
-      'Tue',
-      'Wed',
-      'Thu',
-      'Fri',
-      'Sat',
-      'Sun'
-    ];
-    const monthlyLabels = <String>['W1', 'W2', 'W3', 'W4', 'W5'];
-    const yearlyLabels = <String>[
+    final yearlyLabelsDefault = [
       'Jan',
       'Feb',
       'Mar',
@@ -7830,8 +8863,24 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       'Sep',
       'Oct',
       'Nov',
-      'Dec',
+      'Dec'
     ];
+    final weeklyLabels = isEC
+        ? [
+            DaysOfWeek.amharic[1], // Monday
+            DaysOfWeek.amharic[2], // Tuesday
+            DaysOfWeek.amharic[3], // Wednesday
+            DaysOfWeek.amharic[4], // Thursday
+            DaysOfWeek.amharic[5], // Friday
+            DaysOfWeek.amharic[6], // Saturday
+            DaysOfWeek.amharic[0], // Sunday
+          ].map((d) => d.substring(0, d.length >= 3 ? 3 : d.length)).toList()
+        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final monthlyLabels = ['W1', 'W2', 'W3', 'W4', 'W5'];
+    final yearlyLabels = isEC
+        ? MonthNames.amharic.map((m) => _safePrefix(m, 3)).toList()
+        : yearlyLabelsDefault;
+
     final labels = switch (filter.barPeriod) {
       _AnalyticsBarChartPeriod.weekly => weeklyLabels,
       _AnalyticsBarChartPeriod.monthly => monthlyLabels,
@@ -7839,34 +8888,71 @@ class _AnalyticsBarChartCard extends StatelessWidget {
     };
     final bucketCount = labels.length;
     final statsByKey = <String, _AnalyticsBarCategoryAccumulator>{};
-    final anchorDay = DateTime(anchor.year, anchor.month, anchor.day);
-    final weekStart = anchorDay.subtract(
-      Duration(days: anchorDay.weekday - DateTime.monday),
-    );
-    final monthStart = DateTime(anchor.year, anchor.month, 1);
-    final nextMonthStart = DateTime(anchor.year, anchor.month + 1, 1);
-    final yearStart = DateTime(anchor.year, 1, 1);
-    final nextYearStart = DateTime(anchor.year + 1, 1, 1);
+    final bucketDates = <DateTime>[];
 
     int? bucketIndexFor(DateTime dt) {
-      switch (filter.barPeriod) {
-        case _AnalyticsBarChartPeriod.weekly:
-          if (dt.isBefore(weekStart) ||
-              !dt.isBefore(weekStart.add(const Duration(days: 7)))) {
+      if (isEC) {
+        final ecDt =
+            Kenat.fromGregorian(dt.year, dt.month, dt.day).getEthiopian();
+        final ecAnchor =
+            Kenat.fromGregorian(anchor.year, anchor.month, anchor.day)
+                .getEthiopian();
+        switch (filter.barPeriod) {
+          case _AnalyticsBarChartPeriod.weekly:
+            final anchorGC = DateTime(anchor.year, anchor.month, anchor.day);
+            final weekStartGC = anchorGC
+                .subtract(Duration(days: anchorGC.weekday - DateTime.monday));
+            if (dt.isBefore(weekStartGC) ||
+                !dt.isBefore(weekStartGC.add(const Duration(days: 7))))
+              return null;
+            return dt.difference(weekStartGC).inDays;
+          case _AnalyticsBarChartPeriod.monthly:
+            if (ecDt['year'] == ecAnchor['year'] &&
+                ecDt['month'] == ecAnchor['month']) {
+              return ((ecDt['day']! - 1) ~/ 7).clamp(0, 4);
+            }
             return null;
-          }
-          return dt.difference(weekStart).inDays;
-        case _AnalyticsBarChartPeriod.monthly:
-          if (dt.isBefore(monthStart) || !dt.isBefore(nextMonthStart)) {
+          case _AnalyticsBarChartPeriod.yearly:
+            if (ecDt['year'] == ecAnchor['year']) {
+              return ecDt['month']! - 1;
+            }
             return null;
-          }
-          return ((dt.day - 1) ~/ 7).clamp(0, 4);
-        case _AnalyticsBarChartPeriod.yearly:
-          if (dt.isBefore(yearStart) || !dt.isBefore(nextYearStart)) {
-            return null;
-          }
-          return dt.month - 1;
+        }
+      } else {
+        final anchorDay = DateTime(anchor.year, anchor.month, anchor.day);
+        final weekStart = anchorDay
+            .subtract(Duration(days: anchorDay.weekday - DateTime.monday));
+        final monthStart = DateTime(anchor.year, anchor.month, 1);
+        final nextMonthStart = DateTime(anchor.year, anchor.month + 1, 1);
+        final yearStart = DateTime(anchor.year, 1, 1);
+        final nextYearStart = DateTime(anchor.year + 1, 1, 1);
+
+        switch (filter.barPeriod) {
+          case _AnalyticsBarChartPeriod.weekly:
+            if (dt.isBefore(weekStart) ||
+                !dt.isBefore(weekStart.add(const Duration(days: 7))))
+              return null;
+            return dt.difference(weekStart).inDays;
+          case _AnalyticsBarChartPeriod.monthly:
+            if (dt.isBefore(monthStart) || !dt.isBefore(nextMonthStart))
+              return null;
+            return ((dt.day - 1) ~/ 7).clamp(0, 4);
+          case _AnalyticsBarChartPeriod.yearly:
+            if (dt.isBefore(yearStart) || !dt.isBefore(nextYearStart))
+              return null;
+            return dt.month - 1;
+        }
       }
+    }
+
+    // Populate bucketDates for helper
+    if (filter.barPeriod == _AnalyticsBarChartPeriod.weekly) {
+      final anchorDay = DateTime(anchor.year, anchor.month, anchor.day);
+      final start = isEC
+          ? anchor.subtract(Duration(days: anchor.weekday - DateTime.monday))
+          : anchorDay
+              .subtract(Duration(days: anchorDay.weekday - DateTime.monday));
+      for (int i = 0; i < 7; i++) bucketDates.add(start.add(Duration(days: i)));
     }
 
     for (final transaction in transactions) {
@@ -7932,17 +9018,48 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       ),
     );
 
-    final periodLabel = switch (filter.barPeriod) {
-      _AnalyticsBarChartPeriod.weekly => _formatAnalyticsDateRange(
-          weekStart,
-          weekStart.add(const Duration(days: 6)),
-        ),
-      _AnalyticsBarChartPeriod.monthly =>
-        'W1 - W5 in ${DateFormat('MMMM yyyy').format(anchor)}',
-      _AnalyticsBarChartPeriod.yearly => 'Jan - Dec ${anchor.year}',
-    };
+    String supportingText;
+    if (isEC) {
+      final ecAnchor =
+          Kenat.fromGregorian(anchor.year, anchor.month, anchor.day)
+              .getEthiopian();
+      supportingText = switch (filter.barPeriod) {
+        _AnalyticsBarChartPeriod.weekly => _formatAnalyticsDateRange(
+            bucketDates.first,
+            bucketDates.last,
+            context: context,
+          ),
+        _AnalyticsBarChartPeriod.monthly =>
+          '${MonthNames.amharic[ecAnchor['month']! - 1]} ${ecAnchor['year']}',
+        _AnalyticsBarChartPeriod.yearly =>
+          'Meskerem - Pagume ${ecAnchor['year']}',
+      };
+    } else {
+      final monthStart = DateTime(anchor.year, anchor.month, 1);
+      supportingText = switch (filter.barPeriod) {
+        _AnalyticsBarChartPeriod.weekly => _formatAnalyticsDateRange(
+            bucketDates.first,
+            bucketDates.last,
+            context: context,
+          ),
+        _AnalyticsBarChartPeriod.monthly =>
+          DateFormat('MMMM yyyy').format(monthStart),
+        _AnalyticsBarChartPeriod.yearly => '${anchor.year}',
+      };
+    }
+
+    double totalIncome = 0;
+    double totalExpense = 0;
+    for (final c in statsByKey.values) {
+      if (mode == _AnalyticsHeatmapMode.income)
+        totalIncome += c.total;
+      else
+        totalExpense += c.total;
+    }
+
     final flowLabel =
         mode == _AnalyticsHeatmapMode.income ? 'income' : 'expense';
+    final periodLabel = supportingText;
 
     return _AnalyticsBarSeries(
       title:
@@ -7951,13 +9068,16 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       labels: labels,
       categories: categories,
       totalsByBucket: totalsByBucket,
+      totalIncome: totalIncome,
+      totalExpense: totalExpense,
       emptyMessage: 'No $flowLabel activity for $periodLabel.',
     );
   }
 
   double _pageHeight(_AnalyticsBarSeries series) {
     final hasData = series.totalsByBucket.fold<double>(0.0, math.max) > 0.001;
-    return hasData ? 354 : 276;
+    // Small safety margin to avoid label/legend clipping on some text scales.
+    return hasData ? 362 : 282;
   }
 
   Widget _buildPage(BuildContext context, _AnalyticsBarSeries series) {
@@ -8101,11 +9221,12 @@ class _AnalyticsBarChartCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final previousSeries = _buildSeries(periodOffset - 1);
-    final currentSeries = _buildSeries(periodOffset);
+    final previousSeries = _buildSeries(context, periodOffset - 1);
+    final currentSeries = _buildSeries(context, periodOffset);
     final hasNewerPeriod = periodOffset < 0;
-    final nextSeries =
-        hasNewerPeriod ? _buildSeries(periodOffset + 1) : currentSeries;
+    final nextSeries = hasNewerPeriod
+        ? _buildSeries(context, periodOffset + 1)
+        : currentSeries;
     final viewportHeight = math.max(
       _pageHeight(previousSeries),
       math.max(_pageHeight(currentSeries), _pageHeight(nextSeries)),
@@ -8123,8 +9244,12 @@ class _AnalyticsBarChartCard extends StatelessWidget {
         children: [
           _AnalyticsPrimaryChartHeader(
             chartLabel: 'Bar Chart',
-            headline: '',
-            supportingText: '',
+            headline: filter.barPeriod == _AnalyticsBarChartPeriod.weekly
+                ? 'Weekly Spending'
+                : filter.barPeriod == _AnalyticsBarChartPeriod.monthly
+                    ? 'Monthly Spending'
+                    : 'Yearly Spending',
+            supportingText: currentSeries.supportingText,
             activeFilterCount: activeFilterCount,
             onOpenFilterSheet: onOpenFilterSheet,
             onChartPickerTap: onChartPickerTap,
@@ -8144,7 +9269,24 @@ class _AnalyticsBarChartCard extends StatelessWidget {
                     : index == 1
                         ? currentSeries
                         : nextSeries;
-                return _buildPage(context, series);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (series != currentSeries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          series.supportingText,
+                          style: TextStyle(
+                            color: AppColors.textSecondary(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    _buildPage(context, series),
+                  ],
+                );
               },
             ),
           ),
@@ -8200,6 +9342,8 @@ class _AnalyticsBarSeries {
   final List<String> labels;
   final List<_AnalyticsBarCategorySeries> categories;
   final List<double> totalsByBucket;
+  final double totalIncome;
+  final double totalExpense;
   final String emptyMessage;
 
   const _AnalyticsBarSeries({
@@ -8208,6 +9352,8 @@ class _AnalyticsBarSeries {
     required this.labels,
     required this.categories,
     required this.totalsByBucket,
+    required this.totalIncome,
+    required this.totalExpense,
     required this.emptyMessage,
   });
 }
@@ -8492,24 +9638,16 @@ class _AnalyticsPieChartCard extends StatelessWidget {
         children: [
           _AnalyticsPrimaryChartHeader(
             chartLabel: 'Pie Chart',
-            headline: '',
-            supportingText: '',
+            headline: showIncome ? 'Income Categories' : 'Expense Categories',
+            supportingText: currentPage.periodLabel,
             activeFilterCount: activeFilterCount,
             onOpenFilterSheet: onOpenFilterSheet,
-            details: _AnalyticsFlowModeToggle(
-              showIncome: showIncome,
-              onChanged: onFlowModeChanged ?? (_) {},
-            ),
             onChartPickerTap: onChartPickerTap,
-          ),
-          const SizedBox(height: 12),
-          if (!hasPager)
-            _buildPage(context, currentPage)
-          else
-            _AnalyticsSwipePager(
+            details: _AnalyticsSwipePager(
               height: viewportHeight,
               recenterKey: Object.hash(
                 showIncome,
+                usesCustomDateRange,
                 currentPage.periodLabel,
                 previous.periodLabel,
                 next.periodLabel,
@@ -8522,9 +9660,27 @@ class _AnalyticsPieChartCard extends StatelessWidget {
                     : index == 1
                         ? currentPage
                         : next;
-                return _buildPage(context, page);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (page != currentPage)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          page.periodLabel,
+                          style: TextStyle(
+                            color: AppColors.textSecondary(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    _buildPage(context, page),
+                  ],
+                );
               },
             ),
+          ),
         ],
       ),
     );
@@ -8571,7 +9727,11 @@ class _AnalyticsSpendingByDayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxValue = snapshot.weekdayExpenseTotals.fold<double>(0.0, math.max);
-    final peakDay = _analyticsWeekdayLabel(snapshot.peakWeekdayIndex);
+    final peakDay = _analyticsWeekdayLabel(
+      context,
+      snapshot.peakWeekdayIndex,
+      short: true,
+    );
     final periodLabel = snapshot.periodLabel;
     final periodKey = snapshot.periodKey;
     final infoText = maxValue > 0 ? 'Peak: $peakDay' : snapshot.emptyLabel;
@@ -8780,7 +9940,13 @@ class _AnalyticsSpendingByDayCard extends StatelessWidget {
                                           ? FontWeight.w700
                                           : FontWeight.w600,
                                     ),
-                                    child: Text(_analyticsWeekdayLabel(index)),
+                                    child: Text(
+                                      _analyticsWeekdayLabel(
+                                        context,
+                                        index,
+                                        short: true,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -9317,7 +10483,7 @@ class _SearchFilterRow extends StatelessWidget {
               style: TextStyle(
                   fontSize: 14, color: AppColors.textPrimary(context)),
               decoration: InputDecoration(
-                hintText: 'Search Transactions',
+                hintText: context.l10nText('Search Transactions'),
                 hintStyle: TextStyle(
                   color: AppColors.textTertiary(context),
                   fontSize: 14,
@@ -9466,7 +10632,7 @@ class _LedgerHeaderSummary extends StatelessWidget {
                 style: labelStyle,
               ),
               TextSpan(
-                text: _formatDateHeader(startingDate!),
+                text: _formatDateHeader(startingDate!, context),
                 style: valueStyle,
               ),
             ],
@@ -9872,7 +11038,7 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              _formatDateHeader(date),
+              _formatDateHeader(date, context),
               style: TextStyle(
                 color: AppColors.textPrimary(context),
                 fontSize: 22,
@@ -10015,7 +11181,7 @@ class _HeatmapDayInlineStat extends StatelessWidget {
       TextSpan(
         children: [
           TextSpan(
-            text: '$label ',
+            text: '${context.l10nText(label)} ',
             style: TextStyle(
               color: AppColors.textSecondary(context),
               fontSize: 12,
@@ -10063,7 +11229,11 @@ class _LedgerTransactionEntry extends StatelessWidget {
     final bankName = _bankLabel(transaction.bankId);
 
     final dt = _parseTransactionTime(transaction.time);
-    final timeStr = dt != null ? _formatLedgerTime(dt) : '';
+    final timeParts = dt != null
+        ? _formatLedgerTimeParts(dt, context)
+        : const {'time': '', 'period': null};
+    final timeStr = timeParts['time'] ?? '';
+    final periodStr = timeParts['period'];
 
     final parsedBalance = _parseRunningBalance(transaction.currentBalance);
     final effectiveBalance = parsedBalance ?? derivedBalance;
@@ -10078,13 +11248,28 @@ class _LedgerTransactionEntry extends StatelessWidget {
         children: [
           SizedBox(
             width: 64,
-            child: Text(
-              timeStr,
-              style: TextStyle(
-                color: AppColors.textSecondary(context),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  timeStr,
+                  style: TextStyle(
+                    color: AppColors.textSecondary(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (periodStr != null && periodStr.isNotEmpty)
+                  Text(
+                    periodStr,
+                    style: TextStyle(
+                      color: AppColors.textTertiary(context),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      height: 1.1,
+                    ),
+                  ),
+              ],
             ),
           ),
           Expanded(
@@ -11204,7 +12389,7 @@ class _CashActionButton extends StatelessWidget {
               Icon(icon, size: 16, color: foregroundColor),
             const SizedBox(width: 6),
             Text(
-              label,
+              context.l10nText(label),
               style: TextStyle(
                 color: foregroundColor,
                 fontSize: 13,
@@ -11309,7 +12494,7 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
                     fontWeight: FontWeight.w700,
                   ),
                   decoration: InputDecoration(
-                    labelText: 'Target balance',
+                    labelText: context.l10nText('Target balance'),
                     prefixText: 'ETB ',
                     prefixStyle: TextStyle(
                       color: AppColors.textSecondary(context),
@@ -11381,9 +12566,9 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: const Text(
-                          'Set amount',
-                          style: TextStyle(
+                        child: Text(
+                          context.l10nText('Set amount'),
+                          style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
                           ),
@@ -11578,8 +12763,8 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
 
       if (account == null) {
         messenger.showSnackBar(
-          const SnackBar(
-            content: Text('This account already exists'),
+          SnackBar(
+            content: Text(context.l10nTextRead('This account already exists')),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -11602,7 +12787,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Error adding account: $e'),
+          content: Text('${context.l10nTextRead('Error adding account')}: $e'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -11719,8 +12904,8 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                         fontSize: 15,
                       ),
                       decoration: InputDecoration(
-                        labelText: 'Account Number',
-                        hintText: 'Enter account number',
+                        labelText: context.l10nText('Account Number'),
+                        hintText: context.l10nText('Enter account number'),
                         hintStyle: TextStyle(color: hintColor),
                         labelStyle: TextStyle(color: hintColor),
                         floatingLabelStyle: TextStyle(
@@ -11747,8 +12932,9 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 14),
                       ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? context.l10nTextRead('Required')
+                          : null,
                     ),
                     const SizedBox(height: 20),
 
@@ -11759,8 +12945,8 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                         fontSize: 15,
                       ),
                       decoration: InputDecoration(
-                        labelText: 'Account Holder Name',
-                        hintText: 'Enter account holder name',
+                        labelText: context.l10nText('Account Holder Name'),
+                        hintText: context.l10nText('Enter account holder name'),
                         hintStyle: TextStyle(color: hintColor),
                         labelStyle: TextStyle(color: hintColor),
                         floatingLabelStyle: TextStyle(
@@ -11787,8 +12973,9 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 14),
                       ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? context.l10nTextRead('Required')
+                          : null,
                     ),
                     const SizedBox(height: 20),
 
@@ -11814,7 +13001,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Sync SMS History',
+                                  context.l10nText('Sync SMS History'),
                                   style: TextStyle(
                                     color: AppColors.textPrimary(context),
                                     fontSize: 14,
@@ -11822,7 +13009,8 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                                   ),
                                 ),
                                 Text(
-                                  'Import past transactions for this account',
+                                  context.l10nText(
+                                      'Import past transactions for this account'),
                                   style: TextStyle(
                                     color: AppColors.textSecondary(context),
                                     fontSize: 12,
@@ -11858,7 +13046,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                               ),
                             ),
                             child: Text(
-                              'Cancel',
+                              context.l10nText('Cancel'),
                               style: TextStyle(
                                 color: AppColors.textSecondary(context),
                                 fontWeight: FontWeight.w600,
@@ -11893,9 +13081,9 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                                       color: AppColors.white,
                                     ),
                                   )
-                                : const Text(
-                                    'Add Account',
-                                    style: TextStyle(
+                                : Text(
+                                    context.l10nText('Add Account'),
+                                    style: const TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -12083,7 +13271,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
             ),
             const SizedBox(height: 20),
             Text(
-              'Actions',
+              context.l10nText('Actions'),
               style: TextStyle(
                 color: AppColors.textPrimary(context),
                 fontSize: 14,
@@ -12123,7 +13311,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
             if (!_hasSelectedAction) ...[
               const SizedBox(height: 8),
               Text(
-                'Choose at least one action to run.',
+                context.l10nText('Choose at least one action to run.'),
                 style: TextStyle(
                   color: AppColors.red.withValues(alpha: 0.8),
                   fontSize: 12,
@@ -12133,7 +13321,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
             ],
             const SizedBox(height: 20),
             Text(
-              'Start date',
+              context.l10nText('Start date'),
               style: TextStyle(
                 color: AppColors.textPrimary(context),
                 fontSize: 14,
@@ -12163,7 +13351,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                           Text(
                             _startDate == null
                                 ? 'All available bank messages'
-                                : _formatDateHeader(_startDate!),
+                                : _formatDateHeader(_startDate!, context),
                             style: TextStyle(
                               color: AppColors.textPrimary(context),
                               fontSize: 14,
@@ -12198,7 +13386,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   onPressed: () => setState(() => _startDate = null),
-                  child: const Text('Clear start date'),
+                  child: Text(context.l10nText('Clear start date')),
                 ),
               ),
             ],
@@ -12216,7 +13404,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                       ),
                     ),
                     child: Text(
-                      'Cancel',
+                      context.l10nText('Cancel'),
                       style: TextStyle(
                         color: AppColors.textSecondary(context),
                         fontWeight: FontWeight.w600,
@@ -12250,9 +13438,9 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text(
-                      'Run Reparse',
-                      style: TextStyle(
+                    child: Text(
+                      context.l10nText('Run Reparse'),
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                       ),
@@ -12299,7 +13487,7 @@ class _ReparseScopeTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
+                  context.l10nText(title),
                   style: TextStyle(
                     color: AppColors.textPrimary(context),
                     fontSize: 14,
@@ -12308,7 +13496,7 @@ class _ReparseScopeTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  subtitle,
+                  context.l10nText(subtitle),
                   style: TextStyle(
                     color: AppColors.textSecondary(context),
                     fontSize: 12,
@@ -12556,7 +13744,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    'Filter Transactions',
+                    context.l10nText('Filter Transactions'),
                     style: TextStyle(
                       color: AppColors.textPrimary(context),
                       fontSize: 20,
@@ -12760,9 +13948,9 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
-                            'Clear All',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10nText('Clear All'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 14,
                             ),
@@ -12783,9 +13971,9 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
-                            'Apply Filters',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10nText('Apply Filters'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 14,
                             ),
@@ -12805,7 +13993,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
 
   Widget _sectionLabel(String text) {
     return Text(
-      text,
+      context.l10nText(text),
       style: TextStyle(
         color: AppColors.textSecondary(context),
         fontSize: 12,
@@ -13041,9 +14229,9 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
-                            'Clear All',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10nText('Clear All'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 14,
                             ),
@@ -13064,9 +14252,9 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
-                            'Apply Filters',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10nText('Apply Filters'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 14,
                             ),
@@ -13086,7 +14274,7 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
 
   Widget _sectionLabel(String text) {
     return Text(
-      text,
+      context.l10nText(text),
       style: TextStyle(
         color: AppColors.textSecondary(context),
         fontSize: 12,
@@ -13490,9 +14678,9 @@ class _AnalyticsChartFilterSheetState
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
-                            'Clear All',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10nText('Clear All'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 14,
                             ),
@@ -13513,9 +14701,9 @@ class _AnalyticsChartFilterSheetState
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text(
-                            'Apply Filters',
-                            style: TextStyle(
+                          child: Text(
+                            context.l10nText('Apply Filters'),
+                            style: const TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 14,
                             ),
@@ -13535,7 +14723,7 @@ class _AnalyticsChartFilterSheetState
 
   Widget _sectionLabel(String text) {
     return Text(
-      text,
+      context.l10nText(text),
       style: TextStyle(
         color: AppColors.textSecondary(context),
         fontSize: 12,
@@ -13576,7 +14764,7 @@ class _FilterChip extends StatelessWidget {
           ),
         ),
         child: Text(
-          label,
+          context.l10nText(label),
           style: TextStyle(
             color:
                 selected ? AppColors.white : AppColors.textSecondary(context),
@@ -13618,7 +14806,7 @@ class _DatePickerField extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                value ?? hint,
+                value ?? context.l10nText(hint),
                 style: TextStyle(
                   color: value != null
                       ? AppColors.textPrimary(context)

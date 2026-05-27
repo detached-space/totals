@@ -41,6 +41,7 @@ import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignShell extends StatefulWidget {
   const RedesignShell({super.key});
@@ -256,12 +257,11 @@ class RedesignShellState extends State<RedesignShell>
       final shouldRequest = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Keep transaction alerts active'),
-          content: const Text(
-            'To make sure you get notified instantly when a transaction '
-            'happens, Totals needs to be excluded from battery optimization. '
-            'Without this, your phone may stop delivering notifications '
-            'in the background.',
+          title: Text(ctx.l10nText('Keep transaction alerts active')),
+          content: Text(
+            ctx.l10nText(
+              'To make sure you get notified instantly when a transaction happens, Totals needs to be excluded from battery optimization. Without this, your phone may stop delivering notifications in the background.',
+            ),
           ),
           actions: [
             TextButton(
@@ -269,11 +269,11 @@ class RedesignShellState extends State<RedesignShell>
                 prefs.setBool(_batteryOptDismissedKey, true);
                 Navigator.pop(ctx, false);
               },
-              child: const Text('Not now'),
+              child: Text(ctx.l10nText('Not now')),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Allow'),
+              child: Text(ctx.l10nText('Allow')),
             ),
           ],
         ),
@@ -337,8 +337,8 @@ class RedesignShellState extends State<RedesignShell>
 
     if (match == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Transaction not found'),
+        SnackBar(
+          content: Text(context.l10nTextRead('Transaction not found')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1123,9 +1123,9 @@ class _QuickAccessAccountsTab extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              child: const Text(
-                'Manage Accounts',
-                style: TextStyle(fontWeight: FontWeight.w700),
+              child: Text(
+                context.l10nText('Manage Accounts'),
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -1150,7 +1150,7 @@ class _QuickAccessAccountsSearchField extends StatelessWidget {
       controller: controller,
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        hintText: 'Search accounts, banks, or names',
+        hintText: context.l10nText('Search accounts, banks, or names'),
         prefixIcon: Icon(
           Icons.search_rounded,
           color: AppColors.textTertiary(context),
@@ -1566,7 +1566,7 @@ class _EmptyAccountsState extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            title,
+            context.l10nText(title),
             textAlign: TextAlign.center,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
@@ -1575,7 +1575,7 @@ class _EmptyAccountsState extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            subtitle,
+            context.l10nText(subtitle),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: AppColors.textSecondary(context),
@@ -1585,7 +1585,7 @@ class _EmptyAccountsState extends StatelessWidget {
             const SizedBox(height: 14),
             OutlinedButton(
               onPressed: onAction,
-              child: Text(actionLabel!),
+              child: Text(context.l10nText(actionLabel!)),
             ),
           ],
         ],

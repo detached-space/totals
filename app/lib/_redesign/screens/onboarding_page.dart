@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 const String _kOnboardingCompleteKey = 'has_completed_onboarding';
 
@@ -299,7 +300,9 @@ class _WelcomeSlideState extends State<_WelcomeSlide>
           child: Column(
             children: [
               _fadeSlide(
-                t, 0.0, 0.25,
+                t,
+                0.0,
+                0.25,
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(
@@ -324,7 +327,9 @@ class _WelcomeSlideState extends State<_WelcomeSlide>
               ),
               const Spacer(flex: 2),
               _fadeScale(
-                t, 0.05, 0.35,
+                t,
+                0.05,
+                0.35,
                 ClipRRect(
                   borderRadius: BorderRadius.circular(22),
                   child: SvgPicture.asset(
@@ -336,60 +341,75 @@ class _WelcomeSlideState extends State<_WelcomeSlide>
                 ),
               ),
               const SizedBox(height: 28),
-              _fadeSlide(t, 0.15, 0.40, Text(
-                'Welcome to Totals',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary(context),
-                ),
-              )),
+              _fadeSlide(
+                  t,
+                  0.15,
+                  0.40,
+                  Text(
+                    'Welcome to Totals',
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary(context),
+                    ),
+                  )),
               const SizedBox(height: 8),
-              _fadeSlide(t, 0.22, 0.47, Text(
-                'Your personal finance tracker.\nSmarter spending starts here.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  height: 1.5,
-                  color: AppColors.textSecondary(context),
-                ),
-              )),
+              _fadeSlide(
+                  t,
+                  0.22,
+                  0.47,
+                  Text(
+                    'Your personal finance tracker.\nSmarter spending starts here.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w400,
+                      height: 1.5,
+                      color: AppColors.textSecondary(context),
+                    ),
+                  )),
               const SizedBox(height: 28),
               for (int i = 0; i < _features.length; i++)
                 _fadeSlide(
-                  t, 0.30 + i * 0.07, 0.52 + i * 0.07,
+                  t,
+                  0.30 + i * 0.07,
+                  0.52 + i * 0.07,
                   _FeatureRow(feature: _features[i]),
-                  dx: 20, dy: 4,
+                  dx: 20,
+                  dy: 4,
                 ),
               const SizedBox(height: 24),
-              _fadeSlide(t, 0.68, 0.95, GestureDetector(
-                onTap: widget.onGetStarted,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 32, vertical: 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryLight,
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Get Started',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.white,
-                        ),
+              _fadeSlide(
+                  t,
+                  0.68,
+                  0.95,
+                  GestureDetector(
+                    onTap: widget.onGetStarted,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 32, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(30),
                       ),
-                      const SizedBox(width: 8),
-                      Icon(AppIcons.arrow_forward, size: 18,
-                          color: AppColors.white),
-                    ],
-                  ),
-                ),
-              )),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'Get Started',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(AppIcons.arrow_forward,
+                              size: 18, color: AppColors.white),
+                        ],
+                      ),
+                    ),
+                  )),
               const Spacer(flex: 3),
             ],
           ),
@@ -416,23 +436,26 @@ class _FeatureRow extends StatelessWidget {
               color: AppColors.primaryLight.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(feature.icon, size: 22,
-                color: AppColors.primaryLight),
+            child: Icon(feature.icon, size: 22, color: AppColors.primaryLight),
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(feature.title, style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary(context),
-                )),
+                Text(context.l10nText(feature.title),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary(context),
+                    )),
                 const SizedBox(height: 2),
-                Text(feature.description, style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w400,
-                  color: AppColors.textSecondary(context),
-                )),
+                Text(context.l10nText(feature.description),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                      color: AppColors.textSecondary(context),
+                    )),
               ],
             ),
           ),
@@ -533,7 +556,7 @@ class _TourSlideWidgetState extends State<_TourSlideWidget>
                     GestureDetector(
                       onTap: widget.onSkip,
                       child: Text(
-                        'Skip',
+                        context.l10nText('Skip'),
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
@@ -555,8 +578,7 @@ class _TourSlideWidgetState extends State<_TourSlideWidget>
                     decoration: BoxDecoration(
                       color: AppColors.background(context),
                       borderRadius: BorderRadius.circular(24),
-                      border:
-                          Border.all(color: AppColors.borderColor(context)),
+                      border: Border.all(color: AppColors.borderColor(context)),
                       boxShadow: [
                         BoxShadow(
                           color: AppColors.black.withOpacity(0.04),
@@ -634,9 +656,7 @@ class _HomePreview extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Container(
-                    height: 1,
-                    color: AppColors.white.withOpacity(0.22)),
+                Container(height: 1, color: AppColors.white.withOpacity(0.22)),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -713,9 +733,7 @@ class _HomePreview extends StatelessWidget {
                     fontWeight: FontWeight.w700)),
             const SizedBox(width: 4),
             Container(
-                width: 1,
-                height: 8,
-                color: AppColors.white.withOpacity(0.35)),
+                width: 1, height: 8, color: AppColors.white.withOpacity(0.35)),
             const SizedBox(width: 4),
             Text(expense,
                 style: const TextStyle(
@@ -782,10 +800,9 @@ class _MoneyPreview extends StatelessWidget {
                   child: Row(
                     children: [
                       Icon(Icons.search_rounded,
-                          size: 14,
-                          color: AppColors.textTertiary(context)),
+                          size: 14, color: AppColors.textTertiary(context)),
                       const SizedBox(width: 6),
-                      Text('Search...',
+                      Text(context.l10nText('Search...'),
                           style: TextStyle(
                               fontSize: 10,
                               color: AppColors.textTertiary(context))),
@@ -794,7 +811,7 @@ class _MoneyPreview extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 // Date header
-                Text('Today, Mar 10',
+                Text(context.l10nText('Today, Mar 10'),
                     style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w600,
@@ -1052,8 +1069,7 @@ class _BudgetPreview extends StatelessWidget {
           // Month selector
           Center(
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.surfaceColor(context),
                 borderRadius: BorderRadius.circular(8),
@@ -1065,7 +1081,7 @@ class _BudgetPreview extends StatelessWidget {
                   Icon(AppIcons.chevron_left,
                       size: 12, color: AppColors.textTertiary(context)),
                   const SizedBox(width: 8),
-                  Text('March 2026',
+                  Text(context.l10nText('March 2026'),
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -1127,8 +1143,7 @@ class _BudgetPreview extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-            color: theme.colorScheme.outline.withOpacity(0.08)),
+        border: Border.all(color: theme.colorScheme.outline.withOpacity(0.08)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -1187,7 +1202,7 @@ class _BudgetPreview extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('SPENT',
+                  Text(context.l10nText('SPENT'),
                       style: TextStyle(
                           fontSize: 7,
                           fontWeight: FontWeight.w900,
@@ -1205,7 +1220,7 @@ class _BudgetPreview extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('BUDGET',
+                  Text(context.l10nText('BUDGET'),
                       style: TextStyle(
                           fontSize: 7,
                           fontWeight: FontWeight.w900,
@@ -1258,8 +1273,7 @@ class _BudgetPreview extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                       color: AppColors.textTertiary(context))),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: (isPositive
                           ? const Color(0xFF00C853)
@@ -1335,15 +1349,11 @@ class _MiniTxTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isCategorized
-                        ? chipColor.withOpacity(0.1)
-                        : null,
+                    color: isCategorized ? chipColor.withOpacity(0.1) : null,
                     border: isCategorized
                         ? null
-                        : Border.all(
-                            color: AppColors.textTertiary(context)),
-                    borderRadius:
-                        BorderRadius.circular(isCategorized ? 5 : 6),
+                        : Border.all(color: AppColors.textTertiary(context)),
+                    borderRadius: BorderRadius.circular(isCategorized ? 5 : 6),
                   ),
                   child: Text(
                     category,
@@ -1427,7 +1437,7 @@ class _TourBottomBar extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                title,
+                context.l10nText(title),
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
@@ -1442,7 +1452,7 @@ class _TourBottomBar extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      description,
+                      context.l10nText(description),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 13,
@@ -1485,8 +1495,7 @@ class _CircleArrowButton extends StatelessWidget {
           border: Border.all(color: AppColors.borderColor(context)),
           color: AppColors.cardColor(context),
         ),
-        child: Icon(icon, size: 18,
-            color: AppColors.textSecondary(context)),
+        child: Icon(icon, size: 18, color: AppColors.textSecondary(context)),
       ),
     );
   }
@@ -1520,9 +1529,8 @@ class _MiniBottomNav extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: List.generate(5, (i) {
         final isActive = i == highlightedIndex;
-        final color = isActive
-            ? AppColors.primaryLight
-            : AppColors.textTertiary(context);
+        final color =
+            isActive ? AppColors.primaryLight : AppColors.textTertiary(context);
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1533,7 +1541,7 @@ class _MiniBottomNav extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              _labels[i],
+              context.l10nText(_labels[i]),
               style: TextStyle(
                 fontSize: 9,
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
@@ -1634,60 +1642,81 @@ class _AddAccountSlideState extends State<_AddAccountSlide>
           child: Column(
             children: [
               const Spacer(flex: 3),
-              _fadeScale(t, 0.0, 0.35, Icon(
-                AppIcons.add, size: 56, color: AppColors.primaryLight)),
+              _fadeScale(t, 0.0, 0.35,
+                  Icon(AppIcons.add, size: 56, color: AppColors.primaryLight)),
               const SizedBox(height: 28),
-              _fadeSlide(t, 0.12, 0.45, Text(
-                'Add Your First Account',
-                style: TextStyle(
-                  fontSize: 24, fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary(context),
-                ),
-              )),
-              const SizedBox(height: 12),
-              _fadeSlide(t, 0.22, 0.55, Text(
-                'Link a bank account so Totals can match your transactions. You can always add more later.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w400, height: 1.5,
-                  color: AppColors.textSecondary(context),
-                ),
-              )),
-              const SizedBox(height: 32),
-              _fadeSlide(t, 0.40, 0.75, SizedBox(
-                width: double.infinity,
-                child: GestureDetector(
-                  onTap: widget.onAddAccount,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryLight,
-                      borderRadius: BorderRadius.circular(14),
+              _fadeSlide(
+                  t,
+                  0.12,
+                  0.45,
+                  Text(
+                    'Add Your First Account',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary(context),
                     ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'Add Account',
-                      style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w600,
-                        color: AppColors.white,
+                  )),
+              const SizedBox(height: 12),
+              _fadeSlide(
+                  t,
+                  0.22,
+                  0.55,
+                  Text(
+                    'Link a bank account so Totals can match your transactions. You can always add more later.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w400,
+                      height: 1.5,
+                      color: AppColors.textSecondary(context),
+                    ),
+                  )),
+              const SizedBox(height: 32),
+              _fadeSlide(
+                  t,
+                  0.40,
+                  0.75,
+                  SizedBox(
+                    width: double.infinity,
+                    child: GestureDetector(
+                      onTap: widget.onAddAccount,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryLight,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          context.l10nText('Add Account'),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.white,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              )),
+                  )),
               const SizedBox(height: 16),
-              _fadeSlide(t, 0.55, 0.85, GestureDetector(
-                onTap: () => widget.onSkip(),
-                child: Text(
-                  'Skip for now',
-                  style: TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w500,
-                    color: AppColors.textSecondary(context),
-                    decoration: TextDecoration.underline,
-                    decorationColor: AppColors.textSecondary(context),
-                  ),
-                ),
-              )),
+              _fadeSlide(
+                  t,
+                  0.55,
+                  0.85,
+                  GestureDetector(
+                    onTap: () => widget.onSkip(),
+                    child: Text(
+                      'Skip for now',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textSecondary(context),
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppColors.textSecondary(context),
+                      ),
+                    ),
+                  )),
               const Spacer(flex: 4),
               Opacity(
                 opacity: _progress(t, 0.50, 0.90),
@@ -1696,7 +1725,7 @@ class _AddAccountSlideState extends State<_AddAccountSlide>
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: _CircleArrowButton(
-                      icon: AppIcons.chevron_left, onTap: widget.onBack),
+                        icon: AppIcons.chevron_left, onTap: widget.onBack),
                   ),
                 ),
               ),

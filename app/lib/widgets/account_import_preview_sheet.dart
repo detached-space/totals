@@ -3,6 +3,7 @@ import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 class _AccountPreviewItem {
   final AccountShareEntry entry;
@@ -346,7 +347,7 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              child: const Text('Cancel'),
+              child: Text(context.l10nText('Cancel')),
             ),
           ),
           const SizedBox(width: 12),
@@ -364,7 +365,9 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
                 elevation: 0,
               ),
               child: Text(
-                newCount == 0 ? 'Nothing to Import' : 'Import $newCount',
+                newCount == 0
+                    ? context.l10nText('Nothing to Import')
+                    : '${context.l10nText('Import')} $newCount',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
