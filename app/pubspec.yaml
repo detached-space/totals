@@ -58,6 +58,7 @@ dependencies:
   home_widget: ^0.9.0
   image_picker: ^1.1.2
   google_fonts: 6.3.0
+  in_app_update: ^4.2.5
   pretty_qr_code: ^3.6.0
   phosphor_flutter: ^2.1.0
   kenat: ^1.0.1

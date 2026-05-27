@@ -14,6 +14,7 @@ import 'package:totals/screens/privacy_policy_page.dart';
 import 'package:totals/screens/profile_management_page.dart';
 import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/repositories/profile_repository.dart';
+import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -61,6 +62,20 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
   bool _isExporting = false;
   bool _isImporting = false;
   bool _isFetchingSmsPatterns = false;
+  bool _isCheckingForUpdates = false;
+
+  Future<void> _checkForUpdates() async {
+    if (_isCheckingForUpdates) return;
+    setState(() => _isCheckingForUpdates = true);
+    try {
+      await AppUpdateService.instance.checkForUpdates(
+        context,
+        source: AppUpdateCheckSource.manual,
+      );
+    } finally {
+      if (mounted) setState(() => _isCheckingForUpdates = false);
+    }
+  }
 
   Future<void> _fetchSmsPatterns() async {
     if (_isFetchingSmsPatterns) {
@@ -1469,6 +1484,27 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               const SizedBox(height: 10),
 
               _SettingTile(
+                icon: Icons.system_update_alt_rounded,
+                iconColor: AppColors.blue,
+                title: context.l10nText('Check for Updates'),
+                subtitle: context.l10nText(
+                  'Look for a newer version on Google Play',
+                ),
+                showChevron: false,
+                trailing: _isCheckingForUpdates
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primaryLight,
+                        ),
+                      )
+                    : null,
+                onTap: _isCheckingForUpdates ? null : _checkForUpdates,
+              ),
+
+              _SettingTile(
                 icon: AppIcons.info_outline_rounded,
                 iconColor: AppColors.primaryLight,
                 title: context.l10n('settings.about', 'About'),
@@ -1967,6 +2003,16 @@ class _RedesignAboutPage extends StatelessWidget {
             Center(
               child: Text(
                 context.l10nText('Made by Detached'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color:
+                      AppColors.textSecondary(context).withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                '${context.l10nText('Version')} 1.3.3',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color:
                       AppColors.textSecondary(context).withValues(alpha: 0.6),

@@ -27,6 +27,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
+import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/bank_detection_startup_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -302,6 +303,7 @@ class RedesignShellState extends State<RedesignShell>
 
       if (mounted) {
         unawaited(_checkBatteryOptimization());
+        unawaited(AppUpdateService.instance.checkOnLaunch(context));
       }
     });
   }
