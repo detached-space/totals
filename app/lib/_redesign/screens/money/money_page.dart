@@ -1184,7 +1184,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return 'Meskerem - Pagume ${ecDate['year']}';
+            return '${MonthNames.amharic.first} - ${MonthNames.amharic.last} ${ecDate['year']}';
           }
         } catch (_) {}
         return 'Jan - Dec ${window.start.year}';
@@ -1254,7 +1254,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return 'W1 - W5 in ${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['year']}';
+            return '${context.l10nText('W1 - W5 in')} ${MonthNames.amharic[ecDate['month']! - 1]} ${ecDate['year']}';
           }
         } catch (_) {}
         return 'W1 - W5 in ${DateFormat('MMMM yyyy').format(window.start)}';
@@ -1267,7 +1267,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             final ecDate = Kenat.fromGregorian(
                     window.start.year, window.start.month, window.start.day)
                 .getEthiopian();
-            return 'Meskerem - Pagume ${ecDate['year']}';
+            return '${MonthNames.amharic.first} - ${MonthNames.amharic.last} ${ecDate['year']}';
           }
         } catch (_) {}
         return 'Jan - Dec ${window.start.year}';
@@ -1599,7 +1599,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Select chart',
+                    sheetContext.l10nText('Select chart'),
                     style: TextStyle(
                       color: AppColors.textPrimary(sheetContext),
                       fontSize: 18,
@@ -1608,7 +1608,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Choose a chart.',
+                    sheetContext.l10nText('Choose a chart.'),
                     style: TextStyle(
                       color: AppColors.textSecondary(sheetContext),
                       fontSize: 13,
@@ -2151,7 +2151,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'No transactions were recorded on ${_formatDateHeader(day, context)}.',
+            '${context.l10nTextRead('No transactions were recorded on')} ${_formatDateHeader(day, context)}.',
           ),
         ),
       );
@@ -4119,6 +4119,20 @@ String _formatEtbAbbrev(double value) {
   return formatNumberAbbreviated(value).replaceAll(' ', '');
 }
 
+String _formatLocalizedEtb(BuildContext context, double value) {
+  return '${context.l10nText('ETB')} ${_formatEtbAbbrev(value)}';
+}
+
+String _formatLocalizedCount(
+  BuildContext context,
+  int count,
+  String singular,
+  String plural,
+) {
+  final label = context.l10nText(count == 1 ? singular : plural);
+  return '${_formatCount(count)} $label';
+}
+
 String _formatRatioPercent(double ratio) {
   if (!ratio.isFinite) return '0%';
   return '${(ratio * 100).round()}%';
@@ -5107,6 +5121,10 @@ class _ActivityTransactionsSummaryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currencyLabel = context.l10nText('ETB');
+    final transactionLabel = context.l10nText(
+      summary.totalTransactions == 1 ? 'transaction' : 'transactions',
+    );
     final baseStyle = TextStyle(
       color: AppColors.textSecondary(context),
       fontSize: 12,
@@ -5125,9 +5143,10 @@ class _ActivityTransactionsSummaryRow extends StatelessWidget {
             TextSpan(
               style: baseStyle,
               children: [
-                const TextSpan(text: 'Outgoing '),
+                TextSpan(text: '${context.l10nText('Outgoing')} '),
                 TextSpan(
-                  text: '-ETB ${_formatEtbAbbrev(summary.totalExpense)}',
+                  text:
+                      '-$currencyLabel ${_formatEtbAbbrev(summary.totalExpense)}',
                   style: accentStyle.copyWith(color: AppColors.red),
                 ),
               ],
@@ -5137,16 +5156,17 @@ class _ActivityTransactionsSummaryRow extends StatelessWidget {
             TextSpan(
               style: baseStyle,
               children: [
-                const TextSpan(text: 'Incoming '),
+                TextSpan(text: '${context.l10nText('Incoming')} '),
                 TextSpan(
-                  text: '+ETB ${_formatEtbAbbrev(summary.totalIncome)}',
+                  text:
+                      '+$currencyLabel ${_formatEtbAbbrev(summary.totalIncome)}',
                   style: accentStyle.copyWith(color: AppColors.incomeSuccess),
                 ),
               ],
             ),
           ),
           Text(
-            '${_formatCount(summary.totalTransactions)} transaction${summary.totalTransactions == 1 ? '' : 's'}',
+            '${_formatCount(summary.totalTransactions)} $transactionLabel',
             style: baseStyle,
           ),
         ],
@@ -5282,6 +5302,24 @@ class _AnalyticsOverviewGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const spacing = 10.0;
+    final incomeLabel = _formatLocalizedCount(
+      context,
+      snapshot.incomeCount,
+      'deposit',
+      'deposits',
+    );
+    final expenseLabel = _formatLocalizedCount(
+      context,
+      snapshot.expenseCount,
+      'expense',
+      'expenses',
+    );
+    final incomeFlowLabel = _formatLocalizedCount(
+      context,
+      snapshot.incomeCount,
+      'income',
+      'income',
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableWidth = constraints.maxWidth.isFinite
@@ -5303,8 +5341,8 @@ class _AnalyticsOverviewGrid extends StatelessWidget {
                       iconBg: const Color(0xFFDCFCE7),
                       iconFg: AppColors.incomeSuccess,
                       title: 'TOTAL INCOME',
-                      value: 'ETB ${_formatEtbAbbrev(snapshot.totalIncome)}',
-                      subtitle: '${snapshot.incomeCount} deposits',
+                      value: _formatLocalizedEtb(context, snapshot.totalIncome),
+                      subtitle: incomeLabel,
                     ),
                   ),
                   const SizedBox(width: spacing),
@@ -5314,8 +5352,14 @@ class _AnalyticsOverviewGrid extends StatelessWidget {
                       iconBg: const Color(0xFFFEE2E2),
                       iconFg: AppColors.red,
                       title: 'TOTAL EXPENSE',
-                      value: 'ETB ${_formatEtbAbbrev(snapshot.totalExpense)}',
-                      subtitle: '${snapshot.expenseCount} transactions',
+                      value:
+                          _formatLocalizedEtb(context, snapshot.totalExpense),
+                      subtitle: _formatLocalizedCount(
+                        context,
+                        snapshot.expenseCount,
+                        'transaction',
+                        'transactions',
+                      ),
                     ),
                   ),
                 ],
@@ -5334,8 +5378,7 @@ class _AnalyticsOverviewGrid extends StatelessWidget {
                       iconFg: const Color(0xFF6366F1),
                       title: 'TRANSACTIONS',
                       value: _formatCount(snapshot.totalTransactions),
-                      subtitle:
-                          '${snapshot.expenseCount} expense | ${snapshot.incomeCount} income',
+                      subtitle: '$expenseLabel | $incomeFlowLabel',
                     ),
                   ),
                   const SizedBox(width: spacing),
@@ -5345,8 +5388,8 @@ class _AnalyticsOverviewGrid extends StatelessWidget {
                       iconBg: const Color(0xFFFEF3C7),
                       iconFg: const Color(0xFFD97706),
                       title: 'TOTAL FEES',
-                      value: 'ETB ${_formatEtbAbbrev(snapshot.totalFees)}',
-                      subtitle: 'Service charges + VAT',
+                      value: _formatLocalizedEtb(context, snapshot.totalFees),
+                      subtitle: context.l10nText('Service charges + VAT'),
                     ),
                   ),
                 ],
@@ -6419,7 +6462,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
                 child: Row(
                   children: [
                     Text(
-                      'Heatmap',
+                      context.l10nText('Heatmap'),
                       style: TextStyle(
                         color: AppColors.textPrimary(context),
                         fontSize: 24,
@@ -6945,7 +6988,7 @@ class _AnalyticsPrimaryChartHeader extends StatelessWidget {
           children: [
             if (onChartPickerTap == null)
               Text(
-                chartLabel,
+                context.l10nText(chartLabel),
                 style: TextStyle(
                   color: AppColors.textPrimary(context),
                   fontSize: 24,
@@ -6959,7 +7002,7 @@ class _AnalyticsPrimaryChartHeader extends StatelessWidget {
                 child: Row(
                   children: [
                     Text(
-                      chartLabel,
+                      context.l10nText(chartLabel),
                       style: TextStyle(
                         color: AppColors.textPrimary(context),
                         fontSize: 24,
@@ -6987,7 +7030,7 @@ class _AnalyticsPrimaryChartHeader extends StatelessWidget {
           details!
         else ...[
           Text(
-            headline,
+            context.l10nText(headline),
             style: TextStyle(
               color: AppColors.textPrimary(context),
               fontSize: 20,
@@ -6996,7 +7039,7 @@ class _AnalyticsPrimaryChartHeader extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            supportingText,
+            context.l10nText(supportingText),
             style: TextStyle(
               color: AppColors.textSecondary(context),
               fontSize: 12,
@@ -7226,7 +7269,7 @@ class _AnalyticsChartEmptyState extends StatelessWidget {
       height: height,
       child: Center(
         child: Text(
-          message,
+          context.l10nText(message),
           textAlign: TextAlign.center,
           style: TextStyle(
             color: AppColors.textSecondary(context),
@@ -7265,7 +7308,7 @@ class _AnalyticsBottomSheetOption extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  title,
+                  context.l10nText(title),
                   style: TextStyle(
                     color: AppColors.textPrimary(context),
                     fontWeight: FontWeight.w600,
@@ -7812,7 +7855,7 @@ class _AnalyticsLegendAmountItem extends StatelessWidget {
         const SizedBox(width: 6),
         Expanded(
           child: Text(
-            stat.label,
+            context.l10nText(stat.label),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -7823,7 +7866,7 @@ class _AnalyticsLegendAmountItem extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Text(
-          'ETB ${_formatEtbAbbrev(stat.amount)}',
+          _formatLocalizedEtb(context, stat.amount),
           style: TextStyle(
             color: AppColors.textPrimary(context),
             fontSize: 12,
@@ -8178,7 +8221,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
                     validDates.first.month, validDates.first.day)
                 .getEthiopian();
             rangeLabel =
-                'Week of ${MonthNames.amharic[ecStart['month']! - 1]} ${ecStart['day']}';
+                '${context.l10nText('Week of')} ${MonthNames.amharic[ecStart['month']! - 1]} ${ecStart['day']}';
             break;
           }
         case _AnalyticsLineChartPeriod.monthly:
@@ -8212,7 +8255,8 @@ class _AnalyticsLineChartCard extends StatelessWidget {
             });
             incomeValues = List<double>.filled(13, 0.0);
             expenseValues = List<double>.filled(13, 0.0);
-            supportingText = 'Meskerem - Pagume ${ecAnchor['year']}';
+            supportingText =
+                '${MonthNames.amharic.first} - ${MonthNames.amharic.last} ${ecAnchor['year']}';
             rangeLabel = '${ecAnchor['year']}';
             break;
           }
@@ -8386,7 +8430,8 @@ class _AnalyticsLineChartCard extends StatelessWidget {
       maxValue: maxValue,
       supportingText: supportingText,
       rangeLabel: rangeLabel,
-      emptyMessage: 'No income or expense data for $rangeLabel.',
+      emptyMessage:
+          '${context.l10nText('No income or expense data for')} $rangeLabel.',
     );
   }
 
@@ -8531,7 +8576,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 Text(
-                  '+ ETB ${_formatEtbAbbrev(series.totalIncome)}',
+                  '+ ${_formatLocalizedEtb(context, series.totalIncome)}',
                   style: TextStyle(
                     color: AppColors.incomeSuccess,
                     fontSize: 11,
@@ -8539,7 +8584,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '- ETB ${_formatEtbAbbrev(series.totalExpense)}',
+                  '- ${_formatLocalizedEtb(context, series.totalExpense)}',
                   style: TextStyle(
                     color: AppColors.red,
                     fontSize: 11,
@@ -8547,7 +8592,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  'Peak: ETB ${_formatEtbAbbrev(series.maxValue)}',
+                  '${context.l10nText('Peak')}: ${_formatLocalizedEtb(context, series.maxValue)}',
                   style: TextStyle(
                     color: AppColors.textSecondary(context),
                     fontSize: 11,
@@ -8611,7 +8656,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        'Income vs Expense',
+                        context.l10nText('Income vs Expense'),
                         style: TextStyle(
                           color: AppColors.textPrimary(context),
                           fontSize: 20,
@@ -8741,7 +8786,7 @@ class _AnalyticsLinePeriodToggleOption extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
-          label,
+          context.l10nText(label),
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
@@ -8876,7 +8921,8 @@ class _AnalyticsBarChartCard extends StatelessWidget {
             DaysOfWeek.amharic[0], // Sunday
           ].map((d) => d.substring(0, d.length >= 3 ? 3 : d.length)).toList()
         : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    final monthlyLabels = ['W1', 'W2', 'W3', 'W4', 'W5'];
+    final monthlyLabels =
+        isEC ? ['ሳ1', 'ሳ2', 'ሳ3', 'ሳ4', 'ሳ5'] : ['W1', 'W2', 'W3', 'W4', 'W5'];
     final yearlyLabels = isEC
         ? MonthNames.amharic.map((m) => _safePrefix(m, 3)).toList()
         : yearlyLabelsDefault;
@@ -9032,7 +9078,7 @@ class _AnalyticsBarChartCard extends StatelessWidget {
         _AnalyticsBarChartPeriod.monthly =>
           '${MonthNames.amharic[ecAnchor['month']! - 1]} ${ecAnchor['year']}',
         _AnalyticsBarChartPeriod.yearly =>
-          'Meskerem - Pagume ${ecAnchor['year']}',
+          '${MonthNames.amharic.first} - ${MonthNames.amharic.last} ${ecAnchor['year']}',
       };
     } else {
       final monthStart = DateTime(anchor.year, anchor.month, 1);
@@ -9058,19 +9104,20 @@ class _AnalyticsBarChartCard extends StatelessWidget {
     }
 
     final flowLabel =
-        mode == _AnalyticsHeatmapMode.income ? 'income' : 'expense';
+        mode == _AnalyticsHeatmapMode.income ? 'Income' : 'Expense';
     final periodLabel = supportingText;
 
     return _AnalyticsBarSeries(
       title:
-          '${_periodTitle()} ${mode == _AnalyticsHeatmapMode.income ? 'Income' : 'Expense'}',
+          '${context.l10nText(_periodTitle())} ${context.l10nText(flowLabel)}',
       supportingText: periodLabel,
       labels: labels,
       categories: categories,
       totalsByBucket: totalsByBucket,
       totalIncome: totalIncome,
       totalExpense: totalExpense,
-      emptyMessage: 'No $flowLabel activity for $periodLabel.',
+      emptyMessage:
+          '${context.l10nText(mode == _AnalyticsHeatmapMode.income ? 'No income activity for' : 'No expense activity for')} $periodLabel.',
     );
   }
 
@@ -9185,7 +9232,7 @@ class _AnalyticsBarChartCard extends StatelessWidget {
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
                       final index = group.x.toInt();
                       return BarTooltipItem(
-                        '${series.labels[index]}\nETB ${_formatEtbAbbrev(series.totalsByBucket[index])}',
+                        '${series.labels[index]}\n${_formatLocalizedEtb(context, series.totalsByBucket[index])}',
                         TextStyle(
                           color: AppColors.textPrimary(context),
                           fontSize: 12,
@@ -9455,7 +9502,7 @@ class _AnalyticsBarCategoryItem extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            stat.label,
+            context.l10nText(stat.label),
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: AppColors.textSecondary(context),
@@ -9466,7 +9513,7 @@ class _AnalyticsBarCategoryItem extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Text(
-          'ETB ${_formatEtbAbbrev(stat.total)}',
+          _formatLocalizedEtb(context, stat.total),
           textAlign: TextAlign.right,
           style: TextStyle(
             color: AppColors.textPrimary(context),
@@ -9544,7 +9591,7 @@ class _AnalyticsPieChartCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Category share for ${page.periodLabel}',
+          '${context.l10nText('Category share for')} ${page.periodLabel}',
           style: TextStyle(
             color: AppColors.textSecondary(context),
             fontSize: 12,
@@ -9587,7 +9634,7 @@ class _AnalyticsPieChartCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'ETB ${_formatEtbAbbrev(total)}',
+                      _formatLocalizedEtb(context, total),
                       style: TextStyle(
                         color: AppColors.textPrimary(context),
                         fontSize: 16,
@@ -9596,7 +9643,7 @@ class _AnalyticsPieChartCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      showIncome ? 'Income' : 'Expenses',
+                      context.l10nText(showIncome ? 'Income' : 'Expenses'),
                       style: TextStyle(
                         color: AppColors.textSecondary(context),
                         fontSize: 12,
@@ -9734,7 +9781,11 @@ class _AnalyticsSpendingByDayCard extends StatelessWidget {
     );
     final periodLabel = snapshot.periodLabel;
     final periodKey = snapshot.periodKey;
-    final infoText = maxValue > 0 ? 'Peak: $peakDay' : snapshot.emptyLabel;
+    final emptyText = snapshot.showIncome
+        ? '${context.l10nText('No income activity in')} $periodLabel.'
+        : '${context.l10nText('No expenses in')} $periodLabel.';
+    final infoText =
+        maxValue > 0 ? '${context.l10nText('Peak')}: $peakDay' : emptyText;
     final titleStyle = TextStyle(
       color: AppColors.textPrimary(context),
       fontSize: 20,
@@ -9789,9 +9840,9 @@ class _AnalyticsSpendingByDayCard extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
-                        snapshot.showIncome
+                        context.l10nText(snapshot.showIncome
                             ? 'Income by Day'
-                            : 'Spending by Day',
+                            : 'Spending by Day'),
                         style: titleStyle,
                       ),
                       buildAnimatedInlineTransition(
@@ -9866,7 +9917,7 @@ class _AnalyticsSpendingByDayCard extends StatelessWidget {
                       height: 84,
                       child: Center(
                         child: Text(
-                          snapshot.emptyLabel,
+                          emptyText,
                           style: TextStyle(
                             color: AppColors.textSecondary(context),
                             fontSize: 13,
@@ -9977,11 +10028,12 @@ class _AnalyticsTopRecipientsCard extends StatelessWidget {
         : snapshot.topRecipients.first.amount;
     final periodLabel = snapshot.periodLabel;
     final periodKey = snapshot.periodKey;
+    final emptyText = snapshot.showIncome
+        ? '${context.l10nText('No income senders in')} $periodLabel.'
+        : '${context.l10nText('No expense recipients in')} $periodLabel.';
     final infoText = snapshot.topRecipients.isEmpty
-        ? snapshot.showIncome
-            ? 'No income senders in $periodLabel.'
-            : 'No expense recipients in $periodLabel.'
-        : '${snapshot.recipientExpenseCount} total';
+        ? emptyText
+        : '${_formatCount(snapshot.recipientExpenseCount)} ${context.l10nText('total')}';
     final titleStyle = TextStyle(
       color: AppColors.textPrimary(context),
       fontSize: 20,
@@ -10035,7 +10087,9 @@ class _AnalyticsTopRecipientsCard extends StatelessWidget {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      snapshot.showIncome ? 'Top Senders' : 'Top Recipients',
+                      context.l10nText(
+                        snapshot.showIncome ? 'Top Senders' : 'Top Recipients',
+                      ),
                       style: titleStyle,
                     ),
                     buildAnimatedInlineTransition(
@@ -10110,9 +10164,7 @@ class _AnalyticsTopRecipientsCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     child: Center(
                       child: Text(
-                        snapshot.showIncome
-                            ? 'No income senders in $periodLabel.'
-                            : 'No expense recipients in $periodLabel.',
+                        emptyText,
                         style: TextStyle(
                           color: AppColors.textSecondary(context),
                           fontSize: 13,
@@ -10202,7 +10254,7 @@ class _AnalyticsTopRecipientsCard extends StatelessWidget {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      '${snapshot.showIncome ? '+' : '-'}ETB ${_formatEtbAbbrev(stat.amount)}',
+                                      '${snapshot.showIncome ? '+' : '-'}${_formatLocalizedEtb(context, stat.amount)}',
                                       style: TextStyle(
                                         color: snapshot.showIncome
                                             ? AppColors.incomeSuccess
@@ -10213,7 +10265,7 @@ class _AnalyticsTopRecipientsCard extends StatelessWidget {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      '${stat.count} tx',
+                                      '${_formatCount(stat.count)} ${context.l10nText('tx')}',
                                       style: TextStyle(
                                         color: AppColors.textTertiary(context),
                                         fontSize: 11,
@@ -10258,8 +10310,8 @@ class _AnalyticsMoneyFlowCard extends StatelessWidget {
     final periodLabel = snapshot.periodLabel;
     final periodKey = snapshot.periodKey;
     final infoText = snapshot.totalTransactions == 0
-        ? 'No transactions in $periodLabel.'
-        : '${snapshot.totalTransactions} total';
+        ? '${context.l10nText('No transactions in')} $periodLabel.'
+        : '${_formatCount(snapshot.totalTransactions)} ${context.l10nText('total')}';
     final titleStyle = TextStyle(
       color: AppColors.textPrimary(context),
       fontSize: 20,
@@ -10313,7 +10365,7 @@ class _AnalyticsMoneyFlowCard extends StatelessWidget {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      'Money Flow',
+                      context.l10nText('Money Flow'),
                       style: titleStyle,
                     ),
                     buildAnimatedInlineTransition(
@@ -10388,7 +10440,7 @@ class _AnalyticsMoneyFlowCard extends StatelessWidget {
                 _MoneyFlowRow(
                   label: 'Net Cash Flow',
                   value:
-                      '${snapshot.netCashFlow >= 0 ? '+' : '-'}ETB ${_formatEtbAbbrev(snapshot.netCashFlow.abs())}',
+                      '${snapshot.netCashFlow >= 0 ? '+' : '-'}${_formatLocalizedEtb(context, snapshot.netCashFlow.abs())}',
                   valueColor: flowColor,
                 ),
                 _MoneyFlowRow(
@@ -10397,11 +10449,11 @@ class _AnalyticsMoneyFlowCard extends StatelessWidget {
                 ),
                 _MoneyFlowRow(
                   label: 'Largest Expense',
-                  value: 'ETB ${_formatEtbAbbrev(snapshot.largestExpense)}',
+                  value: _formatLocalizedEtb(context, snapshot.largestExpense),
                 ),
                 _MoneyFlowRow(
                   label: 'Largest Deposit',
-                  value: 'ETB ${_formatEtbAbbrev(snapshot.largestDeposit)}',
+                  value: _formatLocalizedEtb(context, snapshot.largestDeposit),
                 ),
                 _MoneyFlowRow(
                   label: 'Total Transactions',
@@ -10435,7 +10487,7 @@ class _MoneyFlowRow extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              label,
+              context.l10nText(label),
               style: TextStyle(
                 color: AppColors.textSecondary(context),
                 fontSize: 14,
@@ -10971,7 +11023,7 @@ class _EmptyTransactions extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: Text(
-        'No transactions found',
+        context.l10nText('No transactions found'),
         textAlign: TextAlign.center,
         style: TextStyle(
           color: AppColors.textSecondary(context),
@@ -11009,7 +11061,11 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
       allTxns: provider.allTransactions,
       accountSummaries: provider.accountSummaries,
     );
-    final weekdayLabel = DateFormat('EEEE').format(date);
+    final weekdayLabel = _analyticsWeekdayLabel(
+      context,
+      date.weekday % 7,
+      short: false,
+    );
     var incomeTotal = 0.0;
     var expenseTotal = 0.0;
     for (final transaction in transactions) {
@@ -11020,8 +11076,12 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
       }
     }
     final netTotal = incomeTotal - expenseTotal;
-    final transactionLabel =
-        '${_formatCount(transactions.length)} transaction${transactions.length == 1 ? '' : 's'}';
+    final transactionLabel = _formatLocalizedCount(
+      context,
+      transactions.length,
+      'transaction',
+      'transactions',
+    );
     final netPrefix = netTotal >= 0 ? '+' : '-';
 
     return Scaffold(
@@ -11071,18 +11131,18 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
                 children: [
                   _HeatmapDayInlineStat(
                     label: 'Income',
-                    value: '+ETB ${_formatEtbAbbrev(incomeTotal)}',
+                    value: '+${_formatLocalizedEtb(context, incomeTotal)}',
                     valueColor: AppColors.incomeSuccess,
                   ),
                   _HeatmapDayInlineStat(
                     label: 'Expense',
-                    value: '-ETB ${_formatEtbAbbrev(expenseTotal)}',
+                    value: '-${_formatLocalizedEtb(context, expenseTotal)}',
                     valueColor: AppColors.red,
                   ),
                   _HeatmapDayInlineStat(
                     label: 'Net',
                     value:
-                        '${netPrefix}ETB ${_formatEtbAbbrev(netTotal.abs())}',
+                        '$netPrefix${_formatLocalizedEtb(context, netTotal.abs())}',
                     valueColor:
                         netTotal >= 0 ? AppColors.incomeSuccess : AppColors.red,
                   ),
@@ -11221,6 +11281,7 @@ class _LedgerTransactionEntry extends StatelessWidget {
     final amountColor = isCredit ? AppColors.incomeSuccess : AppColors.red;
     final arrow = isCredit ? '↓' : '↑';
     final sign = isCredit ? '+' : '-';
+    final currencyLabel = context.l10nText('ETB');
 
     final amount = transaction.amount;
     final amountStr = formatNumberAbbreviated(amount).replaceAll('k', 'K');
@@ -11288,7 +11349,7 @@ class _LedgerTransactionEntry extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '$arrow  ${sign}ETB $amountStr',
+                  '$arrow  $sign$currencyLabel $amountStr',
                   style: TextStyle(
                     color: amountColor,
                     fontSize: 13,
@@ -11297,7 +11358,7 @@ class _LedgerTransactionEntry extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Balance: $balanceStr',
+                  '${context.l10nText('Balance')}: $balanceStr',
                   style: TextStyle(
                     color: AppColors.textSecondary(context),
                     fontSize: 12,
@@ -13631,7 +13692,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     required double? maxAmount,
   }) {
     if (_hasInvalidAmountInput(minRaw) || _hasInvalidAmountInput(maxRaw)) {
-      return 'Enter a valid amount.';
+      return 'Enter a valid amount';
     }
     if (minAmount != null && maxAmount != null && maxAmount < minAmount) {
       return 'Maximum must be at least minimum.';
@@ -13707,7 +13768,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   }
 
   String _formatDate(DateTime date) {
-    return '${_months[date.month - 1]} ${date.day}, ${date.year}';
+    return _formatDateHeader(date, context);
   }
 
   @override
@@ -13888,7 +13949,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                   if (_amountErrorText != null) ...[
                     const SizedBox(height: 8),
                     Text(
-                      _amountErrorText!,
+                      context.l10nText(_amountErrorText!),
                       style: const TextStyle(
                         color: AppColors.red,
                         fontSize: 12,
@@ -14099,7 +14160,7 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
   }
 
   String _formatDate(DateTime date) {
-    return '${_months[date.month - 1]} ${date.day}, ${date.year}';
+    return _formatDateHeader(date, context);
   }
 
   @override
@@ -14408,7 +14469,7 @@ class _AnalyticsChartFilterSheetState
   }
 
   String _formatDate(DateTime date) {
-    return '${_months[date.month - 1]} ${date.day}, ${date.year}';
+    return _formatDateHeader(date, context);
   }
 
   @override
@@ -14449,7 +14510,7 @@ class _AnalyticsChartFilterSheetState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.chartSection.filterTitle,
+                        context.l10nText(widget.chartSection.filterTitle),
                         style: TextStyle(
                           color: AppColors.textPrimary(context),
                           fontSize: 20,
@@ -14458,7 +14519,7 @@ class _AnalyticsChartFilterSheetState
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        widget.chartSection.filterSubtitle,
+                        context.l10nText(widget.chartSection.filterSubtitle),
                         style: TextStyle(
                           color: AppColors.textSecondary(context),
                           fontSize: 12,
@@ -14866,9 +14927,9 @@ class _AmountFilterField extends StatelessWidget {
         fontWeight: FontWeight.w500,
       ),
       decoration: InputDecoration(
-        hintText: hint,
+        hintText: context.l10nText(hint),
         hintStyle: TextStyle(color: AppColors.textTertiary(context)),
-        prefixText: 'ETB ',
+        prefixText: '${context.l10nText('ETB')} ',
         prefixStyle: TextStyle(
           color: AppColors.textSecondary(context),
           fontSize: 13,
