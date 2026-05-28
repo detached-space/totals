@@ -645,9 +645,8 @@ class _TotalBalanceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currencyLabel = context.l10nText('ETB');
-    final abbreviated =
-        formatNumberAbbreviated(totalBalance).replaceAll('k', 'K');
-    final displayBalance = showBalance ? abbreviated : '***';
+    final displayBalance =
+        showBalance ? formatNumberWithComma(totalBalance) : '***';
     final todayIncomeLabel =
         showBalance ? '+ ${_formatDelta(todayIncome)}' : '***';
     final todayExpenseLabel =

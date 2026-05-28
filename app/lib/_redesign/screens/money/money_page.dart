@@ -4181,6 +4181,10 @@ String _formatEtbAbbrev(double value) {
   return formatNumberAbbreviated(value).replaceAll(' ', '');
 }
 
+String _formatEtbFull(double value) {
+  return formatNumberWithComma(value);
+}
+
 String _formatLocalizedEtb(BuildContext context, double value) {
   return '${context.l10nText('ETB')} ${_formatEtbAbbrev(value)}';
 }
@@ -11500,13 +11504,13 @@ class _AccountsBalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final currencyLabel = context.l10nText('ETB');
     final balanceLabel = showBalance
-        ? '$currencyLabel ${_formatEtbAbbrev(balance)}'
+        ? '$currencyLabel ${_formatEtbFull(balance)}'
         : '$currencyLabel ***';
     final creditLabel = showBalance
-        ? '+$currencyLabel ${_formatEtbAbbrev(totalCredit)}'
+        ? '+$currencyLabel ${_formatEtbFull(totalCredit)}'
         : '+$currencyLabel ***';
     final debitLabel = showBalance
-        ? '-$currencyLabel ${_formatEtbAbbrev(totalDebit)}'
+        ? '-$currencyLabel ${_formatEtbFull(totalDebit)}'
         : '-$currencyLabel ***';
 
     return Container(
@@ -11756,7 +11760,7 @@ class _BankGridCard extends StatelessWidget {
     final bankImage = _getBankImage(bankId);
     final currencyLabel = context.l10nText('ETB');
     final balanceLabel =
-        showBalance ? '$currencyLabel ${_formatEtbAbbrev(balance)}' : '*****';
+        showBalance ? '$currencyLabel ${_formatEtbFull(balance)}' : '*****';
     final subtitleLabel = isCash
         ? context.l10nText('On-hand cash')
         : _formatLocalizedCount(context, accountCount, 'Account', 'Accounts');
@@ -12133,13 +12137,13 @@ class _AccountCard extends StatelessWidget {
     final bankImage = _getBankImage(bankId);
     final currencyLabel = context.l10nText('ETB');
     final balanceLabel = showBalance
-        ? '$currencyLabel ${formatNumberWithComma(account.balance).replaceFirst(RegExp(r'\.00\$'), '')}'
+        ? '$currencyLabel ${_formatEtbFull(account.balance)}'
         : '*****';
     final creditLabel = showBalance
-        ? '+$currencyLabel ${_formatEtbAbbrev(account.totalCredit)}'
+        ? '+$currencyLabel ${_formatEtbFull(account.totalCredit)}'
         : '***';
     final debitLabel = showBalance
-        ? '-$currencyLabel ${_formatEtbAbbrev(account.totalDebit)}'
+        ? '-$currencyLabel ${_formatEtbFull(account.totalDebit)}'
         : '***';
     final normalizedProgress =
         syncProgress == null ? null : syncProgress!.clamp(0.0, 1.0).toDouble();
