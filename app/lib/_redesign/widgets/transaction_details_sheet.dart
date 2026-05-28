@@ -16,7 +16,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
-import 'package:kenat/kenat.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 /// Shows the transaction details bottom sheet matching the redesign style.
@@ -156,8 +155,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         AppCalendarOption.ethiopian;
 
     if (isEC) {
-      final time = Time.fromGregorian(dt.hour, dt.minute);
-      final timeStr = time.format({'useGeez': false, 'lang': 'amharic'});
+      final timeStr = AppDateFormat.ethiopianTime(dt, context: context);
 
       return '${AppDateFormat.monthDayMaybeYear(dt, context: context)} · $timeStr';
     } else {
@@ -1012,7 +1010,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                   children: [
                     Expanded(
                       child: Text(
-                        'Transaction Details',
+                        context.l10nText('Transaction Details'),
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary(context),
@@ -1126,7 +1124,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       if (isLockedSelfTransfer)
                         _DetailRow(
                           label: 'Category',
-                          value: selfTransferLabel ?? 'Self transfer',
+                          value: context
+                              .l10nText(selfTransferLabel ?? 'Self transfer'),
                         )
                       else
                         _buildCategoryRow(category),
@@ -1190,7 +1189,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
             child: Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
-                'Reason',
+                context.l10nText('Reason'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: AppColors.textSecondary(context),
                 ),
@@ -1239,9 +1238,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final theme = Theme.of(context);
     final valueColumnWidth =
         (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
-    final categoryLabel = _provider.categoryLabelForTransaction(
-      _tx,
-      uncategorizedLabel: 'Categorize',
+    final categoryLabel = context.l10nText(
+      _provider.categoryLabelForTransaction(
+        _tx,
+        uncategorizedLabel: 'Categorize',
+      ),
     );
 
     return Container(
@@ -1256,7 +1257,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
           SizedBox(
             width: _kLabelWidth,
             child: Text(
-              'Categories',
+              context.l10nText('Categories'),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: AppColors.textSecondary(context),
               ),
@@ -1300,7 +1301,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                   ] else
                     Expanded(
                       child: Text(
-                        'Categorize',
+                        context.l10nText('Categorize'),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: AppColors.textTertiary(context),
                           fontWeight: FontWeight.w500,
@@ -1472,7 +1473,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Auto-categorize future transactions',
+                        context.l10nText(
+                          'Auto-categorize future transactions',
+                        ),
                         style: TextStyle(
                           color: AppColors.textPrimary(context),
                           fontSize: 13,
@@ -1498,7 +1501,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
             if (isChecked && _autoCategorizationDraftCategories.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
-                'Dismiss categories you do not want to remember',
+                context.l10nText(
+                  'Dismiss categories you do not want to remember',
+                ),
                 style: TextStyle(
                   color: AppColors.textSecondary(context),
                   fontSize: 12,
@@ -1530,7 +1535,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Widget _buildCategorySectionLabel(String label) {
     return Text(
-      label,
+      context.l10nText(label),
       style: Theme.of(context).textTheme.labelMedium?.copyWith(
             color: AppColors.textSecondary(context),
             fontWeight: FontWeight.w700,

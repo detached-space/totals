@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:kenat/kenat.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
@@ -198,7 +197,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       amountColor:
                           isCredit ? AppColors.incomeSuccess : AppColors.red,
                       name: _counterparty(tx, isSelfTransfer: isSelfTransfer),
-                      timestamp: _timeLabel(tx, isEC),
+                      timestamp: _timeLabel(tx, context),
                       selected: selected,
                       onTap: _isSelecting
                           ? () => _toggle(tx)
@@ -235,13 +234,13 @@ String _counterparty(Transaction tx, {bool isSelfTransfer = false}) {
   return isSelfTransfer ? 'YOU' : 'UNKNOWN';
 }
 
-String _timeLabel(Transaction tx, bool isEC) {
+String _timeLabel(Transaction tx, BuildContext context) {
   if (tx.time == null || tx.time!.isEmpty) return '';
   try {
     final dt = DateTime.parse(tx.time!).toLocal();
+    final isEC = AppDateFormat.usesEthiopianCalendar(context);
     if (isEC) {
-      final time = Time.fromGregorian(dt.hour, dt.minute);
-      return time.format({'useGeez': false, 'lang': 'amharic'});
+      return AppDateFormat.ethiopianTime(dt, context: context);
     }
     final hh = dt.hour.toString().padLeft(2, '0');
     final mm = dt.minute.toString().padLeft(2, '0');

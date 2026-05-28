@@ -102,7 +102,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
     } catch (error) {
       print("debug: Redesign settings SMS pattern fetch failed: $error");
       if (!mounted) return;
-      final message = error.toString().replaceFirst('Exception: ', '');
+      final message = context.l10nTextRead(
+        error.toString().replaceFirst('Exception: ', ''),
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),

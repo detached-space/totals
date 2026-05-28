@@ -611,10 +611,13 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentCategoryLabel = _provider.categoryLabelForTransaction(
-      _tx,
-      uncategorizedLabel: 'Categorize',
+    final currentCategoryLabel = context.l10nText(
+      _provider.categoryLabelForTransaction(
+        _tx,
+        uncategorizedLabel: 'Categorize',
+      ),
     );
+    final categoriesTitle = context.l10nText('Categories');
     final isLockedSelfTransfer = _provider.isDetectedSelfTransfer(_tx);
     final mediaQuery = MediaQuery.of(context);
     final keyboardInset = mediaQuery.viewInsets.bottom;
@@ -659,8 +662,8 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
                     Expanded(
                       child: Text(
                         _selectedCategoryIds.isEmpty
-                            ? 'Categories'
-                            : 'Categories · $currentCategoryLabel',
+                            ? categoriesTitle
+                            : '$categoriesTitle · $currentCategoryLabel',
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary(context),
@@ -825,7 +828,9 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Auto-categorize future transactions',
+                        context.l10nText(
+                          'Auto-categorize future transactions',
+                        ),
                         style: TextStyle(
                           color: AppColors.textPrimary(context),
                           fontSize: 13,
@@ -851,7 +856,9 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
             if (isChecked && _autoCategorizationDraftCategories.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
-                'Dismiss categories you do not want to remember',
+                context.l10nText(
+                  'Dismiss categories you do not want to remember',
+                ),
                 style: TextStyle(
                   color: AppColors.textSecondary(context),
                   fontSize: 12,

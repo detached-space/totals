@@ -172,6 +172,34 @@ class AppDateFormat {
   static bool usesEthiopianCalendar(BuildContext? context) =>
       calendarOf(context) == AppCalendarOption.ethiopian;
 
+  static String ethiopianTime(
+    DateTime date, {
+    BuildContext? context,
+    bool showPeriodLabel = true,
+  }) {
+    final time = Time.fromGregorian(date.hour, date.minute);
+    final text = time.format({
+      'useGeez': false,
+      'lang': 'amharic',
+      'showPeriodLabel': showPeriodLabel,
+    });
+    if (languageOf(context) == AppLanguageOption.amharic) return text;
+    return text
+        .replaceAll(PeriodLabels.day, 'morning')
+        .replaceAll(PeriodLabels.night, 'evening')
+        .replaceAll('ጠዋት', 'morning')
+        .replaceAll('ማታ', 'evening');
+  }
+
+  static String ethiopianPeriodLabel(DateTime date, {BuildContext? context}) {
+    final time = Time.fromGregorian(date.hour, date.minute);
+    final isNight = time.period == 'night';
+    if (languageOf(context) == AppLanguageOption.amharic) {
+      return isNight ? PeriodLabels.night : PeriodLabels.day;
+    }
+    return isNight ? 'evening' : 'morning';
+  }
+
   static List<String> ethiopianMonthNames({
     required AppLanguageOption language,
     bool abbreviated = true,

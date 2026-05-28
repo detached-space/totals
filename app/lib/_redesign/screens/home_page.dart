@@ -314,7 +314,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                     : AppColors.red,
                                 name: _transactionCounterparty(transaction,
                                     isSelfTransfer: isSelfTransfer),
-                                timestamp: _transactionTimeLabel(transaction),
+                                timestamp:
+                                    _transactionTimeLabel(transaction, context),
                                 selected: selected,
                                 onTap: _isSelecting
                                     ? () => _toggleSelection(transaction)
@@ -610,9 +611,14 @@ String _transactionCounterparty(Transaction transaction,
   return isSelfTransfer ? 'YOU' : 'UNKNOWN';
 }
 
-String _transactionTimeLabel(Transaction transaction) {
+String _transactionTimeLabel(Transaction transaction, BuildContext context) {
   final dt = _parseTransactionTime(transaction.time);
-  if (dt == null) return 'Unknown time';
+  if (dt == null) return context.l10nText('Unknown time');
+  final isEC =
+      context.watch<ThemeProvider>().appCalendar == AppCalendarOption.ethiopian;
+  if (isEC) {
+    return AppDateFormat.ethiopianTime(dt, context: context);
+  }
   final hh = dt.hour.toString().padLeft(2, '0');
   final mm = dt.minute.toString().padLeft(2, '0');
   return '$hh:$mm';
@@ -2173,6 +2179,10 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
   }
 
   String _formatTime(DateTime dt) {
+    if (AppDateFormat.usesEthiopianCalendar(context)) {
+      return AppDateFormat.ethiopianTime(dt, context: context);
+    }
+
     final h = dt.hour;
     final m = dt.minute.toString().padLeft(2, '0');
     final p = h >= 12 ? 'PM' : 'AM';

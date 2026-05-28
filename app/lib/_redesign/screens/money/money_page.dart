@@ -360,6 +360,8 @@ class _ProviderContentVersion {
 
 class _ActivityTransactionsViewCacheKey {
   final int dataVersion;
+  final String calendar;
+  final String language;
   final String searchQuery;
   final String? type;
   final int? bankId;
@@ -372,6 +374,8 @@ class _ActivityTransactionsViewCacheKey {
 
   const _ActivityTransactionsViewCacheKey({
     required this.dataVersion,
+    required this.calendar,
+    required this.language,
     required this.searchQuery,
     required this.type,
     required this.bankId,
@@ -388,6 +392,8 @@ class _ActivityTransactionsViewCacheKey {
     if (identical(this, other)) return true;
     return other is _ActivityTransactionsViewCacheKey &&
         other.dataVersion == dataVersion &&
+        other.calendar == calendar &&
+        other.language == language &&
         other.searchQuery == searchQuery &&
         other.type == type &&
         other.bankId == bankId &&
@@ -402,6 +408,8 @@ class _ActivityTransactionsViewCacheKey {
   @override
   int get hashCode => Object.hash(
       dataVersion,
+      calendar,
+      language,
       searchQuery,
       type,
       bankId,
@@ -441,12 +449,16 @@ class _ActivityTransactionsSummary {
 
 class _LedgerViewCacheKey {
   final int dataVersion;
+  final String calendar;
+  final String language;
   final int? startDateMillis;
   final int? endDateMillis;
   final String bankIdsKey;
 
   const _LedgerViewCacheKey({
     required this.dataVersion,
+    required this.calendar,
+    required this.language,
     required this.startDateMillis,
     required this.endDateMillis,
     required this.bankIdsKey,
@@ -457,14 +469,22 @@ class _LedgerViewCacheKey {
     if (identical(this, other)) return true;
     return other is _LedgerViewCacheKey &&
         other.dataVersion == dataVersion &&
+        other.calendar == calendar &&
+        other.language == language &&
         other.startDateMillis == startDateMillis &&
         other.endDateMillis == endDateMillis &&
         other.bankIdsKey == bankIdsKey;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(dataVersion, startDateMillis, endDateMillis, bankIdsKey);
+  int get hashCode => Object.hash(
+        dataVersion,
+        calendar,
+        language,
+        startDateMillis,
+        endDateMillis,
+        bankIdsKey,
+      );
 }
 
 class _LedgerViewSummary {
@@ -2814,9 +2834,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   _LedgerViewSummary _resolveLedgerViewSummary(TransactionProvider provider) {
+    final themeProvider = context.watch<ThemeProvider>();
     final sortedLedgerBankIds = _ledgerFilter.bankIds.toList()..sort();
     final cacheKey = _LedgerViewCacheKey(
       dataVersion: provider.dataVersion,
+      calendar: themeProvider.appCalendar.storageValue,
+      language: themeProvider.appLanguage.storageValue,
       startDateMillis: _ledgerFilter.startDate?.millisecondsSinceEpoch,
       endDateMillis: _ledgerFilter.endDate?.millisecondsSinceEpoch,
       bankIdsKey: sortedLedgerBankIds.join(','),
@@ -3061,8 +3084,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   _ActivityTransactionsViewData _resolveActivityTransactionsViewData(
     TransactionProvider provider,
   ) {
+    final themeProvider = context.watch<ThemeProvider>();
     final cacheKey = _ActivityTransactionsViewCacheKey(
       dataVersion: provider.dataVersion,
+      calendar: themeProvider.appCalendar.storageValue,
+      language: themeProvider.appLanguage.storageValue,
       searchQuery: _searchQuery,
       type: _filter.type,
       bankId: _filter.bankId,
@@ -4162,8 +4188,7 @@ String _transactionTimeLabel(Transaction transaction, [BuildContext? context]) {
           Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
               AppCalendarOption.ethiopian;
       if (isEC) {
-        final time = Time.fromGregorian(dt.hour, dt.minute);
-        return time.format({'useGeez': false, 'lang': 'amharic'});
+        return AppDateFormat.ethiopianTime(dt, context: context);
       }
     } catch (_) {}
   }
@@ -4411,8 +4436,7 @@ String _formatLedgerTime(DateTime dt, [BuildContext? context]) {
           Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
               AppCalendarOption.ethiopian;
       if (isEC) {
-        final time = Time.fromGregorian(dt.hour, dt.minute);
-        return time.format({'useGeez': false, 'lang': 'amharic'});
+        return AppDateFormat.ethiopianTime(dt, context: context);
       }
     } catch (_) {}
   }
@@ -4431,14 +4455,15 @@ Map<String, String?> _formatLedgerTimeParts(DateTime dt,
           Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
               AppCalendarOption.ethiopian;
       if (isEC) {
-        final time = Time.fromGregorian(dt.hour, dt.minute);
-        final timeText = time.format({
-          'useGeez': false,
-          'lang': 'amharic',
-          'showPeriodLabel': false,
-        });
-        final periodText =
-            time.period == 'night' ? PeriodLabels.night : PeriodLabels.day;
+        final timeText = AppDateFormat.ethiopianTime(
+          dt,
+          context: context,
+          showPeriodLabel: false,
+        );
+        final periodText = AppDateFormat.ethiopianPeriodLabel(
+          dt,
+          context: context,
+        );
         return {'time': timeText, 'period': periodText};
       }
     } catch (_) {}

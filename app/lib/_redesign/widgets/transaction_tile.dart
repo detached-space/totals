@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/l10n/app_localizations.dart';
 
 /// Shared transaction tile used across all redesign pages.
 ///
@@ -189,6 +190,8 @@ class TransactionCategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final localizedLabel = context.l10nText(label);
+
     // Self-transfer or Misc: neutral gray filled chip
     if (isSelfTransfer || isMisc) {
       return _maybeWrapPressable(
@@ -201,7 +204,7 @@ class TransactionCategoryChip extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 132),
             child: Text(
-              label,
+              localizedLabel,
               style: const TextStyle(
                 color: AppColors.white,
                 fontSize: 11,
@@ -228,7 +231,7 @@ class TransactionCategoryChip extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 132),
             child: Text(
-              label,
+              localizedLabel,
               style: TextStyle(
                 color: color,
                 fontSize: 11,
@@ -253,7 +256,7 @@ class TransactionCategoryChip extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 132),
           child: Text(
-            label,
+            localizedLabel,
             style: TextStyle(
               color: AppColors.isDark(context)
                   ? AppColors.slate400

@@ -634,6 +634,8 @@ class AppLocalizations {
     "Manage transaction categories": "የትራንዛክሽን ምድቦችን ያስተዳድሩ",
     "Transaction categorized successfully.": "ትራንዛክሽን በተሳካ ሁኔታ ተመድቧል።",
     "Auto-categorize future transactions": "የወደፊት ትራንዛክሽኖችን በራስ-ሰር መድብ",
+    "Dismiss categories you do not want to remember":
+        "ማስታወስ የማይፈልጉትን ምድቦች ያስወግዱ",
     "Categorize by receiver automatically": "በተቀባይ በራስ-ሰር መድብ",
     "Could not create category": "ምድብ መፍጠር አልተቻለም",
     "Could not update category. Changes were reverted.":
@@ -934,6 +936,8 @@ class AppLocalizations {
     "Image file is too large. Please use a smaller image.":
         "የምስሉ ፋይል በጣም ትልቅ ነው። እባክዎ ትንሽ ምስል ይጠቀሙ።",
     "Connection error": "የግንኙነት ስህተት",
+    "No internet connection. Connect and try again.":
+        "የኢንተርኔት ግንኙነት የለም። ይገናኙ እና እንደገና ይሞክሩ።",
     "Please check your internet connection.": "እባክዎ የኢንተርኔት ግንኙነትዎን ያረጋግጡ።",
     "Connection error: The server closed the connection during upload. Please try again with a smaller image or check your internet connection.":
         "የግንኙነት ስህተት፦ በሚሰቀልበት ጊዜ ሰርቨሩ ግንኙነቱን ዘግቷል። እባክዎ በትንሽ ምስል እንደገና ይሞክሩ ወይም የኢንተርኔት ግንኙነትዎን ያረጋግጡ።",
