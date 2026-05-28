@@ -450,8 +450,7 @@ class AppLocalizations {
     "Could not check for updates.": "ዝመናዎችን መፈተሽ አልተቻለም።",
     "Totals is up to date.": "Totals የቅርብ ጊዜ ስሪት ላይ ነው።",
     "Update available": "ዝመና አለ",
-    "A newer version of Totals is available on Google Play.":
-        "አዲስ የTotals ስሪት በGoogle Play ላይ ይገኛል።",
+    "A newer version of Totals is available.": "አዲስ የTotals ስሪት ይገኛል።",
     "Update": "አዘምን",
     "Update now": "አሁን አዘምን",
     "Google Play cannot start this update right now.":

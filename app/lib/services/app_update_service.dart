@@ -82,11 +82,7 @@ class AppUpdateService {
         return;
       }
 
-      if (isManual) {
-        await _promptForUpdate(context, updateInfo);
-      } else {
-        _showUpdateAvailableSnackBar(context, updateInfo);
-      }
+      await _promptForUpdate(context, updateInfo);
     } on PlatformException catch (error) {
       if (isManual && context.mounted) {
         _showSnackBar(context, _friendlyUpdateError(context, error));
@@ -137,7 +133,7 @@ class AppUpdateService {
           title: Text(dialogContext.l10nText('Update available')),
           content: Text(
             dialogContext.l10nText(
-              'A newer version of Totals is available on Google Play.',
+              'A newer version of Totals is available.',
             ),
           ),
           actions: [
@@ -157,26 +153,6 @@ class AppUpdateService {
     if (shouldUpdate == true && context.mounted) {
       await _startUpdateFlow(context, updateInfo);
     }
-  }
-
-  void _showUpdateAvailableSnackBar(
-    BuildContext context,
-    AppUpdateInfo updateInfo,
-  ) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(context.l10nTextRead('Update available')),
-        action: SnackBarAction(
-          label: context.l10nTextRead('Update'),
-          onPressed: () {
-            unawaited(_startUpdateFlow(context, updateInfo));
-          },
-        ),
-      ),
-    );
   }
 
   Future<void> _startUpdateFlow(
