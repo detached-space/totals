@@ -165,7 +165,9 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                   itemCount: transactions.length,
                   itemBuilder: (context, index) {
                     final tx = transactions[index];
-                    final bankLabel = provider.getBankShortName(tx.bankId);
+                    final bankLabel = context.l10nText(
+                      provider.getBankShortName(tx.bankId),
+                    );
                     final category = provider.getCategoryById(tx.categoryId);
                     final isSelfTransfer = provider.isSelfTransfer(tx);
                     final isMisc = category?.uncategorized == true;

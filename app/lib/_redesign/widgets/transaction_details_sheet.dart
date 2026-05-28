@@ -135,11 +135,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   String get _counterpartyRole => _isCredit ? 'sender' : 'recipient';
 
   String get _bankFullName {
-    return _provider.getBankName(_tx.bankId);
+    return context.l10nText(_provider.getBankName(_tx.bankId));
   }
 
   String get _bankShortName {
-    return _provider.getBankShortName(_tx.bankId);
+    return context.l10nText(_provider.getBankShortName(_tx.bankId));
   }
 
   String get _formattedAmount {

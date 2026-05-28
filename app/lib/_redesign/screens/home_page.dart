@@ -276,8 +276,9 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                             const _EmptyTransactions()
                           else
                             ...todayList.map((transaction) {
-                              final bankLabel =
-                                  provider.getBankShortName(transaction.bankId);
+                              final bankLabel = context.l10nText(
+                                provider.getBankShortName(transaction.bankId),
+                              );
                               final category = provider
                                   .getCategoryById(transaction.categoryId);
                               final isSelfTransfer =
@@ -2336,8 +2337,9 @@ class _BalanceBreakdownSheetState extends State<_BalanceBreakdownSheet> {
                         final name = isSelfTransfer
                             ? 'YOU'
                             : _transactionCounterparty(txn);
-                        final bank =
-                            widget.provider.getBankShortName(txn.bankId);
+                        final bank = context.l10nText(
+                          widget.provider.getBankShortName(txn.bankId),
+                        );
                         final dt = _parseTransactionTime(txn.time);
                         final timeStr = dt != null ? _formatTime(dt) : '';
                         final parsedBalance =
