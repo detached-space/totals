@@ -32,6 +32,7 @@ import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:kenat/kenat.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/theme/app_language_option.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -5909,8 +5910,14 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
       if (isEC) {
         final ec = Kenat.fromGregorian(month.year, month.month, month.day)
             .getEthiopian();
+        final useFullMonthName =
+            AppDateFormat.languageOf(context) == AppLanguageOption.amharic;
         return widget.view == _AnalyticsHeatmapView.daily
-            ? '${_formatEthiopianMonthNameForContext(ec['month']!, context)} ${ec['year']}'
+            ? '${_formatEthiopianMonthNameForContext(
+                ec['month']!,
+                context,
+                abbreviated: !useFullMonthName,
+              )} ${ec['year']}'
             : '${ec['year']}';
       }
     } catch (_) {}
@@ -6241,7 +6248,13 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
       if (isEC) {
         final ec = Kenat.fromGregorian(month.year, month.month, month.day)
             .getEthiopian();
-        return _formatEthiopianMonthNameForContext(ec['month']!, context);
+        final useFullMonthName =
+            AppDateFormat.languageOf(context) == AppLanguageOption.amharic;
+        return _formatEthiopianMonthNameForContext(
+          ec['month']!,
+          context,
+          abbreviated: !useFullMonthName,
+        );
       }
       return AppDateFormat.monthShort(month, context: context);
     }
@@ -6258,38 +6271,75 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     final currentYearLabel = getYearLabel(_visibleMonth);
     final prevYearLabel = getYearLabel(previousMonth);
     final nextYearLabel = getYearLabel(nextMonth);
+    final previousMonthLabel = getMonthLabel(previousMonth);
+    final currentMonthLabel = getMonthLabel(_visibleMonth);
+    final nextMonthLabel = getMonthLabel(nextMonth);
+    final monthViewportWidth =
+        _measureHeaderMonthViewportWidth(context, textStyle);
+    final yearViewportWidth = _measureLabelViewportWidth(
+      context: context,
+      style: textStyle,
+      labels: [prevYearLabel, currentYearLabel, nextYearLabel],
+      extraWidth: 8,
+    );
+    final monthYearGap = _measureHeaderMonthYearGap(textStyle);
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildAnimatedSlidingLabelValues(
-          textStyle: textStyle,
-          labelWidth: _measureHeaderMonthViewportWidth(context, textStyle),
-          labelHeight: 36,
-          previousLabel: getMonthLabel(previousMonth),
-          currentLabel: getMonthLabel(_visibleMonth),
-          nextLabel: getMonthLabel(nextMonth),
-          itemAlignment: Alignment.centerLeft,
-          axis: Axis.vertical,
-        ),
-        const SizedBox(width: 4),
-        _buildAnimatedSlidingLabelValues(
-          textStyle: textStyle,
-          labelWidth: _measureHeaderYearViewportWidth(context, textStyle),
-          labelHeight: 36,
-          previousLabel: prevYearLabel == currentYearLabel
-              ? currentYearLabel
-              : prevYearLabel,
-          currentLabel: currentYearLabel,
-          nextLabel: nextYearLabel == currentYearLabel
-              ? currentYearLabel
-              : nextYearLabel,
-          itemAlignment: Alignment.centerLeft,
-          axis: Axis.vertical,
-          animateNegative: prevYearLabel != currentYearLabel,
-          animatePositive: nextYearLabel != currentYearLabel,
-        ),
-      ],
+    return AnimatedBuilder(
+      animation: _pageController,
+      builder: (context, _) {
+        final visibleMonthWidth = _resolveAnimatedHeaderMonthWidth(
+          context: context,
+          style: textStyle,
+          previousLabel: previousMonthLabel,
+          currentLabel: currentMonthLabel,
+          nextLabel: nextMonthLabel,
+        );
+        final hiddenMonthWidth = (monthViewportWidth - visibleMonthWidth)
+            .clamp(0.0, monthViewportWidth)
+            .toDouble();
+        final yearShift = -hiddenMonthWidth;
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildAnimatedSlidingLabelValues(
+              textStyle: textStyle,
+              labelWidth: monthViewportWidth,
+              labelHeight: 36,
+              previousLabel: previousMonthLabel,
+              currentLabel: currentMonthLabel,
+              nextLabel: nextMonthLabel,
+              itemAlignment: Alignment.centerLeft,
+              axis: Axis.vertical,
+            ),
+            Transform.translate(
+              offset: Offset(yearShift, 0),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: monthYearGap),
+                  _buildAnimatedSlidingLabelValues(
+                    textStyle: textStyle,
+                    labelWidth: yearViewportWidth,
+                    labelHeight: 36,
+                    previousLabel: prevYearLabel == currentYearLabel
+                        ? currentYearLabel
+                        : prevYearLabel,
+                    currentLabel: currentYearLabel,
+                    nextLabel: nextYearLabel == currentYearLabel
+                        ? currentYearLabel
+                        : nextYearLabel,
+                    itemAlignment: Alignment.centerLeft,
+                    axis: Axis.vertical,
+                    animateNegative: prevYearLabel != currentYearLabel,
+                    animatePositive: nextYearLabel != currentYearLabel,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -6435,14 +6485,26 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   }
 
   double _measurePeriodViewportWidth(BuildContext context, TextStyle style) {
+    final isEC =
+        Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
+            AppCalendarOption.ethiopian;
     final labels = widget.view == _AnalyticsHeatmapView.daily
-        ? List<String>.generate(
-            12,
-            (index) => _formatFullMonthName(
-              DateTime(2024, index + 1, 1),
-              context,
-            ),
-          )
+        ? isEC
+            ? List<String>.generate(
+                13,
+                (index) => _formatEthiopianMonthNameForContext(
+                  index + 1,
+                  context,
+                  abbreviated: false,
+                ),
+              )
+            : List<String>.generate(
+                12,
+                (index) => _formatFullMonthName(
+                  DateTime(2024, index + 1, 1),
+                  context,
+                ),
+              )
         : [
             _formatPeriodLabel(_shiftVisibleMonth(_visibleMonth, -1)),
             _formatPeriodLabel(_visibleMonth),
@@ -6463,10 +6525,16 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     final isEC =
         Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
             AppCalendarOption.ethiopian;
+    final useFullEthiopianMonthName =
+        AppDateFormat.languageOf(context) == AppLanguageOption.amharic;
     final labels = isEC
         ? List<String>.generate(
             13,
-            (index) => _formatEthiopianMonthNameForContext(index + 1, context),
+            (index) => _formatEthiopianMonthNameForContext(
+              index + 1,
+              context,
+              abbreviated: !useFullEthiopianMonthName,
+            ),
           )
         : List<String>.generate(
             12,
@@ -6500,6 +6568,38 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     );
   }
 
+  double _resolveAnimatedHeaderMonthWidth({
+    required BuildContext context,
+    required TextStyle style,
+    required String previousLabel,
+    required String currentLabel,
+    required String nextLabel,
+  }) {
+    final currentWidth = _measureLabelTextWidth(
+      context: context,
+      style: style,
+      label: currentLabel,
+    );
+    final page =
+        _pageController.hasClients ? (_pageController.page ?? 1.0) : 1.0;
+    final delta = (page - 1).clamp(-1.0, 1.0);
+    if (delta.abs() < 0.001) return currentWidth;
+
+    final targetLabel = delta < 0 ? previousLabel : nextLabel;
+    final targetWidth = _measureLabelTextWidth(
+      context: context,
+      style: style,
+      label: targetLabel,
+    );
+    final progress = delta.abs().clamp(0.0, 1.0).toDouble();
+    return currentWidth + ((targetWidth - currentWidth) * progress);
+  }
+
+  double _measureHeaderMonthYearGap(TextStyle style) {
+    final fontSize = style.fontSize ?? 28;
+    return (fontSize * 0.24).clamp(5.0, 9.0).toDouble();
+  }
+
   double _measureLabelViewportWidth({
     required BuildContext context,
     required TextStyle style,
@@ -6509,16 +6609,31 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     var maxWidth = 0.0;
 
     for (final label in labels) {
-      final painter = TextPainter(
-        text: TextSpan(text: label, style: style),
-        textDirection: Directionality.of(context),
-        textScaler: MediaQuery.textScalerOf(context),
-        maxLines: 1,
-      )..layout();
-      maxWidth = math.max(maxWidth, painter.width);
+      maxWidth = math.max(
+        maxWidth,
+        _measureLabelTextWidth(
+          context: context,
+          style: style,
+          label: label,
+        ),
+      );
     }
 
     return maxWidth.ceilToDouble() + extraWidth;
+  }
+
+  double _measureLabelTextWidth({
+    required BuildContext context,
+    required TextStyle style,
+    required String label,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: label, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    return painter.width;
   }
 
   Widget _buildAnimatedPeriodLabelItem({
