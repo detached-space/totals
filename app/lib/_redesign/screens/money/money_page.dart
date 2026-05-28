@@ -6671,7 +6671,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
 
   double _measureHeaderMonthYearGap(TextStyle style) {
     final fontSize = style.fontSize ?? 28;
-    return (fontSize * 0.24).clamp(5.0, 9.0).toDouble();
+    return (fontSize * 0.38).clamp(9.0, 13.0).toDouble();
   }
 
   double _measureLabelViewportWidth({
