@@ -149,7 +149,7 @@ class TransactionProvider with ChangeNotifier {
   Map<int, Category> _categoryById = {};
   List<AutoCategorizationRule> _autoCategorizationRules = [];
   List<AutoCategoryPromptDismissal> _autoCategoryPromptDismissals = [];
-  bool _autoCategorizationEnabled = false;
+  bool _autoCategorizationEnabled = true;
   Map<String, String> _selfTransferLabelByReference = {};
   Map<int, String> _bankNamesById = {
     CashConstants.bankId: CashConstants.bankName,

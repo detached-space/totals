@@ -170,7 +170,7 @@ class NotificationSettingsService {
 
   Future<bool> isAutoCategorizationEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_kAutoCategorizeReceiverEnabled) ?? false;
+    return prefs.getBool(_kAutoCategorizeReceiverEnabled) ?? true;
   }
 
   Future<void> setAutoCategorizationEnabled(bool enabled) async {
