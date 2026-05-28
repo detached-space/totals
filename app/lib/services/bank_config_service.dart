@@ -10,7 +10,13 @@ import 'package:totals/constants/cash_constants.dart';
 class BankConfigService {
   static const String _banksAssetPath = 'assets/banks.json';
   static const int _mpesaBankId = 8;
+  static const int _apolloBankId = 36;
+  static const int _cbeBirrBankId = 37;
   static const Set<int> _retiredBankIds = {35, 38};
+  static const Map<int, String> _canonicalLocalBankImages = {
+    _apolloBankId: 'assets/images/apollo.png',
+    _cbeBirrBankId: 'assets/images/cbe_birr.png',
+  };
   List<Bank>? _assetBanksCache;
 
   List<Bank> _filterCashBanks(List<Bank> banks) {
@@ -41,6 +47,26 @@ class BankConfigService {
       simBased: true,
       colors: const ['#00a859', '#ffffff'],
     );
+  }
+
+  Bank _withCanonicalLocalBankImage(Bank bank) {
+    final canonicalImage = _canonicalLocalBankImages[bank.id];
+    if (canonicalImage == null || bank.image == canonicalImage) return bank;
+    return Bank(
+      id: bank.id,
+      name: bank.name,
+      shortName: bank.shortName,
+      codes: bank.codes,
+      image: canonicalImage,
+      maskPattern: bank.maskPattern,
+      uniformMasking: bank.uniformMasking,
+      simBased: bank.simBased,
+      colors: bank.colors,
+    );
+  }
+
+  List<Bank> _applyCanonicalLocalBankImages(List<Bank> banks) {
+    return banks.map(_withCanonicalLocalBankImage).toList(growable: false);
   }
 
   bool _sameStringList(List<String> a, List<String> b) {
@@ -131,11 +157,13 @@ class BankConfigService {
     final normalized = List<Bank>.from(banks);
     final mpesaByIdIndex =
         normalized.indexWhere((bank) => bank.id == _mpesaBankId);
-    if (mpesaByIdIndex == -1) return normalized;
+    if (mpesaByIdIndex == -1) {
+      return _applyCanonicalLocalBankImages(normalized);
+    }
 
     final bankAtMpesaId = normalized[mpesaByIdIndex];
     if (_isMpesaBank(bankAtMpesaId)) {
-      return normalized;
+      return _applyCanonicalLocalBankImages(normalized);
     }
 
     final mpesaAliasIndex = normalized.indexWhere(
@@ -157,7 +185,7 @@ class BankConfigService {
       colors: source.colors,
     );
 
-    return normalized;
+    return _applyCanonicalLocalBankImages(normalized);
   }
 
   Future<List<Bank>> _loadAssetBanks() async {
