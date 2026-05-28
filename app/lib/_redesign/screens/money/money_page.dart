@@ -5749,6 +5749,24 @@ class _AnalyticsHeatmapCard extends StatefulWidget {
   State<_AnalyticsHeatmapCard> createState() => _AnalyticsHeatmapCardState();
 }
 
+class _HeatmapHeaderWidthCache {
+  final String key;
+  final double previousMonthWidth;
+  final double currentMonthWidth;
+  final double nextMonthWidth;
+  final double monthViewportWidth;
+  final double yearViewportWidth;
+
+  const _HeatmapHeaderWidthCache({
+    required this.key,
+    required this.previousMonthWidth,
+    required this.currentMonthWidth,
+    required this.nextMonthWidth,
+    required this.monthViewportWidth,
+    required this.yearViewportWidth,
+  });
+}
+
 class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   static const Duration _pageSwipeDuration = Duration(milliseconds: 450);
   static const double _sectionHeaderSpacing = 10;
@@ -5761,6 +5779,7 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   late final PageController _pageController;
   late DateTime _visibleMonth;
   bool _isRecenteringPage = false;
+  _HeatmapHeaderWidthCache? _headerWidthCache;
 
   @override
   void initState() {
@@ -6274,25 +6293,28 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     final previousMonthLabel = getMonthLabel(previousMonth);
     final currentMonthLabel = getMonthLabel(_visibleMonth);
     final nextMonthLabel = getMonthLabel(nextMonth);
-    final monthViewportWidth =
-        _measureHeaderMonthViewportWidth(context, textStyle);
-    final yearViewportWidth = _measureLabelViewportWidth(
+    final headerWidths = _resolveHeaderWidthCache(
       context: context,
       style: textStyle,
-      labels: [prevYearLabel, currentYearLabel, nextYearLabel],
-      extraWidth: 8,
+      previousMonthLabel: previousMonthLabel,
+      currentMonthLabel: currentMonthLabel,
+      nextMonthLabel: nextMonthLabel,
+      monthViewportLabels: _headerMonthViewportLabels(context),
+      previousYearLabel: prevYearLabel,
+      currentYearLabel: currentYearLabel,
+      nextYearLabel: nextYearLabel,
     );
+    final monthViewportWidth = headerWidths.monthViewportWidth;
+    final yearViewportWidth = headerWidths.yearViewportWidth;
     final monthYearGap = _measureHeaderMonthYearGap(textStyle);
 
     return AnimatedBuilder(
       animation: _pageController,
       builder: (context, _) {
         final visibleMonthWidth = _resolveAnimatedHeaderMonthWidth(
-          context: context,
-          style: textStyle,
-          previousLabel: previousMonthLabel,
-          currentLabel: currentMonthLabel,
-          nextLabel: nextMonthLabel,
+          previousWidth: headerWidths.previousMonthWidth,
+          currentWidth: headerWidths.currentMonthWidth,
+          nextWidth: headerWidths.nextMonthWidth,
         );
         final hiddenMonthWidth = (monthViewportWidth - visibleMonthWidth)
             .clamp(0.0, monthViewportWidth)
@@ -6518,16 +6540,13 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     );
   }
 
-  double _measureHeaderMonthViewportWidth(
-    BuildContext context,
-    TextStyle style,
-  ) {
+  List<String> _headerMonthViewportLabels(BuildContext context) {
     final isEC =
         Provider.of<ThemeProvider>(context, listen: false).appCalendar ==
             AppCalendarOption.ethiopian;
     final useFullEthiopianMonthName =
         AppDateFormat.languageOf(context) == AppLanguageOption.amharic;
-    final labels = isEC
+    return isEC
         ? List<String>.generate(
             13,
             (index) => _formatEthiopianMonthNameForContext(
@@ -6543,12 +6562,6 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
               context: context,
             ),
           );
-    return _measureLabelViewportWidth(
-      context: context,
-      style: style,
-      labels: labels,
-      extraWidth: 8,
-    );
   }
 
   double _measureHeaderYearViewportWidth(
@@ -6568,29 +6581,90 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
     );
   }
 
-  double _resolveAnimatedHeaderMonthWidth({
+  _HeatmapHeaderWidthCache _resolveHeaderWidthCache({
     required BuildContext context,
     required TextStyle style,
-    required String previousLabel,
-    required String currentLabel,
-    required String nextLabel,
+    required String previousMonthLabel,
+    required String currentMonthLabel,
+    required String nextMonthLabel,
+    required List<String> monthViewportLabels,
+    required String previousYearLabel,
+    required String currentYearLabel,
+    required String nextYearLabel,
   }) {
-    final currentWidth = _measureLabelTextWidth(
-      context: context,
-      style: style,
-      label: currentLabel,
+    final language = AppDateFormat.languageOf(context);
+    final calendar = AppDateFormat.calendarOf(context);
+    final direction = Directionality.of(context);
+    final fontSize = style.fontSize ?? 14;
+    final scaledFontSize =
+        MediaQuery.textScalerOf(context).scale(fontSize).toStringAsFixed(3);
+    final key = <String>[
+      widget.view.name,
+      language.storageValue,
+      calendar.storageValue,
+      '$direction',
+      scaledFontSize,
+      '${style.fontWeight?.index ?? ''}',
+      '${style.fontStyle?.index ?? ''}',
+      '${style.letterSpacing ?? ''}',
+      style.fontFamily ?? '',
+      previousMonthLabel,
+      currentMonthLabel,
+      nextMonthLabel,
+      previousYearLabel,
+      currentYearLabel,
+      nextYearLabel,
+      ...monthViewportLabels,
+    ].join('\u001f');
+
+    final cached = _headerWidthCache;
+    if (cached != null && cached.key == key) return cached;
+
+    final nextCache = _HeatmapHeaderWidthCache(
+      key: key,
+      previousMonthWidth: _measureLabelTextWidth(
+        context: context,
+        style: style,
+        label: previousMonthLabel,
+      ),
+      currentMonthWidth: _measureLabelTextWidth(
+        context: context,
+        style: style,
+        label: currentMonthLabel,
+      ),
+      nextMonthWidth: _measureLabelTextWidth(
+        context: context,
+        style: style,
+        label: nextMonthLabel,
+      ),
+      monthViewportWidth: _measureLabelViewportWidth(
+        context: context,
+        style: style,
+        labels: monthViewportLabels,
+        extraWidth: 8,
+      ),
+      yearViewportWidth: _measureLabelViewportWidth(
+        context: context,
+        style: style,
+        labels: [previousYearLabel, currentYearLabel, nextYearLabel],
+        extraWidth: 8,
+      ),
     );
+    _headerWidthCache = nextCache;
+    return nextCache;
+  }
+
+  double _resolveAnimatedHeaderMonthWidth({
+    required double previousWidth,
+    required double currentWidth,
+    required double nextWidth,
+  }) {
     final page =
         _pageController.hasClients ? (_pageController.page ?? 1.0) : 1.0;
     final delta = (page - 1).clamp(-1.0, 1.0);
     if (delta.abs() < 0.001) return currentWidth;
 
-    final targetLabel = delta < 0 ? previousLabel : nextLabel;
-    final targetWidth = _measureLabelTextWidth(
-      context: context,
-      style: style,
-      label: targetLabel,
-    );
+    final targetWidth = delta < 0 ? previousWidth : nextWidth;
     final progress = delta.abs().clamp(0.0, 1.0).toDouble();
     return currentWidth + ((targetWidth - currentWidth) * progress);
   }
