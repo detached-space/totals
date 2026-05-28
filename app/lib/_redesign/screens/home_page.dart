@@ -924,6 +924,46 @@ String _formatDelta(double value) {
   return formatted;
 }
 
+String _localizedHomeInsight(BuildContext context, String message) {
+  final directTranslation = context.l10nText(message);
+  if (directTranslation != message) return directTranslation;
+
+  if (context.l10nText('INSIGHT') == 'INSIGHT') return message;
+
+  final currencyLabel = context.l10nText('ETB');
+  final savedSoFarMatch = RegExp(
+    r"^You've saved ETB (.+) so far this month\.$",
+  ).firstMatch(message);
+  if (savedSoFarMatch != null) {
+    final amount = savedSoFarMatch.group(1)!;
+    return 'በዚህ ወር እስካሁን $amount $currencyLabel ቆጥበዋል።';
+  }
+
+  final spentSoFarMatch = RegExp(
+    r"^You've spent ETB (.+) more than you earned this month\.$",
+  ).firstMatch(message);
+  if (spentSoFarMatch != null) {
+    final amount = spentSoFarMatch.group(1)!;
+    return 'በዚህ ወር ካገኙት በ$amount $currencyLabel በላይ ወጪ አድርገዋል።';
+  }
+
+  final comparisonMatch = RegExp(
+    r"^You've (saved|spent more than earned) ETB (.+) this month, (\d+)% (better|lower) than your 3-month average\.$",
+  ).firstMatch(message);
+  if (comparisonMatch != null) {
+    final status = comparisonMatch.group(1)!;
+    final amount = comparisonMatch.group(2)!;
+    final percent = comparisonMatch.group(3)!;
+    final direction = comparisonMatch.group(4)! == 'better' ? 'የተሻለ' : 'ዝቅተኛ';
+    final summary = status == 'saved'
+        ? 'በዚህ ወር $amount $currencyLabel ቆጥበዋል'
+        : 'በዚህ ወር ካገኙት በ$amount $currencyLabel በላይ ወጪ አድርገዋል';
+    return '$summary፣ ከ3 ወር አማካይዎ $percent% $direction ነው።';
+  }
+
+  return message;
+}
+
 class _InsightCard extends StatelessWidget {
   final String message;
   final bool showImportBackupPrompt;
@@ -940,6 +980,7 @@ class _InsightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final localizedMessage = _localizedHomeInsight(context, message);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1026,7 +1067,7 @@ class _InsightCard extends StatelessWidget {
                   ),
                 ] else
                   Text(
-                    message,
+                    localizedMessage,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppColors.isDark(context)
                           ? AppColors.slate400
@@ -1248,7 +1289,7 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'INSIGHT',
+                  context.l10nText('INSIGHT'),
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: AppColors.textSecondary(context),
                         letterSpacing: 0.8,

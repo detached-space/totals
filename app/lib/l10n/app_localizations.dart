@@ -60,6 +60,9 @@ class AppLocalizations {
     "home.newTransactionsHere": "አዳዲስ ትራንዛክሽኖች ሲመጡ እዚህ ይታያሉ።",
     "home.missedTransaction": "ዛሬ ትራንዛክሽን አምልጦዎታል?",
     "home.syncSmsHistory": "የኤስኤምኤስ ታሪክ አመሳስል",
+    "home.insight": "ግንዛቤ",
+    "home.noMonthlyActivity":
+        "እስካሁን ወርሃዊ እንቅስቃሴ የለም። ግንዛቤዎችን ለማግኘት Totalsን መጠቀምዎን ይቀጥሉ።",
     "home.quickAccess": "ፈጣን መዳረሻ",
     "home.quickAccounts": "ፈጣን አካውንቶች",
     "home.nothingQuickAccess": "ለፈጣን መዳረሻ የተቀመጠ ነገር የለም",
@@ -1673,6 +1676,9 @@ class AppLocalizations {
     "CBEBirr": "CBE ብር",
     "CBE Birr": "CBE ብር",
     "new transactions": "አዲስ ትራንዛክሽኖች",
+    "INSIGHT": "ግንዛቤ",
+    "No monthly activity yet. Keep using Totals to unlock insights.":
+        "እስካሁን ወርሃዊ እንቅስቃሴ የለም። ግንዛቤዎችን ለማግኘት Totalsን መጠቀምዎን ይቀጥሉ።",
     "ETB": "ብር",
     "GET STARTED": "ጀምር",
     "How did I get here?": "እዚህ እንዴት ደረስኩ?",
