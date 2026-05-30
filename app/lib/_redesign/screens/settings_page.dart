@@ -1273,7 +1273,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
 
               _SettingTile(
-                icon: Icons.language_rounded,
+                icon: Icons.translate_rounded,
                 iconColor: AppColors.incomeSuccess,
                 title: context.l10n('settings.language', 'Language'),
                 subtitle: context.l10n(

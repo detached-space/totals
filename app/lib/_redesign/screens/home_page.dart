@@ -230,6 +230,11 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                             isImportingBackup: _isImportingBackup,
                             onImportBackupTap: () => _importBackup(provider),
                           ),
+                          const SizedBox(height: 16),
+                          _QuickCashActions(
+                            onExpenseTap: _showCashExpenseSheet,
+                            onIncomeTap: _showCashIncomeSheet,
+                          ),
                           const SizedBox(height: 20),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -466,13 +471,23 @@ class _RedesignHomePageState extends State<RedesignHomePage>
         : CashConstants.defaultAccountNumber;
   }
 
-  void _showQuickCashSheet() {
+  void _showCashExpenseSheet() {
     final provider = Provider.of<TransactionProvider>(context, listen: false);
     showAddCashTransactionSheet(
       context: context,
       provider: provider,
       accountNumber: _cashAccountNumber(),
       initialIsDebit: true,
+    );
+  }
+
+  void _showCashIncomeSheet() {
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
+    showAddCashTransactionSheet(
+      context: context,
+      provider: provider,
+      accountNumber: _cashAccountNumber(),
+      initialIsDebit: false,
     );
   }
 
@@ -1091,6 +1106,157 @@ class _InsightCard extends StatelessWidget {
   }
 }
 
+class _QuickCashActions extends StatelessWidget {
+  final VoidCallback onExpenseTap;
+  final VoidCallback onIncomeTap;
+
+  const _QuickCashActions({
+    required this.onExpenseTap,
+    required this.onIncomeTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _QuickCashActionButton(
+            label: 'Expense',
+            icon: AppIcons.upload_rounded,
+            color: AppColors.red,
+            onTap: onExpenseTap,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: _QuickCashActionButton(
+            label: 'Income',
+            icon: AppIcons.download_rounded,
+            color: AppColors.incomeSuccess,
+            filled: true,
+            onTap: onIncomeTap,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickCashActionButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool filled;
+  final VoidCallback onTap;
+
+  const _QuickCashActionButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = filled
+        ? color.withValues(alpha: AppColors.isDark(context) ? 0.14 : 0.09)
+        : AppColors.cardColor(context);
+    final borderColor = filled
+        ? color.withValues(alpha: AppColors.isDark(context) ? 0.42 : 0.28)
+        : AppColors.borderColor(context).withValues(
+            alpha: AppColors.isDark(context) ? 0.72 : 0.9,
+          );
+
+    return CustomPaint(
+      foregroundPainter: _DottedRoundedBorderPainter(
+        color: borderColor,
+        radius: 8,
+      ),
+      child: Material(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            height: 56,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 20, color: color),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    context.l10nText(label),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: filled
+                          ? color
+                          : AppColors.textPrimary(context).withValues(
+                              alpha: AppColors.isDark(context) ? 0.9 : 0.76,
+                            ),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DottedRoundedBorderPainter extends CustomPainter {
+  final Color color;
+  final double radius;
+
+  const _DottedRoundedBorderPainter({
+    required this.color,
+    required this.radius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          rect.deflate(0.75),
+          Radius.circular(radius),
+        ),
+      );
+    final metrics = path.computeMetrics();
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    const dotRadius = 1.2;
+    const targetSpacing = 6.0;
+    for (final metric in metrics) {
+      final dotCount = math.max(1, (metric.length / targetSpacing).round());
+      final spacing = metric.length / dotCount;
+
+      for (var index = 0; index < dotCount; index += 1) {
+        final distance = (index + 0.5) * spacing;
+        final tangent = metric.getTangentForOffset(distance);
+        if (tangent != null) {
+          canvas.drawCircle(tangent.position, dotRadius, paint);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DottedRoundedBorderPainter oldDelegate) {
+    return color != oldDelegate.color || radius != oldDelegate.radius;
+  }
+}
+
 class _HomeLoadingSkeleton extends StatefulWidget {
   const _HomeLoadingSkeleton();
 
@@ -1125,6 +1291,8 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
         _buildBalanceCardSkeleton(context),
         const SizedBox(height: 12),
         _buildInsightCardSkeleton(context),
+        const SizedBox(height: 16),
+        _buildQuickCashActionsSkeleton(context),
         const SizedBox(height: 20),
         _buildTodayHeaderSkeleton(context),
         const SizedBox(height: 12),
@@ -1315,6 +1483,36 @@ class _HomeLoadingSkeletonState extends State<_HomeLoadingSkeleton>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuickCashActionsSkeleton(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: _buildQuickCashActionSkeleton(context)),
+        const SizedBox(width: 14),
+        Expanded(child: _buildQuickCashActionSkeleton(context)),
+      ],
+    );
+  }
+
+  Widget _buildQuickCashActionSkeleton(BuildContext context) {
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      alignment: Alignment.center,
+      child: Container(
+        width: 84,
+        height: 16,
+        decoration: BoxDecoration(
+          color: AppColors.mutedFill(context).withValues(alpha: 0.58),
+          borderRadius: BorderRadius.circular(8),
+        ),
       ),
     );
   }
