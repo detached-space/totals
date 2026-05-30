@@ -235,9 +235,9 @@ class _AddCashTransactionContentState
 
     final bank = _bankForAccount(account);
     final shortName = bank.shortName.trim();
-    if (shortName.isNotEmpty) return shortName;
+    if (shortName.isNotEmpty) return context.l10nText(shortName);
     final name = bank.name.trim();
-    if (name.isNotEmpty) return name;
+    if (name.isNotEmpty) return context.l10nText(name);
     return context.l10nText('Bank');
   }
 

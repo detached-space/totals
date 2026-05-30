@@ -556,6 +556,8 @@ class AppLocalizations {
     "Income vs Expense": "ገቢ እና ወጪ",
     "Income": "ገቢ",
     "Expense": "ወጪ",
+    "Add Income": "ገቢ አክል",
+    "Add Expense": "ወጪ አክል",
     "Expenses": "ወጪዎች",
     "Incoming": "ገቢ",
     "Outgoing": "ወጪ",
