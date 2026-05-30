@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
@@ -8,6 +9,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -60,6 +62,7 @@ class _AddCashTransactionContentState
   final BankConfigService _bankConfigService = BankConfigService();
   late bool _isDebit;
   late AccountSummary _selectedAccount;
+  late DateTime _selectedDateTime;
   List<Bank> _banks = const [];
   int? _selectedCategoryId;
   bool _isLoading = false;
@@ -71,6 +74,7 @@ class _AddCashTransactionContentState
     _noteController = TextEditingController();
     _isDebit = widget.initialIsDebit;
     _selectedAccount = _initialSelectedAccount();
+    _selectedDateTime = DateTime.now();
     _loadBanks();
   }
 
@@ -278,6 +282,103 @@ class _AddCashTransactionContentState
     );
   }
 
+  String _formatTransactionDateTime(BuildContext context) {
+    if (AppDateFormat.usesEthiopianCalendar(context)) {
+      final date =
+          AppDateFormat.monthDayYear(_selectedDateTime, context: context);
+      final time = AppDateFormat.ethiopianTime(
+        _selectedDateTime,
+        context: context,
+      );
+      return '$date ${context.l10nText('at')} $time';
+    }
+
+    final month = AppDateFormat.monthFull(_selectedDateTime, context: context);
+    final date = '${_selectedDateTime.day} $month ${_selectedDateTime.year}';
+    final time = DateFormat('h:mm a').format(_selectedDateTime);
+    return '$date ${context.l10nText('at')} $time';
+  }
+
+  Future<void> _pickTransactionDateTime() async {
+    final current = _selectedDateTime;
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 3650)),
+    );
+    if (!mounted || pickedDate == null) return;
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current),
+    );
+    if (!mounted) return;
+
+    final time = pickedTime ?? TimeOfDay.fromDateTime(current);
+    setState(() {
+      _selectedDateTime = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        time.hour,
+        time.minute,
+      );
+    });
+  }
+
+  Widget _buildDateTimeField(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final fieldRadius = BorderRadius.circular(12);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.l10nText('Date & Time').toUpperCase(),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.4,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Material(
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+          borderRadius: fieldRadius,
+          child: InkWell(
+            onTap: _pickTransactionDateTime,
+            borderRadius: fieldRadius,
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: 54),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: fieldRadius,
+                border: Border.all(
+                  color: colorScheme.outline.withValues(alpha: 0.5),
+                  width: 1.5,
+                ),
+              ),
+              child: Text(
+                _formatTransactionDateTime(context),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _saveTransaction() async {
     final amount = _parseAmount(_amountController.text);
     if (amount == null || amount <= 0) {
@@ -313,7 +414,7 @@ class _AddCashTransactionContentState
         reference: reference,
         creditor: _isDebit || note.isEmpty ? null : note,
         receiver: _isDebit && note.isNotEmpty ? note : null,
-        time: now.toIso8601String(),
+        time: _selectedDateTime.toIso8601String(),
         bankId: selectedAccount.bankId,
         type: _isDebit ? 'DEBIT' : 'CREDIT',
         currentBalance: remainingBalance.toStringAsFixed(2),
@@ -603,6 +704,9 @@ class _AddCashTransactionContentState
                                 ],
                               ),
                             ),
+                            const SizedBox(height: 16),
+
+                            _buildDateTimeField(context),
                           ],
                         ),
                       ),

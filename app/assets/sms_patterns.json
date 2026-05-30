@@ -381,6 +381,37 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
+      "regex": "paid\\s+ETB\\s+(?<amount>[\\d,]+(?:\\.\\d{2})?)\\s+for\\s+(?<receiver>.+?)\\s+purchase\\s+made.*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,]+(?:\\.\\d{2})?)",
+      "type": "DEBIT",
+      "description": "Telebirr debit for package",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "receiver": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+ETB\\s?(?<amount>[\\d,.]+)\\s+for\\s+(?<service>[^\\n]+?)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2}).*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?balance\\s+is\\s+ETB\\s?(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Telebirr Service Payment",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "service": 2,
+        "date": 3,
+        "reference": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
       "regex": "You\\s+(?:have\\s+donated|have\\s+Paid|have\\s+paid)\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:balance\\s+is|telebirr\\s+balance\\s+is)\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
       "type": "DEBIT",
       "description": "Fallback Telebirr English payment donation",
@@ -1976,21 +2007,6 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
-      "regex": "paid\\s+ETB\\s+(?<amount>[\\d,]+(?:\\.\\d{2})?)\\s+for\\s+(?<receiver>.+?)\\s+purchase\\s+made.*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,]+(?:\\.\\d{2})?)",
-      "type": "DEBIT",
-      "description": "Telebirr debit for package",
-      "refRequired": true,
-      "hasAccount": false,
-      "mapping": {
-        "amount": 1,
-        "receiver": 2,
-        "reference": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
       "regex": "received\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+transaction\\s+number\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
       "type": "CREDIT",
       "description": "Telebirr Received from Awash",
@@ -2095,22 +2111,6 @@
         "date": 4,
         "reference": 5,
         "balance": 6
-      }
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+ETB\\s?(?<amount>[\\d,.]+)\\s+for\\s+(?<service>[^\\n]+?)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2}).*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?balance\\s+is\\s+ETB\\s?(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Telebirr Service Payment",
-      "refRequired": true,
-      "hasAccount": false,
-      "mapping": {
-        "amount": 1,
-        "service": 2,
-        "date": 3,
-        "reference": 4,
-        "balance": 5
       }
     },
     {

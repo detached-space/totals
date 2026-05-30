@@ -810,6 +810,7 @@ class AppLocalizations {
     "Transaction": "ትራንዛክሽን",
     "Transactions": "ትራንዛክሽኖች",
     "Date & Time": "ቀን እና ሰዓት",
+    "at": "በ",
     "Amount": "መጠን",
     "Balance After": "ቀሪ ሂሳብ ከዚህ በኋላ",
     "Reference": "ማጣቀሻ",
