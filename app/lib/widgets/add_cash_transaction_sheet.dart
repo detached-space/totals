@@ -439,6 +439,11 @@ class _AddCashTransactionContentState
     }
   }
 
+  void _cancel() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -720,9 +725,7 @@ class _AddCashTransactionContentState
                         children: [
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _isLoading
-                                  ? null
-                                  : () => Navigator.pop(context),
+                              onPressed: _isLoading ? null : _cancel,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: hintColor,
                                 padding:
