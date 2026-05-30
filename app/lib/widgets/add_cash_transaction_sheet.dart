@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/account.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -13,6 +16,7 @@ Future<void> showAddCashTransactionSheet({
   required TransactionProvider provider,
   required String accountNumber,
   bool? initialIsDebit,
+  bool showTypeSelector = true,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -24,6 +28,7 @@ Future<void> showAddCashTransactionSheet({
         provider: provider,
         accountNumber: accountNumber,
         initialIsDebit: initialIsDebit ?? true,
+        showTypeSelector: showTypeSelector,
       );
     },
   );
@@ -33,11 +38,13 @@ class _AddCashTransactionContent extends StatefulWidget {
   final TransactionProvider provider;
   final String accountNumber;
   final bool initialIsDebit;
+  final bool showTypeSelector;
 
   const _AddCashTransactionContent({
     required this.provider,
     required this.accountNumber,
     required this.initialIsDebit,
+    required this.showTypeSelector,
   });
 
   @override
@@ -49,7 +56,11 @@ class _AddCashTransactionContentState
     extends State<_AddCashTransactionContent> {
   late final TextEditingController _amountController;
   late final TextEditingController _noteController;
+  final AccountRepository _accountRepo = AccountRepository();
+  final BankConfigService _bankConfigService = BankConfigService();
   late bool _isDebit;
+  late AccountSummary _selectedAccount;
+  List<Bank> _banks = const [];
   int? _selectedCategoryId;
   bool _isLoading = false;
 
@@ -59,6 +70,8 @@ class _AddCashTransactionContentState
     _amountController = TextEditingController();
     _noteController = TextEditingController();
     _isDebit = widget.initialIsDebit;
+    _selectedAccount = _initialSelectedAccount();
+    _loadBanks();
   }
 
   List<Category> get _filteredCategories {
@@ -81,20 +94,90 @@ class _AddCashTransactionContentState
     return double.tryParse(cleaned);
   }
 
-  double _currentCashWalletBalance() {
-    final walletSummaries = widget.provider.accountSummaries
-        .where((summary) => summary.bankId == CashConstants.bankId)
-        .toList();
-    if (walletSummaries.isEmpty) return 0.0;
-    return walletSummaries.fold<double>(
-      0.0,
-      (sum, summary) => sum + summary.balance,
+  List<AccountSummary> get _selectableAccounts {
+    final summaries =
+        List<AccountSummary>.from(widget.provider.accountSummaries)
+          ..sort((a, b) {
+            if (a.bankId == CashConstants.bankId) return -1;
+            if (b.bankId == CashConstants.bankId) return 1;
+            return a.bankId.compareTo(b.bankId);
+          });
+    final hasCash =
+        summaries.any((summary) => summary.bankId == CashConstants.bankId);
+    if (!hasCash) {
+      summaries.insert(0, _cashAccountSummary());
+    }
+    return summaries;
+  }
+
+  AccountSummary _cashAccountSummary() {
+    return AccountSummary(
+      bankId: CashConstants.bankId,
+      accountNumber: CashConstants.defaultAccountNumber,
+      accountHolderName: CashConstants.defaultAccountHolderName,
+      totalTransactions: 0,
+      totalCredit: 0,
+      totalDebit: 0,
+      settledBalance: 0,
+      balance: 0,
+      pendingCredit: 0,
     );
   }
 
+  AccountSummary _initialSelectedAccount() {
+    final accounts = _selectableAccounts;
+    final requestedAccountNumber = widget.accountNumber.trim();
+    if (requestedAccountNumber.isNotEmpty) {
+      for (final account in accounts) {
+        if (account.accountNumber == requestedAccountNumber) {
+          return account;
+        }
+      }
+    }
+    return accounts.first;
+  }
+
+  bool _sameAccount(AccountSummary a, AccountSummary b) {
+    return a.bankId == b.bankId && a.accountNumber == b.accountNumber;
+  }
+
+  Bank _cashBank() {
+    return Bank(
+      id: CashConstants.bankId,
+      name: CashConstants.bankName,
+      shortName: CashConstants.bankShortName,
+      codes: const [],
+      image: 'assets/images/eth_birr.png',
+      colors: CashConstants.bankColors,
+    );
+  }
+
+  Map<int, Bank> get _banksById {
+    return {
+      CashConstants.bankId: _cashBank(),
+      for (final bank in _banks) bank.id: bank,
+    };
+  }
+
+  Bank _bankForAccount(AccountSummary account) {
+    return _banksById[account.bankId] ??
+        Bank(
+          id: account.bankId,
+          name: account.accountHolderName,
+          shortName: account.bankId.toString(),
+          codes: const [],
+          image: '',
+        );
+  }
+
+  Future<void> _loadBanks() async {
+    final banks = await _bankConfigService.getBanks(allowRemoteFetch: false);
+    if (!mounted) return;
+    setState(() => _banks = banks);
+  }
+
   Future<void> _ensureCashAccount() async {
-    final accountRepo = AccountRepository();
-    final accounts = await accountRepo.getAccounts();
+    final accounts = await _accountRepo.getAccounts();
     final hasCash = accounts.any((a) => a.bank == CashConstants.bankId);
     if (hasCash) return;
     final cashAccount = Account(
@@ -103,7 +186,96 @@ class _AddCashTransactionContentState
       balance: 0.0,
       accountHolderName: CashConstants.defaultAccountHolderName,
     );
-    await accountRepo.saveAccount(cashAccount);
+    await _accountRepo.saveAccount(cashAccount);
+  }
+
+  Future<void> _updateStoredAccountBalance(
+    AccountSummary selectedAccount,
+    double remainingBalance,
+  ) async {
+    if (selectedAccount.bankId == CashConstants.bankId) return;
+
+    final accounts = await _accountRepo.getAccounts();
+    for (final account in accounts) {
+      if (account.bank != selectedAccount.bankId ||
+          account.accountNumber != selectedAccount.accountNumber) {
+        continue;
+      }
+
+      await _accountRepo.saveAccount(
+        Account(
+          accountNumber: account.accountNumber,
+          bank: account.bank,
+          balance: remainingBalance,
+          accountHolderName: account.accountHolderName,
+          settledBalance: account.settledBalance,
+          pendingCredit: account.pendingCredit,
+          profileId: account.profileId,
+        ),
+      );
+      return;
+    }
+  }
+
+  double _remainingBalanceAfter(AccountSummary account, double amount) {
+    return account.balance + (_isDebit ? -amount : amount);
+  }
+
+  String _manualReference(int bankId, int micros) {
+    if (bankId == CashConstants.bankId) {
+      return CashConstants.buildManualReference(micros);
+    }
+    return 'manual_${bankId}_$micros';
+  }
+
+  String _accountLabel(BuildContext context, AccountSummary account) {
+    if (account.bankId == CashConstants.bankId) {
+      return context.l10nText('Cash Wallet');
+    }
+
+    final bank = _bankForAccount(account);
+    final shortName = bank.shortName.trim();
+    if (shortName.isNotEmpty) return shortName;
+    final name = bank.name.trim();
+    if (name.isNotEmpty) return name;
+    return context.l10nText('Bank');
+  }
+
+  Widget _buildAccountSelector(BuildContext context, Color accentColor) {
+    final theme = Theme.of(context);
+    final accounts = _selectableAccounts;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.l10nText('Account'),
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 76,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: accounts.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final account = accounts[index];
+              return _AccountSelectorChip(
+                bank: _bankForAccount(account),
+                label: _accountLabel(context, account),
+                selected: _sameAccount(account, _selectedAccount),
+                accentColor: accentColor,
+                onTap: () => setState(() => _selectedAccount = account),
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _saveTransaction() async {
@@ -123,13 +295,17 @@ class _AddCashTransactionContentState
     setState(() => _isLoading = true);
 
     try {
-      await _ensureCashAccount();
+      final selectedAccount = _selectedAccount;
+      if (selectedAccount.bankId == CashConstants.bankId) {
+        await _ensureCashAccount();
+      }
 
       final now = DateTime.now();
       final note = _noteController.text.trim();
-      final nextCashBalance =
-          _currentCashWalletBalance() + (_isDebit ? -amount : amount);
-      final reference = CashConstants.buildManualReference(
+      final remainingBalance = _remainingBalanceAfter(selectedAccount, amount);
+      await _updateStoredAccountBalance(selectedAccount, remainingBalance);
+      final reference = _manualReference(
+        selectedAccount.bankId,
         now.microsecondsSinceEpoch,
       );
       final transaction = Transaction(
@@ -138,12 +314,10 @@ class _AddCashTransactionContentState
         creditor: _isDebit || note.isEmpty ? null : note,
         receiver: _isDebit && note.isNotEmpty ? note : null,
         time: now.toIso8601String(),
-        bankId: CashConstants.bankId,
+        bankId: selectedAccount.bankId,
         type: _isDebit ? 'DEBIT' : 'CREDIT',
-        currentBalance: nextCashBalance.toStringAsFixed(2),
-        accountNumber: widget.accountNumber.isNotEmpty
-            ? widget.accountNumber
-            : CashConstants.defaultAccountNumber,
+        currentBalance: remainingBalance.toStringAsFixed(2),
+        accountNumber: selectedAccount.accountNumber,
         categoryId: _selectedCategoryId,
       );
 
@@ -178,6 +352,7 @@ class _AddCashTransactionContentState
         : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
     final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
     final formBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
+    final accentColor = _isDebit ? Colors.red : Colors.green;
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 200),
@@ -217,14 +392,12 @@ class _AddCashTransactionContentState
                                 Container(
                                   padding: const EdgeInsets.all(10),
                                   decoration: BoxDecoration(
-                                    color:
-                                        (_isDebit ? Colors.red : Colors.green)
-                                            .withValues(alpha: 0.1),
+                                    color: accentColor.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Icon(
                                     _isDebit ? Icons.remove : Icons.add,
-                                    color: _isDebit ? Colors.red : Colors.green,
+                                    color: accentColor,
                                     size: 24,
                                   ),
                                 ),
@@ -232,8 +405,8 @@ class _AddCashTransactionContentState
                                 Expanded(
                                   child: Text(
                                     _isDebit
-                                        ? context.l10nText('Add Cash Expense')
-                                        : context.l10nText('Add Cash Income'),
+                                        ? context.l10nText('Add Expense')
+                                        : context.l10nText('Add Income'),
                                     style: theme.textTheme.titleLarge?.copyWith(
                                       fontWeight: FontWeight.bold,
                                       color: colorScheme.onSurface,
@@ -244,45 +417,50 @@ class _AddCashTransactionContentState
                             ),
                             const SizedBox(height: 24),
 
-                            // Transaction Type Toggle
-                            Container(
-                              decoration: BoxDecoration(
-                                color: colorScheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.5),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.all(4),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: _TypeButton(
-                                      label: 'Expense',
-                                      icon: Icons.arrow_upward,
-                                      isSelected: _isDebit,
-                                      color: Colors.red,
-                                      onTap: () => setState(() {
-                                        _isDebit = true;
-                                        _selectedCategoryId = null;
-                                      }),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: _TypeButton(
-                                      label: 'Income',
-                                      icon: Icons.arrow_downward,
-                                      isSelected: !_isDebit,
-                                      color: Colors.green,
-                                      onTap: () => setState(() {
-                                        _isDebit = false;
-                                        _selectedCategoryId = null;
-                                      }),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            _buildAccountSelector(context, accentColor),
                             const SizedBox(height: 24),
+
+                            if (widget.showTypeSelector) ...[
+                              // Transaction Type Toggle
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHighest
+                                      .withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                padding: const EdgeInsets.all(4),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: _TypeButton(
+                                        label: 'Expense',
+                                        icon: Icons.arrow_upward,
+                                        isSelected: _isDebit,
+                                        color: Colors.red,
+                                        onTap: () => setState(() {
+                                          _isDebit = true;
+                                          _selectedCategoryId = null;
+                                        }),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: _TypeButton(
+                                        label: 'Income',
+                                        icon: Icons.arrow_downward,
+                                        isSelected: !_isDebit,
+                                        color: Colors.green,
+                                        onTap: () => setState(() {
+                                          _isDebit = false;
+                                          _selectedCategoryId = null;
+                                        }),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                            ],
 
                             // Amount Field
                             TextField(
@@ -550,6 +728,110 @@ class _TypeButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AccountSelectorChip extends StatelessWidget {
+  final Bank bank;
+  final String label;
+  final bool selected;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _AccountSelectorChip({
+    required this.bank,
+    required this.label,
+    required this.selected,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final borderColor =
+        selected ? accentColor : colorScheme.outline.withValues(alpha: 0.28);
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 76,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onTap,
+                  customBorder: const CircleBorder(),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 52,
+                    height: 52,
+                    padding: EdgeInsets.all(selected ? 3 : 4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: borderColor,
+                        width: selected ? 2 : 1,
+                      ),
+                    ),
+                    child: ClipOval(
+                      child: bank.image.isEmpty
+                          ? _BankImageFallback(colorScheme: colorScheme)
+                          : Image.asset(
+                              bank.image,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _BankImageFallback(
+                                colorScheme: colorScheme,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: selected ? accentColor : colorScheme.onSurfaceVariant,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BankImageFallback extends StatelessWidget {
+  final ColorScheme colorScheme;
+
+  const _BankImageFallback({required this.colorScheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: colorScheme.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.account_balance,
+        size: 22,
+        color: colorScheme.onSurfaceVariant,
       ),
     );
   }

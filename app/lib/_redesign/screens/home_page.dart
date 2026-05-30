@@ -478,6 +478,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
       provider: provider,
       accountNumber: _cashAccountNumber(),
       initialIsDebit: true,
+      showTypeSelector: false,
     );
   }
 
@@ -488,6 +489,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
       provider: provider,
       accountNumber: _cashAccountNumber(),
       initialIsDebit: false,
+      showTypeSelector: false,
     );
   }
 
