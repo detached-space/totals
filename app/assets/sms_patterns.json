@@ -3,1041 +3,67 @@
     {
       "bankId": 1,
       "senderId": "CBE",
-      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Service\\s+charge[\\s\\S]*?VAT\\(15%\\)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?id=(?<reference>[A-Z0-9@.\\-]+)",
+      "regex": "You\\s+have\\s+transferred\\s+ETB\\s*(?<amount>[\\d,]+(?:\\.\\d+)?)\\s+to\\s+(?<receiver>.+?)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4})\\s+at\\s+(?<time>\\d{1,2}:\\d{2}:\\d{2})\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?:\\.?S\\.charge|\\.?Service charge|\\.?s\\.charge|\\.?service charge)\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+VAT\\(15%\\)\\s+of\\s+(?:ETB\\s*)?(?<vat>[\\d,.]+)\\s+and\\s+Disaster\\s+Fund\\s*\\(5%\\)\\s+of\\s+(?:ETB\\s*)?(?<disasterFund>[\\d,]+(?:\\.\\d+)?)[,\\s]+with\\s+(?:a\\s+)?total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,]+(?:\\.\\d+)?)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>[\\d,]+(?:\\.\\d+)?)[\\s\\S]*?id=(?<reference>FT\\w+)",
       "type": "DEBIT",
-      "description": "Fallback CBE service charge debit receipt",
+      "description": "CBE Transferred with S.charge and Disaster Fund (apps.cbe id= URL)",
       "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 5,
-      "senderId": "ZemenBank",
-      "regex": "account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?reference\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Zemen external transfer debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "telebirr\\s+account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+(?<direction>credited|debited)\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:current\\s+Account\\s+balance|current\\s+balance)\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr account credit debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+(?<direction>Credited|credited|Debited|debited)\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Amhara account credit debit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?including\\s+VAT[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Amhara fee debit",
-      "refRequired": false,
-      "hasAccount": true
+      "hasAccount": true,
+      "hasFees": true,
+      "mapping": {
+        "amount": 1,
+        "receiver": 2,
+        "date": 3,
+        "time": 4,
+        "account": 5,
+        "serviceCharge": 6,
+        "vat": 7,
+        "disasterFund": 8,
+        "totalAmount": 9,
+        "balance": 10,
+        "reference": 11
+      }
     },
     {
       "bankId": 1,
       "senderId": "CBE",
-      "regex": "(?:Account|account)\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<direction>credited|debited)\\s+with\\s+(?<currency>ETB|USD)\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:Acct\\s+Bal|Current\\s+Balance\\s+is)[:\\s]+(?:ETB|USD)\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback CBE account credit/debit balance",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?Payment\\s+Reference\\s+Number\\s+(?<paymentReference>\\d+)[\\s\\S]*?receipt/(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?telebirr\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "regex": "A\\s+debit\\s+transaction\\s+of\\s+ETB\\s*(?<amount>[\\d,]+(?:\\.\\d+)?)\\s*\\.?\\s*has\\s+occurred\\s+on\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Service\\s+charge\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+VAT\\(15%\\)\\s+of\\s+(?:ETB\\s*)?(?<vat>[\\d,.]+)\\s+and\\s+Disaster\\s+Recovery\\(5%\\)\\s+of\\s+(?:ETB\\s*)?(?<disasterRecovery>[\\d,.]+)\\s+with\\s+total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,.]+)[\\s\\S]*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,]+(?:\\.\\d+)?)[\\s\\S]*?https?://[^\\s/]+/(?<reference>[A-Za-z0-9]+)",
       "type": "DEBIT",
-      "description": "Fallback Telebirr insurance receipt-url transaction",
+      "description": "CBE Debit Transaction with Disaster Recovery Fee (Dear Customer)",
       "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "Dear\\s+Apollo\\s+user[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?debited\\s+by\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Info:Transfer\\s+to\\s+Telebirr[\\s\\S]*?Avail\\s+balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\s*\\.\\s*(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback BOA Apollo user transfer to Telebirr",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?Payment\\s+Reference\\s+Number\\s+(?<paymentReference>\\d+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr third party insurance mixed language",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ተቀብለዋል|አስተላልፈዋል|ገቢ\\s+ተደርጓል)[\\s\\S]*?መለያ\\s+ቁጥር\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+ቀሪ\\s+ሒሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "CREDIT",
-      "description": "Fallback MPESA Amharic h-sab transaction",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "የገንዘብ\\s+ዝውውር\\s+(?<originalReference>[A-Z0-9]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ገቢ\\s+ተደርጓል[\\s\\S]*?መለያ\\s+ቁጥር\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+ቀሪ\\s+ሒሳብ\\s+(?<balance>-?[\\d,.]+)\\s*ብር",
-      "type": "CREDIT",
-      "description": "Fallback MPESA Amharic reversal credited",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "request\\s+to\\s+withdraw\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr ATM withdraw completed",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 36,
-      "senderId": "Apollo",
-      "regex": "Dear\\s+Customer,\\s*A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?credited\\s+By\\s+EthSwich[\\s\\S]*?with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\.\\s+bal:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Apollo EthSwitch credit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 36,
-      "senderId": "Apollo",
-      "regex": "account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?available\\s+balance\\s+in\\s+the\\s+account\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Apollo branch transfer debit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "Ref:\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?transferred\\s+(?<amount>-?[\\d,.]+)\\s+to[\\s\\S]*?New\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Awash transfer with leading ref",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "A\\s+(?<operation>withdrawal|deposit)\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+was\\s+made\\s+(?:from|to)\\s+your\\s+a/c\\s+(?<account>[\\dXx*]+)[\\s\\S]*?balance\\s+now\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Awash withdrawal or deposit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "You\\s+received\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+in\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Ref:\\s*(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "CREDIT",
-      "description": "Fallback Awash received salary credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "You\\s+(?:received|have\\s+received)\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:in|on)\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?:Ref:\\s*|by\\s+Ref:\\s*)(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:new|available)?\\s*balance\\s+(?:is\\s+now|is)\\s+(?:ETB\\s*)?(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Awash received credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "You\\s+have\\s+sent\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)\\s*(?:ETB)?\\s+From\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Your\\s+Balance\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Awash sent to phone",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "You\\s+have\\s+sent\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+To[\\s\\S]*?Transaction\\s+ID:\\s*(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback Awash sent with transaction id",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "ETB\\s*(?<amount>-?[\\d,.]+)\\s+has\\s+been\\s+credited\\s+to\\s+your\\s+account[\\s\\S]*?Txn\\s+ID:\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+now\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Awash credited with txn id",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 2,
-      "senderId": "AwashBank",
-      "regex": "transferred\\s+to[\\s\\S]*?Amount\\s+(?<amount>-?[\\d,.]+)\\s+ETB\\s+To[\\s\\S]*?Your\\s+Balance\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Awash other bank transfer amount first",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 36,
-      "senderId": "Apollo",
-      "regex": "Dear\\s+Apollo\\s+user[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<direction>credited|debited)[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\.?\\s+balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\s*\\.\\s*(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "CREDIT",
-      "description": "Fallback Apollo account credit/debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 36,
-      "senderId": "Apollo",
-      "regex": "Dear[\\s\\S]*?your\\s+account\\s+(?<account>[\\dXx*]+)\\s+was\\s+(?<direction>credited|debited)\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Available\\s+Balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?trx=(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "CREDIT",
-      "description": "Fallback Apollo receipt credit/debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 36,
-      "senderId": "Apollo",
-      "regex": "cashback\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\.\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?available\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Apollo cashback",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "Dear\\s+Apollo\\s+user[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?debited\\s+by\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\s+balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\s*\\.\\s*(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback BOA Apollo user debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?has\\s+been\\s+(?<direction>credited|debited)[\\s\\S]*?with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\.?\\s+bal:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA account credited or debited",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "GizePay\\s+account\\s+has\\s+been\\s+credited\\s+with\\s+(?<amount>-?[\\d,.]+)\\s+birr[\\s\\S]*?TXN\\s+ID\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA GizePay credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "(?:withdrawn|received|Transfer\\s+of)\\s+(?<amount>-?[\\d,.]+)\\s+birr[\\s\\S]*?(?:Txn\\s+ID|TXN\\s+ID)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback BOA GizePay movement",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "received\\s+(?<amount>-?[\\d,.]+)\\s+birr[\\s\\S]*?GizePay\\s+account\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA GizePay business received",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "ETB\\s*(?<amount>-?[\\d,.]+)\\s+is\\s+Locked\\s+From\\s+Your\\s+Account\\s+Number\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Available\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback BOA POS locked amount",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "transferred\\s+you\\s+Br\\.?(?<amount>-?[\\d,.]+)[\\s\\S]*?account\\s+(?<account>[\\dXx*]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA transferred to external bank",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "your\\s+account\\s+(?<account>[\\dXx*]+)\\s+was\\s+(?<direction>credited|debited)\\s+with\\s+(?<currency>ETB|USD)\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Available\\s+Balance:\\s+(?:ETB|USD)\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA receipt credit debit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "ወደ\\s+ሂሳብ(?:\\s+ቁጥርዎ|ዎ)?\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ገቢ[\\s\\S]*?ብር\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA Amharic credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "ከሂሳብ(?:\\s+ቁጥርዎ|ዎ)?\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ወጪ[\\s\\S]*?ብር\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback BOA Amharic debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "Dear\\s+Customer,\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?credited[\\s\\S]*?Info:\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?Avail\\.\\s+bal:[\\s\\S]*?(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback BOA malformed transfer credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 4,
-      "senderId": "DashenBank",
-      "regex": "withdrawn\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+your\\s+account\\s+'(?<account>[\\dXx*]+)'[\\s\\S]*?current\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Dashen withdrawal",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 4,
-      "senderId": "DashenBank",
-      "regex": "transferred\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+as\\s+check\\s+payment\\s+to\\s+your\\s+account\\s+'(?<account>[\\dXx*]+)'[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Dashen check payment credit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 4,
-      "senderId": "DashenBank",
-      "regex": "account\\s+'(?<account>[\\dXx*]+)'\\s+is\\s+(?<direction>credited|debited)\\s+as\\s+reversal\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Dashen reversal",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 5,
-      "senderId": "ZemenBank",
-      "regex": "(?<currency>ETB|USD|Birr)\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>[A-Za-z\\s-]+?)\\s+has\\s+been\\s+made\\s+(?<direction>to|from)\\s+A/c\\s+No\\.?\\s*(?<account>[\\dXx*]+)[\\s\\S]*?A/c\\s+Available\\s+Bal\\.?\\s*is\\s+(?:ETB|USD|Birr)\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Zemen made to/from account",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 5,
-      "senderId": "ZemenBank",
-      "regex": "account\\s*\\((?<account>[\\dXx*]+)\\)\\s+has\\s+been\\s+debited\\s+with\\s+Birr\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?reference\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?available\\s+balance\\s+is\\s+Birr\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Zemen POS purchase debit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 5,
-      "senderId": "ZemenBank",
-      "regex": "Birr\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>POS transaction|Miscellaneous-deduction|Miscellaneous- deposit)[\\s\\S]*?(?:from|to)\\s+A/c\\s+No\\.?\\s*(?<account>[\\dXx*]+)[\\s\\S]*?A/c\\s+Available\\s+Bal\\.?(?:is|\\.is)\\s+Birr\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Zemen POS miscellaneous",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+ETB\\s+(?<amount>[\\d,]+(?:\\.\\d{2})?)\\s+for\\s+(?<receiver>.+?)\\s+purchase\\s+made.*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,]+(?:\\.\\d{2})?)",
-      "type": "DEBIT",
-      "description": "Telebirr debit for package",
-      "refRequired": true,
-      "hasAccount": false,
+      "hasAccount": true,
+      "hasFees": true,
       "mapping": {
         "amount": 1,
-        "receiver": 2,
-        "reference": 3,
-        "balance": 4
+        "account": 2,
+        "serviceCharge": 3,
+        "vat": 4,
+        "disasterRecovery": 5,
+        "totalAmount": 6,
+        "balance": 7,
+        "reference": 8
       }
     },
     {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+ETB\\s?(?<amount>[\\d,.]+)\\s+for\\s+(?<service>[^\\n]+?)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2}).*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?balance\\s+is\\s+ETB\\s?(?<balance>[\\d,.]+)",
+      "bankId": 1,
+      "senderId": "CBE",
+      "regex": "You\\s+have\\s+successfully\\s+transferred\\s+ETB\\s*(?<amount>[\\d,]+(?:\\.\\d+)?)\\s+from\\s+account\\s+(?<account>[\\dXx*]+)\\s+to\\s+account\\s+(?<receiverAccount>[\\dXx*]+)\\s*\\((?<receiver>[^)]+)\\)[\\s\\S]*?Service\\s+charge\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+VAT\\(15%\\)\\s+of\\s+(?:ETB\\s*)?(?<vat>[\\d,.]+)\\s+and\\s+Disaster\\s+Recovery\\(5%\\)\\s+of\\s+(?:ETB\\s*)?(?<disasterRecovery>[\\d,.]+)\\s+with\\s+total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,.]+)[\\s\\S]*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,]+(?:\\.\\d+)?)[\\s\\S]*?https?://[^\\s/]+/(?<reference>[A-Za-z0-9]+)",
       "type": "DEBIT",
-      "description": "Telebirr Service Payment",
+      "description": "CBE Successful Transfer with Disaster Recovery Fee (Dear Customer)",
       "refRequired": true,
-      "hasAccount": false,
+      "hasAccount": true,
+      "hasFees": true,
       "mapping": {
         "amount": 1,
-        "service": 2,
-        "date": 3,
-        "reference": 4,
-        "balance": 5
+        "account": 2,
+        "receiverAccount": 3,
+        "receiver": 4,
+        "serviceCharge": 5,
+        "vat": 6,
+        "disasterRecovery": 7,
+        "totalAmount": 8,
+        "balance": 9,
+        "reference": 10
       }
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "You\\s+(?:have\\s+donated|have\\s+Paid|have\\s+paid)\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:balance\\s+is|telebirr\\s+balance\\s+is)\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr English payment donation",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "You\\s+have\\s+successfully\\s+Withdraw\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr saving withdrawal",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "Transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)\\s+transferred[\\s\\S]*?telebirr\\s+Account[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr bank transfer credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "Telecom\\s+Bill\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Transaction\\s+Number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr telecom bill",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr insurance mixed language",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "You\\s+have\\s+Received\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?current\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr received from organization",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "successfully\\s+deposited\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?saving\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr Sinq deposit",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "endekise[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)\\s+credit\\s+amount[\\s\\S]*?outstanding\\s+amount\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr endekise",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ከፍለዋል|አስተላልፈዋል|ልከዋል|ፈጽመዋል|ፈፅመዋል|ሞልተዋል|ለግሰዋል)[\\s\\S]*?(?:ቁጥርዎ|ቁጠር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ቀሪ\\s+ሒሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr Amharic debit transfer payment",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ተቀብለዋል|ገቢ\\s+ተደርጎልዎታል|ተመላሽ\\s+አግኝተዋል|ተሞልቶሎታል)[\\s\\S]*?(?:ቁጥርዎ|ቁጠር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ቀሪ\\s+ሒሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr Amharic amount credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "(?:ግብይት\\s+ቁጥር|ቁጥርዎ)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ተላልፏል|ገቢ)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr Amharic credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "repaid\\s+(?<amount>-?[\\d,.]+)\\s+ETB[\\s\\S]*?unpaid\\s+credit\\s+amount\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+ETB",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr credit repayment",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+amount\\s+is\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?total\\s+outstanding\\s+amount\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr paid outstanding credit",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "ATM\\s+withdraw\\s+secret\\s+code\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)\\s+with\\s+amount\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr ATM secret code",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "got\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+bonus",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr bonus",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+a\\s+credit\\s+amount\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?outstanding\\s+credit\\s+amount\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr credit amount paid",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "outstanding\\s+credit\\s+balance\\s+of\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Telebirr overdue credit balance",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ተመላሽ\\s+አግኝተዋል[\\s\\S]*?ቀሪ\\s+ሒሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr Amharic cashback no reference",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ተሞልቶሎታል[\\s\\S]*?ቁጥርዎ\\s+(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "CREDIT",
-      "description": "Fallback Telebirr Amharic airtime received no balance",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+(?:Confirmed|confirmed)\\.[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+(?<currency>Birr|Ksh)\\s+(?<operation>received|paid|sent|withdrawn|deposited)[\\s\\S]*?(?:balance\\s+is|balance\\s+was|Utility\\s+balance\\s+is)\\s+(?:Birr|Ksh)?\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback MPESA English confirmed amount first",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+(?:Confirmed|confirmed)\\.[\\s\\S]*?(?<currency>Birr|Ksh)\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>received|paid|sent|withdrawn|deposited)[\\s\\S]*?(?:balance\\s+is|M-PESA\\s+balance\\s+is)\\s+(?:Birr|Ksh)\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback MPESA English confirmed",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+confirmed[\\s\\S]*?received\\s+(?<currency>Ksh|Birr)(?<amount>-?[\\d,.]+)[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+(?:Ksh|Birr)(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback MPESA English received remittance",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+Imethibitishwa[\\s\\S]*?(?:Ksh|Birr)(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:Baki\\s+yako|M-PESA)[\\s\\S]*?(?:Ksh|Birr)(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback MPESA Swahili transaction",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+confirmed[\\s\\S]*?bought\\s+Ksh(?<amount>-?[\\d,.]+)[\\s\\S]*?balance\\s+is\\s+Ksh(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback MPESA airtime bought",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "cashback\\s+of\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
-      "type": "CREDIT",
-      "description": "Fallback MPESA cashback",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "Reversal[\\s\\S]*?(?:Ksh|Birr)(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:credited|debited)[\\s\\S]*?M-PESA\\s+account[\\s\\S]*?balance\\s+is\\s+(?:Ksh|Birr)(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback MPESA reversal confirmed",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "transaction\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?reversed[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+Birr\\s+is\\s+credited[\\s\\S]*?M-PESA[\\s\\S]*?balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
-      "type": "CREDIT",
-      "description": "Fallback MPESA transaction reversed",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "Dear[\\s\\S]*?you\\s+(?:have\\s+)?(?:withdrawn|successfully\\s+contributed|gifted|have\\s+received)\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?Transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
-      "type": "DEBIT",
-      "description": "Fallback MPESA customer transaction",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ከፍሏል|ተቀብለዋል|አስተላልፈዋል|ገቢ\\s+ተደርጓል)[\\s\\S]*?(?:ቁጥር|መለያ\\s+ቁጥር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+ቀሪ\\s+ሂሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "DEBIT",
-      "description": "Fallback MPESA Amharic transaction",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "Overdraft\\s+amount\\s+used\\s+is\\s+(?<amount>-?[\\d,.]+)Birr[\\s\\S]*?outstanding\\s+amount\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
-      "type": "DEBIT",
-      "description": "Fallback MPESA overdraft used",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "Overdraft\\s+loan\\s+of\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?available\\s+limit\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
-      "type": "CREDIT",
-      "description": "Fallback MPESA overdraft loan paid",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "Give\\s+Ksh(?<amount>-?[\\d,.]+)\\s+cash[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+Ksh(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback MPESA give cash",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "M-PESA\\s+Account\\s*:\\s*Ksh(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback MPESA account balance",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "M-PESA[\\s\\S]*?malipo\\s+ya\\s+Ksh(?<amount>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback MPESA failed payment",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 8,
-      "senderId": "MPESA",
-      "regex": "ገደብዎ\\s+(?<amount>-?[\\d,.]+)\\s+ብር",
-      "type": "CREDIT",
-      "description": "Fallback MPESA overdraft opt in",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+is\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?available\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Ahadu account debited",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "(?:Credit|Deposit|deposit)\\s+of\\s+ETB\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)\\s+(?:to|is\\s+done\\s+to)\\s+your\\s+account(?:\\s+no|\\s+number)?\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?:Current|current)\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Ahadu credit deposit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "debit\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Current\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Ahadu debit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "received\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?credited\\s+to\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?reference\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "CREDIT",
-      "description": "Fallback Ahadu received from telebirr",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "ብር\\s*(?<amount>-?[\\d,.]+)\\s+ወደ\\s+ሂሳብ\\s+ቁጥርዎ\\s+(?<account>[\\dXx*]+)[\\s\\S]*?ገቢ[\\s\\S]*?ቀሪ\\s+ሂሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
-      "type": "CREDIT",
-      "description": "Fallback Ahadu Amharic credit",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "Withdrawn\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Ahadu withdrawn",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 10,
-      "senderId": "AhaduBank",
-      "regex": "transfer\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+reference\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?current\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Ahadu transfer",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "ETB\\s*(?<amount>-?[\\d,.]+)\\s+has\\s+been\\s+(?<operation>withdrawn|deposited)\\s+(?:from|to)\\s+A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan account movement",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "Transfer\\s+Completed\\.\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Reference(?:\\s+is|:)\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan transfer completed",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "transferred\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)\\s*(?:ETB)?\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Reference\\s+No\\.\\s+is:?\\s*(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan telebirr transfer",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "received\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+telebirr[\\s\\S]*?Reference\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?credited\\s+to\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Berhan telebirr received",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "ATM\\s+cash\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan ATM withdrawal",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+Birr\\s+school\\s+fees[\\s\\S]*?Receipt:\\s*(?<reference>https?:\\/\\/\\S+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan school fee receipt",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "successfully\\s+paid\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+as\\s+school\\s+fees[\\s\\S]*?Txn\\s+reference\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?New\\s+Balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan school fee paid",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "ብር\\s+ETB\\s*(?<amount>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan Amharic loan reminder",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 12,
-      "senderId": "BerhanBank",
-      "regex": "Account\\s+Number:\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+DR[\\s\\S]*?Available\\s+Balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Berhan ministatement debit",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "Please\\s+be\\s+informed\\s+that\\s+(?<currency>ETB|USD|EUR)\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>[^.]+?)\\s+is\\s+made\\s+(?<direction>from|to)\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Available\\s+Balance\\s*:\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Current\\s+Balance\\s*:\\s*(?<currentBalance>-?[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Fallback Hibret account movement",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "Mobile\\s+Topup\\s+transaction\\s+of\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?Transaction\\s+Reference\\s+no\\s+(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback Hibret mobile topup",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "Available\\s+Balance\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Current\\s+Balance\\s+ETB\\s*(?<currentBalance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Hibret balance inquiry",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "Utility\\s+Payment\\s+successful\\.\\s+Amount\\s+ETB:(?<amount>-?[\\d,.]+)\\s+From\\s+account\\s+(?<account>[\\dXx*]+)",
-      "type": "DEBIT",
-      "description": "Fallback Hibret utility payment",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "Funds\\s+transfer\\s+successful\\.\\s+Amount\\s+transfered\\s+ETB:(?<amount>-?[\\d,.]+)\\s+From\\s+account\\s+(?<account>[\\dXx*]+)",
-      "type": "DEBIT",
-      "description": "Fallback Hibret funds transfer successful",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "transferred\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Reference\\s+No\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback Hibret telebirr transfer",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 19,
-      "senderId": "HibretBank",
-      "regex": "received\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+telebirr[\\s\\S]*?credited\\s+to\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?available\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Fallback Hibret telebirr received",
-      "refRequired": false,
-      "hasAccount": true
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "(?:made|paid|sent|withdrawn|received)[\\s\\S]*?(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?(?:Txn\\s+ID|transaction\\s+ID|transaction\\s+number\\s+is)\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:CBE\\s+Birr\\s+(?:account\\s+)?balance\\s+is|balance\\s+is)\\s*(?<balance>-?[\\d,.]+)Br",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr English transaction",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "reversal\\s+of\\s+transaction\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)Br\\.\\s+is\\s+credited[\\s\\S]*?CBE\\s+Birr\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)Br",
-      "type": "CREDIT",
-      "description": "Fallback CBE Birr reversal",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "you\\s+made\\s+a\\s+(?<operation>withdrawal|[\\d,.]+Br\\.\\s+birr\\s+Deposit)[\\s\\S]*?Txn\\s+ID\\s+is?\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?CBE\\s+Birr\\s+account\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)Br",
-      "type": "CREDIT",
-      "description": "Fallback CBE Birr saving movement",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "(?:ደረሰኝ|ቁጥር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)Br",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr Amharic transaction",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?(?:ደረሰኝ|ቁጠር|ቁጥር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)Br",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr Amharic amount first",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "lakkoofsa\\s+nagahee\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?qarshii(?:n)?\\s+(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?Hafteen\\s+herreega[\\s\\S]*?(?<balance>-?[\\d,.]+)Br",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr Afaan Oromo transaction",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "received\\s+(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?Txn\\s+ID\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?CBE\\s+Birr\\s+account\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)Br",
-      "type": "CREDIT",
-      "description": "Fallback CBE Birr received",
-      "refRequired": true,
-      "hasAccount": true
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "received\\s+(?<amount>-?[\\d,.]+)Br\\.\\s+airtime[\\s\\S]*?Thank\\s+you\\s+for\\s+choosing\\s+CBE\\s+Birr",
-      "type": "CREDIT",
-      "description": "Fallback CBE Birr airtime received",
-      "refRequired": false,
-      "hasAccount": false
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "voucher\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+),\\s+Amount\\s+(?<amount>-?[\\d,.]+)Br",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr ATM cash out voucher",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "(?<amount>-?[\\d,.]+)Br\\.Br\\s+Ticket\\s+purchase[\\s\\S]*?with\\s+(?<reference>[A-Z0-9@.\\-]+)\\s+transaction\\s+ID",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr ticket purchase",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "paid\\s+(?<amount>-?[\\d,.]+)Br\\.\\s+bill\\s+payment[\\s\\S]*?Txn\\s+ID\\s+(?<reference>[A-Z0-9@.\\-]+)",
-      "type": "DEBIT",
-      "description": "Fallback CBE Birr bill payment no balance",
-      "refRequired": true,
-      "hasAccount": false
-    },
-    {
-      "bankId": 37,
-      "senderId": "CBEBirr",
-      "regex": "(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?በቀን[\\s\\S]*?በደረሰኝ\\s+ቁጠር\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?ሂሳብ\\s+(?<balance>-?[\\d,.]+)Br",
-      "type": "CREDIT",
-      "description": "Fallback CBE Birr Amharic credit amount first",
-      "refRequired": true,
-      "hasAccount": true
     },
     {
       "bankId": 1,
@@ -1261,175 +287,53 @@
       }
     },
     {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
+      "bankId": 1,
+      "senderId": "CBE",
+      "regex": "You\\s+have\\s+successfully\\s+transferred\\s+ETB\\s*(?<amount>[\\d,.]+)\\s+from\\s+account\\s+(?<account>[\\dXx*]+)\\s+to\\s+account\\s+(?<receiverAccount>[\\dXx*]+)\\s*\\((?<receiver>[^)]+)\\)[\\s\\S]*?Service\\s+charge\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+VAT\\(15%\\)\\s+of\\s+(?:ETB\\s*)?(?<vat>[\\d,.]+)\\s+and\\s+Disaster\\s+Recovery\\(5%\\)\\s+of\\s+(?<disasterRecovery>[\\d,.]+)\\s+with\\s+total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,.]+)[\\s\\S]*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,.]+)[\\s\\S]*?https?://[^\\s/]+/(?<reference>[A-Za-z0-9]+)",
       "type": "DEBIT",
-      "description": "Awash Account Debit",
+      "description": "CBE Successful Transfer with Disaster Recovery Fee",
       "refRequired": true,
       "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "balance": 3,
-        "reference": 4
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "sent\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+To\\s+\\((?<receiver>[\\d\\*x]+)\\).*?Transaction\\s+ID:\\s+(?<reference>[A-Z0-9]+).*?Available\\s+Balance\\s+is\\s+(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Awash Account Debit (Transfer)",
-      "hasAccount": true,
-      "refRequired": true,
+      "hasFees": true,
       "mapping": {
         "amount": 1,
-        "receiver": 2,
-        "reference": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "Account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB-(?<amount>[\\d,.]+).*?applied\\s+on\\s+(?<date>[\\d\\s:-]+).*?Current\\s+balance:\\s+ETB(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Awash Account Debit no ref",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "date": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "Account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+Credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?to\\s+Awash\\s+with\\s+reference\\s+(?<reference>[A-Z0-9]+).*?balance\\s+now\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Awash Account Credit (TeleBirr C2B)",
-      "refRequired": true,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "reference": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "You\\s+have\\s+transferred\\s+to\\s+other\\s+bank\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+To\\s+(?<receiver>[^\\(]+).*?Your\\s+available\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
-      "type": "DEBIT",
-      "description": "Awash Other Bank Transfer",
-      "refRequired": true,
-      "hasAccount": false,
-      "mapping": {
-        "amount": 1,
-        "receiver": 2,
-        "balance": 3,
-        "reference": 4
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "Telebirr\\s+Transfer\\s+of\\s+(?<amount>[\\d,.]+)\\s+ETB\\s+to\\s+(?<receiver>[^-]+)\\s+-\\s+(?<receiverAccount>[\\d]+).*?Your\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
-      "type": "DEBIT",
-      "description": "Awash Telebirr Transfer",
-      "refRequired": true,
-      "hasAccount": false,
-      "mapping": {
-        "amount": 1,
-        "receiver": 2,
+        "account": 2,
         "receiverAccount": 3,
-        "balance": 4,
-        "reference": 5
+        "receiver": 4,
+        "serviceCharge": 5,
+        "vat": 6,
+        "disasterRecovery": 7,
+        "totalAmount": 8,
+        "balance": 9,
+        "reference": 10
       }
     },
     {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "Account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+Credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?Your\\s+balance\\s+now\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Awash Account Credit",
-      "refRequired": false,
+      "bankId": 1,
+      "senderId": "CBE",
+      "regex": "A\\s+debit\\s+transaction\\s+of\\s+ETB\\s*(?<amount>[\\d,.]+)[\\s\\S]*?occurred\\s+on\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Service\\s+charge\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+VAT\\(15%\\)\\s+of\\s+(?:ETB\\s*)?(?<vat>[\\d,.]+)\\s+and\\s+Disaster\\s+Recovery\\(5%\\)\\s+of\\s+(?<disasterRecovery>[\\d,.]+)\\s+with\\s+total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,.]+)[\\s\\S]*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,.]+)[\\s\\S]*?https?://[^\\s/]+/(?<reference>[A-Za-z0-9]+)",
+      "type": "DEBIT",
+      "description": "CBE Debit Transaction Occurred with Disaster Recovery Fee",
+      "refRequired": true,
       "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "balance": 3
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "bought\\s+airtime\\s+worth\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+for\\s+(?<receiver>[\\d+]+).*?Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:.*?-(?<reference>[A-Z0-9-]+)\\.",
-      "type": "DEBIT",
-      "description": "Awash Airtime Purchase",
-      "refRequired": true,
-      "hasAccount": false,
+      "hasFees": true,
       "mapping": {
         "amount": 1,
-        "receiver": 2,
-        "balance": 3,
-        "reference": 4
+        "account": 2,
+        "serviceCharge": 3,
+        "vat": 4,
+        "disasterRecovery": 5,
+        "totalAmount": 6,
+        "balance": 7,
+        "reference": 8
       }
     },
     {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "Merchant\\s+payment\\s+of\\s+(?<amount>[\\d,.]+)\\s+ETB\\s+to\\s+(?<receiver>[^.]+)\\.\\s+Ref\\s+(?<reference>[\\dA-Z]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+",
+      "bankId": 1,
+      "senderId": "CBE",
+      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Service\\s+charge[\\s\\S]*?VAT\\(15%\\)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?id=(?<reference>[A-Z0-9@.\\-]+)",
       "type": "DEBIT",
-      "description": "Awash Merchant Payment",
-      "refRequired": true,
-      "hasAccount": false,
-      "mapping": {
-        "amount": 1,
-        "receiver": 2,
-        "reference": 3
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "Account\\s+(?<account>[0-9xX*]+).*?(?:Debited|Credited)\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+).*?balance\\s+now\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Awash debit with no ref",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "balance": 3
-      }
-    },
-    {
-      "bankId": 2,
-      "senderId": "Awash",
-      "regex": "You\\s+have\\s+transferred\\s+to\\s+.*?\\s+Amount\\s+(?<amount>[\\d,.]+)\\s*ETB\\s+To\\s+(?<receiverAccount>\\d+)\\s+\\((?<receiver>[^)]+)\\).*?Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
-      "type": "DEBIT",
-      "description": "Awash Other Bank Transfer (Flexible)",
-      "refRequired": true,
-      "hasAccount": false,
-      "mapping": {
-        "amount": 1,
-        "receiverAccount": 2,
-        "receiver": 3,
-        "balance": 4,
-        "reference": 5
-      }
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "account\\s+(?<account>[\\d\\*]+)\\s+was\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s*\\.\\s*Available\\s+Balance:\\s*ETB\\s+(?<balance>[\\d,.]+)\\s*\\.\\s*Receipt:\\s*https?:\\/\\/[^\\s]+\\?trx=(?<reference>[A-Z0-9]+)",
-      "type": "DEBIT",
-      "description": "BOA Debit",
+      "description": "Fallback CBE service charge debit receipt",
       "refRequired": true,
       "hasAccount": true,
       "mapping": {
@@ -1440,172 +344,35 @@
       }
     },
     {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "account\\s+(?<account>[\\d\\*]+).*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<source>[^.]+)\\.\\s+Available\\s+Balance:\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt:\\s*https?:\\/\\/[^\\s]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "bankId": 1,
+      "senderId": "CBE",
+      "regex": "(?:Account|account)\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<direction>credited|debited)\\s+with\\s+(?<currency>ETB|USD)\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:Acct\\s+Bal|Current\\s+Balance\\s+is)[:\\s]+(?:ETB|USD)\\s*(?<balance>-?[\\d,.]+)",
       "type": "CREDIT",
-      "description": "BOA Credit",
-      "refRequired": true,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "source": 3,
-        "balance": 4,
-        "reference": 5
-      }
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "account\\s+(?<account>[\\d\\*]+).*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,\\.]+).*?transfer\\s+made\\s+by\\s+(?<source>.+?)\\s+through.*?available\\s+balance.*?ETB\\s+(?<balance>[\\d,\\.]+)",
-      "type": "CREDIT",
-      "description": "BOA Transfer Credit (old)",
+      "description": "Fallback CBE account credit/debit balance",
       "refRequired": false,
       "hasAccount": true,
       "mapping": {
         "account": 1,
-        "amount": 2,
-        "source": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "account\\s+(?<account>[\\d\\*]+).*?debited\\s+with\\s+ETB\\s+(?<amount>[\\d,\\.]+).*?account transfer you made\\s+through\\s+(?<source>.+?)\\..*?available\\s+balance.*?ETB\\s+(?<balance>[\\d,\\.]+)",
-      "type": "DEBIT",
-      "description": "BOA Transfer Debit (old)",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "source": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 3,
-      "senderId": "BOA",
-      "regex": "account\\s+(?<account>[\\d\\*]+).*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,\\.]+).*?transfer\\s+made\\s+by\\s*(?<source>.*?)\\s+through.*?available\\s+balance.*?ETB\\s+(?<balance>[\\d,\\.]+)",
-      "type": "CREDIT",
-      "description": "BOA Transfer Credit (no ref)",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "source": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "received\\s+ETB\\s+(?<amount>[\\d,.]+).*?Ref\\s+No:?\\s*(?<reference>\\d+).*?on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4})\\s+\\d{2}:\\d{2}:\\d{2}.*?account\\s+'(?<account>[\\d\\*]+)'.*?balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Dashen Telebirr Credit",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "amount": 1,
-        "reference": 2,
-        "date": 3,
-        "account": 4,
+        "direction": 2,
+        "currency": 3,
+        "amount": 4,
         "balance": 5
       }
     },
     {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "ETB\\s+(?<amount>[\\d,.]+)\\s+has\\s+been\\s+debited\\s+from\\s+your\\s+account\\s+(?<account>[\\d\\*]+).*?on\\s+(?<date>\\d{4}-\\d{2}-\\d{2})\\s+at\\s+\\d{2}:\\d{2}:\\d{2}.*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?receipt\\/+(?<reference>[A-Z0-9]+)",
+      "bankId": 5,
+      "senderId": "Zemen",
+      "regex": "Birr\\s+(?<amount>[\\d,]+(?:\\.\\d+)?)\\s+ATM\\s+cash\\s+withdrawal\\s+has\\s+been\\s+made\\s+from\\s+A/c\\s+No\\.\\s+(?<account>[\\dXx*]+)\\s+on\\s+(?<date>\\d{1,2}-[A-Za-z]{3}-\\d{4})[\\s\\S]*?A/c\\s+Available\\s+Bal\\.\\s+is\\s+Birr\\s+(?<balance>[\\d,]+(?:\\.\\d+)?)[\\s\\S]*?transaction\\s+ATM\\s+location\\s+is\\s+(?<location>[^.]+?)\\s*\\.",
       "type": "DEBIT",
-      "description": "Dashen Telebirr Transfer Debit (with Receipt Ref)",
-      "refRequired": true,
+      "description": "Zemen ATM Withdrawal with Location (Dear Customer, no reference)",
+      "refRequired": false,
       "hasAccount": true,
       "mapping": {
         "amount": 1,
         "account": 2,
         "date": 3,
         "balance": 4,
-        "reference": 5
-      }
-    },
-    {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "account\\s+'(?<account>[\\d\\*]+)'.*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Dashen Account Credit",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "date": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "transferred\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+to\\s+your\\s+account\\s+'(?<account>[\\d\\*]+)'.*?on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Dashen Account Transfer Credit",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "amount": 1,
-        "account": 2,
-        "date": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "account\\s+'(?<account>[\\d\\*]+)'\\s+is\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Dashen Account Debit",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "date": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?on\\s+(?<date>\\d{4}-\\d{2}-\\d{2}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Dashen Account Debit 2",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "date": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 4,
-      "senderId": "Dashen",
-      "regex": "(?<sender>[A-Z][A-Z ]+)\\s+has\\s+deposited\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+to\\s+your\\s+account\\s+'(?<account>[\\d\\*]+)'\\s+on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4})(?:\\s+at\\s+\\d{2}:\\d{2}:\\d{2}\\s+[AP]M)?.*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,]+\\.\\d{2})",
-      "type": "CREDIT",
-      "description": "Dashen Deposit Credit",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "sender": 1,
-        "amount": 2,
-        "account": 3,
-        "date": 4,
-        "balance": 5
+        "location": 5
       }
     },
     {
@@ -1731,6 +498,68 @@
         "amount": 1,
         "account": 2,
         "date": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 5,
+      "senderId": "ZemenBank",
+      "regex": "account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?reference\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Zemen external transfer debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 5,
+      "senderId": "ZemenBank",
+      "regex": "(?<currency>ETB|USD|Birr)\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>[A-Za-z\\s-]+?)\\s+has\\s+been\\s+made\\s+(?<direction>to|from)\\s+A/c\\s+No\\.?\\s*(?<account>[\\dXx*]+)[\\s\\S]*?A/c\\s+Available\\s+Bal\\.?\\s*is\\s+(?:ETB|USD|Birr)\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Zemen made to/from account",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "currency": 1,
+        "amount": 2,
+        "operation": 3,
+        "direction": 4,
+        "account": 5,
+        "balance": 6
+      }
+    },
+    {
+      "bankId": 5,
+      "senderId": "ZemenBank",
+      "regex": "account\\s*\\((?<account>[\\dXx*]+)\\)\\s+has\\s+been\\s+debited\\s+with\\s+Birr\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?reference\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?available\\s+balance\\s+is\\s+Birr\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Zemen POS purchase debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 5,
+      "senderId": "ZemenBank",
+      "regex": "Birr\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>POS transaction|Miscellaneous-deduction|Miscellaneous- deposit)[\\s\\S]*?(?:from|to)\\s+A/c\\s+No\\.?\\s*(?<account>[\\dXx*]+)[\\s\\S]*?A/c\\s+Available\\s+Bal\\.?(?:is|\\.is)\\s+Birr\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Zemen POS miscellaneous",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "operation": 2,
+        "account": 3,
         "balance": 4
       }
     },
@@ -2007,6 +836,21 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
+      "regex": "paid\\s+ETB\\s+(?<amount>[\\d,]+(?:\\.\\d{2})?)\\s+for\\s+(?<receiver>.+?)\\s+purchase\\s+made.*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,]+(?:\\.\\d{2})?)",
+      "type": "DEBIT",
+      "description": "Telebirr debit for package",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "receiver": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
       "regex": "received\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+transaction\\s+number\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
       "type": "CREDIT",
       "description": "Telebirr Received from Awash",
@@ -2116,6 +960,22 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
+      "regex": "paid\\s+ETB\\s?(?<amount>[\\d,.]+)\\s+for\\s+(?<service>[^\\n]+?)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2}).*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+).*?balance\\s+is\\s+ETB\\s?(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Telebirr Service Payment",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "service": 2,
+        "date": 3,
+        "reference": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
       "regex": "transaction\\s+for\\s+(?<type>[^\\n]+?)\\s+request.*?receipt\\s+number\\s+(?<receiptRef>[A-Z0-9]+).*?reversed\\s+to\\s+your\\s+account\\s+on\\s+(?<date>[^\\n]+?)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s?(?<balance>[\\d,.]+).*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+)",
       "type": "CREDIT",
       "description": "Telebirr Transaction Reversal",
@@ -2146,67 +1006,723 @@
       }
     },
     {
-      "bankId": 7,
-      "senderId": "NIB",
-      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Debited\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+)\\s+On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4})\\s+Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+for\\s+(?<category>[^\\n]+?)\\s+ETB\\s*(?<amount>[\\d,.]+)\\s+to\\s+(?<merchant>.+?);\\s+with\\s+Payment\\s+reference\\s+number\\s+(?<paymentRef>[A-Z0-9]+)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2})[\\s\\S]*?(?:The|the)\\s+service\\s+fee\\s+is\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+15%\\s+VAT\\s+on\\s+the\\s+service\\s+fee\\s+is\\s+ETB\\s*(?<vat>[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+)[\\s\\S]*?telebirr\\s+account\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,.]+)",
       "type": "DEBIT",
-      "description": "Nib Account Debit",
+      "description": "Telebirr Category Payment with Payment Reference Number",
       "refRequired": true,
-      "hasAccount": true,
+      "hasAccount": false,
+      "hasFees": true,
       "mapping": {
-        "account": 1,
+        "category": 1,
         "amount": 2,
-        "date": 3,
-        "reference": 4,
-        "balance": 5
+        "merchant": 3,
+        "paymentRef": 4,
+        "date": 5,
+        "serviceCharge": 6,
+        "vat": 7,
+        "reference": 8,
+        "balance": 9
       }
     },
     {
-      "bankId": 7,
-      "senderId": "NIB",
-      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Debited\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+).*?On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4})\\s+Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+ETB\\s*(?<amount>[\\d,.]+)\\s+for\\s+fuel\\s+purchased\\s+from\\s+(?<merchant>.+?)\\s+for\\s+plate\\s+number\\s+(?<plate>[A-Za-z0-9]+)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2})[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+)[\\s\\S]*?current\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,.]+)",
       "type": "DEBIT",
-      "description": "Nib Account Debit with Charges",
+      "description": "Telebirr Fuel Payment with Plate Number",
       "refRequired": true,
-      "hasAccount": true,
+      "hasAccount": false,
       "mapping": {
-        "account": 1,
-        "amount": 2,
-        "date": 3,
-        "reference": 4,
-        "balance": 5
+        "amount": 1,
+        "merchant": 2,
+        "plate": 3,
+        "date": 4,
+        "reference": 5,
+        "balance": 6
       }
     },
     {
-      "bankId": 7,
-      "senderId": "NIB",
-      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Debited\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+)\\s+On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4}).*?Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Nib Account Debit (Telebirr/Service Charge)",
-      "refRequired": true,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "date": 3,
-        "reference": 4,
-        "balance": 5
-      }
-    },
-    {
-      "bankId": 7,
-      "senderId": "NIB",
-      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4}).*?Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "telebirr\\s+account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+(?<direction>credited|debited)\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:current\\s+Account\\s+balance|current\\s+balance)\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
       "type": "CREDIT",
-      "description": "Nib Account Credit",
+      "description": "Fallback Telebirr account credit debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "direction": 2,
+        "amount": 3,
+        "reference": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?Payment\\s+Reference\\s+Number\\s+(?<paymentReference>\\d+)[\\s\\S]*?receipt/(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?telebirr\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr insurance receipt-url transaction",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "paymentReference": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?Payment\\s+Reference\\s+Number\\s+(?<paymentReference>\\d+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr third party insurance mixed language",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "paymentReference": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "request\\s+to\\s+withdraw\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr ATM withdraw completed",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "You\\s+(?:have\\s+donated|have\\s+Paid|have\\s+paid)\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:balance\\s+is|telebirr\\s+balance\\s+is)\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr English payment donation",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "You\\s+have\\s+successfully\\s+Withdraw\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr saving withdrawal",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "Transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)\\s+transferred[\\s\\S]*?telebirr\\s+Account[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr bank transfer credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "Telecom\\s+Bill\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Transaction\\s+Number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr telecom bill",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr insurance mixed language",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "You\\s+have\\s+Received\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?current\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr received from organization",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "successfully\\s+deposited\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?saving\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr Sinq deposit",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "endekise[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)\\s+credit\\s+amount[\\s\\S]*?outstanding\\s+amount\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr endekise",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ከፍለዋል|አስተላልፈዋል|ልከዋል|ፈጽመዋል|ፈፅመዋል|ሞልተዋል|ለግሰዋል)[\\s\\S]*?(?:ቁጥርዎ|ቁጠር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ቀሪ\\s+ሒሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr Amharic debit transfer payment",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ተቀብለዋል|ገቢ\\s+ተደርጎልዎታል|ተመላሽ\\s+አግኝተዋል|ተሞልቶሎታል)[\\s\\S]*?(?:ቁጥርዎ|ቁጠር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ቀሪ\\s+ሒሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr Amharic amount credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "(?:ግብይት\\s+ቁጥር|ቁጥርዎ)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ተላልፏል|ገቢ)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr Amharic credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "repaid\\s+(?<amount>-?[\\d,.]+)\\s+ETB[\\s\\S]*?unpaid\\s+credit\\s+amount\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+ETB",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr credit repayment",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+amount\\s+is\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?total\\s+outstanding\\s+amount\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr paid outstanding credit",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "ATM\\s+withdraw\\s+secret\\s+code\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)\\s+with\\s+amount\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr ATM secret code",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "got\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+bonus",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr bonus",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "paid\\s+a\\s+credit\\s+amount\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?outstanding\\s+credit\\s+amount\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr credit amount paid",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "outstanding\\s+credit\\s+balance\\s+of\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Telebirr overdue credit balance",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "balance": 1
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ተመላሽ\\s+አግኝተዋል[\\s\\S]*?ቀሪ\\s+ሒሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr Amharic cashback no reference",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 6,
+      "senderId": "telebirr",
+      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ተሞልቶሎታል[\\s\\S]*?ቁጥርዎ\\s+(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "CREDIT",
+      "description": "Fallback Telebirr Amharic airtime received no balance",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "(?:Dear\\s+customer,\\s+)?Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<sender>.+?)\\s+(?:S\\.C\\.\\s+)?Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)\\.\\s+Receipt:\\s+https?:\\/\\/[^?]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "type": "CREDIT",
+      "description": "Amhara Bank Credit (WITH Receipt)",
       "refRequired": true,
       "hasAccount": true,
       "mapping": {
         "account": 1,
         "amount": 2,
-        "date": 3,
+        "sender": 3,
+        "balance": 4,
+        "reference": 5
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "(?:Dear\\s+customer,\\s+)?Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<sender>.+?)\\s+(?:S\\.C\\.\\s+)?Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Amhara Bank Credit (NO Receipt)",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "sender": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<sender>[^.]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Amhara Bank Credit (Short Format)",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "sender": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "(?:Dear\\s+customer,\\s+)?Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+and\\s+transfered\\s+to\\s+(?<receiver>\\d+)\\s+with\\s+reference\\s+number\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Amhara Bank Transfer Debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "receiver": 3,
         "reference": 4,
         "balance": 5
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)\\.\\s+Receipt:\\s+https?:\\/\\/[^?]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "type": "DEBIT",
+      "description": "Amhara Bank Debit (WITH Receipt)",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3,
+        "reference": 4
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Amhara Bank Debit (NO Receipt)",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+(?<direction>Credited|credited|Debited|debited)\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Amhara account credit debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "direction": 2,
+        "amount": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 9,
+      "senderId": "AmharaBank",
+      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?including\\s+VAT[\\s\\S]*?Current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Amhara fee debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "account\\s+(?<account>[\\d\\*]+)\\s+was\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s*\\.\\s*Available\\s+Balance:\\s*ETB\\s+(?<balance>[\\d,.]+)\\s*\\.\\s*Receipt:\\s*https?:\\/\\/[^\\s]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "type": "DEBIT",
+      "description": "BOA Debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3,
+        "reference": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "account\\s+(?<account>[\\d\\*]+).*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<source>[^.]+)\\.\\s+Available\\s+Balance:\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt:\\s*https?:\\/\\/[^\\s]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "type": "CREDIT",
+      "description": "BOA Credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "source": 3,
+        "balance": 4,
+        "reference": 5
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "account\\s+(?<account>[\\d\\*]+).*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,\\.]+).*?transfer\\s+made\\s+by\\s+(?<source>.+?)\\s+through.*?available\\s+balance.*?ETB\\s+(?<balance>[\\d,\\.]+)",
+      "type": "CREDIT",
+      "description": "BOA Transfer Credit (old)",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "source": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "account\\s+(?<account>[\\d\\*]+).*?debited\\s+with\\s+ETB\\s+(?<amount>[\\d,\\.]+).*?account transfer you made\\s+through\\s+(?<source>.+?)\\..*?available\\s+balance.*?ETB\\s+(?<balance>[\\d,\\.]+)",
+      "type": "DEBIT",
+      "description": "BOA Transfer Debit (old)",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "source": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "account\\s+(?<account>[\\d\\*]+).*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,\\.]+).*?transfer\\s+made\\s+by\\s*(?<source>.*?)\\s+through.*?available\\s+balance.*?ETB\\s+(?<balance>[\\d,\\.]+)",
+      "type": "CREDIT",
+      "description": "BOA Transfer Credit (no ref)",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "source": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "Dear\\s+Apollo\\s+user[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?debited\\s+by\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Info:Transfer\\s+to\\s+Telebirr[\\s\\S]*?Avail\\s+balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\s*\\.\\s*(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback BOA Apollo user transfer to Telebirr",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3,
+        "reference": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "Dear\\s+Apollo\\s+user[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?debited\\s+by\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\s+balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\s*\\.\\s*(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback BOA Apollo user debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3,
+        "reference": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?has\\s+been\\s+(?<direction>credited|debited)[\\s\\S]*?with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\.?\\s+bal:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA account credited or debited",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "direction": 2,
+        "amount": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "GizePay\\s+account\\s+has\\s+been\\s+credited\\s+with\\s+(?<amount>-?[\\d,.]+)\\s+birr[\\s\\S]*?TXN\\s+ID\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA GizePay credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "(?:withdrawn|received|Transfer\\s+of)\\s+(?<amount>-?[\\d,.]+)\\s+birr[\\s\\S]*?(?:Txn\\s+ID|TXN\\s+ID)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback BOA GizePay movement",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "received\\s+(?<amount>-?[\\d,.]+)\\s+birr[\\s\\S]*?GizePay\\s+account\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA GizePay business received",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "ETB\\s*(?<amount>-?[\\d,.]+)\\s+is\\s+Locked\\s+From\\s+Your\\s+Account\\s+Number\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Available\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback BOA POS locked amount",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "transferred\\s+you\\s+Br\\.?(?<amount>-?[\\d,.]+)[\\s\\S]*?account\\s+(?<account>[\\dXx*]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA transferred to external bank",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "your\\s+account\\s+(?<account>[\\dXx*]+)\\s+was\\s+(?<direction>credited|debited)\\s+with\\s+(?<currency>ETB|USD)\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Available\\s+Balance:\\s+(?:ETB|USD)\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA receipt credit debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "direction": 2,
+        "currency": 3,
+        "amount": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "ወደ\\s+ሂሳብ(?:\\s+ቁጥርዎ|ዎ)?\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ገቢ[\\s\\S]*?ብር\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA Amharic credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "ከሂሳብ(?:\\s+ቁጥርዎ|ዎ)?\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ወጪ[\\s\\S]*?ብር\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback BOA Amharic debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 3,
+      "senderId": "BOA",
+      "regex": "Dear\\s+Customer,\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?credited[\\s\\S]*?Info:\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?Avail\\.\\s+bal:[\\s\\S]*?(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback BOA malformed transfer credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "reference": 3,
+        "balance": 4
       }
     },
     {
@@ -2422,73 +1938,816 @@
       }
     },
     {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "(?:Dear\\s+customer,\\s+)?Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<sender>.+?)\\s+(?:S\\.C\\.\\s+)?Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)\\.\\s+Receipt:\\s+https?:\\/\\/[^?]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ተቀብለዋል|አስተላልፈዋል|ገቢ\\s+ተደርጓል)[\\s\\S]*?መለያ\\s+ቁጥር\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+ቀሪ\\s+ሒሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
       "type": "CREDIT",
-      "description": "Amhara Bank Credit (WITH Receipt)",
+      "description": "Fallback MPESA Amharic h-sab transaction",
       "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "የገንዘብ\\s+ዝውውር\\s+(?<originalReference>[A-Z0-9]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?ገቢ\\s+ተደርጓል[\\s\\S]*?መለያ\\s+ቁጥር\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+ቀሪ\\s+ሒሳብ\\s+(?<balance>-?[\\d,.]+)\\s*ብር",
+      "type": "CREDIT",
+      "description": "Fallback MPESA Amharic reversal credited",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "originalReference": 1,
+        "amount": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+(?:Confirmed|confirmed)\\.[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+(?<currency>Birr|Ksh)\\s+(?<operation>received|paid|sent|withdrawn|deposited)[\\s\\S]*?(?:balance\\s+is|balance\\s+was|Utility\\s+balance\\s+is)\\s+(?:Birr|Ksh)?\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback MPESA English confirmed amount first",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "currency": 3,
+        "operation": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+(?:Confirmed|confirmed)\\.[\\s\\S]*?(?<currency>Birr|Ksh)\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>received|paid|sent|withdrawn|deposited)[\\s\\S]*?(?:balance\\s+is|M-PESA\\s+balance\\s+is)\\s+(?:Birr|Ksh)\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback MPESA English confirmed",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "currency": 2,
+        "amount": 3,
+        "operation": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+confirmed[\\s\\S]*?received\\s+(?<currency>Ksh|Birr)(?<amount>-?[\\d,.]+)[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+(?:Ksh|Birr)(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback MPESA English received remittance",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "currency": 2,
+        "amount": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+Imethibitishwa[\\s\\S]*?(?:Ksh|Birr)(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:Baki\\s+yako|M-PESA)[\\s\\S]*?(?:Ksh|Birr)(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback MPESA Swahili transaction",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<reference>[A-Z0-9@.\\-]+)\\s+confirmed[\\s\\S]*?bought\\s+Ksh(?<amount>-?[\\d,.]+)[\\s\\S]*?balance\\s+is\\s+Ksh(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback MPESA airtime bought",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "cashback\\s+of\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
+      "type": "CREDIT",
+      "description": "Fallback MPESA cashback",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "Reversal[\\s\\S]*?(?:Ksh|Birr)(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:credited|debited)[\\s\\S]*?M-PESA\\s+account[\\s\\S]*?balance\\s+is\\s+(?:Ksh|Birr)(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback MPESA reversal confirmed",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "transaction\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?reversed[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+Birr\\s+is\\s+credited[\\s\\S]*?M-PESA[\\s\\S]*?balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
+      "type": "CREDIT",
+      "description": "Fallback MPESA transaction reversed",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "Dear[\\s\\S]*?you\\s+(?:have\\s+)?(?:withdrawn|successfully\\s+contributed|gifted|have\\s+received)\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?Transaction\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
+      "type": "DEBIT",
+      "description": "Fallback MPESA customer transaction",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "(?<amount>-?[\\d,.]+)\\s+ብር[\\s\\S]*?(?:ከፍሏል|ተቀብለዋል|አስተላልፈዋል|ገቢ\\s+ተደርጓል)[\\s\\S]*?(?:ቁጥር|መለያ\\s+ቁጥር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?M-PESA\\s+ቀሪ\\s+ሂሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "DEBIT",
+      "description": "Fallback MPESA Amharic transaction",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "Overdraft\\s+amount\\s+used\\s+is\\s+(?<amount>-?[\\d,.]+)Birr[\\s\\S]*?outstanding\\s+amount\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
+      "type": "DEBIT",
+      "description": "Fallback MPESA overdraft used",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "Overdraft\\s+loan\\s+of\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?available\\s+limit\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
+      "type": "CREDIT",
+      "description": "Fallback MPESA overdraft loan paid",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "Give\\s+Ksh(?<amount>-?[\\d,.]+)\\s+cash[\\s\\S]*?M-PESA\\s+balance\\s+is\\s+Ksh(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback MPESA give cash",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "M-PESA\\s+Account\\s*:\\s*Ksh(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback MPESA account balance",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "balance": 1
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "M-PESA[\\s\\S]*?malipo\\s+ya\\s+Ksh(?<amount>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback MPESA failed payment",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1
+      }
+    },
+    {
+      "bankId": 8,
+      "senderId": "MPESA",
+      "regex": "ገደብዎ\\s+(?<amount>-?[\\d,.]+)\\s+ብር",
+      "type": "CREDIT",
+      "description": "Fallback MPESA overdraft opt in",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1
+      }
+    },
+    {
+      "bankId": 36,
+      "senderId": "Apollo",
+      "regex": "Dear\\s+Customer,\\s*A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?credited\\s+By\\s+EthSwich[\\s\\S]*?with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\.\\s+bal:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Apollo EthSwitch credit",
+      "refRequired": false,
       "hasAccount": true,
       "mapping": {
         "account": 1,
         "amount": 2,
-        "sender": 3,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 36,
+      "senderId": "Apollo",
+      "regex": "account\\s+(?<account>[\\dXx*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?available\\s+balance\\s+in\\s+the\\s+account\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Apollo branch transfer debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 36,
+      "senderId": "Apollo",
+      "regex": "Dear\\s+Apollo\\s+user[\\s\\S]*?A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<direction>credited|debited)[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Avail\\.?\\s+balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\s*\\.\\s*(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "CREDIT",
+      "description": "Fallback Apollo account credit/debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "direction": 2,
+        "amount": 3,
         "balance": 4,
         "reference": 5
       }
     },
     {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "(?:Dear\\s+customer,\\s+)?Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<sender>.+?)\\s+(?:S\\.C\\.\\s+)?Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "bankId": 36,
+      "senderId": "Apollo",
+      "regex": "Dear[\\s\\S]*?your\\s+account\\s+(?<account>[\\dXx*]+)\\s+was\\s+(?<direction>credited|debited)\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Available\\s+Balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?trx=(?<reference>[A-Z0-9@.\\-]+)",
       "type": "CREDIT",
-      "description": "Amhara Bank Credit (NO Receipt)",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "sender": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+by\\s+(?<sender>[^.]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "CREDIT",
-      "description": "Amhara Bank Credit (Short Format)",
-      "refRequired": false,
-      "hasAccount": true,
-      "mapping": {
-        "account": 1,
-        "amount": 2,
-        "sender": 3,
-        "balance": 4
-      }
-    },
-    {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "(?:Dear\\s+customer,\\s+)?Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+and\\s+transfered\\s+to\\s+(?<receiver>\\d+)\\s+with\\s+reference\\s+number\\s+(?<reference>[A-Z0-9]+).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
-      "type": "DEBIT",
-      "description": "Amhara Bank Transfer Debit",
+      "description": "Fallback Apollo receipt credit/debit",
       "refRequired": true,
       "hasAccount": true,
       "mapping": {
         "account": 1,
-        "amount": 2,
-        "receiver": 3,
-        "reference": 4,
-        "balance": 5
+        "direction": 2,
+        "amount": 3,
+        "balance": 4,
+        "reference": 5
       }
     },
     {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)\\.\\s+Receipt:\\s+https?:\\/\\/[^?]+\\?trx=(?<reference>[A-Z0-9]+)",
+      "bankId": 36,
+      "senderId": "Apollo",
+      "regex": "cashback\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Ref\\s+No\\.\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?available\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Apollo cashback",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "Account\\s+(?<account>[\\dXx*]+)\\s+is\\s+debited\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?available\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
       "type": "DEBIT",
-      "description": "Amhara Bank Debit (WITH Receipt)",
+      "description": "Fallback Ahadu account debited",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "(?:Credit|Deposit|deposit)\\s+of\\s+ETB\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)\\s+(?:to|is\\s+done\\s+to)\\s+your\\s+account(?:\\s+no|\\s+number)?\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?:Current|current)\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Ahadu credit deposit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "debit\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Current\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Ahadu debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "received\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?credited\\s+to\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?reference\\s+number\\s+(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "CREDIT",
+      "description": "Fallback Ahadu received from telebirr",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "reference": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "ብር\\s*(?<amount>-?[\\d,.]+)\\s+ወደ\\s+ሂሳብ\\s+ቁጥርዎ\\s+(?<account>[\\dXx*]+)[\\s\\S]*?ገቢ[\\s\\S]*?ቀሪ\\s+ሂሳብ\\s+(?<balance>-?[\\d,.]+)\\s+ብር",
+      "type": "CREDIT",
+      "description": "Fallback Ahadu Amharic credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "Withdrawn\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?current\\s+Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Ahadu withdrawn",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 10,
+      "senderId": "AhaduBank",
+      "regex": "transfer\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?transaction\\s+reference\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?current\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Ahadu transfer",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "ETB\\s*(?<amount>-?[\\d,.]+)\\s+has\\s+been\\s+(?<operation>withdrawn|deposited)\\s+(?:from|to)\\s+A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan account movement",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "operation": 2,
+        "account": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "Transfer\\s+Completed\\.\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?Reference(?:\\s+is|:)\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan transfer completed",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "transferred\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)\\s*(?:ETB)?\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Reference\\s+No\\.\\s+is:?\\s*(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan telebirr transfer",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "reference": 3
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "received\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+telebirr[\\s\\S]*?Reference\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?credited\\s+to\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Berhan telebirr received",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "account": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "ATM\\s+cash\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+A/C\\s+No\\.\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan ATM withdrawal",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "paid\\s+(?<amount>-?[\\d,.]+)\\s+Birr\\s+school\\s+fees[\\s\\S]*?Receipt:\\s*(?<reference>https?:\\/\\/\\S+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan school fee receipt",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "successfully\\s+paid\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+as\\s+school\\s+fees[\\s\\S]*?Txn\\s+reference\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?New\\s+Balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan school fee paid",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "ብር\\s+ETB\\s*(?<amount>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan Amharic loan reminder",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1
+      }
+    },
+    {
+      "bankId": 12,
+      "senderId": "BerhanBank",
+      "regex": "Account\\s+Number:\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)\\s+DR[\\s\\S]*?Available\\s+Balance:\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Berhan ministatement debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "Please\\s+be\\s+informed\\s+that\\s+(?<currency>ETB|USD|EUR)\\s*(?<amount>-?[\\d,.]+)\\s+(?<operation>[^.]+?)\\s+is\\s+made\\s+(?<direction>from|to)\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Available\\s+Balance\\s*:\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Current\\s+Balance\\s*:\\s*(?<currentBalance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Hibret account movement",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "currency": 1,
+        "amount": 2,
+        "operation": 3,
+        "direction": 4,
+        "account": 5,
+        "balance": 6,
+        "currentBalance": 7
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "Mobile\\s+Topup\\s+transaction\\s+of\\s+(?<amount>-?[\\d,.]+)\\s+Birr[\\s\\S]*?Transaction\\s+Reference\\s+no\\s+(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback Hibret mobile topup",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "Available\\s+Balance\\s+ETB\\s*(?<balance>-?[\\d,.]+)[\\s\\S]*?Current\\s+Balance\\s+ETB\\s*(?<currentBalance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Hibret balance inquiry",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "balance": 1,
+        "currentBalance": 2
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "Utility\\s+Payment\\s+successful\\.\\s+Amount\\s+ETB:(?<amount>-?[\\d,.]+)\\s+From\\s+account\\s+(?<account>[\\dXx*]+)",
+      "type": "DEBIT",
+      "description": "Fallback Hibret utility payment",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "Funds\\s+transfer\\s+successful\\.\\s+Amount\\s+transfered\\s+ETB:(?<amount>-?[\\d,.]+)\\s+From\\s+account\\s+(?<account>[\\dXx*]+)",
+      "type": "DEBIT",
+      "description": "Fallback Hibret funds transfer successful",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "transferred\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Reference\\s+No\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback Hibret telebirr transfer",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "reference": 3
+      }
+    },
+    {
+      "bankId": 19,
+      "senderId": "HibretBank",
+      "regex": "received\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+telebirr[\\s\\S]*?credited\\s+to\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?available\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Hibret telebirr received",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "(?:made|paid|sent|withdrawn|received)[\\s\\S]*?(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?(?:Txn\\s+ID|transaction\\s+ID|transaction\\s+number\\s+is)\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:CBE\\s+Birr\\s+(?:account\\s+)?balance\\s+is|balance\\s+is)\\s*(?<balance>-?[\\d,.]+)Br",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr English transaction",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "reversal\\s+of\\s+transaction\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)Br\\.\\s+is\\s+credited[\\s\\S]*?CBE\\s+Birr\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)Br",
+      "type": "CREDIT",
+      "description": "Fallback CBE Birr reversal",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "you\\s+made\\s+a\\s+(?<operation>withdrawal|[\\d,.]+Br\\.\\s+birr\\s+Deposit)[\\s\\S]*?Txn\\s+ID\\s+is?\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?CBE\\s+Birr\\s+account\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)Br",
+      "type": "CREDIT",
+      "description": "Fallback CBE Birr saving movement",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "operation": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "(?:ደረሰኝ|ቁጥር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)Br",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr Amharic transaction",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?(?:ደረሰኝ|ቁጠር|ቁጥር)\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:ቀሪ\\s+ሂሳብ|ሂሳብ)\\s+(?<balance>-?[\\d,.]+)Br",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr Amharic amount first",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "lakkoofsa\\s+nagahee\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?qarshii(?:n)?\\s+(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?Hafteen\\s+herreega[\\s\\S]*?(?<balance>-?[\\d,.]+)Br",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr Afaan Oromo transaction",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "received\\s+(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?Txn\\s+ID\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?CBE\\s+Birr\\s+account\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)Br",
+      "type": "CREDIT",
+      "description": "Fallback CBE Birr received",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "received\\s+(?<amount>-?[\\d,.]+)Br\\.\\s+airtime[\\s\\S]*?Thank\\s+you\\s+for\\s+choosing\\s+CBE\\s+Birr",
+      "type": "CREDIT",
+      "description": "Fallback CBE Birr airtime received",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "voucher\\s+number\\s+is\\s+(?<reference>[A-Z0-9@.\\-]+),\\s+Amount\\s+(?<amount>-?[\\d,.]+)Br",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr ATM cash out voucher",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "(?<amount>-?[\\d,.]+)Br\\.Br\\s+Ticket\\s+purchase[\\s\\S]*?with\\s+(?<reference>[A-Z0-9@.\\-]+)\\s+transaction\\s+ID",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr ticket purchase",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "paid\\s+(?<amount>-?[\\d,.]+)Br\\.\\s+bill\\s+payment[\\s\\S]*?Txn\\s+ID\\s+(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback CBE Birr bill payment no balance",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 37,
+      "senderId": "CBEBirr",
+      "regex": "(?<amount>-?[\\d,.]+)Br\\.[\\s\\S]*?በቀን[\\s\\S]*?በደረሰኝ\\s+ቁጠር\\s+(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?ሂሳብ\\s+(?<balance>-?[\\d,.]+)Br",
+      "type": "CREDIT",
+      "description": "Fallback CBE Birr Amharic credit amount first",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
+      "type": "DEBIT",
+      "description": "Awash Account Debit",
       "refRequired": true,
       "hasAccount": true,
       "mapping": {
@@ -2499,11 +2758,87 @@
       }
     },
     {
-      "bankId": 9,
-      "senderId": "AmharaBank",
-      "regex": "Your\\s+account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\.\\s+Your\\s+current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "sent\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+To\\s+\\((?<receiver>[\\d\\*x]+)\\).*?Transaction\\s+ID:\\s+(?<reference>[A-Z0-9]+).*?Available\\s+Balance\\s+is\\s+(?<balance>[\\d,.]+)",
       "type": "DEBIT",
-      "description": "Amhara Bank Debit (NO Receipt)",
+      "description": "Awash Account Debit (Transfer)",
+      "hasAccount": true,
+      "refRequired": true,
+      "mapping": {
+        "amount": 1,
+        "receiver": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "Account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB-(?<amount>[\\d,.]+).*?applied\\s+on\\s+(?<date>[\\d\\s:-]+).*?Current\\s+balance:\\s+ETB(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Awash Account Debit no ref",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "Account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+Credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?to\\s+Awash\\s+with\\s+reference\\s+(?<reference>[A-Z0-9]+).*?balance\\s+now\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Awash Account Credit (TeleBirr C2B)",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "You\\s+have\\s+transferred\\s+to\\s+other\\s+bank\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+To\\s+(?<receiver>[^\\(]+).*?Your\\s+available\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
+      "type": "DEBIT",
+      "description": "Awash Other Bank Transfer",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "receiver": 2,
+        "balance": 3,
+        "reference": 4
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "Telebirr\\s+Transfer\\s+of\\s+(?<amount>[\\d,.]+)\\s+ETB\\s+to\\s+(?<receiver>[^-]+)\\s+-\\s+(?<receiverAccount>[\\d]+).*?Your\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
+      "type": "DEBIT",
+      "description": "Awash Telebirr Transfer",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "receiver": 2,
+        "receiverAccount": 3,
+        "balance": 4,
+        "reference": 5
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "Account\\s+(?<account>[\\d\\*x]+)\\s+has\\s+been\\s+Credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?Your\\s+balance\\s+now\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Awash Account Credit",
       "refRequired": false,
       "hasAccount": true,
       "mapping": {
@@ -2513,46 +2848,389 @@
       }
     },
     {
-      "bankId": 1,
-      "senderId": "CBE",
-      "regex": "You\\s+have\\s+successfully\\s+transferred\\s+ETB\\s*(?<amount>[\\d,.]+)\\s+from\\s+account\\s+(?<account>[\\dXx*]+)\\s+to\\s+account\\s+(?<receiverAccount>[\\dXx*]+)\\s*\\((?<receiver>[^)]+)\\)[\\s\\S]*?Service\\s+charge\\s+of\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+VAT\\(15%\\)\\s+of\\s+ETB\\s*(?<vat>[\\d,.]+)\\s+and\\s+Disaster\\s+Recovery\\(5%\\)\\s+of\\s+(?<disasterRecovery>[\\d,.]+)\\s+with\\s+total\\s+of\\s+ETB\\s*(?<totalAmount>[\\d,.]+)[\\s\\S]*?Your\\s+current\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,.]+)[\\s\\S]*?https?://[^\\s/]+/(?<reference>[A-Za-z0-9]+)",
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "bought\\s+airtime\\s+worth\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+for\\s+(?<receiver>[\\d+]+).*?Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:.*?-(?<reference>[A-Z0-9-]+)\\.",
       "type": "DEBIT",
-      "description": "CBE Successful Transfer with Disaster Recovery Fee",
+      "description": "Awash Airtime Purchase",
       "refRequired": true,
-      "hasAccount": true,
-      "hasFees": true,
+      "hasAccount": false,
       "mapping": {
         "amount": 1,
-        "account": 2,
-        "receiverAccount": 3,
-        "receiver": 4,
-        "serviceCharge": 5,
-        "vat": 6,
-        "disasterRecovery": 7,
-        "totalAmount": 8,
-        "balance": 9,
-        "reference": 10
+        "receiver": 2,
+        "balance": 3,
+        "reference": 4
       }
     },
     {
-      "bankId": 6,
-      "senderId": "telebirr",
-      "regex": "paid\\s+for\\s+(?<category>[^\\n]+?)\\s+ETB\\s*(?<amount>[\\d,.]+)\\s+to\\s+(?<merchant>.+?);\\s+with\\s+Payment\\s+reference\\s+number\\s+(?<paymentRef>[A-Z0-9]+)\\s+on\\s+(?<date>\\d{1,2}/\\d{1,2}/\\d{4}\\s+\\d{1,2}:\\d{2}:\\d{2})[\\s\\S]*?(?:The|the)\\s+service\\s+fee\\s+is\\s+ETB\\s*(?<serviceCharge>[\\d,.]+)\\s+and\\s+15%\\s+VAT\\s+on\\s+the\\s+service\\s+fee\\s+is\\s+ETB\\s*(?<vat>[\\d,.]+)[\\s\\S]*?transaction\\s+number\\s+is\\s+(?<reference>[A-Z0-9]+)[\\s\\S]*?telebirr\\s+account\\s+balance\\s+is\\s+ETB\\s*(?<balance>[\\d,.]+)",
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "Merchant\\s+payment\\s+of\\s+(?<amount>[\\d,.]+)\\s+ETB\\s+to\\s+(?<receiver>[^.]+)\\.\\s+Ref\\s+(?<reference>[\\dA-Z]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+",
       "type": "DEBIT",
-      "description": "Telebirr Category Payment with Payment Reference Number",
+      "description": "Awash Merchant Payment",
       "refRequired": true,
       "hasAccount": false,
-      "hasFees": true,
       "mapping": {
-        "category": 1,
+        "amount": 1,
+        "receiver": 2,
+        "reference": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "Account\\s+(?<account>[0-9xX*]+).*?(?:Debited|Credited)\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+).*?balance\\s+now\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Awash debit with no ref",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
         "amount": 2,
-        "merchant": 3,
-        "paymentRef": 4,
-        "date": 5,
-        "serviceCharge": 6,
-        "vat": 7,
-        "reference": 8,
-        "balance": 9
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "Awash",
+      "regex": "You\\s+have\\s+transferred\\s+to\\s+.*?\\s+Amount\\s+(?<amount>[\\d,.]+)\\s*ETB\\s+To\\s+(?<receiverAccount>\\d+)\\s+\\((?<receiver>[^)]+)\\).*?Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?Receipt\\s+Link:\\s*https?:\\/\\/[^\\s]+\\/(?<reference>[A-Z0-9-]+)",
+      "type": "DEBIT",
+      "description": "Awash Other Bank Transfer (Flexible)",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "receiverAccount": 2,
+        "receiver": 3,
+        "balance": 4,
+        "reference": 5
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "Ref:\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?transferred\\s+(?<amount>-?[\\d,.]+)\\s+to[\\s\\S]*?New\\s+balance\\s+is\\s+(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Awash transfer with leading ref",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "reference": 1,
+        "amount": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "A\\s+(?<operation>withdrawal|deposit)\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+was\\s+made\\s+(?:from|to)\\s+your\\s+a/c\\s+(?<account>[\\dXx*]+)[\\s\\S]*?balance\\s+now\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Awash withdrawal or deposit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "operation": 1,
+        "amount": 2,
+        "account": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "You\\s+received\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+in\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Ref:\\s*(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "CREDIT",
+      "description": "Fallback Awash received salary credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "reference": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "You\\s+(?:received|have\\s+received)\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)[\\s\\S]*?(?:in|on)\\s+your\\s+account\\s+(?<account>[\\dXx*]+)[\\s\\S]*?(?:Ref:\\s*|by\\s+Ref:\\s*)(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?(?:new|available)?\\s*balance\\s+(?:is\\s+now|is)\\s+(?:ETB\\s*)?(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Awash received credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "reference": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "You\\s+have\\s+sent\\s+(?:ETB\\s*)?(?<amount>-?[\\d,.]+)\\s*(?:ETB)?\\s+From\\s+(?<account>[\\dXx*]+)[\\s\\S]*?Your\\s+Balance\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Awash sent to phone",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "You\\s+have\\s+sent\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+To[\\s\\S]*?Transaction\\s+ID:\\s*(?<reference>[A-Z0-9@.\\-]+)",
+      "type": "DEBIT",
+      "description": "Fallback Awash sent with transaction id",
+      "refRequired": true,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "reference": 2
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "ETB\\s*(?<amount>-?[\\d,.]+)\\s+has\\s+been\\s+credited\\s+to\\s+your\\s+account[\\s\\S]*?Txn\\s+ID:\\s*(?<reference>[A-Z0-9@.\\-]+)[\\s\\S]*?balance\\s+is\\s+now\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Awash credited with txn id",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 2,
+      "senderId": "AwashBank",
+      "regex": "transferred\\s+to[\\s\\S]*?Amount\\s+(?<amount>-?[\\d,.]+)\\s+ETB\\s+To[\\s\\S]*?Your\\s+Balance\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Awash other bank transfer amount first",
+      "refRequired": false,
+      "hasAccount": false,
+      "mapping": {
+        "amount": 1,
+        "balance": 2
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "received\\s+ETB\\s+(?<amount>[\\d,.]+).*?Ref\\s+No:?\\s*(?<reference>\\d+).*?on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4})\\s+\\d{2}:\\d{2}:\\d{2}.*?account\\s+'(?<account>[\\d\\*]+)'.*?balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Dashen Telebirr Credit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "reference": 2,
+        "date": 3,
+        "account": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "ETB\\s+(?<amount>[\\d,.]+)\\s+has\\s+been\\s+debited\\s+from\\s+your\\s+account\\s+(?<account>[\\d\\*]+).*?on\\s+(?<date>\\d{4}-\\d{2}-\\d{2})\\s+at\\s+\\d{2}:\\d{2}:\\d{2}.*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+).*?receipt\\/+(?<reference>[A-Z0-9]+)",
+      "type": "DEBIT",
+      "description": "Dashen Telebirr Transfer Debit (with Receipt Ref)",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "date": 3,
+        "balance": 4,
+        "reference": 5
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "account\\s+'(?<account>[\\d\\*]+)'.*?credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Dashen Account Credit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "transferred\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+to\\s+your\\s+account\\s+'(?<account>[\\d\\*]+)'.*?on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Dashen Account Transfer Credit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "date": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "account\\s+'(?<account>[\\d\\*]+)'\\s+is\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Dashen Account Debit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+debited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+).*?on\\s+(?<date>\\d{4}-\\d{2}-\\d{2}).*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Dashen Account Debit 2",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "Dashen",
+      "regex": "(?<sender>[A-Z][A-Z ]+)\\s+has\\s+deposited\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+to\\s+your\\s+account\\s+'(?<account>[\\d\\*]+)'\\s+on\\s+(?<date>\\d{2}\\/\\d{2}\\/\\d{4})(?:\\s+at\\s+\\d{2}:\\d{2}:\\d{2}\\s+[AP]M)?.*?current\\s+balance\\s+is\\s+ETB\\s+(?<balance>[\\d,]+\\.\\d{2})",
+      "type": "CREDIT",
+      "description": "Dashen Deposit Credit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "sender": 1,
+        "amount": 2,
+        "account": 3,
+        "date": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "DashenBank",
+      "regex": "withdrawn\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+from\\s+your\\s+account\\s+'(?<account>[\\dXx*]+)'[\\s\\S]*?current\\s+balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Fallback Dashen withdrawal",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "DashenBank",
+      "regex": "transferred\\s+ETB\\s*(?<amount>-?[\\d,.]+)\\s+as\\s+check\\s+payment\\s+to\\s+your\\s+account\\s+'(?<account>[\\dXx*]+)'[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Dashen check payment credit",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "amount": 1,
+        "account": 2,
+        "balance": 3
+      }
+    },
+    {
+      "bankId": 4,
+      "senderId": "DashenBank",
+      "regex": "account\\s+'(?<account>[\\dXx*]+)'\\s+is\\s+(?<direction>credited|debited)\\s+as\\s+reversal\\s+with\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?balance\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Fallback Dashen reversal",
+      "refRequired": false,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "direction": 2,
+        "amount": 3,
+        "balance": 4
+      }
+    },
+    {
+      "bankId": 7,
+      "senderId": "NIB",
+      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Debited\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+)\\s+On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4})\\s+Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Nib Account Debit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "reference": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 7,
+      "senderId": "NIB",
+      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Debited\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+).*?On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4})\\s+Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Nib Account Debit with Charges",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "reference": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 7,
+      "senderId": "NIB",
+      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Debited\\s+with\\s+ETB\\s+-?(?<amount>[\\d,.]+)\\s+On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4}).*?Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "DEBIT",
+      "description": "Nib Account Debit (Telebirr/Service Charge)",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "reference": 4,
+        "balance": 5
+      }
+    },
+    {
+      "bankId": 7,
+      "senderId": "NIB",
+      "regex": "Account\\s+(?<account>[\\d\\*]+)\\s+has\\s+been\\s+Credited\\s+with\\s+ETB\\s+(?<amount>[\\d,.]+)\\s+On\\s+(?<date>\\d{1,2}\\s+[A-Z]{3}\\s+\\d{4}).*?Ref:\\s+(?<reference>[A-Z0-9]+).*?Current\\s+Balance\\s+is\\s+ETB\\s+(?<balance>[\\d,.]+)",
+      "type": "CREDIT",
+      "description": "Nib Account Credit",
+      "refRequired": true,
+      "hasAccount": true,
+      "mapping": {
+        "account": 1,
+        "amount": 2,
+        "date": 3,
+        "reference": 4,
+        "balance": 5
       }
     }
   ]
