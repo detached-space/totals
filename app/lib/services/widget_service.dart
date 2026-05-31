@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:home_widget/home_widget.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/services/budget_widget_data_provider.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_state_service.dart';
+import 'package:totals/theme/app_calendar_option.dart';
 
 class WidgetService {
   static const String appGroupId = 'group.detached.totals.widget';
@@ -17,6 +19,7 @@ class WidgetService {
       'detached.totals.$budgetAndroidWidgetName';
   static const int maxBudgetWidgetBudgets = 3;
 
+  static const String _appCalendarKey = 'app_calendar';
   static const String _budgetWidgetSelectedIdsKey =
       'budget_widget_selected_ids';
   static const String _budgetWidgetSelectedCountKey =
@@ -109,11 +112,17 @@ class WidgetService {
   }
 
   static Future<void> refreshBudgetWidget({
+    String? calendar,
     bool updateRefreshState = true,
   }) async {
     try {
-      final payload = await budgetDataProvider.getWidgetPayload();
-      final selectedIds = await getBudgetWidgetSelectedIds();
+      final resolvedCalendar = await _resolveBudgetWidgetCalendar(calendar);
+      final payload = await budgetDataProvider.getWidgetPayload(
+        calendar: resolvedCalendar,
+      );
+      final selectedIds = await getBudgetWidgetSelectedIds(
+        calendar: resolvedCalendar,
+      );
       final stylesById = await getBudgetWidgetStylePreferences();
       final sanitizedIds = selectedIds
           .where(payload.budgetsById.containsKey)
@@ -125,7 +134,10 @@ class WidgetService {
       );
 
       if (!_sameIds(selectedIds, sanitizedIds)) {
-        await _saveBudgetWidgetSelectedIds(sanitizedIds);
+        await _saveBudgetWidgetSelectedIds(
+          sanitizedIds,
+          calendar: resolvedCalendar,
+        );
       }
 
       await HomeWidget.saveWidgetData<String>(
@@ -276,11 +288,30 @@ class WidgetService {
     await WidgetRefreshStateService.instance.setLastRefreshAt(DateTime.now());
   }
 
-  static Future<List<int>> getBudgetWidgetSelectedIds() async {
+  static Future<List<int>> getBudgetWidgetSelectedIds({
+    String? calendar,
+  }) async {
+    final resolvedCalendar = await _resolveBudgetWidgetCalendar(calendar);
+    final scopedKey = _budgetWidgetSelectedIdsKeyForCalendar(resolvedCalendar);
     final raw = await HomeWidget.getWidgetData<String>(
-      _budgetWidgetSelectedIdsKey,
-      defaultValue: '[]',
+      scopedKey,
     );
+    if (raw != null) return _decodeIntList(raw);
+
+    if (resolvedCalendar == AppCalendarOption.gregorian.storageValue) {
+      final legacyRaw = await HomeWidget.getWidgetData<String>(
+        _budgetWidgetSelectedIdsKey,
+      );
+      final legacyIds = _decodeIntList(legacyRaw);
+      if (legacyRaw != null) {
+        await _saveBudgetWidgetSelectedIds(
+          legacyIds,
+          calendar: resolvedCalendar,
+        );
+      }
+      return legacyIds;
+    }
+
     return _decodeIntList(raw);
   }
 
@@ -302,14 +333,18 @@ class WidgetService {
 
   static Future<BudgetWidgetSelectionResult> addBudgetToWidget(
     int budgetId, {
+    String? calendar,
     BudgetWidgetStylePreference? stylePreference,
   }) async {
-    final selectedIds = await getBudgetWidgetSelectedIds();
+    final resolvedCalendar = await _resolveBudgetWidgetCalendar(calendar);
+    final selectedIds = await getBudgetWidgetSelectedIds(
+      calendar: resolvedCalendar,
+    );
     if (selectedIds.contains(budgetId)) {
       if (stylePreference != null) {
         await _saveBudgetWidgetStylePreference(budgetId, stylePreference);
       }
-      await refreshBudgetWidget();
+      await refreshBudgetWidget(calendar: resolvedCalendar);
       return BudgetWidgetSelectionResult.alreadySelected;
     }
     if (selectedIds.length >= maxBudgetWidgetBudgets) {
@@ -320,18 +355,24 @@ class WidgetService {
       await _saveBudgetWidgetStylePreference(budgetId, stylePreference);
     }
     final nextIds = [...selectedIds, budgetId];
-    await _saveBudgetWidgetSelectedIds(nextIds);
-    await refreshBudgetWidget();
+    await _saveBudgetWidgetSelectedIds(nextIds, calendar: resolvedCalendar);
+    await refreshBudgetWidget(calendar: resolvedCalendar);
     return BudgetWidgetSelectionResult.added;
   }
 
-  static Future<bool> removeBudgetFromWidget(int budgetId) async {
-    final selectedIds = await getBudgetWidgetSelectedIds();
+  static Future<bool> removeBudgetFromWidget(
+    int budgetId, {
+    String? calendar,
+  }) async {
+    final resolvedCalendar = await _resolveBudgetWidgetCalendar(calendar);
+    final selectedIds = await getBudgetWidgetSelectedIds(
+      calendar: resolvedCalendar,
+    );
     if (!selectedIds.contains(budgetId)) return false;
 
     final nextIds = selectedIds.where((id) => id != budgetId).toList();
-    await _saveBudgetWidgetSelectedIds(nextIds);
-    await refreshBudgetWidget();
+    await _saveBudgetWidgetSelectedIds(nextIds, calendar: resolvedCalendar);
+    await refreshBudgetWidget(calendar: resolvedCalendar);
     return true;
   }
 
@@ -364,16 +405,39 @@ class WidgetService {
     return indexedIds.map((entry) => entry.value).toList(growable: false);
   }
 
-  static Future<void> _saveBudgetWidgetSelectedIds(List<int> ids) async {
+  static Future<void> _saveBudgetWidgetSelectedIds(
+    List<int> ids, {
+    String? calendar,
+  }) async {
+    final resolvedCalendar = await _resolveBudgetWidgetCalendar(calendar);
     final sanitized = ids
         .where((id) => id > 0)
         .toSet()
         .take(maxBudgetWidgetBudgets)
         .toList(growable: false);
     await HomeWidget.saveWidgetData<String>(
-      _budgetWidgetSelectedIdsKey,
+      _budgetWidgetSelectedIdsKeyForCalendar(resolvedCalendar),
       jsonEncode(sanitized),
     );
+    if (resolvedCalendar == AppCalendarOption.gregorian.storageValue) {
+      await HomeWidget.saveWidgetData<String>(
+        _budgetWidgetSelectedIdsKey,
+        jsonEncode(sanitized),
+      );
+    }
+  }
+
+  static Future<String> _resolveBudgetWidgetCalendar(String? calendar) async {
+    if (calendar != null) {
+      return AppCalendarOption.fromStorage(calendar).storageValue;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    return AppCalendarOption.fromStorage(prefs.getString(_appCalendarKey))
+        .storageValue;
+  }
+
+  static String _budgetWidgetSelectedIdsKeyForCalendar(String calendar) {
+    return '${_budgetWidgetSelectedIdsKey}_${AppCalendarOption.fromStorage(calendar).storageValue}';
   }
 
   static Future<void> _saveBudgetWidgetStylePreference(

@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 22,
+      version: 23,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -179,7 +179,8 @@ class DatabaseHelper {
         isActive INTEGER NOT NULL DEFAULT 1,
         createdAt TEXT NOT NULL,
         updatedAt TEXT,
-        timeFrame TEXT
+        timeFrame TEXT,
+        calendar TEXT NOT NULL DEFAULT 'gregorian'
       )
     ''');
 
@@ -255,6 +256,7 @@ class DatabaseHelper {
     await db
         .execute('CREATE INDEX idx_budgets_categoryId ON budgets(categoryId)');
     await db.execute('CREATE INDEX idx_budgets_isActive ON budgets(isActive)');
+    await db.execute('CREATE INDEX idx_budgets_calendar ON budgets(calendar)');
     await db
         .execute('CREATE INDEX idx_budgets_startDate ON budgets(startDate)');
     await db
@@ -743,6 +745,17 @@ class DatabaseHelper {
     if (oldVersion < 22) {
       await _ensureAutoCategorizationSchema(db);
     }
+
+    if (oldVersion < 23) {
+      try {
+        await db.execute(
+          "ALTER TABLE budgets ADD COLUMN calendar TEXT NOT NULL DEFAULT 'gregorian'",
+        );
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_budgets_calendar ON budgets(calendar)',
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -967,6 +980,14 @@ class DatabaseHelper {
     if (!names.contains('categoryIds')) {
       await addColumn('ALTER TABLE budgets ADD COLUMN categoryIds TEXT');
     }
+    if (!names.contains('calendar')) {
+      await addColumn(
+        "ALTER TABLE budgets ADD COLUMN calendar TEXT NOT NULL DEFAULT 'gregorian'",
+      );
+    }
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_budgets_calendar ON budgets(calendar)',
+    );
   }
 
   Future<void> _ensureProfileSchema(Database db) async {

@@ -1,5 +1,8 @@
 import 'dart:convert';
 
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/utils/app_calendar_date_utils.dart';
+
 class Budget {
   final int? id;
   final String name;
@@ -14,7 +17,9 @@ class Budget {
   final bool isActive;
   final DateTime createdAt;
   final DateTime? updatedAt;
-  final String? timeFrame; // 'daily', 'monthly', 'yearly', 'never' - for category budgets
+  final String?
+      timeFrame; // 'daily', 'monthly', 'yearly', 'never' - for category budgets
+  final String calendar;
 
   Budget({
     this.id,
@@ -31,6 +36,7 @@ class Budget {
     required this.createdAt,
     this.updatedAt,
     this.timeFrame,
+    this.calendar = 'gregorian',
   });
 
   static List<int>? _decodeCategoryIds(dynamic raw) {
@@ -91,6 +97,7 @@ class Budget {
           ? DateTime.parse(row['updatedAt'] as String)
           : null,
       timeFrame: row['timeFrame'] as String?,
+      calendar: (row['calendar'] as String?) ?? 'gregorian',
     );
   }
 
@@ -152,6 +159,7 @@ class Budget {
       createdAt: parseDate(json['createdAt']) ?? DateTime.now(),
       updatedAt: parseDate(json['updatedAt']),
       timeFrame: json['timeFrame'] as String?,
+      calendar: (json['calendar'] as String?) ?? 'gregorian',
     );
   }
 
@@ -171,6 +179,7 @@ class Budget {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'timeFrame': timeFrame,
+      'calendar': calendar,
     };
   }
 
@@ -181,8 +190,9 @@ class Budget {
       'type': type,
       'amount': amount,
       'categoryId': categoryId,
-      'categoryIds':
-          categoryIds == null || categoryIds!.isEmpty ? null : jsonEncode(categoryIds),
+      'categoryIds': categoryIds == null || categoryIds!.isEmpty
+          ? null
+          : jsonEncode(categoryIds),
       'startDate': startDate.toIso8601String(),
       'endDate': endDate?.toIso8601String(),
       'rollover': rollover ? 1 : 0,
@@ -191,6 +201,7 @@ class Budget {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'timeFrame': timeFrame,
+      'calendar': calendar,
     };
   }
 
@@ -209,6 +220,7 @@ class Budget {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? timeFrame,
+    String? calendar,
   }) {
     return Budget(
       id: id ?? this.id,
@@ -225,6 +237,7 @@ class Budget {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       timeFrame: timeFrame ?? this.timeFrame,
+      calendar: calendar ?? this.calendar,
     );
   }
 
@@ -276,77 +289,39 @@ class Budget {
     return !startsAfterRange && !endsBeforeRange;
   }
 
+  AppCalendarOption get calendarOption =>
+      AppCalendarOption.fromStorage(calendar);
+
+  String get _currentPeriodFrame {
+    if (type != 'category') return type;
+    final frame = timeFrame ?? 'monthly';
+    return frame == 'unlimited' ? 'never' : frame;
+  }
+
   // Helper methods for period calculations
   DateTime getCurrentPeriodStart() {
-    final now = DateTime.now();
-    switch (type) {
-      case 'daily':
-        return DateTime(now.year, now.month, now.day);
-      case 'monthly':
-        return DateTime(now.year, now.month, 1);
-      case 'yearly':
-        return DateTime(now.year, 1, 1);
-      case 'category':
-        // For category budgets, use timeFrame if available, otherwise default to monthly
-        final frame = timeFrame ?? 'monthly';
-        switch (frame) {
-          case 'daily':
-            return DateTime(now.year, now.month, now.day);
-          case 'monthly':
-            return DateTime(now.year, now.month, 1);
-          case 'yearly':
-            return DateTime(now.year, 1, 1);
-          case 'never':
-            // For never, use the startDate of the budget
-            return startDate;
-          default:
-            // Handle legacy 'unlimited' value
-            if (frame == 'unlimited') {
-              return startDate;
-            }
-            return DateTime(now.year, now.month, 1);
-        }
-      default:
-        return DateTime(now.year, now.month, 1);
+    final frame = _currentPeriodFrame;
+    if (frame == 'never') {
+      return startDate;
     }
+    return AppCalendarDateUtils.periodStart(
+      DateTime.now(),
+      frame,
+      calendar: calendarOption,
+    );
   }
 
   DateTime getCurrentPeriodEnd() {
     final start = getCurrentPeriodStart();
-    switch (type) {
-      case 'daily':
-        return DateTime(start.year, start.month, start.day, 23, 59, 59);
-      case 'monthly':
-        final nextMonth = DateTime(start.year, start.month + 1, 1);
-        return nextMonth.subtract(const Duration(seconds: 1));
-      case 'yearly':
-        return DateTime(start.year, 12, 31, 23, 59, 59);
-      case 'category':
-        // For category budgets, use timeFrame if available, otherwise default to monthly
-        final frame = timeFrame ?? 'monthly';
-        switch (frame) {
-          case 'daily':
-            return DateTime(start.year, start.month, start.day, 23, 59, 59);
-          case 'monthly':
-            final nextMonth = DateTime(start.year, start.month + 1, 1);
-            return nextMonth.subtract(const Duration(seconds: 1));
-          case 'yearly':
-            return DateTime(start.year, 12, 31, 23, 59, 59);
-          case 'never':
-            // For never, use endDate if set, otherwise return a far future date
-            return endDate ?? DateTime(2100, 12, 31, 23, 59, 59);
-          default:
-            // Handle legacy 'unlimited' value
-            if (frame == 'unlimited') {
-              return endDate ?? DateTime(2100, 12, 31, 23, 59, 59);
-            }
-            final nextMonth = DateTime(start.year, start.month + 1, 1);
-            return nextMonth.subtract(const Duration(seconds: 1));
-        }
-      default:
-        final nextMonth = DateTime(start.year, start.month + 1, 1);
-        return nextMonth.subtract(const Duration(seconds: 1));
+    final frame = _currentPeriodFrame;
+    if (frame == 'never') {
+      return endDate ?? DateTime(2100, 12, 31, 23, 59, 59);
     }
+    return AppCalendarDateUtils.periodEndInclusive(
+      start,
+      frame,
+      calendar: calendarOption,
+    );
   }
 
   bool isDateInCurrentPeriod(DateTime date) {

@@ -1,55 +1,90 @@
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/budget.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/utils/app_calendar_date_utils.dart';
 
 class BudgetRepository {
-  Future<List<Budget>> getAllBudgets() async {
+  String? _normalizeCalendar(String? calendar) {
+    final value = calendar?.trim();
+    if (value == null || value.isEmpty) return null;
+    return AppCalendarOption.fromStorage(value).storageValue;
+  }
+
+  Future<List<Budget>> getAllBudgets({String? calendar}) async {
     final db = await DatabaseHelper.instance.database;
+    final normalizedCalendar = _normalizeCalendar(calendar);
     final List<Map<String, dynamic>> maps = await db.query(
       'budgets',
+      where: normalizedCalendar == null ? null : 'calendar = ?',
+      whereArgs: normalizedCalendar == null ? null : [normalizedCalendar],
       orderBy: 'createdAt DESC',
     );
 
     return maps.map<Budget>((map) => Budget.fromDb(map)).toList();
   }
 
-  Future<List<Budget>> getActiveBudgets() async {
+  Future<List<Budget>> getActiveBudgets({String? calendar}) async {
     final db = await DatabaseHelper.instance.database;
+    final normalizedCalendar = _normalizeCalendar(calendar);
+    final where = <String>['isActive = ?'];
+    final whereArgs = <Object?>[1];
+    if (normalizedCalendar != null) {
+      where.add('calendar = ?');
+      whereArgs.add(normalizedCalendar);
+    }
     final List<Map<String, dynamic>> maps = await db.query(
       'budgets',
-      where: 'isActive = ?',
-      whereArgs: [1],
+      where: where.join(' AND '),
+      whereArgs: whereArgs,
       orderBy: 'createdAt DESC',
     );
 
     return maps.map<Budget>((map) => Budget.fromDb(map)).toList();
   }
 
-  Future<List<Budget>> getBudgetsByType(String type) async {
+  Future<List<Budget>> getBudgetsByType(String type, {String? calendar}) async {
     final db = await DatabaseHelper.instance.database;
+    final normalizedCalendar = _normalizeCalendar(calendar);
+    final where = <String>['type = ?', 'isActive = ?'];
+    final whereArgs = <Object?>[type, 1];
+    if (normalizedCalendar != null) {
+      where.add('calendar = ?');
+      whereArgs.add(normalizedCalendar);
+    }
     final List<Map<String, dynamic>> maps = await db.query(
       'budgets',
-      where: 'type = ? AND isActive = ?',
-      whereArgs: [type, 1],
+      where: where.join(' AND '),
+      whereArgs: whereArgs,
       orderBy: 'createdAt DESC',
     );
 
     return maps.map<Budget>((map) => Budget.fromDb(map)).toList();
   }
 
-  Future<List<Budget>> getCategoryBudgets() async {
+  Future<List<Budget>> getCategoryBudgets({String? calendar}) async {
     final db = await DatabaseHelper.instance.database;
+    final normalizedCalendar = _normalizeCalendar(calendar);
+    final where = <String>['type = ?', 'isActive = ?'];
+    final whereArgs = <Object?>['category', 1];
+    if (normalizedCalendar != null) {
+      where.add('calendar = ?');
+      whereArgs.add(normalizedCalendar);
+    }
     final List<Map<String, dynamic>> maps = await db.query(
       'budgets',
-      where: 'type = ? AND isActive = ?',
-      whereArgs: ['category', 1],
+      where: where.join(' AND '),
+      whereArgs: whereArgs,
       orderBy: 'createdAt DESC',
     );
 
     return maps.map<Budget>((map) => Budget.fromDb(map)).toList();
   }
 
-  Future<List<Budget>> getBudgetsByCategory(int categoryId) async {
-    final budgets = await getActiveBudgets();
+  Future<List<Budget>> getBudgetsByCategory(
+    int categoryId, {
+    String? calendar,
+  }) async {
+    final budgets = await getActiveBudgets(calendar: calendar);
     return budgets.where((b) => b.includesCategory(categoryId)).toList();
   }
 
@@ -99,8 +134,15 @@ class BudgetRepository {
     }
 
     final db = await DatabaseHelper.instance.database;
-    final monthStart = DateTime(month.year, month.month, 1);
-    final nextMonthStart = DateTime(month.year, month.month + 1, 1);
+    final calendar = AppCalendarOption.fromStorage(editedBudget.calendar);
+    final monthStart = AppCalendarDateUtils.monthStart(
+      month,
+      calendar: calendar,
+    );
+    final nextMonthStart = AppCalendarDateUtils.nextMonthStart(
+      month,
+      calendar: calendar,
+    );
     final monthEnd = nextMonthStart.subtract(const Duration(seconds: 1));
     final originalEnd = originalBudget.endDate;
     final hadPastSegment = originalBudget.startDate.isBefore(monthStart);
@@ -182,8 +224,15 @@ class BudgetRepository {
     }
 
     final db = await DatabaseHelper.instance.database;
-    final monthStart = DateTime(month.year, month.month, 1);
-    final nextMonthStart = DateTime(month.year, month.month + 1, 1);
+    final calendar = AppCalendarOption.fromStorage(originalBudget.calendar);
+    final monthStart = AppCalendarDateUtils.monthStart(
+      month,
+      calendar: calendar,
+    );
+    final nextMonthStart = AppCalendarDateUtils.nextMonthStart(
+      month,
+      calendar: calendar,
+    );
     final monthEnd = nextMonthStart.subtract(const Duration(seconds: 1));
     final originalEnd = originalBudget.endDate;
     final hadPastSegment = originalBudget.startDate.isBefore(monthStart);
@@ -311,43 +360,89 @@ class BudgetRepository {
   }
 
   // Get active budgets for current period
-  Future<List<Budget>> getActiveBudgetsForCurrentPeriod(String type) async {
+  Future<List<Budget>> getActiveBudgetsForCurrentPeriod(
+    String type, {
+    String? calendar,
+  }) async {
     final now = DateTime.now();
     final db = await DatabaseHelper.instance.database;
+    final normalizedCalendar = _normalizeCalendar(calendar);
+    final calendarOption = AppCalendarOption.fromStorage(normalizedCalendar);
 
     DateTime periodStart;
     DateTime periodEnd;
 
     switch (type) {
       case 'daily':
-        periodStart = DateTime(now.year, now.month, now.day);
-        periodEnd = DateTime(now.year, now.month, now.day, 23, 59, 59);
+        periodStart = AppCalendarDateUtils.periodStart(
+          now,
+          'daily',
+          calendar: calendarOption,
+        );
+        periodEnd = AppCalendarDateUtils.periodEndInclusive(
+          periodStart,
+          'daily',
+          calendar: calendarOption,
+        );
         break;
       case 'monthly':
-        periodStart = DateTime(now.year, now.month, 1);
-        final nextMonth = DateTime(now.year, now.month + 1, 1);
-        periodEnd = nextMonth.subtract(const Duration(seconds: 1));
+        periodStart = AppCalendarDateUtils.periodStart(
+          now,
+          'monthly',
+          calendar: calendarOption,
+        );
+        periodEnd = AppCalendarDateUtils.periodEndInclusive(
+          periodStart,
+          'monthly',
+          calendar: calendarOption,
+        );
         break;
       case 'yearly':
-        periodStart = DateTime(now.year, 1, 1);
-        periodEnd = DateTime(now.year, 12, 31, 23, 59, 59);
+        periodStart = AppCalendarDateUtils.periodStart(
+          now,
+          'yearly',
+          calendar: calendarOption,
+        );
+        periodEnd = AppCalendarDateUtils.periodEndInclusive(
+          periodStart,
+          'yearly',
+          calendar: calendarOption,
+        );
         break;
       default:
-        periodStart = DateTime(now.year, now.month, 1);
-        final nextMonth = DateTime(now.year, now.month + 1, 1);
-        periodEnd = nextMonth.subtract(const Duration(seconds: 1));
+        periodStart = AppCalendarDateUtils.periodStart(
+          now,
+          'monthly',
+          calendar: calendarOption,
+        );
+        periodEnd = AppCalendarDateUtils.periodEndInclusive(
+          periodStart,
+          'monthly',
+          calendar: calendarOption,
+        );
+    }
+
+    final where = <String>[
+      'type = ?',
+      'isActive = ?',
+      'startDate <= ?',
+      '(endDate IS NULL OR endDate >= ?)',
+    ];
+    final whereArgs = <Object?>[
+      type,
+      1,
+      periodEnd.toIso8601String(),
+      periodStart.toIso8601String(),
+    ];
+    if (normalizedCalendar != null) {
+      where.add('calendar = ?');
+      whereArgs.add(normalizedCalendar);
     }
 
     final List<Map<String, dynamic>> maps = await db.query(
       'budgets',
-      where:
-          'type = ? AND isActive = ? AND startDate <= ? AND (endDate IS NULL OR endDate >= ?)',
-      whereArgs: [
-        type,
-        1,
-        periodEnd.toIso8601String(),
-        periodStart.toIso8601String(),
-      ],
+      where: where.join(' AND '),
+      whereArgs: whereArgs,
       orderBy: 'createdAt DESC',
     );
 

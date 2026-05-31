@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/theme/app_font_option.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
+import 'package:totals/services/widget_service.dart';
 
 class ThemeProvider extends ChangeNotifier {
   static const String _themeKey = 'theme_mode';
@@ -188,6 +189,7 @@ class ThemeProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_appLanguageKey, language.storageValue);
     await prefs.setString(_appCalendarKey, _appCalendar.storageValue);
+    await _refreshBudgetWidgetForCalendar();
   }
 
   Future<void> _loadAppCalendar() async {
@@ -205,6 +207,7 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_appCalendarKey, calendar.storageValue);
+    await _refreshBudgetWidgetForCalendar();
   }
 
   Future<void> setZoomedOut(bool value) async {
@@ -278,5 +281,13 @@ class ThemeProvider extends ChangeNotifier {
     final safeIndex = currentIndex < 0 ? 0 : currentIndex;
     final nextIndex = (safeIndex + 1) % _themeCycleOrder.length;
     setThemeMode(_themeCycleOrder[nextIndex]);
+  }
+
+  Future<void> _refreshBudgetWidgetForCalendar() async {
+    try {
+      await WidgetService.refreshBudgetWidget(
+        calendar: _appCalendar.storageValue,
+      );
+    } catch (_) {}
   }
 }

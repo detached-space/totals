@@ -69,8 +69,10 @@ class BudgetService {
   }
 
   // Get all active budgets with their status
-  Future<List<BudgetStatus>> getAllBudgetStatuses() async {
-    final budgets = await _budgetRepository.getActiveBudgets();
+  Future<List<BudgetStatus>> getAllBudgetStatuses({String? calendar}) async {
+    final budgets = await _budgetRepository.getActiveBudgets(
+      calendar: calendar,
+    );
     final statuses = <BudgetStatus>[];
 
     for (final budget in budgets) {
@@ -82,8 +84,14 @@ class BudgetService {
   }
 
   // Get budgets by type with status
-  Future<List<BudgetStatus>> getBudgetStatusesByType(String type) async {
-    final budgets = await _budgetRepository.getBudgetsByType(type);
+  Future<List<BudgetStatus>> getBudgetStatusesByType(
+    String type, {
+    String? calendar,
+  }) async {
+    final budgets = await _budgetRepository.getBudgetsByType(
+      type,
+      calendar: calendar,
+    );
     final statuses = <BudgetStatus>[];
 
     for (final budget in budgets) {
@@ -95,8 +103,12 @@ class BudgetService {
   }
 
   // Get category budgets with status
-  Future<List<BudgetStatus>> getCategoryBudgetStatuses() async {
-    final budgets = await _budgetRepository.getCategoryBudgets();
+  Future<List<BudgetStatus>> getCategoryBudgetStatuses({
+    String? calendar,
+  }) async {
+    final budgets = await _budgetRepository.getCategoryBudgets(
+      calendar: calendar,
+    );
     final statuses = <BudgetStatus>[];
 
     for (final budget in budgets) {
@@ -108,8 +120,14 @@ class BudgetService {
   }
 
   // Get budgets by category ID
-  Future<List<Budget>> getBudgetsByCategory(int categoryId) async {
-    return await _budgetRepository.getBudgetsByCategory(categoryId);
+  Future<List<Budget>> getBudgetsByCategory(
+    int categoryId, {
+    String? calendar,
+  }) async {
+    return await _budgetRepository.getBudgetsByCategory(
+      categoryId,
+      calendar: calendar,
+    );
   }
 
   // Check if budget is exceeded or approaching limit

@@ -12,8 +12,11 @@ import 'package:totals/models/budget.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/budget_provider.dart';
+import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/widget_service.dart';
+import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/utils/app_calendar_date_utils.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -244,7 +247,8 @@ class RedesignBudgetPage extends StatefulWidget {
 }
 
 class RedesignBudgetPageState extends State<RedesignBudgetPage> {
-  DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  DateTime _selectedMonth = DateTime.now();
+  AppCalendarOption? _loadedBudgetCalendar;
   Budget? _detailBudget;
   bool _needsExpanded = true;
   bool _wantsExpanded = true;
@@ -265,13 +269,29 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
       final bp = Provider.of<BudgetProvider>(context, listen: false);
       final tp = Provider.of<TransactionProvider>(context, listen: false);
       bp.setTransactionProvider(tp);
-      bp.loadBudgets();
       _loadBudgetWidgetState();
     });
   }
 
-  Future<void> _loadBudgetWidgetState() async {
-    final selectedIds = await WidgetService.getBudgetWidgetSelectedIds();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final calendar = Provider.of<ThemeProvider>(context).appCalendar;
+    if (_loadedBudgetCalendar == calendar) return;
+    _loadedBudgetCalendar = calendar;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bp = Provider.of<BudgetProvider>(context, listen: false);
+      bp.loadBudgets(calendar: calendar.storageValue);
+      _loadBudgetWidgetState(calendar: calendar);
+    });
+  }
+
+  Future<void> _loadBudgetWidgetState({AppCalendarOption? calendar}) async {
+    final resolvedCalendar = calendar ?? _activeCalendar;
+    final selectedIds = await WidgetService.getBudgetWidgetSelectedIds(
+      calendar: resolvedCalendar.storageValue,
+    );
     final stylesById = await WidgetService.getBudgetWidgetStylePreferences();
     if (!mounted) return;
     setState(() {
@@ -369,6 +389,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     try {
       await WidgetService.addBudgetToWidget(
         budgetId,
+        calendar: _activeCalendar.storageValue,
         stylePreference: preference,
       );
       await _loadBudgetWidgetState();
@@ -386,10 +407,16 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
 
   // ── Month helpers ───────────────────────────────────────────────────────
 
-  DateTime get _monthStart =>
-      DateTime(_selectedMonth.year, _selectedMonth.month);
-  DateTime get _monthEnd =>
-      DateTime(_selectedMonth.year, _selectedMonth.month + 1);
+  AppCalendarOption get _activeCalendar => AppDateFormat.calendarOf(context);
+
+  DateTime get _monthStart => AppCalendarDateUtils.monthStart(
+        _selectedMonth,
+        calendar: _activeCalendar,
+      );
+  DateTime get _monthEnd => AppCalendarDateUtils.nextMonthStart(
+        _selectedMonth,
+        calendar: _activeCalendar,
+      );
   DateTime get _monthEndInclusive =>
       _monthEnd.subtract(const Duration(milliseconds: 1));
 
@@ -398,13 +425,19 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
   }
 
   void _prevMonth() => setState(() {
-        _selectedMonth =
-            DateTime(_selectedMonth.year, _selectedMonth.month - 1);
+        _selectedMonth = AppCalendarDateUtils.shiftMonth(
+          _selectedMonth,
+          -1,
+          calendar: _activeCalendar,
+        );
       });
 
   void _nextMonth() => setState(() {
-        _selectedMonth =
-            DateTime(_selectedMonth.year, _selectedMonth.month + 1);
+        _selectedMonth = AppCalendarDateUtils.shiftMonth(
+          _selectedMonth,
+          1,
+          calendar: _activeCalendar,
+        );
       });
 
   // ── Spending computation ────────────────────────────────────────────────
@@ -458,6 +491,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     return Consumer2<BudgetProvider, TransactionProvider>(
       builder: (context, budgetProvider, transactionProvider, _) {
         final budgets = budgetProvider.budgets
+            .where((budget) => budget.calendar == _activeCalendar.storageValue)
             .where(_isBudgetVisibleInSelectedMonth)
             .toList();
         final debits = _monthDebits(transactionProvider);
@@ -539,7 +573,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
 
     return RefreshIndicator(
       color: AppColors.primaryLight,
-      onRefresh: bp.loadBudgets,
+      onRefresh: () => bp.loadBudgets(calendar: _activeCalendar.storageValue),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 96),
@@ -622,6 +656,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                 MaterialPageRoute(
                   builder: (_) => _UnbudgetedTransactionsPage(
                     selectedMonth: _selectedMonth,
+                    calendar: _activeCalendar,
                     budgetedCategoryIds: budgetedCatIds,
                   ),
                 ),
@@ -800,8 +835,9 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
         budgetProvider: bp,
         transactionProvider: tp,
         selectedMonth: _selectedMonth,
+        calendar: _activeCalendar,
       ),
-    ).whenComplete(_loadBudgetWidgetState);
+    ).whenComplete(() => _loadBudgetWidgetState());
   }
 
   void _openEditBudgetForm(
@@ -814,9 +850,10 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
         budgetProvider: bp,
         transactionProvider: tp,
         selectedMonth: _selectedMonth,
+        calendar: _activeCalendar,
         existing: budget,
       ),
-    ).whenComplete(_loadBudgetWidgetState);
+    ).whenComplete(() => _loadBudgetWidgetState());
   }
 }
 
@@ -1328,10 +1365,12 @@ class _UnbudgetedSpendingCard extends StatelessWidget {
 
 class _UnbudgetedTransactionsPage extends StatelessWidget {
   final DateTime selectedMonth;
+  final AppCalendarOption calendar;
   final Set<int> budgetedCategoryIds;
 
   const _UnbudgetedTransactionsPage({
     required this.selectedMonth,
+    required this.calendar,
     required this.budgetedCategoryIds,
   });
 
@@ -1358,9 +1397,14 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
       ),
       body: Consumer<TransactionProvider>(
         builder: (context, provider, _) {
-          final monthStart = DateTime(selectedMonth.year, selectedMonth.month);
-          final monthEnd =
-              DateTime(selectedMonth.year, selectedMonth.month + 1);
+          final monthStart = AppCalendarDateUtils.monthStart(
+            selectedMonth,
+            calendar: calendar,
+          );
+          final monthEnd = AppCalendarDateUtils.nextMonthStart(
+            selectedMonth,
+            calendar: calendar,
+          );
           final transactions = provider.allTransactions.where((t) {
             if (t.type != 'DEBIT') return false;
             if (t.time == null) return false;
@@ -1666,12 +1710,14 @@ class _NewBudgetFormSheet extends StatefulWidget {
   final BudgetProvider budgetProvider;
   final TransactionProvider transactionProvider;
   final DateTime selectedMonth;
+  final AppCalendarOption calendar;
   final Budget? existing;
 
   const _NewBudgetFormSheet({
     required this.budgetProvider,
     required this.transactionProvider,
     required this.selectedMonth,
+    required this.calendar,
     this.existing,
   });
 
@@ -1707,12 +1753,13 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
   String _selectedWidgetColorKey = 'mint';
 
   bool get _isEdit => widget.existing != null;
-  DateTime get _selectedMonthStart =>
-      DateTime(widget.selectedMonth.year, widget.selectedMonth.month, 1);
-  DateTime get _selectedMonthEnd => DateTime(
-        widget.selectedMonth.year,
-        widget.selectedMonth.month + 1,
-        1,
+  DateTime get _selectedMonthStart => AppCalendarDateUtils.monthStart(
+        widget.selectedMonth,
+        calendar: widget.calendar,
+      );
+  DateTime get _selectedMonthEnd => AppCalendarDateUtils.nextMonthStart(
+        widget.selectedMonth,
+        calendar: widget.calendar,
       ).subtract(const Duration(seconds: 1));
   bool get _hasFutureBudgetsToUpdate {
     final existing = widget.existing;
@@ -1930,7 +1977,9 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
   }
 
   Future<void> _loadHomescreenWidgetState() async {
-    final selectedIds = await WidgetService.getBudgetWidgetSelectedIds();
+    final selectedIds = await WidgetService.getBudgetWidgetSelectedIds(
+      calendar: widget.calendar.storageValue,
+    );
     final existingBudgetId = _existingBudgetId;
     final stylePreference = existingBudgetId == null
         ? null
@@ -1961,12 +2010,18 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
 
     if (!_showOnHomescreenWidget) {
       if (savedBudgetId != null) {
-        await WidgetService.removeBudgetFromWidget(savedBudgetId);
+        await WidgetService.removeBudgetFromWidget(
+          savedBudgetId,
+          calendar: widget.calendar.storageValue,
+        );
       }
       if (originallySelected &&
           originalBudgetId != null &&
           originalBudgetId != savedBudgetId) {
-        await WidgetService.removeBudgetFromWidget(originalBudgetId);
+        await WidgetService.removeBudgetFromWidget(
+          originalBudgetId,
+          calendar: widget.calendar.storageValue,
+        );
       }
       return null;
     }
@@ -1978,11 +2033,15 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
     if (originallySelected &&
         originalBudgetId != null &&
         originalBudgetId != savedBudgetId) {
-      await WidgetService.removeBudgetFromWidget(originalBudgetId);
+      await WidgetService.removeBudgetFromWidget(
+        originalBudgetId,
+        calendar: widget.calendar.storageValue,
+      );
     }
 
     final addResult = await WidgetService.addBudgetToWidget(
       savedBudgetId,
+      calendar: widget.calendar.storageValue,
       stylePreference: BudgetWidgetStylePreference(
         iconKey: _selectedWidgetIconKey,
         colorKey: _selectedWidgetColorKey,
@@ -3042,6 +3101,7 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
       createdAt: widget.existing?.createdAt ?? now,
       updatedAt: now,
       timeFrame: isCategory ? _selectedPeriod : null,
+      calendar: widget.calendar.storageValue,
     );
 
     try {

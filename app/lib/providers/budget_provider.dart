@@ -5,6 +5,7 @@ import 'package:totals/services/budget_service.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/theme/app_calendar_option.dart';
 
 export 'package:totals/services/budget_service.dart' show BudgetStatus;
 
@@ -17,23 +18,32 @@ class BudgetProvider with ChangeNotifier {
   List<Budget> _budgets = [];
   List<BudgetStatus> _budgetStatuses = [];
   bool _isLoading = false;
+  String _calendar = AppCalendarOption.gregorian.storageValue;
 
   // Getters
   List<Budget> get budgets => _budgets;
   List<BudgetStatus> get budgetStatuses => _budgetStatuses;
   bool get isLoading => _isLoading;
+  String get calendar => _calendar;
 
   // Set transaction provider for integration
   void setTransactionProvider(TransactionProvider provider) {
     _transactionProvider = provider;
   }
 
-  Future<void> loadBudgets() async {
+  String _normalizeCalendar(String? calendar) {
+    return AppCalendarOption.fromStorage(calendar).storageValue;
+  }
+
+  Future<void> loadBudgets({String? calendar}) async {
+    if (calendar != null) {
+      _calendar = _normalizeCalendar(calendar);
+    }
     _isLoading = true;
     notifyListeners();
 
     try {
-      _budgets = await _budgetRepository.getActiveBudgets();
+      _budgets = await _budgetRepository.getActiveBudgets(calendar: _calendar);
       await _refreshBudgetStatuses();
       await _refreshBudgetWidgetSafe();
     } catch (e) {
@@ -45,14 +55,17 @@ class BudgetProvider with ChangeNotifier {
   }
 
   Future<void> _refreshBudgetStatuses() async {
-    _budgetStatuses = await _budgetService.getAllBudgetStatuses();
+    _budgetStatuses = await _budgetService.getAllBudgetStatuses(
+      calendar: _calendar,
+    );
   }
 
   Future<Budget> createBudget(Budget budget) async {
     try {
-      final id = await _budgetRepository.insertBudget(budget);
+      final scopedBudget = budget.copyWith(calendar: _calendar);
+      final id = await _budgetRepository.insertBudget(scopedBudget);
       // Get the created budget with its ID
-      final createdBudget = budget.copyWith(id: id);
+      final createdBudget = scopedBudget.copyWith(id: id);
       await loadBudgets();
       notifyListeners();
       // Check and send notifications for the specific budget that was created
@@ -70,16 +83,17 @@ class BudgetProvider with ChangeNotifier {
 
   Future<Budget> updateBudget(Budget budget) async {
     try {
-      await _budgetRepository.updateBudget(budget);
+      final scopedBudget = budget.copyWith(calendar: _calendar);
+      await _budgetRepository.updateBudget(scopedBudget);
       await loadBudgets();
       notifyListeners();
       // Check and send notifications for the specific budget that was updated
       try {
-        await _budgetAlertService.checkAndNotifyBudgetAlert(budget);
+        await _budgetAlertService.checkAndNotifyBudgetAlert(scopedBudget);
       } catch (e) {
         print("debug: Error checking budget alerts after updating budget: $e");
       }
-      return budget;
+      return scopedBudget;
     } catch (e) {
       print("debug: Error updating budget: $e");
       rethrow;
@@ -93,15 +107,16 @@ class BudgetProvider with ChangeNotifier {
     bool keepFutureSegment = true,
   }) async {
     try {
+      final scopedEditedBudget = editedBudget.copyWith(calendar: _calendar);
       final editedBudgetId = await _budgetRepository.updateBudgetForMonthOnly(
         originalBudget: originalBudget,
-        editedBudget: editedBudget,
+        editedBudget: scopedEditedBudget,
         month: month,
         keepFutureSegment: keepFutureSegment,
       );
       await loadBudgets();
       notifyListeners();
-      return editedBudget.copyWith(id: editedBudgetId);
+      return scopedEditedBudget.copyWith(id: editedBudgetId);
     } catch (e) {
       print("debug: Error updating budget for month only: $e");
       rethrow;
@@ -161,11 +176,14 @@ class BudgetProvider with ChangeNotifier {
   }
 
   Future<List<BudgetStatus>> getBudgetsByType(String type) async {
-    return await _budgetService.getBudgetStatusesByType(type);
+    return await _budgetService.getBudgetStatusesByType(
+      type,
+      calendar: _calendar,
+    );
   }
 
   Future<List<BudgetStatus>> getCategoryBudgets() async {
-    return await _budgetService.getCategoryBudgetStatuses();
+    return await _budgetService.getCategoryBudgetStatuses(calendar: _calendar);
   }
 
   Future<BudgetStatus?> getBudgetStatus(int budgetId) async {
@@ -190,7 +208,10 @@ class BudgetProvider with ChangeNotifier {
 
   // Get overall budget status for a type
   Future<BudgetStatus?> getOverallBudgetStatus(String type) async {
-    final budgets = await _budgetRepository.getBudgetsByType(type);
+    final budgets = await _budgetRepository.getBudgetsByType(
+      type,
+      calendar: _calendar,
+    );
     if (budgets.isEmpty) return null;
 
     // For overall budgets, we might have only one active budget per type
@@ -201,7 +222,7 @@ class BudgetProvider with ChangeNotifier {
 
   Future<void> _refreshBudgetWidgetSafe() async {
     try {
-      await WidgetService.refreshBudgetWidget();
+      await WidgetService.refreshBudgetWidget(calendar: _calendar);
     } catch (e) {
       print("debug: Error refreshing budget widget: $e");
     }

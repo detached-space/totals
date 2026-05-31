@@ -23,7 +23,7 @@ import 'package:totals/utils/transaction_duplicate_detector.dart';
 const int _dashenBankId = 4;
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 5;
+  static const int currentSchemaVersion = 6;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -368,7 +368,8 @@ class DataExportImportService {
           final rollover = budget.rollover ? '1' : '0';
           final isActive = budget.isActive ? '1' : '0';
           final timeFrame = (budget.timeFrame ?? '').trim().toLowerCase();
-          return '$name|$type|$amount|$category|$start|$end|$rollover|$threshold|$isActive|$timeFrame';
+          final calendar = budget.calendar.trim().toLowerCase();
+          return '$name|$type|$amount|$category|$start|$end|$rollover|$threshold|$isActive|$timeFrame|$calendar';
         }
 
         final existingBudgets = await _budgetRepo.getAllBudgets();
