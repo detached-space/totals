@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -114,8 +115,25 @@ class EnginePendingPayload {
   }
 }
 
+class _EngineResponse {
+  final int statusCode;
+  final String bodyText;
+  final Map<String, dynamic> decoded;
+
+  const _EngineResponse({
+    required this.statusCode,
+    required this.bodyText,
+    required this.decoded,
+  });
+}
+
 class TotalsEngineClient {
   static const _defaultBaseUrl = 'https://engine-staging.totals.detached.space';
+  static const _requestTimeout = Duration(seconds: 12);
+  static const _retryDelays = [
+    Duration(milliseconds: 450),
+    Duration(milliseconds: 1200),
+  ];
 
   final SharedExpenseCryptoService _cryptoService;
   final http.Client _client;
@@ -214,7 +232,20 @@ class TotalsEngineClient {
 
   Future<bool> isReachable() async {
     try {
-      final response = await _client.get(_uri('/health'));
+      final response = await _retryTransient(
+        label: 'health',
+        request: () => _client.get(_uri('/health')).timeout(_requestTimeout),
+        shouldRetryResult: (response) {
+          final shouldRetry = _isRetryableStatus(response.statusCode);
+          if (shouldRetry) {
+            _engineLog(
+              'health retryable status=${response.statusCode} '
+              'body=${_logBody(response.body)}',
+            );
+          }
+          return shouldRetry;
+        },
+      );
       final reachable = response.statusCode >= 200 && response.statusCode < 300;
       _engineLog(
           'isReachable status=${response.statusCode} reachable=$reachable');
@@ -236,37 +267,53 @@ class TotalsEngineClient {
     _engineLog(
       '$method $path -> $uri bodyKeys=${body?.keys.join(',') ?? '-'}',
     );
-    late http.StreamedResponse response;
-    try {
-      response = await _client.send(
-        http.Request(method, uri)
-          ..headers.addAll(headers)
-          ..body = body == null ? '' : jsonEncode(body),
-      );
-    } catch (error, stackTrace) {
-      _engineLog('$method $path network failed: $error');
-      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
-      rethrow;
-    }
-    final bodyText = await response.stream.bytesToString();
-    final decoded = _decodeBody(bodyText);
-    _engineLog(
-      '$method $path <- ${response.statusCode} bytes=${bodyText.length}',
-    );
+    final response = method == 'GET'
+        ? await _retryTransient(
+            label: '$method $path',
+            request: () =>
+                _sendAuthenticatedRequest(method, uri, headers, body),
+            shouldRetryResult: (response) {
+              final shouldRetry = _isRetryableStatus(response.statusCode);
+              if (shouldRetry) {
+                _engineLog(
+                  '$method $path retryable status=${response.statusCode} '
+                  'body=${_logBody(response.bodyText)}',
+                );
+              }
+              return shouldRetry;
+            },
+          )
+        : await _sendAuthenticatedRequest(method, uri, headers, body);
+
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      _engineLog('$method $path errorBody=${_logBody(bodyText)}');
+      _engineLog('$method $path errorBody=${_logBody(response.bodyText)}');
       throw TotalsEngineException(
-        _errorMessage(decoded) ?? 'Totals Engine request failed.',
+        _errorMessage(response.decoded) ?? 'Totals Engine request failed.',
         statusCode: response.statusCode,
       );
     }
-    return decoded;
+    return response.decoded;
   }
 
   Future<Map<String, String>> _authHeaders() async {
     final identity = await _cryptoService.getOrCreateIdentity();
     _engineLog('requesting challenge key=${_logId(identity.publicKeyHex)}');
-    final challengeResponse = await _client.post(_uri('/auth/challenge'));
+    final challengeResponse = await _retryTransient(
+      label: 'challenge',
+      request: () => _client.post(_uri('/auth/challenge')).timeout(
+            _requestTimeout,
+          ),
+      shouldRetryResult: (response) {
+        final shouldRetry = _isRetryableStatus(response.statusCode);
+        if (shouldRetry) {
+          _engineLog(
+            'challenge retryable status=${response.statusCode} '
+            'body=${_logBody(response.body)}',
+          );
+        }
+        return shouldRetry;
+      },
+    );
     final decoded = _decodeBody(challengeResponse.body);
     _engineLog(
       'challenge <- ${challengeResponse.statusCode} bytes=${challengeResponse.body.length}',
@@ -296,6 +343,96 @@ class TotalsEngineClient {
       'X-Signature': signature,
       'Content-Type': 'application/json',
     };
+  }
+
+  Future<_EngineResponse> _sendAuthenticatedRequest(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+    Map<String, dynamic>? body,
+  ) async {
+    try {
+      final response = await _client
+          .send(
+            http.Request(method, uri)
+              ..headers.addAll(headers)
+              ..body = body == null ? '' : jsonEncode(body),
+          )
+          .timeout(_requestTimeout);
+      final bodyText = await response.stream.bytesToString();
+      final decoded = _decodeBody(bodyText);
+      _engineLog(
+        '$method ${uri.path} <- ${response.statusCode} bytes=${bodyText.length}',
+      );
+      return _EngineResponse(
+        statusCode: response.statusCode,
+        bodyText: bodyText,
+        decoded: decoded,
+      );
+    } catch (error, stackTrace) {
+      _engineLog('$method ${uri.path} network failed: $error');
+      if (kDebugMode && !_isRetryableNetworkError(error)) {
+        debugPrintStack(stackTrace: stackTrace);
+      }
+      rethrow;
+    }
+  }
+
+  Future<T> _retryTransient<T>({
+    required String label,
+    required Future<T> Function() request,
+    bool Function(T result)? shouldRetryResult,
+  }) async {
+    for (var attempt = 0; attempt <= _retryDelays.length; attempt++) {
+      try {
+        final result = await request();
+        final shouldRetry = shouldRetryResult?.call(result) ?? false;
+        if (!shouldRetry || attempt == _retryDelays.length) return result;
+
+        await _waitBeforeRetry(label, attempt);
+      } catch (error) {
+        if (attempt == _retryDelays.length ||
+            !_isRetryableNetworkError(error)) {
+          rethrow;
+        }
+        _engineLog('$label transient network failure: $error');
+        await _waitBeforeRetry(label, attempt);
+      }
+    }
+
+    throw StateError('Retry loop exited unexpectedly.');
+  }
+
+  Future<void> _waitBeforeRetry(String label, int attempt) async {
+    final delay = _retryDelays[attempt];
+    _engineLog(
+      '$label retrying in ${delay.inMilliseconds}ms '
+      '(attempt ${attempt + 2}/${_retryDelays.length + 1})',
+    );
+    await Future.delayed(delay);
+  }
+
+  bool _isRetryableNetworkError(Object error) {
+    if (error is TimeoutException || error is http.ClientException) {
+      return true;
+    }
+
+    final message = error.toString().toLowerCase();
+    return message.contains('connection closed') ||
+        message.contains('connection reset') ||
+        message.contains('connection refused') ||
+        message.contains('failed host lookup') ||
+        message.contains('network is unreachable') ||
+        message.contains('software caused connection abort') ||
+        message.contains('handshake');
+  }
+
+  bool _isRetryableStatus(int statusCode) {
+    return statusCode == 408 ||
+        statusCode == 429 ||
+        statusCode == 502 ||
+        statusCode == 503 ||
+        statusCode == 504;
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');

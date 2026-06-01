@@ -804,7 +804,7 @@ class SmsService {
     var details = await PatternParser.extractTransactionDetails(
         cleanedMessageBody, senderAddress, messageDate, relevantPatterns);
 
-    if (details == null) {
+    if (details == null && FallbackSmsParser.isEnabled) {
       print("debug: Trying fallback SMS parser for ${bank.name}");
       details = await FallbackSmsParser.extractTransactionDetails(
         messageBody: cleanedMessageBody,

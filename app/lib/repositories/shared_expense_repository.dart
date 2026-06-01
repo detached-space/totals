@@ -1,12 +1,14 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/shared_expense_group.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
+import 'package:uuid/uuid.dart';
 
 void _sharedExpenseLog(String message) {
   if (kDebugMode) {
@@ -21,6 +23,7 @@ String _logId(String value) {
 
 class SharedExpenseRepository {
   static const _groupsKey = 'shared_expense_groups_v1';
+  static const _groupsTable = 'shared_expense_groups';
   static const _groupKeyPrefix = 'shared_expense_group_key_';
   static const _legacyInvitePrefixes = ['totals://join/', 'totals//join/'];
 
@@ -49,33 +52,102 @@ class SharedExpenseRepository {
 
   Future<List<SharedExpenseGroup>> getGroups() async {
     try {
+      final db = await _groupsDatabase();
+      final rows = await db.query(
+        _groupsTable,
+        orderBy: 'createdAt DESC',
+      );
+      final groups = rows
+          .map(_groupFromDbRow)
+          .whereType<SharedExpenseGroup>()
+          .where((group) => group.id.isNotEmpty)
+          .toList(growable: false);
+      if (groups.isNotEmpty) {
+        _sharedExpenseLog('getGroups loaded ${groups.length} db groups');
+        return groups;
+      }
+
+      final legacyGroups = await _groupsFromLegacyPrefs();
+      if (legacyGroups.isNotEmpty) {
+        _sharedExpenseLog(
+          'getGroups migrating ${legacyGroups.length} legacy pref groups',
+        );
+        await _saveGroups(legacyGroups);
+        return legacyGroups;
+      }
+
+      _sharedExpenseLog('getGroups local cache empty');
+      return const [];
+    } catch (error, stackTrace) {
+      _sharedExpenseLog('getGroups failed: $error');
+      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  Future<List<SharedExpenseGroup>> _groupsFromLegacyPrefs() async {
+    try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_groupsKey);
-      if (raw == null || raw.isEmpty) {
-        _sharedExpenseLog('getGroups local cache empty');
-        return const [];
-      }
+      if (raw == null || raw.isEmpty) return const [];
 
       final decoded = jsonDecode(raw);
       if (decoded is! List) {
-        _sharedExpenseLog('getGroups ignored non-list cache payload');
+        _sharedExpenseLog('getGroups ignored non-list legacy cache payload');
         return const [];
       }
 
-      final groups = decoded
+      return decoded
           .whereType<Map>()
           .map((group) => SharedExpenseGroup.fromJson(
                 Map<String, dynamic>.from(group),
               ))
           .where((group) => group.id.isNotEmpty)
           .toList(growable: false);
-      _sharedExpenseLog('getGroups loaded ${groups.length} local groups');
-      return groups;
     } catch (error, stackTrace) {
-      _sharedExpenseLog('getGroups failed: $error');
+      _sharedExpenseLog('getGroups ignored invalid legacy cache: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
-      rethrow;
+      return const [];
     }
+  }
+
+  SharedExpenseGroup? _groupFromDbRow(Map<String, Object?> row) {
+    try {
+      final payload = row['payload'];
+      if (payload is! String || payload.isEmpty) {
+        _sharedExpenseLog('getGroups ignored empty db payload');
+        return null;
+      }
+
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map) {
+        _sharedExpenseLog('getGroups ignored non-map db payload');
+        return null;
+      }
+
+      return SharedExpenseGroup.fromJson(Map<String, dynamic>.from(decoded));
+    } catch (error, stackTrace) {
+      _sharedExpenseLog('getGroups skipped invalid db row: $error');
+      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+      return null;
+    }
+  }
+
+  Future<Database> _groupsDatabase() async {
+    final db = await DatabaseHelper.instance.database;
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_groupsTable (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_shared_expense_groups_createdAt '
+      'ON $_groupsTable(createdAt)',
+    );
+    return db;
   }
 
   Future<SharedExpenseGroup> createGroup({
@@ -398,6 +470,26 @@ class SharedExpenseRepository {
   }
 
   Future<void> _saveGroups(List<SharedExpenseGroup> groups) async {
+    final db = await _groupsDatabase();
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+      await txn.delete(_groupsTable);
+      final batch = txn.batch();
+      for (final group in groups) {
+        batch.insert(
+          _groupsTable,
+          {
+            'id': group.id,
+            'payload': jsonEncode(group.toJson()),
+            'createdAt': group.createdAt.toIso8601String(),
+            'updatedAt': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _groupsKey,

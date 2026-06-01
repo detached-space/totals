@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:totals/models/bank.dart';
 
 class FallbackSmsParser {
+  static bool get isEnabled => false;
+
   static const String _assetPath = 'assets/fallback_sms_patterns.json';
   static const String _schema = 'totals.fallbackSmsPatterns.v1';
 
@@ -12,6 +14,8 @@ class FallbackSmsParser {
   static Future<Set<int>> supportedBankIds({
     bool requirePatterns = false,
   }) async {
+    if (!isEnabled) return const <int>{};
+
     final configs = await _loadConfigs();
     final supported = <int>{};
 
@@ -38,6 +42,8 @@ class FallbackSmsParser {
     required DateTime? messageDate,
     required Bank bank,
   }) async {
+    if (!isEnabled) return null;
+
     final configs = await _configsForTotalsBank(bank.id);
     if (configs.isEmpty) return null;
 

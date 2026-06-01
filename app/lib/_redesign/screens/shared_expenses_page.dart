@@ -21,6 +21,19 @@ String _logId(String value) {
   return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
 }
 
+String _formatEtb(num amount) {
+  final value = amount.round();
+  final sign = value < 0 ? '-' : '';
+  final digits = value.abs().toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    final remaining = digits.length - i;
+    buffer.write(digits[i]);
+    if (remaining > 1 && remaining % 3 == 1) buffer.write(',');
+  }
+  return '${sign}ETB $buffer';
+}
+
 class RedesignSharedExpensesPage extends StatefulWidget {
   const RedesignSharedExpensesPage({super.key});
 
@@ -29,8 +42,8 @@ class RedesignSharedExpensesPage extends StatefulWidget {
       _RedesignSharedExpensesPageState();
 }
 
-class _RedesignSharedExpensesPageState
-    extends State<RedesignSharedExpensesPage> {
+class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
+    with AutomaticKeepAliveClientMixin<RedesignSharedExpensesPage> {
   final SharedExpenseRepository _repository = SharedExpenseRepository();
   final AccountRepository _accountRepository = AccountRepository();
   static const String _accountShareDisplayNameKey =
@@ -38,11 +51,11 @@ class _RedesignSharedExpensesPageState
 
   List<SharedExpenseGroup> _groups = const [];
   String _myPublicKey = '';
-  bool _isLoading = true;
   bool _isRefreshing = false;
   bool _isMutating = false;
   bool _engineReachable = true;
   String? _approvingMemberKey;
+  SharedExpenseGroup? _selectedGroup;
   _CreatingGroupDraft? _creatingGroup;
 
   @override
@@ -50,6 +63,9 @@ class _RedesignSharedExpensesPageState
     super.initState();
     _loadGroups(refreshFromEngine: true, showErrors: false);
   }
+
+  @override
+  bool get wantKeepAlive => true;
 
   Future<void> _loadGroups({
     bool refreshFromEngine = false,
@@ -60,7 +76,6 @@ class _RedesignSharedExpensesPageState
       'loadGroups start refreshFromEngine=$refreshFromEngine showErrors=$showErrors',
     );
     setState(() {
-      if (_groups.isEmpty && _creatingGroup == null) _isLoading = true;
       if (refreshFromEngine) _isRefreshing = true;
     });
 
@@ -70,6 +85,7 @@ class _RedesignSharedExpensesPageState
       if (mounted) {
         setState(() {
           _groups = localGroups;
+          _selectedGroup = _updatedSelectedGroup(localGroups);
           _myPublicKey = myPublicKey;
         });
       }
@@ -80,6 +96,7 @@ class _RedesignSharedExpensesPageState
         if (mounted) {
           setState(() {
             _groups = groups;
+            _selectedGroup = _updatedSelectedGroup(groups);
             _engineReachable = reachable;
           });
         }
@@ -99,7 +116,6 @@ class _RedesignSharedExpensesPageState
     } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
           _isRefreshing = false;
         });
       }
@@ -125,6 +141,29 @@ class _RedesignSharedExpensesPageState
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
     }
     return '';
+  }
+
+  SharedExpenseGroup? _updatedSelectedGroup(List<SharedExpenseGroup> groups) {
+    final selected = _selectedGroup;
+    if (selected == null) return null;
+    for (final group in groups) {
+      if (group.id == selected.id) return group;
+    }
+    return selected;
+  }
+
+  void _openGroup(SharedExpenseGroup group) {
+    _sharedExpensesPageLog('openGroup group=${_logId(group.id)}');
+    setState(() => _selectedGroup = group);
+  }
+
+  void _closeGroup() {
+    _sharedExpensesPageLog('closeGroup');
+    setState(() => _selectedGroup = null);
+  }
+
+  void _showAddExpenseComingSoon() {
+    _showSnack(context.l10nTextRead('Expense entry is coming next'));
   }
 
   Future<void> _saveDefaultDisplayName(String name) async {
@@ -163,7 +202,6 @@ class _RedesignSharedExpensesPageState
     _sharedExpensesPageLog('createGroup submitted name="${input.groupName}"');
     setState(() {
       _isMutating = true;
-      _isLoading = false;
       _creatingGroup = _CreatingGroupDraft(
         name: input.groupName,
         displayName: input.displayName,
@@ -175,8 +213,16 @@ class _RedesignSharedExpensesPageState
         name: input.groupName,
         displayName: input.displayName,
       );
+      if (mounted) {
+        setState(() {
+          _creatingGroup = null;
+          _groups = [
+            group,
+            ..._groups.where((existing) => existing.id != group.id),
+          ];
+        });
+      }
       await _copyInvite(group, showSnack: false);
-      await _loadGroups(refreshFromEngine: true, showErrors: false);
       _showSnack(copiedMessage);
       _sharedExpensesPageLog('createGroup done group=${_logId(group.id)}');
     } catch (error, stackTrace) {
@@ -286,6 +332,19 @@ class _RedesignSharedExpensesPageState
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final selectedGroup = _selectedGroup;
+    if (selectedGroup != null) {
+      return _SharedGroupDetailView(
+        group: selectedGroup,
+        myPublicKey: _myPublicKey,
+        shortKey: _shortKey,
+        onBack: _closeGroup,
+        onCopyInvite: () => _copyInvite(selectedGroup),
+        onAddExpense: _showAddExpenseComingSoon,
+      );
+    }
+
     final theme = Theme.of(context);
     const contentPadding = EdgeInsets.fromLTRB(20, 16, 20, 24);
     final groupCardCount = _groups.length + (_creatingGroup == null ? 0 : 1);
@@ -339,12 +398,7 @@ class _RedesignSharedExpensesPageState
                   ),
                 ),
               ),
-              if (_isLoading)
-                const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_groups.isEmpty && _creatingGroup == null)
+              if (_groups.isEmpty && _creatingGroup == null)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _EmptySharedState(
@@ -370,9 +424,11 @@ class _RedesignSharedExpensesPageState
                           group.pendingApprovalMembers(_myPublicKey);
                       return _SharedGroupCard(
                         group: group,
+                        isRefreshing: _isRefreshing,
                         pendingMembers: pendingMembers,
                         shortKey: _shortKey,
                         approvingMemberKey: _approvingMemberKey,
+                        onOpen: () => _openGroup(group),
                         onCopyInvite: () => _copyInvite(group),
                         onApproveMember: (member) =>
                             _approveMember(group, member),
@@ -718,17 +774,21 @@ class _CreatingGroupCard extends StatelessWidget {
 
 class _SharedGroupCard extends StatelessWidget {
   final SharedExpenseGroup group;
+  final bool isRefreshing;
   final List<SharedExpenseMember> pendingMembers;
   final String Function(String value) shortKey;
   final String? approvingMemberKey;
+  final VoidCallback onOpen;
   final VoidCallback onCopyInvite;
   final ValueChanged<SharedExpenseMember> onApproveMember;
 
   const _SharedGroupCard({
     required this.group,
+    required this.isRefreshing,
     required this.pendingMembers,
     required this.shortKey,
     required this.approvingMemberKey,
+    required this.onOpen,
     required this.onCopyInvite,
     required this.onApproveMember,
   });
@@ -736,24 +796,35 @@ class _SharedGroupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final statusLabel = switch (group.status) {
-      SharedExpenseGroupStatus.ready => context.l10nText('Synced'),
-      SharedExpenseGroupStatus.pendingApproval =>
-        context.l10nText('Pending approval'),
-      SharedExpenseGroupStatus.localOnly => context.l10nText('Local only'),
-    };
-    final statusColor = switch (group.status) {
-      SharedExpenseGroupStatus.ready => AppColors.incomeSuccess,
-      SharedExpenseGroupStatus.pendingApproval => AppColors.amber,
-      SharedExpenseGroupStatus.localOnly => AppColors.textTertiary(context),
-    };
+    final isReadyRefreshing =
+        isRefreshing && group.status == SharedExpenseGroupStatus.ready;
+    final statusLabel = isReadyRefreshing
+        ? context.l10nText('Refreshing')
+        : switch (group.status) {
+            SharedExpenseGroupStatus.ready => context.l10nText('Synced'),
+            SharedExpenseGroupStatus.pendingApproval =>
+              context.l10nText('Pending approval'),
+            SharedExpenseGroupStatus.localOnly =>
+              context.l10nText('Local only'),
+          };
+    final statusColor = isReadyRefreshing
+        ? AppColors.blue
+        : switch (group.status) {
+            SharedExpenseGroupStatus.ready => AppColors.incomeSuccess,
+            SharedExpenseGroupStatus.pendingApproval => AppColors.amber,
+            SharedExpenseGroupStatus.localOnly =>
+              AppColors.textTertiary(context),
+          };
 
     return Material(
       color: AppColors.cardColor(context),
       borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
+      child: InkWell(
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: AppColors.borderColor(context)),
           boxShadow: [
@@ -764,7 +835,7 @@ class _SharedGroupCard extends StatelessWidget {
             ),
           ],
         ),
-        child: Column(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -856,6 +927,7 @@ class _SharedGroupCard extends StatelessWidget {
                 ),
             ],
           ],
+          ),
         ),
       ),
     );
@@ -1063,96 +1135,100 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final mediaQuery = MediaQuery.of(context);
 
     return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
+      padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
       child: Container(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          18,
-          20,
-          20 + MediaQuery.of(context).padding.bottom,
-        ),
         decoration: BoxDecoration(
           color: AppColors.background(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: SafeArea(
           top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: AppColors.textPrimary(context),
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.fromLTRB(
+              20,
+              18,
+              20,
+              20 + mediaQuery.padding.bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(AppIcons.close_rounded),
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.cardColor(context),
+                        foregroundColor: AppColors.textPrimary(context),
+                        minimumSize: const Size(48, 48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+                _SheetTextField(
+                  controller: _groupController,
+                  label: widget.groupLabel,
+                  hint: widget.groupHint,
+                  textInputAction: TextInputAction.next,
+                  showError:
+                      _hasTriedSubmit && _groupController.text.trim().isEmpty,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 20),
+                _SheetTextField(
+                  controller: _nameController,
+                  label: widget.nameLabel,
+                  hint: widget.nameHint,
+                  textInputAction: TextInputAction.done,
+                  showError:
+                      _hasTriedSubmit && _nameController.text.trim().isEmpty,
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) => _submit(),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _submit,
+                    iconAlignment: IconAlignment.end,
+                    icon: const Icon(AppIcons.check_rounded, size: 20),
+                    label: Text(widget.primaryLabel),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primaryLight,
+                      foregroundColor: AppColors.white,
+                      minimumSize: const Size(0, 58),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(AppIcons.close_rounded),
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppColors.cardColor(context),
-                      foregroundColor: AppColors.textPrimary(context),
-                      minimumSize: const Size(48, 48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 28),
-              _SheetTextField(
-                controller: _groupController,
-                label: widget.groupLabel,
-                hint: widget.groupHint,
-                textInputAction: TextInputAction.next,
-                showError:
-                    _hasTriedSubmit && _groupController.text.trim().isEmpty,
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 20),
-              _SheetTextField(
-                controller: _nameController,
-                label: widget.nameLabel,
-                hint: widget.nameHint,
-                textInputAction: TextInputAction.done,
-                showError:
-                    _hasTriedSubmit && _nameController.text.trim().isEmpty,
-                onChanged: (_) => setState(() {}),
-                onSubmitted: (_) => _submit(),
-              ),
-              const SizedBox(height: 28),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _submit,
-                  iconAlignment: IconAlignment.end,
-                  icon: const Icon(AppIcons.check_rounded, size: 20),
-                  label: Text(widget.primaryLabel),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primaryLight,
-                    foregroundColor: AppColors.white,
-                    minimumSize: const Size(0, 58),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    textStyle: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 48),
+              ],
+            ),
           ),
         ),
       ),
