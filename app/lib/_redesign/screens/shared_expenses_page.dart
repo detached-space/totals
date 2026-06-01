@@ -772,6 +772,882 @@ class _CreatingGroupCard extends StatelessWidget {
   }
 }
 
+class _SharedGroupDetailView extends StatefulWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final String Function(String value) shortKey;
+  final VoidCallback onBack;
+  final VoidCallback onCopyInvite;
+  final VoidCallback onAddExpense;
+
+  const _SharedGroupDetailView({
+    required this.group,
+    required this.myPublicKey,
+    required this.shortKey,
+    required this.onBack,
+    required this.onCopyInvite,
+    required this.onAddExpense,
+  });
+
+  @override
+  State<_SharedGroupDetailView> createState() => _SharedGroupDetailViewState();
+}
+
+class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
+  int _selectedTab = 0;
+
+  static const List<Color> _memberColors = [
+    AppColors.primaryLight,
+    AppColors.incomeSuccess,
+    Color(0xFFDB2777),
+    AppColors.amber,
+    AppColors.blue,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final members = _memberViews(context);
+
+    return Scaffold(
+      backgroundColor: AppColors.background(context),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 84),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: FloatingActionButton(
+            onPressed: widget.onAddExpense,
+            backgroundColor: AppColors.primaryLight,
+            foregroundColor: AppColors.white,
+            elevation: 8,
+            shape: const CircleBorder(),
+            child: const Icon(AppIcons.add, size: 26),
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SharedGroupDetailTopBar(
+                      onBack: widget.onBack,
+                      onCopyInvite: widget.onCopyInvite,
+                    ),
+                    const SizedBox(height: 16),
+                    _SharedGroupIdentityHeader(
+                      group: widget.group,
+                      members: members,
+                    ),
+                    const SizedBox(height: 18),
+                    _SharedBalanceSummaryCard(
+                      group: widget.group,
+                      members: members,
+                    ),
+                    const SizedBox(height: 16),
+                    _SharedGroupTabs(
+                      selectedIndex: _selectedTab,
+                      onChanged: (index) => setState(() {
+                        _selectedTab = index;
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 128),
+              sliver: SliverToBoxAdapter(
+                child: switch (_selectedTab) {
+                  0 => _SharedGroupHomeTab(
+                      members: members,
+                      onSeeAll: () => setState(() => _selectedTab = 1),
+                    ),
+                  1 => const _SharedGroupActivitiesTab(),
+                  _ => _SharedGroupAnalyticsTab(
+                      group: widget.group,
+                      pendingApprovalCount: widget.group
+                          .pendingApprovalMembers(widget.myPublicKey)
+                          .length,
+                    ),
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<_SharedMemberView> _memberViews(BuildContext context) {
+    final rawMembers = widget.group.members
+        .where((member) => member.devicePublicKey.isNotEmpty)
+        .toList(growable: true)
+      ..sort((a, b) {
+        if (a.devicePublicKey == widget.myPublicKey) return -1;
+        if (b.devicePublicKey == widget.myPublicKey) return 1;
+        return 0;
+      });
+    final members = rawMembers.isEmpty
+        ? [
+            SharedExpenseMember(
+              devicePublicKey: widget.myPublicKey,
+              joinedAt: widget.group.createdAt,
+            ),
+          ]
+        : rawMembers;
+    final views = <_SharedMemberView>[];
+    for (var i = 0; i < members.length; i++) {
+      final member = members[i];
+      final isMe = member.devicePublicKey == widget.myPublicKey ||
+          (widget.myPublicKey.isEmpty && i == 0);
+      final displayName = isMe
+          ? widget.group.myDisplayName.trim()
+          : '${context.l10nText('Member')} ${i + 1}';
+      final label =
+          displayName.isNotEmpty ? displayName : context.l10nText('You');
+      views.add(
+        _SharedMemberView(
+          label: label,
+          shortKey: widget.shortKey(member.devicePublicKey),
+          color: _memberColors[i % _memberColors.length],
+        ),
+      );
+    }
+    return views;
+  }
+}
+
+class _SharedMemberView {
+  final String label;
+  final String shortKey;
+  final Color color;
+
+  const _SharedMemberView({
+    required this.label,
+    required this.shortKey,
+    required this.color,
+  });
+
+  String get initial {
+    final trimmed = label.trim();
+    if (trimmed.isEmpty) return '?';
+    return String.fromCharCode(trimmed.runes.first).toUpperCase();
+  }
+}
+
+class _SharedGroupDetailTopBar extends StatelessWidget {
+  final VoidCallback onBack;
+  final VoidCallback onCopyInvite;
+
+  const _SharedGroupDetailTopBar({
+    required this.onBack,
+    required this.onCopyInvite,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        InkWell(
+          onTap: onBack,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  AppIcons.chevron_left,
+                  size: 20,
+                  color: AppColors.textTertiary(context),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  context.l10nText('Groups'),
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: AppColors.textTertiary(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const Spacer(),
+        IconButton(
+          onPressed: onCopyInvite,
+          icon: const Icon(AppIcons.more_horiz, size: 24),
+          style: IconButton.styleFrom(
+            backgroundColor: AppColors.cardColor(context),
+            foregroundColor: AppColors.textSecondary(context),
+            side: BorderSide(color: AppColors.borderColor(context)),
+            minimumSize: const Size(44, 44),
+            shape: const CircleBorder(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SharedGroupIdentityHeader extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final List<_SharedMemberView> members;
+
+  const _SharedGroupIdentityHeader({
+    required this.group,
+    required this.members,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pillColor =
+        AppColors.isDark(context) ? AppColors.darkSurface : AppColors.slate900;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+          decoration: BoxDecoration(
+            color: pillColor,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            group.name.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.2,
+                ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _StackedMemberAvatars(members: members),
+            const SizedBox(width: 10),
+            Text(
+              group.memberCount == 1
+                  ? context.l10nText('1 member')
+                  : '${group.memberCount} ${context.l10nText('members')}',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textTertiary(context),
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _StackedMemberAvatars extends StatelessWidget {
+  final List<_SharedMemberView> members;
+
+  const _StackedMemberAvatars({required this.members});
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleMembers = members.take(4).toList(growable: false);
+    return SizedBox(
+      width: 24.0 + ((visibleMembers.length - 1).clamp(0, 3) * 19.0),
+      height: 28,
+      child: Stack(
+        children: [
+          for (var i = 0; i < visibleMembers.length; i++)
+            Positioned(
+              left: i * 19,
+              child: Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: visibleMembers[i].color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: AppColors.background(context),
+                    width: 2,
+                  ),
+                ),
+                child: Text(
+                  visibleMembers[i].initial,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: AppColors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedBalanceSummaryCard extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final List<_SharedMemberView> members;
+
+  const _SharedBalanceSummaryCard({
+    required this.group,
+    required this.members,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final counterparties = members.skip(1).take(2).toList(growable: false);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderColor(context)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    group.status == SharedExpenseGroupStatus.ready
+                        ? context.l10nText("YOU'RE SETTLED UP")
+                        : context.l10nText('PENDING SETUP'),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppColors.textTertiary(context),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _formatEtb(0),
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    group.status == SharedExpenseGroupStatus.ready
+                        ? context.l10nText('No balances yet')
+                        : context.l10nText('Waiting for group approval'),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary(context),
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    context.l10nText('Add an expense to start splitting.'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textTertiary(context),
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            if (counterparties.isNotEmpty) ...[
+              const SizedBox(width: 14),
+              VerticalDivider(
+                color: AppColors.borderColor(context),
+                width: 1,
+                thickness: 1,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final member in counterparties) ...[
+                      Text(
+                        member.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: member.color,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatEtb(0),
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedGroupTabs extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+
+  const _SharedGroupTabs({
+    required this.selectedIndex,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = [
+      context.l10nText('Home'),
+      context.l10nText('Activities'),
+      context.l10nText('Analytics'),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.mutedFill(context).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            Expanded(
+              child: _SharedGroupTabButton(
+                label: labels[i],
+                isSelected: selectedIndex == i,
+                onTap: () => onChanged(i),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedGroupTabButton extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _SharedGroupTabButton({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.zero,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.primaryDark : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            style: TextStyle(
+              color: isSelected
+                  ? AppColors.white
+                  : AppColors.textSecondary(context),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedGroupHomeTab extends StatelessWidget {
+  final List<_SharedMemberView> members;
+  final VoidCallback onSeeAll;
+
+  const _SharedGroupHomeTab({
+    required this.members,
+    required this.onSeeAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SharedSectionHeader(
+          label: context.l10nText('RECENT'),
+          actionLabel: context.l10nText('See all'),
+          onAction: onSeeAll,
+        ),
+        const SizedBox(height: 8),
+        _SharedDetailEmptyBlock(
+          icon: AppIcons.receipt_long_rounded,
+          title: context.l10nText('No expenses yet'),
+          subtitle: context.l10nText(
+            'Tap + to add the first group expense.',
+          ),
+        ),
+        const SizedBox(height: 22),
+        _SharedSectionHeader(label: context.l10nText('SETTLE')),
+        const SizedBox(height: 8),
+        _SharedSettleEmptyRow(members: members),
+      ],
+    );
+  }
+}
+
+class _SharedGroupActivitiesTab extends StatelessWidget {
+  const _SharedGroupActivitiesTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SharedSectionHeader(label: context.l10nText('ACTIVITIES')),
+        const SizedBox(height: 8),
+        _SharedDetailEmptyBlock(
+          icon: AppIcons.toc_rounded,
+          title: context.l10nText('No activity yet'),
+          subtitle: context.l10nText(
+            'Expenses, approvals, and settlements will appear here.',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SharedGroupAnalyticsTab extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final int pendingApprovalCount;
+
+  const _SharedGroupAnalyticsTab({
+    required this.group,
+    required this.pendingApprovalCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SharedSectionHeader(label: context.l10nText('ANALYTICS')),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _SharedMetricTile(
+                label: context.l10nText('Total spent'),
+                value: _formatEtb(0),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _SharedMetricTile(
+                label: context.l10nText('Members'),
+                value: '${group.memberCount}',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _SharedMetricTile(
+                label: context.l10nText('Open balances'),
+                value: _formatEtb(0),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _SharedMetricTile(
+                label: context.l10nText('Approvals'),
+                value: '$pendingApprovalCount',
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SharedSectionHeader extends StatelessWidget {
+  final String label;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _SharedSectionHeader({
+    required this.label,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: AppColors.textTertiary(context),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.2,
+                ),
+          ),
+        ),
+        if (actionLabel != null && onAction != null)
+          TextButton.icon(
+            onPressed: onAction,
+            iconAlignment: IconAlignment.end,
+            icon: const Icon(AppIcons.arrow_forward, size: 16),
+            label: Text(actionLabel!),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primaryLight,
+              textStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SharedDetailEmptyBlock extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _SharedDetailEmptyBlock({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppColors.borderColor(context)),
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.primaryLight.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: AppColors.primaryLight, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiary(context),
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedSettleEmptyRow extends StatelessWidget {
+  final List<_SharedMemberView> members;
+
+  const _SharedSettleEmptyRow({required this.members});
+
+  @override
+  Widget build(BuildContext context) {
+    final from = members.isNotEmpty ? members.first : null;
+    final to = members.length > 1
+        ? members[1]
+        : members.isNotEmpty
+            ? members.first
+            : null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: from == null || to == null || from == to
+                ? Text(
+                    context.l10nText('Nothing to settle'),
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w800,
+                        ),
+                  )
+                : Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          from.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    color: from.color,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Icon(
+                          AppIcons.arrow_forward,
+                          color: AppColors.primaryLight,
+                          size: 18,
+                        ),
+                      ),
+                      Flexible(
+                        child: Text(
+                          to.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    color: to.color,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            _formatEtb(0),
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedMetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SharedMetricTile({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: AppColors.textTertiary(context),
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SharedGroupCard extends StatelessWidget {
   final SharedExpenseGroup group;
   final bool isRefreshing;
@@ -825,108 +1701,109 @@ class _SharedGroupCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.borderColor(context)),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.borderColor(context)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.black.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
           child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        group.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w800,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          group.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: AppColors.textPrimary(context),
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        '${group.memberCount} ${context.l10nText('members')}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
+                        const SizedBox(height: 12),
+                        Text(
+                          '${group.memberCount} ${context.l10nText('members')}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary(context),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        shortKey(group.id),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textTertiary(context),
-                          letterSpacing: 0,
+                        const SizedBox(height: 8),
+                        Text(
+                          shortKey(group.id),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textTertiary(context),
+                            letterSpacing: 0,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                _StatusChip(label: statusLabel, color: statusColor),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: group.status == SharedExpenseGroupStatus.localOnly
-                      ? null
-                      : onCopyInvite,
-                  icon: const Icon(AppIcons.copy, size: 17),
-                  label: Text(context.l10nText('Copy code')),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textPrimary(context),
-                    minimumSize: const Size(0, 42),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    side: BorderSide(color: AppColors.borderColor(context)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      ],
                     ),
                   ),
+                  _StatusChip(label: statusLabel, color: statusColor),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed:
+                        group.status == SharedExpenseGroupStatus.localOnly
+                            ? null
+                            : onCopyInvite,
+                    icon: const Icon(AppIcons.copy, size: 17),
+                    label: Text(context.l10nText('Copy code')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary(context),
+                      minimumSize: const Size(0, 42),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      side: BorderSide(color: AppColors.borderColor(context)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
+                const SizedBox(height: 16),
+                _InlineNote(
+                  icon: AppIcons.lock_outline_rounded,
+                  text: context.l10nText('Waiting for approval'),
+                  color: AppColors.amber,
                 ),
               ],
-            ),
-            if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
-              const SizedBox(height: 16),
-              _InlineNote(
-                icon: AppIcons.lock_outline_rounded,
-                text: context.l10nText('Waiting for approval'),
-                color: AppColors.amber,
-              ),
-            ],
-            if (pendingMembers.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              Divider(color: AppColors.borderColor(context), height: 1),
-              const SizedBox(height: 14),
-              Text(
-                context.l10nText('Approval needed'),
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: AppColors.textPrimary(context),
-                  fontWeight: FontWeight.w800,
+              if (pendingMembers.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Divider(color: AppColors.borderColor(context), height: 1),
+                const SizedBox(height: 14),
+                Text(
+                  context.l10nText('Approval needed'),
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              for (final member in pendingMembers)
-                _PendingMemberRow(
-                  member: member,
-                  shortKey: shortKey,
-                  isApproving: approvingMemberKey == member.devicePublicKey,
-                  onApprove: () => onApproveMember(member),
-                ),
+                const SizedBox(height: 10),
+                for (final member in pendingMembers)
+                  _PendingMemberRow(
+                    member: member,
+                    shortKey: shortKey,
+                    isApproving: approvingMemberKey == member.devicePublicKey,
+                    onApprove: () => onApproveMember(member),
+                  ),
+              ],
             ],
-          ],
           ),
         ),
       ),
