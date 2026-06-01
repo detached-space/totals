@@ -43,6 +43,7 @@ class _RedesignSharedExpensesPageState
   bool _isMutating = false;
   bool _engineReachable = true;
   String? _approvingMemberKey;
+  _CreatingGroupDraft? _creatingGroup;
 
   @override
   void initState() {
@@ -59,7 +60,7 @@ class _RedesignSharedExpensesPageState
       'loadGroups start refreshFromEngine=$refreshFromEngine showErrors=$showErrors',
     );
     setState(() {
-      if (_groups.isEmpty) _isLoading = true;
+      if (_groups.isEmpty && _creatingGroup == null) _isLoading = true;
       if (refreshFromEngine) _isRefreshing = true;
     });
 
@@ -160,7 +161,14 @@ class _RedesignSharedExpensesPageState
     if (input == null) return;
 
     _sharedExpensesPageLog('createGroup submitted name="${input.groupName}"');
-    setState(() => _isMutating = true);
+    setState(() {
+      _isMutating = true;
+      _isLoading = false;
+      _creatingGroup = _CreatingGroupDraft(
+        name: input.groupName,
+        displayName: input.displayName,
+      );
+    });
     try {
       await _saveDefaultDisplayName(input.displayName);
       final group = await _repository.createGroup(
@@ -176,7 +184,12 @@ class _RedesignSharedExpensesPageState
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
       _showSnack(error.toString());
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      if (mounted) {
+        setState(() {
+          _isMutating = false;
+          _creatingGroup = null;
+        });
+      }
     }
   }
 
@@ -275,6 +288,7 @@ class _RedesignSharedExpensesPageState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     const contentPadding = EdgeInsets.fromLTRB(20, 16, 20, 24);
+    final groupCardCount = _groups.length + (_creatingGroup == null ? 0 : 1);
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -330,7 +344,7 @@ class _RedesignSharedExpensesPageState
                   hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (_groups.isEmpty)
+              else if (_groups.isEmpty && _creatingGroup == null)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _EmptySharedState(
@@ -343,10 +357,15 @@ class _RedesignSharedExpensesPageState
                 SliverPadding(
                   padding: contentPadding.copyWith(top: 26),
                   sliver: SliverList.separated(
-                    itemCount: _groups.length,
+                    itemCount: groupCardCount,
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
-                      final group = _groups[index];
+                      if (_creatingGroup != null && index == 0) {
+                        return _CreatingGroupCard(draft: _creatingGroup!);
+                      }
+                      final groupIndex =
+                          index - (_creatingGroup == null ? 0 : 1);
+                      final group = _groups[groupIndex];
                       final pendingMembers =
                           group.pendingApprovalMembers(_myPublicKey);
                       return _SharedGroupCard(
@@ -581,6 +600,117 @@ class _EmptySharedState extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CreatingGroupDraft {
+  final String name;
+  final String displayName;
+
+  const _CreatingGroupDraft({
+    required this.name,
+    required this.displayName,
+  });
+}
+
+class _CreatingGroupCard extends StatelessWidget {
+  final _CreatingGroupDraft draft;
+
+  const _CreatingGroupCard({required this.draft});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: AppColors.cardColor(context),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: AppColors.primaryLight.withValues(alpha: 0.28),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        draft.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        context.l10nText('1 member'),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary(context),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${context.l10nText('Sharing as')} ${draft.displayName}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textTertiary(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _StatusChip(
+                  label: context.l10nText('Creating'),
+                  color: AppColors.blue,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primaryLight,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    context.l10nText('Preparing invite code'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
