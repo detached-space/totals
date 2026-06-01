@@ -795,6 +795,7 @@ class _SharedGroupDetailView extends StatefulWidget {
 
 class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
   int _selectedTab = 0;
+  bool _showTransactions = false;
 
   static const List<Color> _memberColors = [
     AppColors.primaryLight,
@@ -805,7 +806,24 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
   ];
 
   @override
+  void didUpdateWidget(covariant _SharedGroupDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.group.id != widget.group.id) {
+      _showTransactions = false;
+      _selectedTab = 0;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_showTransactions) {
+      return _SharedGroupTransactionsView(
+        group: widget.group,
+        onBack: () => setState(() => _showTransactions = false),
+        onAddExpense: widget.onAddExpense,
+      );
+    }
+
     final members = _memberViews(context);
 
     return Scaffold(
@@ -865,7 +883,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                 child: switch (_selectedTab) {
                   0 => _SharedGroupHomeTab(
                       members: members,
-                      onSeeAll: () => setState(() => _selectedTab = 1),
+                      onSeeAll: () => setState(() => _showTransactions = true),
                     ),
                   1 => const _SharedGroupActivitiesTab(),
                   _ => _SharedGroupAnalyticsTab(
@@ -937,6 +955,389 @@ class _SharedMemberView {
     final trimmed = label.trim();
     if (trimmed.isEmpty) return '?';
     return String.fromCharCode(trimmed.runes.first).toUpperCase();
+  }
+}
+
+class _SharedGroupTransactionsView extends StatefulWidget {
+  final SharedExpenseGroup group;
+  final VoidCallback onBack;
+  final VoidCallback onAddExpense;
+
+  const _SharedGroupTransactionsView({
+    required this.group,
+    required this.onBack,
+    required this.onAddExpense,
+  });
+
+  @override
+  State<_SharedGroupTransactionsView> createState() =>
+      _SharedGroupTransactionsViewState();
+}
+
+class _SharedGroupTransactionsViewState
+    extends State<_SharedGroupTransactionsView> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const transactionCount = 0;
+    final hasQuery = _query.trim().isNotEmpty;
+
+    return Scaffold(
+      backgroundColor: AppColors.background(context),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 84),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: FloatingActionButton(
+            onPressed: widget.onAddExpense,
+            backgroundColor: AppColors.primaryLight,
+            foregroundColor: AppColors.white,
+            elevation: 8,
+            shape: const CircleBorder(),
+            child: const Icon(AppIcons.add, size: 26),
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SharedTransactionsTopBar(
+                      groupName: widget.group.name,
+                      onBack: widget.onBack,
+                    ),
+                    const SizedBox(height: 22),
+                    Text(
+                      context.l10nText('Transactions'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                color: AppColors.textPrimary(context),
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0,
+                              ),
+                    ),
+                    const SizedBox(height: 18),
+                    _SharedTransactionsSearchField(
+                      controller: _searchController,
+                      onChanged: (value) => setState(() => _query = value),
+                    ),
+                    const SizedBox(height: 12),
+                    const _SharedTransactionsFilterRow(),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 128),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SharedTransactionsCountHeader(count: transactionCount),
+                    _SharedTransactionsEmptyState(hasQuery: hasQuery),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedTransactionsTopBar extends StatelessWidget {
+  final String groupName;
+  final VoidCallback onBack;
+
+  const _SharedTransactionsTopBar({
+    required this.groupName,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onBack,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Icon(
+              AppIcons.chevron_left,
+              size: 20,
+              color: AppColors.textTertiary(context),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                groupName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: AppColors.textTertiary(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedTransactionsSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _SharedTransactionsSearchField({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(17),
+      borderSide: BorderSide(color: AppColors.borderColor(context)),
+    );
+
+    return SizedBox(
+      height: 52,
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: AppColors.textPrimary(context),
+              fontWeight: FontWeight.w600,
+            ),
+        decoration: InputDecoration(
+          hintText: context.l10nText('Search reason or member...'),
+          hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: AppColors.textTertiary(context),
+                fontWeight: FontWeight.w500,
+              ),
+          prefixIcon: Icon(
+            AppIcons.search,
+            size: 22,
+            color: AppColors.textTertiary(context),
+          ),
+          filled: true,
+          fillColor: AppColors.cardColor(context),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+          border: border,
+          enabledBorder: border,
+          focusedBorder: border.copyWith(
+            borderSide: const BorderSide(color: AppColors.primaryLight),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedTransactionsFilterRow extends StatelessWidget {
+  const _SharedTransactionsFilterRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        _SharedTransactionsFilterChip(
+          label: context.l10nText('Type'),
+          value: context.l10nText('All'),
+        ),
+        _SharedTransactionsFilterChip(
+          label: context.l10nText('When'),
+          value: context.l10nText('All time'),
+        ),
+        _SharedTransactionsFilterChip(
+          label: context.l10nText('Paid by'),
+          value: context.l10nText('All'),
+        ),
+      ],
+    );
+  }
+}
+
+class _SharedTransactionsFilterChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _SharedTransactionsFilterChip({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 42),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(21),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textTertiary(context),
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 104),
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(
+            AppIcons.expand_more,
+            size: 14,
+            color: AppColors.textTertiary(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedTransactionsCountHeader extends StatelessWidget {
+  final int count;
+
+  const _SharedTransactionsCountHeader({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final transactionLabel = count == 1
+        ? context.l10nText('TRANSACTION')
+        : context.l10nText('TRANSACTIONS');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.only(left: 6, bottom: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Text(
+        '$count $transactionLabel',
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: AppColors.textTertiary(context),
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
+      ),
+    );
+  }
+}
+
+class _SharedTransactionsEmptyState extends StatelessWidget {
+  final bool hasQuery;
+
+  const _SharedTransactionsEmptyState({required this.hasQuery});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 18),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppColors.primaryLight.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: const Icon(
+              AppIcons.receipt_long_rounded,
+              color: AppColors.primaryLight,
+              size: 21,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hasQuery
+                      ? context.l10nText('No matching transactions')
+                      : context.l10nText('No transactions yet'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  hasQuery
+                      ? context.l10nText('Try a different search.')
+                      : context.l10nText('Group expenses will appear here.'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiary(context),
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _formatEtb(0),
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

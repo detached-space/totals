@@ -76,6 +76,7 @@ class AppIcons {
   static const IconData savings = PhosphorIconsFill.piggyBank;
   static const IconData savings_outlined = PhosphorIconsRegular.piggyBank;
   static const IconData schedule_rounded = PhosphorIconsRegular.clock;
+  static const IconData search = PhosphorIconsRegular.magnifyingGlass;
   static const IconData sms_outlined = PhosphorIconsRegular.chatText;
   static const IconData toc_rounded = PhosphorIconsRegular.listBullets;
   static const IconData trending_down_rounded = PhosphorIconsRegular.trendDown;
