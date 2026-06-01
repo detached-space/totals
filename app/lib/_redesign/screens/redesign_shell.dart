@@ -15,7 +15,7 @@ import 'package:totals/_redesign/screens/lock_screen.dart';
 import 'package:totals/_redesign/screens/money/money_page.dart';
 import 'package:totals/_redesign/screens/budget_page.dart';
 import 'package:totals/_redesign/screens/settings_page.dart';
-import 'package:totals/_redesign/screens/tools_page.dart';
+import 'package:totals/_redesign/screens/shared_expenses_page.dart';
 import 'package:totals/_redesign/widgets/redesign_bottom_nav.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -737,7 +737,7 @@ class RedesignShellState extends State<RedesignShell>
               const RedesignHomePage(),
               RedesignMoneyPage(key: _moneyPageKey),
               RedesignBudgetPage(key: _budgetPageKey),
-              const RedesignToolsPage(),
+              const RedesignSharedExpensesPage(),
               RedesignSettingsPage(
                 key: ValueKey('settings-${_activeProfileId ?? 'none'}'),
               ),
@@ -748,7 +748,7 @@ class RedesignShellState extends State<RedesignShell>
             pageController: _pageController,
             onTap: _onTabSelected,
             onMoneyLongPress: _showQuickCashSheet,
-            onToolsLongPress: _showQuickAccessAccountsSheet,
+            onSharedLongPress: _showQuickAccessAccountsSheet,
             onProfileLongPressAt: _onProfileLongPressAt,
           ),
         ),

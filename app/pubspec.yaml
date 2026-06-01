@@ -62,6 +62,10 @@ dependencies:
   pretty_qr_code: ^3.6.0
   phosphor_flutter: ^2.1.0
   kenat: ^1.0.1
+  cryptography: ^2.7.0
+  flutter_secure_storage: ^9.2.2
+  uuid: ^4.5.1
+  flutter_dotenv: ^6.0.0
   # background_sms: ^0.0.4
   # background_sms:
   #   git:
@@ -99,6 +103,7 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   assets:
+    - .env
     - assets/images/
     - assets/banks.json
     - assets/sms_patterns.json

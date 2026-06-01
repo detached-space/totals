@@ -12,7 +12,7 @@ class RedesignBottomNav extends StatelessWidget {
   final PageController pageController;
   final ValueChanged<int> onTap;
   final VoidCallback? onMoneyLongPress;
-  final VoidCallback? onToolsLongPress;
+  final VoidCallback? onSharedLongPress;
   final ValueChanged<Rect>? onProfileLongPressAt;
 
   const RedesignBottomNav({
@@ -21,7 +21,7 @@ class RedesignBottomNav extends StatelessWidget {
     required this.pageController,
     required this.onTap,
     this.onMoneyLongPress,
-    this.onToolsLongPress,
+    this.onSharedLongPress,
     this.onProfileLongPressAt,
   });
 
@@ -62,10 +62,10 @@ class RedesignBottomNav extends StatelessWidget {
         onLongPressAt: null,
       ),
       (
-        label: context.l10n('nav.tools', 'Tools'),
-        activeIcon: AppIcons.grid_view_rounded,
-        inactiveIcon: AppIcons.grid_view_outlined,
-        onLongPress: onToolsLongPress,
+        label: context.l10n('nav.shared', 'Shared'),
+        activeIcon: AppIcons.group,
+        inactiveIcon: AppIcons.group_outlined,
+        onLongPress: onSharedLongPress,
         onLongPressAt: null,
       ),
       (
@@ -92,7 +92,7 @@ class RedesignBottomNav extends StatelessWidget {
                   top: BorderSide(color: AppColors.borderColor(context))),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.black.withOpacity(0.06),
+                  color: AppColors.black.withValues(alpha: 0.06),
                   blurRadius: 12,
                   offset: const Offset(0, -4),
                 ),

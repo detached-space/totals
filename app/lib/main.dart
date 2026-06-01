@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/insights_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
@@ -98,6 +99,13 @@ Widget _buildUiScaledApp({
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: '.env', isOptional: true);
+  } catch (e) {
+    if (kDebugMode) {
+      print('debug: dotenv load failed: $e');
+    }
+  }
 
   // Initialize database and migrate if needed
   // await MigrationHelper.migrateIfNeeded();

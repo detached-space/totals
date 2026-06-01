@@ -45,6 +45,8 @@ class AppIcons {
   static const IconData fingerprint_rounded = PhosphorIconsRegular.fingerprint;
   static const IconData grid_view_outlined = PhosphorIconsRegular.squaresFour;
   static const IconData grid_view_rounded = PhosphorIconsFill.squaresFour;
+  static const IconData group = PhosphorIconsFill.usersThree;
+  static const IconData group_outlined = PhosphorIconsRegular.usersThree;
   static const IconData help_outline_rounded = PhosphorIconsRegular.question;
   static const IconData home_filled = PhosphorIconsFill.house;
   static const IconData home_outlined = PhosphorIconsRegular.house;
