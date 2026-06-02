@@ -454,8 +454,13 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
 
   double _spentForBudget(Budget b, List<Transaction> debits) {
     return debits
-        .where((t) => t.selectedCategoryIds.any(b.includesCategory))
+        .where((t) => _transactionMatchesBudget(t, b))
         .fold(0.0, (s, t) => s + t.amount);
+  }
+
+  bool _transactionMatchesBudget(Transaction transaction, Budget budget) {
+    if (budget.appliesToAllExpenses) return true;
+    return transaction.selectedCategoryIds.any(budget.includesCategory);
   }
 
   bool _isWantsBudget(Budget budget, TransactionProvider tp) {
@@ -685,7 +690,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
 
     // Transactions for this budget
     final txns = debits
-        .where((t) => t.selectedCategoryIds.any(budget.includesCategory))
+        .where((t) => _transactionMatchesBudget(t, budget))
         .toList();
     // Sort newest first
     txns.sort((a, b) {
