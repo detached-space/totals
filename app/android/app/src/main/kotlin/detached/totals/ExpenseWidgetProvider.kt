@@ -7,7 +7,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -174,12 +173,6 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             val labels = Array(3) { index ->
                 widgetData.getString("${categoryPrefix}_${index}_amount", "") ?: ""
             }
-            val categoryColors = IntArray(3) { index ->
-                parseColorHex(
-                    widgetData.getString("${categoryPrefix}_${index}_color", null),
-                    rankColors[index]
-                )
-            }
             val sumTop = rawAmounts.sum()
             var base = if (totalRaw > 0.0) totalRaw else sumTop
             if (base < sumTop) base = sumTop
@@ -190,7 +183,7 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
                 widgetId = widgetId,
                 values = rawAmounts,
                 base = base,
-                colors = categoryColors
+                colors = rankColors
             )?.let { bitmap ->
                 views.setImageViewBitmap(R.id.category_bar, bitmap)
             }
@@ -213,7 +206,7 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
                 views.setTextViewText(categoryNameIds[i], names[i])
 
                 views.setTextViewText(categoryAmountIds[i], labels[i])
-                views.setTextColor(categoryAmountIds[i], categoryColors[i])
+                views.setTextColor(categoryAmountIds[i], rankColors[i])
             }
 
             appWidgetManager.updateAppWidget(widgetId, views)
@@ -451,14 +444,5 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
         }
         val numeric = normalized.trimEnd('k', 'm').replace(",", "").trim()
         return numeric.toDoubleOrNull()?.times(multiplier) ?: 0.0
-    }
-
-    private fun parseColorHex(raw: String?, fallback: Int): Int {
-        if (raw.isNullOrBlank()) return fallback
-        return try {
-            Color.parseColor(raw)
-        } catch (_: IllegalArgumentException) {
-            fallback
-        }
     }
 }

@@ -1,12 +1,9 @@
-import 'dart:ui';
-
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/telebirr_bank_transfer_service.dart';
-import 'package:totals/utils/category_style.dart';
 import 'package:totals/utils/text_utils.dart';
 
 class CategoryExpense {
@@ -207,9 +204,7 @@ class WidgetDataProvider {
       final rank = entry.key;
       final categoryEntry = entry.value;
       final category = categoryMap[categoryEntry.key];
-      final colorHex = category == null
-          ? _rankColors[rank % _rankColors.length]
-          : _colorToHex(categoryPaletteColor(category));
+      final colorHex = _rankColors[rank % _rankColors.length];
       return CategoryExpense(
         categoryId: categoryEntry.key,
         name: category?.name ?? 'Uncategorized',
@@ -217,11 +212,6 @@ class WidgetDataProvider {
         colorHex: colorHex,
       );
     }).toList();
-  }
-
-  String _colorToHex(Color color) {
-    final argb = color.toARGB32();
-    return '#${(argb & 0x00FFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
 
   Future<List<CategoryExpense>> getTodayCategoryBreakdown() async {
