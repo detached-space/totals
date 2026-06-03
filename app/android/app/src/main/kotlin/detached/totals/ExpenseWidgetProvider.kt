@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -35,6 +36,7 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
         val widthDp: Int,
         val heightDp: Int,
         val compact: Boolean,
+        val showHeader: Boolean,
         val showTitle: Boolean,
         val showLastUpdated: Boolean,
         val maxCategoryRows: Int
@@ -149,12 +151,6 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
                 R.id.category_amount_1,
                 R.id.category_amount_2
             )
-            val categoryDotIds = listOf(
-                R.id.category_dot_0,
-                R.id.category_dot_1,
-                R.id.category_dot_2
-            )
-
             val rankColors = intArrayOf(
                 ContextCompat.getColor(context, R.color.budget_widget_progress_safe),
                 ContextCompat.getColor(context, R.color.budget_widget_progress_warn),
@@ -178,7 +174,12 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             val labels = Array(3) { index ->
                 widgetData.getString("${categoryPrefix}_${index}_amount", "") ?: ""
             }
-
+            val categoryColors = IntArray(3) { index ->
+                parseColorHex(
+                    widgetData.getString("${categoryPrefix}_${index}_color", null),
+                    rankColors[index]
+                )
+            }
             val sumTop = rawAmounts.sum()
             var base = if (totalRaw > 0.0) totalRaw else sumTop
             if (base < sumTop) base = sumTop
@@ -189,7 +190,7 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
                 widgetId = widgetId,
                 values = rawAmounts,
                 base = base,
-                colors = rankColors
+                colors = categoryColors
             )?.let { bitmap ->
                 views.setImageViewBitmap(R.id.category_bar, bitmap)
             }
@@ -210,19 +211,9 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
 
                 views.setViewVisibility(categoryRowIds[i], View.VISIBLE)
                 views.setTextViewText(categoryNameIds[i], names[i])
-                views.setInt(categoryDotIds[i], "setColorFilter", rankColors[i])
 
-                val valueLabel = if (isHidden) {
-                    val percent = if (base > 0.0) {
-                        ((rawAmounts[i] / base) * 100).roundToInt().coerceIn(0, 999)
-                    } else {
-                        0
-                    }
-                    "$percent%"
-                } else {
-                    labels[i]
-                }
-                views.setTextViewText(categoryAmountIds[i], valueLabel)
+                views.setTextViewText(categoryAmountIds[i], labels[i])
+                views.setTextColor(categoryAmountIds[i], categoryColors[i])
             }
 
             appWidgetManager.updateAppWidget(widgetId, views)
@@ -245,11 +236,12 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             ?: 110
 
         val compact = widthDp < 220 || heightDp < 120
+        val showHeader = heightDp >= 84
         val showTitle = widthDp >= 178
         val showLastUpdated = heightDp >= 108
         val maxCategoryRows = when {
-            widthDp < 182 || heightDp < 112 -> 1
-            widthDp < 226 || heightDp < 146 -> 2
+            widthDp < 182 -> 1
+            widthDp < 226 -> 2
             else -> 3
         }
 
@@ -257,6 +249,7 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             widthDp = widthDp,
             heightDp = heightDp,
             compact = compact,
+            showHeader = showHeader,
             showTitle = showTitle,
             showLastUpdated = showLastUpdated,
             maxCategoryRows = maxCategoryRows
@@ -266,7 +259,11 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
     private fun applyResponsiveLayout(context: Context, views: RemoteViews, mode: WidgetMode) {
         val density = context.resources.displayMetrics.density
         val horizontalPadding = if (mode.compact) 10 else 12
-        val verticalPadding = if (mode.compact) 10 else 12
+        val verticalPadding = when {
+            mode.heightDp < 84 -> 4
+            mode.compact -> 8
+            else -> 12
+        }
 
         views.setViewPadding(
             R.id.widget_root,
@@ -276,6 +273,10 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             (verticalPadding * density).roundToInt()
         )
 
+        views.setViewVisibility(
+            R.id.expense_header_row,
+            if (mode.showHeader) View.VISIBLE else View.GONE
+        )
         views.setViewVisibility(
             R.id.widget_title,
             if (mode.showTitle) View.VISIBLE else View.GONE
@@ -298,12 +299,20 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
         views.setTextViewTextSize(
             R.id.expense_total_value,
             TypedValue.COMPLEX_UNIT_SP,
-            if (mode.compact) 24f else 30f
+            when {
+                mode.heightDp < 84 -> 22f
+                mode.compact -> 24f
+                else -> 30f
+            }
         )
         views.setTextViewTextSize(
             R.id.expense_total_currency,
             TypedValue.COMPLEX_UNIT_SP,
-            if (mode.compact) 11f else 13f
+            when {
+                mode.heightDp < 84 -> 10f
+                mode.compact -> 11f
+                else -> 13f
+            }
         )
         views.setTextViewTextSize(
             R.id.last_updated,
@@ -311,7 +320,11 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             if (mode.compact) 7.5f else 8f
         )
 
-        val rowNameIds = listOf(R.id.category_name_0, R.id.category_name_1, R.id.category_name_2)
+        val rowNameIds = listOf(
+            R.id.category_name_0,
+            R.id.category_name_1,
+            R.id.category_name_2
+        )
         val rowAmountIds = listOf(
             R.id.category_amount_0,
             R.id.category_amount_1,
@@ -321,14 +334,14 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             views.setTextViewTextSize(
                 id,
                 TypedValue.COMPLEX_UNIT_SP,
-                if (mode.compact) 10f else 11f
+                if (mode.heightDp < 84) 8.5f else if (mode.compact) 9f else 10f
             )
         }
         rowAmountIds.forEach { id ->
             views.setTextViewTextSize(
                 id,
                 TypedValue.COMPLEX_UNIT_SP,
-                if (mode.compact) 10f else 11f
+                if (mode.heightDp < 84) 8.5f else if (mode.compact) 9f else 10f
             )
         }
     }
@@ -438,5 +451,14 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
         }
         val numeric = normalized.trimEnd('k', 'm').replace(",", "").trim()
         return numeric.toDoubleOrNull()?.times(multiplier) ?: 0.0
+    }
+
+    private fun parseColorHex(raw: String?, fallback: Int): Int {
+        if (raw.isNullOrBlank()) return fallback
+        return try {
+            Color.parseColor(raw)
+        } catch (_: IllegalArgumentException) {
+            fallback
+        }
     }
 }
