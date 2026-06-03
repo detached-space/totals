@@ -1,12 +1,21 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/auto_categorization.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/screens/auto_categorization_rules_scan_page.dart';
+import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_style.dart';
+import 'package:totals/widgets/account_share_qr_code.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Categories Page
@@ -95,6 +104,66 @@ class _CategoriesPageState extends State<CategoriesPage>
         );
       }
     }
+  }
+
+  Future<void> _openAutoCategorizationShareSheet(String flow) async {
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
+    final rules = provider.autoCategorizationRulesForFlow(flow);
+    final payload = AutoCategorizationRulesSharePayload.fromRules(
+      rules: rules,
+      resolveCategory: provider.getCategoryById,
+      flow: flow,
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.cardColor(context),
+      builder: (_) => _AutoCategorizationShareSheet(
+        payload: payload,
+        flow: flow,
+        onScan: _scanAutoCategorizationRules,
+      ),
+    );
+  }
+
+  Future<void> _scanAutoCategorizationRules() async {
+    final result =
+        await Navigator.of(context).push<AutoCategorizationRulesImportResult>(
+      MaterialPageRoute(
+        builder: (_) => const AutoCategorizationRulesScanPage(),
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_buildAutoCategorizationImportMessage(result)),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  String _buildAutoCategorizationImportMessage(
+    AutoCategorizationRulesImportResult result,
+  ) {
+    if (!result.importedAnything) {
+      return context.l10nTextRead('No auto-category rules imported');
+    }
+
+    final ruleLabel = result.importedRuleGroups == 1
+        ? context.l10nTextRead('rule group')
+        : context.l10nTextRead('rule groups');
+    final categoryLabel = result.createdCategories == 1
+        ? context.l10nTextRead('category')
+        : context.l10nTextRead('categories');
+    final createdCategoryText = result.createdCategories > 0
+        ? ', ${context.l10nTextRead('created')} '
+            '${result.createdCategories} $categoryLabel'
+        : '';
+    return '${context.l10nTextRead('Imported')} '
+        '${result.importedRuleGroups} $ruleLabel$createdCategoryText.';
   }
 
   @override
@@ -199,6 +268,8 @@ class _CategoriesPageState extends State<CategoriesPage>
                 resolveCategory: provider.getCategoryById,
                 onSetAutoCategorizationEnabled:
                     provider.setAutoCategorizationEnabled,
+                onShareScanAutoCategorization: () =>
+                    _openAutoCategorizationShareSheet('expense'),
                 onCreate: () => _openEditor(initialFlow: 'expense'),
                 onEdit: (c) => _openEditor(existing: c, initialFlow: c.flow),
                 onDeleteRule: (rule) async {
@@ -242,6 +313,8 @@ class _CategoriesPageState extends State<CategoriesPage>
                 resolveCategory: provider.getCategoryById,
                 onSetAutoCategorizationEnabled:
                     provider.setAutoCategorizationEnabled,
+                onShareScanAutoCategorization: () =>
+                    _openAutoCategorizationShareSheet('income'),
                 onCreate: () => _openEditor(initialFlow: 'income'),
                 onEdit: (c) => _openEditor(existing: c, initialFlow: c.flow),
                 onDeleteRule: (rule) async {
@@ -360,6 +433,7 @@ class _CategoryList extends StatelessWidget {
   final List<_CategorySection> sections;
   final Category? Function(int?) resolveCategory;
   final Future<void> Function(bool enabled) onSetAutoCategorizationEnabled;
+  final VoidCallback onShareScanAutoCategorization;
   final VoidCallback onCreate;
   final ValueChanged<Category> onEdit;
   final Future<void> Function(AutoCategorizationRule rule) onDeleteRule;
@@ -375,6 +449,7 @@ class _CategoryList extends StatelessWidget {
     required this.sections,
     required this.resolveCategory,
     required this.onSetAutoCategorizationEnabled,
+    required this.onShareScanAutoCategorization,
     required this.onCreate,
     required this.onEdit,
     required this.onDeleteRule,
@@ -442,6 +517,7 @@ class _CategoryList extends StatelessWidget {
           isEnabled: isAutoCategorizationEnabled,
           resolveCategory: resolveCategory,
           onSetEnabled: onSetAutoCategorizationEnabled,
+          onShareScan: onShareScanAutoCategorization,
           onDeleteRule: onDeleteRule,
         ),
         if (promptDismissals.isNotEmpty) ...[
@@ -461,6 +537,7 @@ class _AutomationCard extends StatelessWidget {
   final String subtitle;
   final int count;
   final Widget child;
+  final Widget? titleAction;
   final Widget? trailing;
 
   const _AutomationCard({
@@ -468,6 +545,7 @@ class _AutomationCard extends StatelessWidget {
     required this.subtitle,
     required this.count,
     required this.child,
+    this.titleAction,
     this.trailing,
   });
 
@@ -480,6 +558,7 @@ class _AutomationCard extends StatelessWidget {
           title: title,
           subtitle: subtitle,
           count: count,
+          titleAction: titleAction,
           trailing: trailing,
         ),
         const SizedBox(height: 14),
@@ -489,11 +568,229 @@ class _AutomationCard extends StatelessWidget {
   }
 }
 
+class _AutoCategorizationShareScanButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AutoCategorizationShareScanButton({
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: context.l10nText('Share or scan rules'),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Ink(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppColors.mutedFill(context),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              Icons.qr_code_2_rounded,
+              size: 17,
+              color: AppColors.textSecondary(context),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AutoCategorizationShareSheet extends StatefulWidget {
+  final AutoCategorizationRulesSharePayload payload;
+  final String flow;
+  final Future<void> Function() onScan;
+
+  const _AutoCategorizationShareSheet({
+    required this.payload,
+    required this.flow,
+    required this.onScan,
+  });
+
+  @override
+  State<_AutoCategorizationShareSheet> createState() =>
+      _AutoCategorizationShareSheetState();
+}
+
+class _AutoCategorizationShareSheetState
+    extends State<_AutoCategorizationShareSheet> {
+  final GlobalKey _qrKey = GlobalKey();
+
+  String? get _qrData => widget.payload.rules.isEmpty
+      ? null
+      : AutoCategorizationRulesSharePayload.encode(widget.payload);
+
+  Future<void> _shareQrCode() async {
+    final qrData = _qrData;
+    if (qrData == null) return;
+    final shareText = context.l10nTextRead(
+      'Scan this QR code to import my auto-category rules',
+    );
+
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+
+      final renderObject = _qrKey.currentContext?.findRenderObject();
+      if (renderObject is! RenderRepaintBoundary) return;
+
+      final image = await renderObject.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final buffer = byteData!.buffer.asUint8List();
+
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/auto_category_rules_qr.png');
+      await file.writeAsBytes(buffer);
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: shareText,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Error sharing QR code')}: $e',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openScanner() async {
+    final onScan = widget.onScan;
+    Navigator.pop(context);
+    await onScan();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final qrData = _qrData;
+    final hasData = qrData != null;
+    final flowLabel = widget.flow == 'income'
+        ? context.l10nText('Income')
+        : context.l10nText('Expense');
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    context.l10nText('Share or scan rules'),
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary(context),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: AppColors.textSecondary(context),
+                  ),
+                  tooltip: context.l10nText('Close'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hasData
+                  ? '$flowLabel ${context.l10nText('auto-category rules')}'
+                  : context.l10nText('No rules to share yet.'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary(context),
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (hasData)
+              RepaintBoundary(
+                key: _qrKey,
+                child: AccountShareQrCode(
+                  data: qrData,
+                  fallback: Text(
+                    context.l10nText('Too much data to render QR'),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary(context),
+                    ),
+                  ),
+                ),
+              )
+            else
+              Container(
+                width: 220,
+                height: 220,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceColor(context),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: AppColors.borderColor(context)),
+                ),
+                child: Text(
+                  context.l10nText(
+                    'Create auto-category rules before sharing this tab.',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary(context),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openScanner,
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                    label: Text(context.l10nText('Scan')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor:
+                          AppColors.isDark(context) ? AppColors.white : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: hasData ? _shareQrCode : null,
+                    icon: const Icon(Icons.share_rounded),
+                    label: Text(context.l10nText('Share')),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AutoCategorizationRulesCard extends StatelessWidget {
   final List<AutoCategorizationRule> rules;
   final bool isEnabled;
   final Category? Function(int?) resolveCategory;
   final Future<void> Function(bool enabled) onSetEnabled;
+  final VoidCallback onShareScan;
   final Future<void> Function(AutoCategorizationRule rule) onDeleteRule;
 
   const _AutoCategorizationRulesCard({
@@ -501,6 +798,7 @@ class _AutoCategorizationRulesCard extends StatelessWidget {
     required this.isEnabled,
     required this.resolveCategory,
     required this.onSetEnabled,
+    required this.onShareScan,
     required this.onDeleteRule,
   });
 
@@ -512,6 +810,7 @@ class _AutoCategorizationRulesCard extends StatelessWidget {
           ? context.l10nText('Future transactions matched automatically')
           : context.l10nText('Auto-categorization is turned off'),
       count: rules.length,
+      titleAction: _AutoCategorizationShareScanButton(onTap: onShareScan),
       trailing: Switch.adaptive(
         value: isEnabled,
         onChanged: (value) {
@@ -728,12 +1027,14 @@ class _SectionHeader extends StatelessWidget {
   final String title;
   final String subtitle;
   final int count;
+  final Widget? titleAction;
   final Widget? trailing;
 
   const _SectionHeader({
     required this.title,
     required this.subtitle,
     required this.count,
+    this.titleAction,
     this.trailing,
   });
 
@@ -777,6 +1078,10 @@ class _SectionHeader extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (titleAction != null) ...[
+                    const SizedBox(width: 6),
+                    titleAction!,
+                  ],
                 ],
               ),
             ),

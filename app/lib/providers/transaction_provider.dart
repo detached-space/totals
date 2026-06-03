@@ -18,6 +18,7 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
+import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/text_utils.dart';
 
 class TransactionTotals {
@@ -130,6 +131,27 @@ class _StabilityHealthMetrics {
     required this.averageDeviation,
     required this.sampleCount,
   });
+}
+
+class _AutoCategorizationRuleImportGroup {
+  final String counterparty;
+  final String flow;
+  final List<int> categoryIds = [];
+  int? primaryCategoryId;
+
+  _AutoCategorizationRuleImportGroup({
+    required this.counterparty,
+    required this.flow,
+  });
+
+  void addCategory(int categoryId, {required bool isPrimary}) {
+    if (!categoryIds.contains(categoryId)) {
+      categoryIds.add(categoryId);
+    }
+    if (isPrimary || primaryCategoryId == null) {
+      primaryCategoryId = categoryId;
+    }
+  }
 }
 
 class TransactionProvider with ChangeNotifier {
@@ -1576,6 +1598,155 @@ class TransactionProvider with ChangeNotifier {
   Future<void> deleteCategory(Category category) async {
     await _categoryRepo.deleteCategory(category);
     await loadData();
+  }
+
+  Future<AutoCategorizationRulesImportResult>
+      importAutoCategorizationRulesPayload(
+    AutoCategorizationRulesSharePayload payload,
+  ) async {
+    final localCategories = await _categoryRepo.getCategories();
+    final categoryIdBySourceId = <int, int>{};
+    var createdCategories = 0;
+    var matchedCategories = 0;
+
+    for (final sharedCategory in payload.categories) {
+      if (categoryIdBySourceId.containsKey(sharedCategory.sourceId)) {
+        continue;
+      }
+
+      var localCategory = _findMatchingSharedCategory(
+        sharedCategory,
+        localCategories,
+      );
+
+      if (localCategory == null) {
+        localCategory = await _createSharedCategory(
+          sharedCategory,
+          localCategories,
+        );
+        createdCategories++;
+      } else {
+        matchedCategories++;
+      }
+
+      final localCategoryId = localCategory.id;
+      if (localCategoryId != null && localCategoryId > 0) {
+        categoryIdBySourceId[sharedCategory.sourceId] = localCategoryId;
+      }
+    }
+
+    final groups = <String, _AutoCategorizationRuleImportGroup>{};
+    for (final sharedRule in payload.rules) {
+      final localCategoryId = categoryIdBySourceId[sharedRule.sourceCategoryId];
+      if (localCategoryId == null || localCategoryId <= 0) continue;
+
+      final flow = _autoCategorizationService.normalizeFlow(sharedRule.flow);
+      final normalizedCounterparty =
+          sharedRule.normalizedCounterparty.trim().isNotEmpty
+              ? sharedRule.normalizedCounterparty
+              : _autoCategorizationService.normalizeCounterparty(
+                  sharedRule.counterparty,
+                );
+      if (normalizedCounterparty.isEmpty) continue;
+
+      final key = '$normalizedCounterparty::$flow';
+      final group = groups.putIfAbsent(
+        key,
+        () => _AutoCategorizationRuleImportGroup(
+          counterparty: sharedRule.counterparty,
+          flow: flow,
+        ),
+      );
+      group.addCategory(localCategoryId, isPrimary: sharedRule.isPrimary);
+    }
+
+    var importedRuleGroups = 0;
+    var importedRules = 0;
+    for (final group in groups.values) {
+      if (group.categoryIds.isEmpty) continue;
+
+      await _autoCategorizationService.replaceRules(
+        counterparty: group.counterparty,
+        flow: group.flow,
+        categoryIds: group.categoryIds,
+        primaryCategoryId: group.primaryCategoryId,
+      );
+      await _autoCategorizationService.clearPromptDismissal(
+        counterparty: group.counterparty,
+        flow: group.flow,
+      );
+      importedRuleGroups++;
+      importedRules += group.categoryIds.length;
+    }
+
+    await loadData();
+    return AutoCategorizationRulesImportResult(
+      createdCategories: createdCategories,
+      matchedCategories: matchedCategories,
+      importedRuleGroups: importedRuleGroups,
+      importedRules: importedRules,
+    );
+  }
+
+  Future<Category> _createSharedCategory(
+    AutoCategorizationRulesShareCategory sharedCategory,
+    List<Category> localCategories,
+  ) async {
+    try {
+      final category = await _categoryRepo.createCategory(
+        name: sharedCategory.name,
+        essential: sharedCategory.essential,
+        uncategorized: sharedCategory.uncategorized,
+        iconKey: sharedCategory.iconKey,
+        colorKey: sharedCategory.colorKey,
+        description: sharedCategory.description,
+        flow: _normalizeSharedCategoryFlow(sharedCategory.flow),
+        recurring: sharedCategory.recurring,
+      );
+      localCategories.add(category);
+      return category;
+    } catch (_) {
+      final refreshedCategories = await _categoryRepo.getCategories();
+      localCategories
+        ..clear()
+        ..addAll(refreshedCategories);
+      final existing = _findMatchingSharedCategory(
+        sharedCategory,
+        localCategories,
+      );
+      if (existing != null) return existing;
+      rethrow;
+    }
+  }
+
+  Category? _findMatchingSharedCategory(
+    AutoCategorizationRulesShareCategory sharedCategory,
+    List<Category> localCategories,
+  ) {
+    final builtInKey = sharedCategory.builtInKey?.trim();
+    if (builtInKey != null && builtInKey.isNotEmpty) {
+      for (final category in localCategories) {
+        if (category.builtInKey == builtInKey) return category;
+      }
+    }
+
+    final targetFlow = _normalizeSharedCategoryFlow(sharedCategory.flow);
+    final targetName = _normalizeSharedCategoryName(sharedCategory.name);
+    for (final category in localCategories) {
+      if (_normalizeSharedCategoryFlow(category.flow) != targetFlow) continue;
+      if (_normalizeSharedCategoryName(category.name) == targetName) {
+        return category;
+      }
+    }
+    return null;
+  }
+
+  String _normalizeSharedCategoryFlow(String? flow) {
+    return flow?.trim().toLowerCase() == 'income' ? 'income' : 'expense';
+  }
+
+  String _normalizeSharedCategoryName(String name) {
+    return name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
   }
 
   String? resolvePrimaryCounterparty(Transaction transaction) {
