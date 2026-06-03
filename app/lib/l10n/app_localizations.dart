@@ -1719,6 +1719,32 @@ class AppLocalizations {
     "Future transactions matched automatically": "የወደፊት ትራንዛክሽኖች በራስ-ሰር ይዛመዳሉ",
     "Auto-categorization is turned off": "ራስ-ሰር ምደባ ጠፍቷል",
     "No auto-categorization rules yet.": "እስካሁን የራስ-ሰር ምደባ ደንቦች የሉም።",
+    "Share or scan rules": "ደንቦችን አጋራ ወይም ቃኝ",
+    "Scan": "ቃኝ",
+    "Scan this QR code to import my auto-category rules":
+        "የእኔን የራስ-ሰር ምደባ ደንቦች ለማስገባት ይህን QR ኮድ ይቃኙ",
+    "auto-category rules": "የራስ-ሰር ምደባ ደንቦች",
+    "No rules to share yet.": "እስካሁን ለማጋራት ደንቦች የሉም።",
+    "Create auto-category rules before sharing this tab.":
+        "ይህን ትር ከማጋራትዎ በፊት የራስ-ሰር ምደባ ደንቦችን ይፍጠሩ።",
+    "No auto-category rules imported": "ምንም የራስ-ሰር ምደባ ደንቦች አልገቡም",
+    "Imported": "ገብቷል",
+    "created": "ተፈጥሯል",
+    "rule group": "የደንብ ቡድን",
+    "rule groups": "የደንብ ቡድኖች",
+    "category": "ምድብ",
+    "categories": "ምድቦች",
+    "Scan Auto-Category Rules": "የራስ-ሰር ምደባ ደንቦችን ቃኝ",
+    "Importing rules...": "ደንቦች በማስገባት ላይ...",
+    "Camera unavailable. Please enable permissions.":
+        "ካሜራ አይገኝም። እባክዎ ፈቃዶችን ያብሩ።",
+    "Point your camera at a Totals auto-category QR.":
+        "ካሜራዎን ወደ Totals የራስ-ሰር ምደባ QR ያመልክቱ።",
+    "Import auto-category rules?": "የራስ-ሰር ምደባ ደንቦች ይገቡ?",
+    "Rules for the same counterparty will be updated. Missing categories will be created first.":
+        "ለተመሳሳይ ተቀባይ/ላኪ ያሉ ደንቦች ይዘመናሉ። የጎደሉ ምድቦች መጀመሪያ ይፈጠራሉ።",
+    "Rule groups": "የደንብ ቡድኖች",
+    "Categories to create": "የሚፈጠሩ ምድቦች",
     "Deleted category": "የተሰረዘ ምድብ",
     "Dismissed Prompts": "የተዘጉ ጥያቄዎች",
     "Addresses that should not trigger the popup again":
