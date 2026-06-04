@@ -1442,8 +1442,19 @@ class SharedExpenseRepository {
     _sharedExpenseLog('_saveGroups saved count=${groups.length}');
   }
 
-  Future<String?> _readGroupKey(String groupId) {
-    return _secureStorage.read(key: '$_groupKeyPrefix$groupId');
+  Future<String?> _readGroupKey(String groupId) async {
+    final key = '$_groupKeyPrefix$groupId';
+    try {
+      return await _secureStorage.read(key: key);
+    } catch (error) {
+      _sharedExpenseLog(
+        '_readGroupKey decrypt failed group=${_logId(groupId)} error=$error — purging slot',
+      );
+      try {
+        await _secureStorage.delete(key: key);
+      } catch (_) {/* ignore */}
+      return null;
+    }
   }
 
   Future<void> _writeGroupKey(String groupId, String groupKeyHex) {

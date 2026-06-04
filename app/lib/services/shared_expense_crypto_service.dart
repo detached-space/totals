@@ -51,8 +51,8 @@ class SharedExpenseCryptoService {
         _random = random ?? Random.secure();
 
   Future<SharedExpenseIdentity> getOrCreateIdentity() async {
-    final existingPrivateHex = await _storage.read(key: _privateKeyKey);
-    final existingPublicHex = await _storage.read(key: _publicKeyKey);
+    final existingPrivateHex = await _safeRead(_privateKeyKey);
+    final existingPublicHex = await _safeRead(_publicKeyKey);
     if (existingPrivateHex != null &&
         existingPrivateHex.isNotEmpty &&
         existingPublicHex != null &&
@@ -74,13 +74,30 @@ class SharedExpenseCryptoService {
     return SharedExpenseIdentity(publicKeyHex: publicKeyHex);
   }
 
+  /// Read a value from secure storage, treating decrypt failures (e.g. the
+  /// Keystore master key rotated after an app reinstall) as "no value stored"
+  /// rather than letting a crash bubble up. The caller will regenerate.
+  Future<String?> _safeRead(String key) async {
+    try {
+      return await _storage.read(key: key);
+    } catch (error) {
+      _cryptoLog('safeRead failed key=$key error=$error — purging slot');
+      // Best effort — try to clear the unreadable entry so a fresh write
+      // succeeds. If that also throws, swallow it.
+      try {
+        await _storage.delete(key: key);
+      } catch (_) {/* ignore */}
+      return null;
+    }
+  }
+
   Future<String> signHexChallenge(String challengeHex) async {
-    final privateKeyHex = await _storage.read(key: _privateKeyKey);
+    final privateKeyHex = await _safeRead(_privateKeyKey);
     if (privateKeyHex == null || privateKeyHex.isEmpty) {
       await getOrCreateIdentity();
     }
 
-    final seedHex = await _storage.read(key: _privateKeyKey);
+    final seedHex = await _safeRead(_privateKeyKey);
     if (seedHex == null || seedHex.isEmpty) {
       throw StateError('Shared expense identity is not available.');
     }
@@ -181,7 +198,7 @@ class SharedExpenseCryptoService {
   }
 
   Future<SecretKey> _sharedSecretFor(String otherEd25519PublicKeyHex) async {
-    final privateKeyHex = await _storage.read(key: _privateKeyKey);
+    final privateKeyHex = await _safeRead(_privateKeyKey);
     if (privateKeyHex == null || privateKeyHex.isEmpty) {
       throw StateError('Shared expense identity is not available.');
     }
