@@ -611,12 +611,23 @@ class SharedExpenseRepository {
       await _engineClient.acknowledgePayload(payload.id);
     }
 
-    // Stamp lastSyncAt
+    // Stamp lastSyncAt + retry any pending meta broadcast.
     final after = await _groupById(groupId);
     if (after != null) {
       await _upsertGroup(after.copyWith(
         lastSyncAt: DateTime.now().millisecondsSinceEpoch,
       ));
+      if (after.pendingMetaBroadcast && after.hasGroupKey) {
+        final retryOk = await _broadcastMetaPayloads(after);
+        if (retryOk) {
+          final cleared = await _groupById(groupId);
+          if (cleared != null) {
+            await _upsertGroup(
+              cleared.copyWith(pendingMetaBroadcast: false),
+            );
+          }
+        }
+      }
     }
 
     _sharedExpenseLog(
@@ -1318,38 +1329,102 @@ class SharedExpenseRepository {
     );
   }
 
+  /// Broadcast my display name AND the current group name to all approved
+  /// members. Returns true if both submissions succeeded.
+  Future<bool> _broadcastMetaPayloads(SharedExpenseGroup group) async {
+    final groupKeyHex = await _readGroupKey(group.id);
+    if (groupKeyHex == null) return false;
+    final keyBytes = SharedExpenseCryptoService.fromHex(groupKeyHex);
+    var allOk = true;
+    if (group.name.isNotEmpty) {
+      try {
+        final encrypted = await _cryptoService.encryptPayloadWithKey(
+          keyBytes: keyBytes,
+          payload: {
+            'type': 'group_meta',
+            'name': group.name,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          },
+        );
+        await _engineClient.submitPayload(
+          groupId: group.id,
+          encryptedBlob: encrypted,
+        );
+      } catch (e) {
+        _sharedExpenseLog('group_meta send failed: $e');
+        allOk = false;
+      }
+    }
+    if (group.myDisplayName.isNotEmpty) {
+      try {
+        final encrypted = await _cryptoService.encryptPayloadWithKey(
+          keyBytes: keyBytes,
+          payload: {
+            'type': 'member_meta',
+            'displayName': group.myDisplayName,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          },
+        );
+        await _engineClient.submitPayload(
+          groupId: group.id,
+          encryptedBlob: encrypted,
+        );
+      } catch (e) {
+        _sharedExpenseLog('member_meta send failed: $e');
+        allOk = false;
+      }
+    }
+    return allOk;
+  }
+
   Future<void> _emitGroupMeta(SharedExpenseGroup group) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return;
-    final encrypted = await _cryptoService.encryptPayloadWithKey(
-      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
-      payload: {
-        'type': 'group_meta',
-        'name': group.name,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      },
-    );
-    await _engineClient.submitPayload(
-      groupId: group.id,
-      encryptedBlob: encrypted,
-    );
+    try {
+      final encrypted = await _cryptoService.encryptPayloadWithKey(
+        keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+        payload: {
+          'type': 'group_meta',
+          'name': group.name,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
+      await _engineClient.submitPayload(
+        groupId: group.id,
+        encryptedBlob: encrypted,
+      );
+    } catch (e) {
+      _sharedExpenseLog('_emitGroupMeta failed: $e — flagging for retry');
+      final latest = await _groupById(group.id);
+      if (latest != null) {
+        await _upsertGroup(latest.copyWith(pendingMetaBroadcast: true));
+      }
+    }
   }
 
   Future<void> _emitMemberMeta(SharedExpenseGroup group) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return;
-    final encrypted = await _cryptoService.encryptPayloadWithKey(
-      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
-      payload: {
-        'type': 'member_meta',
-        'displayName': group.myDisplayName,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      },
-    );
-    await _engineClient.submitPayload(
-      groupId: group.id,
-      encryptedBlob: encrypted,
-    );
+    try {
+      final encrypted = await _cryptoService.encryptPayloadWithKey(
+        keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+        payload: {
+          'type': 'member_meta',
+          'displayName': group.myDisplayName,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
+      await _engineClient.submitPayload(
+        groupId: group.id,
+        encryptedBlob: encrypted,
+      );
+    } catch (e) {
+      _sharedExpenseLog('_emitMemberMeta failed: $e — flagging for retry');
+      final latest = await _groupById(group.id);
+      if (latest != null) {
+        await _upsertGroup(latest.copyWith(pendingMetaBroadcast: true));
+      }
+    }
   }
 
   Future<void> _broadcastJoinRequest(SharedExpenseGroup group) async {

@@ -243,6 +243,11 @@ class SharedExpenseGroup {
   /// Last successful sync time (ms epoch) — used for activity badging.
   final int? lastSyncAt;
 
+  /// True when our own member_meta / group_meta broadcast failed (network
+  /// blip, etc.) and we should retry on the next syncGroup. Mirrors the iOS
+  /// `_needBroadcastMeta` flag.
+  final bool pendingMetaBroadcast;
+
   const SharedExpenseGroup({
     required this.id,
     required this.name,
@@ -258,6 +263,7 @@ class SharedExpenseGroup {
     this.pendingApprovals = const [],
     this.keySharedWith = const {},
     this.lastSyncAt,
+    this.pendingMetaBroadcast = false,
   });
 
   int get memberCount => members.isEmpty ? 1 : members.length;
@@ -301,6 +307,7 @@ class SharedExpenseGroup {
     List<PendingApproval>? pendingApprovals,
     Set<String>? keySharedWith,
     int? lastSyncAt,
+    bool? pendingMetaBroadcast,
   }) {
     return SharedExpenseGroup(
       id: id ?? this.id,
@@ -317,6 +324,7 @@ class SharedExpenseGroup {
       pendingApprovals: pendingApprovals ?? this.pendingApprovals,
       keySharedWith: keySharedWith ?? this.keySharedWith,
       lastSyncAt: lastSyncAt ?? this.lastSyncAt,
+      pendingMetaBroadcast: pendingMetaBroadcast ?? this.pendingMetaBroadcast,
     );
   }
 
@@ -374,6 +382,7 @@ class SharedExpenseGroup {
           .whereType<String>()
           .toSet(),
       lastSyncAt: (json['lastSyncAt'] as num?)?.toInt(),
+      pendingMetaBroadcast: json['pendingMetaBroadcast'] == true,
     );
   }
 
@@ -393,6 +402,7 @@ class SharedExpenseGroup {
       'pendingApprovals': pendingApprovals.map((p) => p.toJson()).toList(),
       'keySharedWith': keySharedWith.toList(),
       if (lastSyncAt != null) 'lastSyncAt': lastSyncAt,
+      if (pendingMetaBroadcast) 'pendingMetaBroadcast': true,
     };
   }
 }
