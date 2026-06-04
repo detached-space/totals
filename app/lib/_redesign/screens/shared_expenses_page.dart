@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,11 +45,15 @@ class RedesignSharedExpensesPage extends StatefulWidget {
 }
 
 class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
-    with AutomaticKeepAliveClientMixin<RedesignSharedExpensesPage> {
+    with
+        AutomaticKeepAliveClientMixin<RedesignSharedExpensesPage>,
+        WidgetsBindingObserver {
   final SharedExpenseRepository _repository = SharedExpenseRepository();
   final AccountRepository _accountRepository = AccountRepository();
   static const String _accountShareDisplayNameKey =
       'account_share_display_name';
+  static const Duration _pollInterval = Duration(seconds: 12);
+  static const Duration _minBackgroundRefreshGap = Duration(milliseconds: 500);
 
   List<SharedExpenseGroup> _groups = const [];
   String _myPublicKey = '';
@@ -57,11 +63,56 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   String? _approvingMemberKey;
   SharedExpenseGroup? _selectedGroup;
   _CreatingGroupDraft? _creatingGroup;
+  Timer? _pollTimer;
+  DateTime? _lastBackgroundRefresh;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadGroups(refreshFromEngine: true, showErrors: false);
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _backgroundRefresh();
+    }
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _backgroundRefresh());
+  }
+
+  Future<void> _backgroundRefresh() async {
+    if (!mounted) return;
+    if (_isRefreshing || _isMutating) return;
+    if (_groups.isEmpty) return;
+    final now = DateTime.now();
+    if (_lastBackgroundRefresh != null &&
+        now.difference(_lastBackgroundRefresh!) < _minBackgroundRefreshGap) {
+      return;
+    }
+    _lastBackgroundRefresh = now;
+    try {
+      final groups = await _repository.refreshGroups();
+      if (!mounted) return;
+      setState(() {
+        _groups = groups;
+        _selectedGroup = _updatedSelectedGroup(groups);
+      });
+    } catch (error) {
+      _sharedExpensesPageLog('backgroundRefresh failed: $error');
+    }
   }
 
   @override
@@ -162,8 +213,176 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     setState(() => _selectedGroup = null);
   }
 
+  Future<void> _openGroupSettings(SharedExpenseGroup group) async {
+    final result = await showModalBottomSheet<_GroupSettingsResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (sheetContext) => _GroupSettingsSheet(
+        initialName: group.name,
+        initialDisplayName: group.myDisplayName,
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    if (result is _GroupSettingsCopyInvite) {
+      await _copyInvite(group);
+      return;
+    }
+
+    if (result is _GroupSettingsLeave) {
+      setState(() => _isMutating = true);
+      try {
+        await _repository.leaveGroup(group);
+        if (!mounted) return;
+        final groups = await _repository.getGroups();
+        if (!mounted) return;
+        setState(() {
+          _groups = groups;
+          _selectedGroup = null;
+        });
+        _showSnack(context.l10nTextRead('You left the group'));
+      } catch (error) {
+        _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      } finally {
+        if (mounted) setState(() => _isMutating = false);
+      }
+      return;
+    }
+
+    if (result is _GroupSettingsSave) {
+      final nameChanged = result.name.trim() != group.name;
+      final displayChanged =
+          result.displayName.trim() != group.myDisplayName;
+      if (!nameChanged && !displayChanged) return;
+      setState(() => _isMutating = true);
+      try {
+        final updated = await _repository.updateMeta(
+          group: group,
+          name: nameChanged ? result.name.trim() : null,
+          myDisplayName: displayChanged ? result.displayName.trim() : null,
+        );
+        if (!mounted) return;
+        final groups = await _repository.getGroups();
+        if (!mounted) return;
+        setState(() {
+          _groups = groups;
+          _selectedGroup = updated;
+        });
+        _showSnack(context.l10nTextRead('Saved'));
+      } catch (error) {
+        _showSnack(error.toString().replaceFirst('Exception: ', ''));
+      } finally {
+        if (mounted) setState(() => _isMutating = false);
+      }
+    }
+  }
+
+  Future<void> _openExpenseSheet(
+    SharedExpenseGroup group, {
+    SharedExpense? expense,
+  }) async {
+    if (!group.hasGroupKey) {
+      _showSnack(context.l10nTextRead(
+        'Wait until you have the group key before adding an expense.',
+      ));
+      return;
+    }
+    final result = await showModalBottomSheet<_ExpenseSheetResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (sheetContext) => _ExpenseDraftSheet(
+        group: group,
+        myPublicKey: _myPublicKey,
+        editing: expense,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _isMutating = true);
+    try {
+      SharedExpenseGroup updated = group;
+      if (result is _ExpenseSheetDelete && expense != null) {
+        updated = await _repository.deleteExpense(
+          group: group,
+          expenseId: expense.id,
+        );
+      } else if (result is _ExpenseSheetSave) {
+        if (expense != null) {
+          updated = await _repository.updateExpense(
+            group: group,
+            before: expense,
+            amount: result.amount,
+            reason: result.reason,
+            paidBy: result.paidBy,
+            splitAmong: result.splitAmong,
+          );
+        } else {
+          updated = await _repository.createExpense(
+            group: group,
+            amount: result.amount,
+            reason: result.reason,
+            paidBy: result.paidBy,
+            splitAmong: result.splitAmong,
+          );
+        }
+      }
+      if (!mounted) return;
+      final groups = await _repository.getGroups();
+      setState(() {
+        _groups = groups;
+        _selectedGroup = updated;
+      });
+      _showSnack(
+        result is _ExpenseSheetDelete
+            ? context.l10nTextRead('Expense deleted')
+            : expense != null
+                ? context.l10nTextRead('Expense updated')
+                : context.l10nTextRead('Expense added'),
+      );
+    } catch (error) {
+      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
+  Future<void> _settleWith(
+    SharedExpenseGroup group,
+    String recipientPk,
+    double amount,
+  ) async {
+    setState(() => _isMutating = true);
+    try {
+      final updated = await _repository.settleUpWith(
+        group: group,
+        recipientPk: recipientPk,
+        amount: amount,
+      );
+      if (!mounted) return;
+      final groups = await _repository.getGroups();
+      setState(() {
+        _groups = groups;
+        _selectedGroup = updated;
+      });
+      final name = group.displayNameFor(_myPublicKey, recipientPk);
+      _showSnack('Settled with $name');
+    } catch (error) {
+      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
   void _showAddExpenseComingSoon() {
-    _showSnack(context.l10nTextRead('Expense entry is coming next'));
+    final group = _selectedGroup;
+    if (group != null) {
+      _openExpenseSheet(group);
+    } else {
+      _showSnack(context.l10nTextRead('Open a group first to add an expense.'));
+    }
   }
 
   Future<void> _saveDefaultDisplayName(String name) async {
@@ -240,6 +459,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 
   Future<void> _joinGroup() async {
+    final requestedMessage = context.l10nTextRead('Join request sent');
     final joinedMessage = context.l10nTextRead('Joined group');
     final displayName = await _defaultDisplayName();
     if (!mounted) return;
@@ -264,12 +484,12 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     setState(() => _isMutating = true);
     try {
       await _saveDefaultDisplayName(input.displayName);
-      await _repository.joinGroup(
+      final joined = await _repository.joinGroup(
         inviteOrCode: input.groupName,
         displayName: input.displayName,
       );
       await _loadGroups(refreshFromEngine: true, showErrors: false);
-      _showSnack(joinedMessage);
+      _showSnack(joined.hasGroupKey ? joinedMessage : requestedMessage);
       _sharedExpensesPageLog('joinGroup done');
     } catch (error, stackTrace) {
       _sharedExpensesPageLog('joinGroup failed: $error');
@@ -315,6 +535,23 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _showSnack(context.l10nTextRead('Invite code copied'));
   }
 
+  Future<void> _cancelJoinRequest(SharedExpenseGroup group) async {
+    _sharedExpensesPageLog('cancelJoinRequest group=${_logId(group.id)}');
+    setState(() => _isMutating = true);
+    try {
+      await _repository.leaveGroup(group);
+      if (!mounted) return;
+      final groups = await _repository.getGroups();
+      if (!mounted) return;
+      setState(() => _groups = groups);
+      _showSnack(context.l10nTextRead('Join request cancelled'));
+    } catch (error) {
+      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -340,8 +577,12 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         myPublicKey: _myPublicKey,
         shortKey: _shortKey,
         onBack: _closeGroup,
-        onCopyInvite: () => _copyInvite(selectedGroup),
+        onOpenSettings: () => _openGroupSettings(selectedGroup),
         onAddExpense: _showAddExpenseComingSoon,
+        onEditExpense: (e) =>
+            _openExpenseSheet(selectedGroup, expense: e),
+        onSettle: (recipientPk, amount) =>
+            _settleWith(selectedGroup, recipientPk, amount),
       );
     }
 
@@ -424,6 +665,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                           group.pendingApprovalMembers(_myPublicKey);
                       return _SharedGroupCard(
                         group: group,
+                        myPublicKey: _myPublicKey,
                         isRefreshing: _isRefreshing,
                         pendingMembers: pendingMembers,
                         shortKey: _shortKey,
@@ -432,6 +674,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         onCopyInvite: () => _copyInvite(group),
                         onApproveMember: (member) =>
                             _approveMember(group, member),
+                        onCancelJoinRequest: () =>
+                            _cancelJoinRequest(group),
                       );
                     },
                   ),
@@ -777,16 +1021,20 @@ class _SharedGroupDetailView extends StatefulWidget {
   final String myPublicKey;
   final String Function(String value) shortKey;
   final VoidCallback onBack;
-  final VoidCallback onCopyInvite;
+  final VoidCallback onOpenSettings;
   final VoidCallback onAddExpense;
+  final ValueChanged<SharedExpense> onEditExpense;
+  final void Function(String recipientPk, double amount) onSettle;
 
   const _SharedGroupDetailView({
     required this.group,
     required this.myPublicKey,
     required this.shortKey,
     required this.onBack,
-    required this.onCopyInvite,
+    required this.onOpenSettings,
     required this.onAddExpense,
+    required this.onEditExpense,
+    required this.onSettle,
   });
 
   @override
@@ -819,8 +1067,10 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
     if (_showTransactions) {
       return _SharedGroupTransactionsView(
         group: widget.group,
+        myPublicKey: widget.myPublicKey,
         onBack: () => setState(() => _showTransactions = false),
         onAddExpense: widget.onAddExpense,
+        onEditExpense: widget.onEditExpense,
       );
     }
 
@@ -854,7 +1104,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                   children: [
                     _SharedGroupDetailTopBar(
                       onBack: widget.onBack,
-                      onCopyInvite: widget.onCopyInvite,
+                      onOpenSettings: widget.onOpenSettings,
                     ),
                     const SizedBox(height: 16),
                     _SharedGroupIdentityHeader(
@@ -865,6 +1115,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                     _SharedBalanceSummaryCard(
                       group: widget.group,
                       members: members,
+                      myPublicKey: widget.myPublicKey,
                     ),
                     const SizedBox(height: 16),
                     _SharedGroupTabs(
@@ -884,8 +1135,15 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                   0 => _SharedGroupHomeTab(
                       members: members,
                       onSeeAll: () => setState(() => _showTransactions = true),
+                      group: widget.group,
+                      myPublicKey: widget.myPublicKey,
+                      onEditExpense: widget.onEditExpense,
+                      onSettle: widget.onSettle,
                     ),
-                  1 => const _SharedGroupActivitiesTab(),
+                  1 => _SharedGroupActivitiesTab(
+                      group: widget.group,
+                      myPublicKey: widget.myPublicKey,
+                    ),
                   _ => _SharedGroupAnalyticsTab(
                       group: widget.group,
                       pendingApprovalCount: widget.group
@@ -923,16 +1181,22 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
       final member = members[i];
       final isMe = member.devicePublicKey == widget.myPublicKey ||
           (widget.myPublicKey.isEmpty && i == 0);
-      final displayName = isMe
-          ? widget.group.myDisplayName.trim()
-          : '${context.l10nText('Member')} ${i + 1}';
-      final label =
-          displayName.isNotEmpty ? displayName : context.l10nText('You');
+      final resolved = widget.group.displayNameFor(
+        widget.myPublicKey,
+        member.devicePublicKey,
+      );
+      final label = resolved.trim().isNotEmpty
+          ? resolved
+          : (isMe ? context.l10nText('You') : context.l10nText('Member'));
+      final color = member.devicePublicKey.isEmpty
+          ? _memberColors[i % _memberColors.length]
+          : Color(memberColorFor(widget.group, member.devicePublicKey));
       views.add(
         _SharedMemberView(
           label: label,
           shortKey: widget.shortKey(member.devicePublicKey),
-          color: _memberColors[i % _memberColors.length],
+          color: color,
+          publicKey: member.devicePublicKey,
         ),
       );
     }
@@ -944,11 +1208,13 @@ class _SharedMemberView {
   final String label;
   final String shortKey;
   final Color color;
+  final String publicKey;
 
   const _SharedMemberView({
     required this.label,
     required this.shortKey,
     required this.color,
+    this.publicKey = '',
   });
 
   String get initial {
@@ -960,13 +1226,17 @@ class _SharedMemberView {
 
 class _SharedGroupTransactionsView extends StatefulWidget {
   final SharedExpenseGroup group;
+  final String myPublicKey;
   final VoidCallback onBack;
   final VoidCallback onAddExpense;
+  final ValueChanged<SharedExpense> onEditExpense;
 
   const _SharedGroupTransactionsView({
     required this.group,
+    required this.myPublicKey,
     required this.onBack,
     required this.onAddExpense,
+    required this.onEditExpense,
   });
 
   @override
@@ -987,8 +1257,21 @@ class _SharedGroupTransactionsViewState
 
   @override
   Widget build(BuildContext context) {
-    const transactionCount = 0;
     final hasQuery = _query.trim().isNotEmpty;
+    final queryLower = _query.trim().toLowerCase();
+    final filtered = widget.group.expenses
+        .where((e) => !e.deleted)
+        .where((e) {
+      if (queryLower.isEmpty) return true;
+      final reasonMatch = e.reason.toLowerCase().contains(queryLower);
+      final payerName = widget.group
+          .displayNameFor(widget.myPublicKey, e.paidBy)
+          .toLowerCase();
+      final payerMatch = payerName.contains(queryLower);
+      return reasonMatch || payerMatch;
+    }).toList(growable: false)
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final transactionCount = filtered.length;
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -1050,7 +1333,20 @@ class _SharedGroupTransactionsViewState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _SharedTransactionsCountHeader(count: transactionCount),
-                    _SharedTransactionsEmptyState(hasQuery: hasQuery),
+                    if (filtered.isEmpty)
+                      _SharedTransactionsEmptyState(hasQuery: hasQuery)
+                    else
+                      Column(
+                        children: [
+                          for (final e in filtered)
+                            _SharedExpenseRow(
+                              expense: e,
+                              group: widget.group,
+                              myPublicKey: widget.myPublicKey,
+                              onTap: () => widget.onEditExpense(e),
+                            ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -1343,11 +1639,11 @@ class _SharedTransactionsEmptyState extends StatelessWidget {
 
 class _SharedGroupDetailTopBar extends StatelessWidget {
   final VoidCallback onBack;
-  final VoidCallback onCopyInvite;
+  final VoidCallback onOpenSettings;
 
   const _SharedGroupDetailTopBar({
     required this.onBack,
-    required this.onCopyInvite,
+    required this.onOpenSettings,
   });
 
   @override
@@ -1381,7 +1677,7 @@ class _SharedGroupDetailTopBar extends StatelessWidget {
         ),
         const Spacer(),
         IconButton(
-          onPressed: onCopyInvite,
+          onPressed: onOpenSettings,
           icon: const Icon(AppIcons.more_horiz, size: 24),
           style: IconButton.styleFrom(
             backgroundColor: AppColors.cardColor(context),
@@ -1497,15 +1793,55 @@ class _StackedMemberAvatars extends StatelessWidget {
 class _SharedBalanceSummaryCard extends StatelessWidget {
   final SharedExpenseGroup group;
   final List<_SharedMemberView> members;
+  final String myPublicKey;
 
   const _SharedBalanceSummaryCard({
     required this.group,
     required this.members,
+    required this.myPublicKey,
   });
 
   @override
   Widget build(BuildContext context) {
-    final counterparties = members.skip(1).take(2).toList(growable: false);
+    final isReady = group.status == SharedExpenseGroupStatus.ready;
+    final balances = isReady ? computeBalancesFor(group) : const <String, double>{};
+    final myBalance = balances[myPublicKey] ?? 0.0;
+    final settled = myBalance.abs() < 0.5;
+
+    final String label;
+    final Color amountColor;
+    if (!isReady) {
+      label = context.l10nText('PENDING SETUP');
+      amountColor = AppColors.textPrimary(context);
+    } else if (settled) {
+      label = context.l10nText("YOU'RE SETTLED UP");
+      amountColor = AppColors.textPrimary(context);
+    } else if (myBalance > 0) {
+      label = context.l10nText("YOU'RE OWED");
+      amountColor = AppColors.incomeSuccess;
+    } else {
+      label = context.l10nText('YOU OWE');
+      amountColor = AppColors.red;
+    }
+
+    final amountText = _formatEtb(myBalance.abs());
+    final subtitleText = !isReady
+        ? context.l10nText('Waiting for group approval')
+        : settled
+            ? context.l10nText('Everything is even')
+            : myBalance > 0
+                ? context.l10nText('Across your shared groups')
+                : context.l10nText('Send a nudge or settle up');
+
+    // Counterparties — sorted by absolute balance, biggest first.
+    final counterparties = members
+        .skip(1)
+        .where((m) => m.publicKey.isNotEmpty)
+        .toList(growable: false)
+      ..sort((a, b) =>
+          (balances[b.publicKey] ?? 0).abs().compareTo(
+              (balances[a.publicKey] ?? 0).abs()));
+    final topTwo = counterparties.take(2).toList(growable: false);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1531,9 +1867,7 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    group.status == SharedExpenseGroupStatus.ready
-                        ? context.l10nText("YOU'RE SETTLED UP")
-                        : context.l10nText('PENDING SETUP'),
+                    label,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: AppColors.textTertiary(context),
                           fontWeight: FontWeight.w900,
@@ -1542,33 +1876,24 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    _formatEtb(0),
+                    amountText,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: AppColors.textPrimary(context),
+                          color: amountColor,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 0,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    group.status == SharedExpenseGroupStatus.ready
-                        ? context.l10nText('No balances yet')
-                        : context.l10nText('Waiting for group approval'),
+                    subtitleText,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppColors.textSecondary(context),
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    context.l10nText('Add an expense to start splitting.'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textTertiary(context),
                         ),
                   ),
                 ],
               ),
             ),
-            if (counterparties.isNotEmpty) ...[
+            if (topTwo.isNotEmpty) ...[
               const SizedBox(width: 14),
               VerticalDivider(
                 color: AppColors.borderColor(context),
@@ -1581,7 +1906,7 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final member in counterparties) ...[
+                    for (final member in topTwo) ...[
                       Text(
                         member.label,
                         maxLines: 1,
@@ -1593,13 +1918,25 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                                 ),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        _formatEtb(0),
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: AppColors.textPrimary(context),
-                              fontWeight: FontWeight.w900,
-                            ),
-                      ),
+                      Builder(builder: (_) {
+                        final bal = balances[member.publicKey] ?? 0.0;
+                        final isMyCreditor = bal < 0;
+                        // From MY perspective:
+                        //   if their balance > 0, they're owed money (someone owes them)
+                        //   if their balance < 0, they owe money (likely me)
+                        final txt = _formatEtb(bal.abs());
+                        return Text(
+                          isMyCreditor ? '+$txt' : txt,
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: isMyCreditor
+                                    ? AppColors.incomeSuccess
+                                    : (bal > 0
+                                        ? AppColors.textPrimary(context)
+                                        : AppColors.red),
+                                fontWeight: FontWeight.w900,
+                              ),
+                        );
+                      }),
                       const SizedBox(height: 12),
                     ],
                   ],
@@ -1704,14 +2041,29 @@ class _SharedGroupTabButton extends StatelessWidget {
 class _SharedGroupHomeTab extends StatelessWidget {
   final List<_SharedMemberView> members;
   final VoidCallback onSeeAll;
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final ValueChanged<SharedExpense> onEditExpense;
+  final void Function(String recipientPk, double amount) onSettle;
 
   const _SharedGroupHomeTab({
     required this.members,
     required this.onSeeAll,
+    required this.group,
+    required this.myPublicKey,
+    required this.onEditExpense,
+    required this.onSettle,
   });
 
   @override
   Widget build(BuildContext context) {
+    final active = group.expenses
+        .where((e) => !e.deleted)
+        .toList(growable: false)
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final recent = active.take(4).toList(growable: false);
+    final plan = settlementPlanFor(group);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1721,41 +2073,441 @@ class _SharedGroupHomeTab extends StatelessWidget {
           onAction: onSeeAll,
         ),
         const SizedBox(height: 8),
-        _SharedDetailEmptyBlock(
-          icon: AppIcons.receipt_long_rounded,
-          title: context.l10nText('No expenses yet'),
-          subtitle: context.l10nText(
-            'Tap + to add the first group expense.',
+        if (recent.isEmpty)
+          _SharedDetailEmptyBlock(
+            icon: AppIcons.receipt_long_rounded,
+            title: context.l10nText('No expenses yet'),
+            subtitle: context.l10nText(
+              'Tap + to add the first group expense.',
+            ),
+          )
+        else
+          Column(
+            children: [
+              for (final expense in recent)
+                _SharedExpenseRow(
+                  expense: expense,
+                  group: group,
+                  myPublicKey: myPublicKey,
+                  onTap: () => onEditExpense(expense),
+                ),
+            ],
           ),
-        ),
         const SizedBox(height: 22),
         _SharedSectionHeader(label: context.l10nText('SETTLE')),
         const SizedBox(height: 8),
-        _SharedSettleEmptyRow(members: members),
+        if (plan.debts.isEmpty)
+          _SharedSettleEmptyRow(members: members)
+        else
+          Column(
+            children: [
+              for (final debt in plan.debts)
+                _SharedSettleArrow(
+                  debt: debt,
+                  group: group,
+                  myPublicKey: myPublicKey,
+                  onTap: debt.from == myPublicKey
+                      ? () => onSettle(debt.to, debt.amount)
+                      : null,
+                ),
+            ],
+          ),
       ],
     );
   }
 }
 
-class _SharedGroupActivitiesTab extends StatelessWidget {
-  const _SharedGroupActivitiesTab();
+/// One row in the Recent list — colored left bar + reason + amount.
+class _SharedExpenseRow extends StatelessWidget {
+  final SharedExpense expense;
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final VoidCallback? onTap;
+  const _SharedExpenseRow({
+    required this.expense,
+    required this.group,
+    required this.myPublicKey,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final payerColor = Color(memberColorFor(group, expense.paidBy));
+    final payerName = group.displayNameFor(myPublicKey, expense.paidBy);
+    final isSettlement = expense.kind == 'settlement';
+    final recipient = expense.splitAmong.isNotEmpty ? expense.splitAmong.first : '';
+    final recipientName =
+        recipient.isNotEmpty ? group.displayNameFor(myPublicKey, recipient) : '';
+    final recipientColor =
+        recipient.isNotEmpty ? Color(memberColorFor(group, recipient)) : payerColor;
+    final ago = _shortRelative(expense.timestamp);
+
+    final content = Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 4,
+            height: 36,
+            decoration: BoxDecoration(
+              color: payerColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (isSettlement)
+                  Row(
+                    children: [
+                      Text(payerName,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: payerColor,
+                                fontWeight: FontWeight.w700,
+                              )),
+                      Text('  →  ',
+                          style: TextStyle(
+                              color: AppColors.textTertiary(context),
+                              fontWeight: FontWeight.w600)),
+                      Text(recipientName,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: recipientColor,
+                                fontWeight: FontWeight.w700,
+                              )),
+                    ],
+                  )
+                else
+                  Text(
+                    expense.reason.isEmpty ? '(no reason)' : expense.reason,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                const SizedBox(height: 2),
+                Text.rich(
+                  TextSpan(
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textTertiary(context),
+                        ),
+                    children: [
+                      if (!isSettlement) ...[
+                        TextSpan(
+                          text: payerName,
+                          style: TextStyle(
+                            color: payerColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        TextSpan(
+                          text:
+                              ' paid · split ${expense.splitAmong.length}',
+                        ),
+                      ] else
+                        const TextSpan(text: 'Settlement'),
+                      if (ago.isNotEmpty) TextSpan(text: ' · $ago'),
+                      if (expense.status == 'pending')
+                        const TextSpan(text: ' · sending…'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _formatEtb(expense.amount),
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: content,
+      ),
+    );
+  }
+}
+
+class _SharedSettleArrow extends StatelessWidget {
+  final SettlementDebt debt;
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final VoidCallback? onTap;
+  const _SharedSettleArrow({
+    required this.debt,
+    required this.group,
+    required this.myPublicKey,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fromName = group.displayNameFor(myPublicKey, debt.from);
+    final toName = group.displayNameFor(myPublicKey, debt.to);
+    final fromColor = Color(memberColorFor(group, debt.from));
+    final toColor = Color(memberColorFor(group, debt.to));
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(color: fromColor, shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Text(
+              fromName.isNotEmpty
+                  ? fromName.characters.first.toUpperCase()
+                  : '?',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(fromName,
+              style: TextStyle(
+                  color: fromColor, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 6),
+          Icon(Icons.arrow_right_alt,
+              size: 18, color: AppColors.textTertiary(context)),
+          const SizedBox(width: 6),
+          Text(toName,
+              style: TextStyle(
+                  color: toColor, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 6),
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(color: toColor, shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Text(
+              toName.isNotEmpty
+                  ? toName.characters.first.toUpperCase()
+                  : '?',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800),
+            ),
+          ),
+          const Spacer(),
+          Text(_formatEtb(debt.amount),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w900,
+                  )),
+          if (onTap != null) ...[
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: onTap,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primaryLight,
+                minimumSize: const Size(0, 32),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                side: BorderSide(
+                  color: AppColors.primaryLight.withValues(alpha: 0.5),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              child: const Text('Settle'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+String _shortRelative(int ts) {
+  if (ts <= 0) return '';
+  final diff = DateTime.now().millisecondsSinceEpoch - ts;
+  if (diff < 60 * 1000) return 'just now';
+  if (diff < 60 * 60 * 1000) return '${(diff / (60 * 1000)).floor()}m ago';
+  if (diff < 24 * 60 * 60 * 1000) {
+    return '${(diff / (60 * 60 * 1000)).floor()}h ago';
+  }
+  if (diff < 7 * 24 * 60 * 60 * 1000) {
+    return '${(diff / (24 * 60 * 60 * 1000)).floor()}d ago';
+  }
+  final d = DateTime.fromMillisecondsSinceEpoch(ts);
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
+  return '${months[d.month - 1]} ${d.day}';
+}
+
+class _SharedGroupActivitiesTab extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  const _SharedGroupActivitiesTab({
+    required this.group,
+    required this.myPublicKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = [...group.activity]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SharedSectionHeader(label: context.l10nText('ACTIVITIES')),
         const SizedBox(height: 8),
-        _SharedDetailEmptyBlock(
-          icon: AppIcons.toc_rounded,
-          title: context.l10nText('No activity yet'),
-          subtitle: context.l10nText(
-            'Expenses, approvals, and settlements will appear here.',
+        if (entries.isEmpty)
+          _SharedDetailEmptyBlock(
+            icon: AppIcons.toc_rounded,
+            title: context.l10nText('No activity yet'),
+            subtitle: context.l10nText(
+              'Expenses, approvals, and settlements will appear here.',
+            ),
+          )
+        else
+          Column(
+            children: [
+              for (final entry in entries)
+                _ActivityRow(
+                  entry: entry,
+                  group: group,
+                  myPublicKey: myPublicKey,
+                ),
+            ],
           ),
-        ),
       ],
     );
+  }
+}
+
+class _ActivityRow extends StatelessWidget {
+  final SharedActivityEntry entry;
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  const _ActivityRow({
+    required this.entry,
+    required this.group,
+    required this.myPublicKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final actorName = entry.actor.isEmpty
+        ? context.l10nText('Someone')
+        : group.displayNameFor(myPublicKey, entry.actor);
+    final actorColor = entry.actor.isEmpty
+        ? AppColors.textSecondary(context)
+        : Color(memberColorFor(group, entry.actor));
+    final message = _describe(entry, context);
+    final ago = _shortRelative(entry.timestamp);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(top: 7, right: 10),
+            decoration: BoxDecoration(
+              color: actorColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary(context),
+                    ),
+                children: [
+                  TextSpan(
+                    text: actorName,
+                    style: TextStyle(
+                      color: actorColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  TextSpan(text: ' $message'),
+                  if (ago.isNotEmpty)
+                    TextSpan(
+                      text: '  ·  $ago',
+                      style: TextStyle(
+                        color: AppColors.textTertiary(context),
+                        fontSize: 11,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _describe(SharedActivityEntry e, BuildContext context) {
+    switch (e.kind) {
+      case 'group_created':
+        return 'created the group';
+      case 'group_renamed':
+        return 'renamed the group to "${e.data['after'] ?? ''}"';
+      case 'member_approved':
+        return 'approved a new member';
+      case 'member_joined':
+        return 'joined the group';
+      case 'member_left':
+        return 'left the group';
+      case 'expense_created':
+        return 'added "${e.data['reason'] ?? 'an expense'}" · ${_formatEtb(e.data['amount'] ?? 0)}';
+      case 'expense_amount_changed':
+        return 'changed amount to ${_formatEtb(e.data['after'] ?? 0)}';
+      case 'expense_reason_changed':
+        return 'renamed expense to "${e.data['after'] ?? ''}"';
+      case 'expense_paid_by_changed':
+        return 'changed who paid';
+      case 'expense_split_changed':
+        return 'changed the split';
+      case 'expense_date_changed':
+        return 'updated the date';
+      case 'expense_deleted':
+        return 'deleted "${e.data['reason'] ?? 'an expense'}"';
+      case 'settlement_created':
+        return 'settled up · ${_formatEtb(e.data['amount'] ?? 0)}';
+      default:
+        return e.kind;
+    }
   }
 }
 
@@ -2049,8 +2801,9 @@ class _SharedMetricTile extends StatelessWidget {
   }
 }
 
-class _SharedGroupCard extends StatelessWidget {
+class _SharedGroupCard extends StatefulWidget {
   final SharedExpenseGroup group;
+  final String myPublicKey;
   final bool isRefreshing;
   final List<SharedExpenseMember> pendingMembers;
   final String Function(String value) shortKey;
@@ -2058,9 +2811,11 @@ class _SharedGroupCard extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback onCopyInvite;
   final ValueChanged<SharedExpenseMember> onApproveMember;
+  final VoidCallback onCancelJoinRequest;
 
   const _SharedGroupCard({
     required this.group,
+    required this.myPublicKey,
     required this.isRefreshing,
     required this.pendingMembers,
     required this.shortKey,
@@ -2068,7 +2823,46 @@ class _SharedGroupCard extends StatelessWidget {
     required this.onOpen,
     required this.onCopyInvite,
     required this.onApproveMember,
+    required this.onCancelJoinRequest,
   });
+
+  @override
+  State<_SharedGroupCard> createState() => _SharedGroupCardState();
+}
+
+class _SharedGroupCardState extends State<_SharedGroupCard> {
+  bool _cancelArmed = false;
+  Timer? _cancelDisarmTimer;
+
+  // Convenience aliases so existing references inside build() stay short.
+  SharedExpenseGroup get group => widget.group;
+  String get myPublicKey => widget.myPublicKey;
+  bool get isRefreshing => widget.isRefreshing;
+  List<SharedExpenseMember> get pendingMembers => widget.pendingMembers;
+  String Function(String value) get shortKey => widget.shortKey;
+  String? get approvingMemberKey => widget.approvingMemberKey;
+  VoidCallback get onOpen => widget.onOpen;
+  VoidCallback get onCopyInvite => widget.onCopyInvite;
+  ValueChanged<SharedExpenseMember> get onApproveMember =>
+      widget.onApproveMember;
+
+  @override
+  void dispose() {
+    _cancelDisarmTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onCancelTap() {
+    if (!_cancelArmed) {
+      setState(() => _cancelArmed = true);
+      _cancelDisarmTimer?.cancel();
+      _cancelDisarmTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (mounted) setState(() => _cancelArmed = false);
+      });
+      return;
+    }
+    widget.onCancelJoinRequest();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2132,6 +2926,13 @@ class _SharedGroupCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 12),
+                        if (group.status == SharedExpenseGroupStatus.ready)
+                          _GroupCardBalanceLine(
+                            group: group,
+                            myPublicKey: myPublicKey,
+                          ),
+                        if (group.status == SharedExpenseGroupStatus.ready)
+                          const SizedBox(height: 8),
                         Text(
                           '${group.memberCount} ${context.l10nText('members')}',
                           style: theme.textTheme.bodyMedium?.copyWith(
@@ -2174,6 +2975,40 @@ class _SharedGroupCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (group.status == SharedExpenseGroupStatus.pendingApproval)
+                    OutlinedButton.icon(
+                      onPressed: _onCancelTap,
+                      icon: Icon(
+                        AppIcons.close,
+                        size: 17,
+                        color: _cancelArmed
+                            ? Colors.white
+                            : const Color(0xFFBE123C),
+                      ),
+                      label: Text(
+                        _cancelArmed
+                            ? context.l10nText('Tap again to cancel')
+                            : context.l10nText('Cancel request'),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _cancelArmed
+                            ? Colors.white
+                            : const Color(0xFFBE123C),
+                        backgroundColor:
+                            _cancelArmed ? const Color(0xFFBE123C) : null,
+                        minimumSize: const Size(0, 42),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        side: BorderSide(
+                          color: _cancelArmed
+                              ? const Color(0xFFBE123C)
+                              : const Color(0xFFBE123C)
+                                  .withValues(alpha: 0.5),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                 ],
               ),
               if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
@@ -2199,6 +3034,10 @@ class _SharedGroupCard extends StatelessWidget {
                 for (final member in pendingMembers)
                   _PendingMemberRow(
                     member: member,
+                    displayName: group.displayNameFor(
+                      myPublicKey,
+                      member.devicePublicKey,
+                    ),
                     shortKey: shortKey,
                     isApproving: approvingMemberKey == member.devicePublicKey,
                     onApprove: () => onApproveMember(member),
@@ -2271,12 +3110,14 @@ class _InlineNote extends StatelessWidget {
 
 class _PendingMemberRow extends StatelessWidget {
   final SharedExpenseMember member;
+  final String displayName;
   final String Function(String value) shortKey;
   final bool isApproving;
   final VoidCallback onApprove;
 
   const _PendingMemberRow({
     required this.member,
+    required this.displayName,
     required this.shortKey,
     required this.isApproving,
     required this.onApprove,
@@ -2305,15 +3146,36 @@ class _PendingMemberRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              shortKey(member.devicePublicKey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.textSecondary(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            child: Builder(builder: (_) {
+              final shortPk = shortKey(member.devicePublicKey);
+              final hasName = displayName.trim().isNotEmpty &&
+                  displayName.trim() != shortPk;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    hasName ? displayName : shortPk,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textPrimary(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (hasName)
+                    Text(
+                      shortPk,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiary(context),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              );
+            }),
           ),
           const SizedBox(width: 10),
           FilledButton(
@@ -2600,6 +3462,899 @@ class _SheetTextField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================================
+// Add-expense sheet (minimal — amount + reason, equal split among all members).
+// ============================================================================
+
+abstract class _ExpenseSheetResult {
+  const _ExpenseSheetResult();
+}
+
+class _ExpenseSheetSave extends _ExpenseSheetResult {
+  final double amount;
+  final String reason;
+  final String paidBy;
+  final List<String> splitAmong;
+  const _ExpenseSheetSave({
+    required this.amount,
+    required this.reason,
+    required this.paidBy,
+    required this.splitAmong,
+  });
+}
+
+class _ExpenseSheetDelete extends _ExpenseSheetResult {
+  const _ExpenseSheetDelete();
+}
+
+class _ExpenseDraftSheet extends StatefulWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final SharedExpense? editing;
+  const _ExpenseDraftSheet({
+    required this.group,
+    required this.myPublicKey,
+    this.editing,
+  });
+
+  @override
+  State<_ExpenseDraftSheet> createState() => _ExpenseDraftSheetState();
+}
+
+class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
+  late final TextEditingController _amountCtrl = TextEditingController(
+    text: widget.editing == null
+        ? ''
+        : widget.editing!.amount
+            .toStringAsFixed(widget.editing!.amount % 1 == 0 ? 0 : 2),
+  );
+  late final TextEditingController _reasonCtrl =
+      TextEditingController(text: widget.editing?.reason ?? '');
+  late String _paidBy = widget.editing?.paidBy ?? widget.myPublicKey;
+  late Set<String> _split = widget.editing != null
+      ? widget.editing!.splitAmong.toSet()
+      : widget.group.members
+          .map((m) => m.devicePublicKey)
+          .where((k) => k.isNotEmpty)
+          .toSet();
+  bool _deleteArmed = false;
+  Timer? _deleteDisarmTimer;
+
+  bool get _isEditing => widget.editing != null;
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _reasonCtrl.dispose();
+    _deleteDisarmTimer?.cancel();
+    super.dispose();
+  }
+
+  void _submit() {
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    final reason = _reasonCtrl.text.trim();
+    if (amount <= 0 || reason.isEmpty || _split.isEmpty) return;
+    Navigator.of(context).pop(_ExpenseSheetSave(
+      amount: amount,
+      reason: reason,
+      paidBy: _paidBy,
+      splitAmong: _split.toList(),
+    ));
+  }
+
+  void _onDeleteTap() {
+    if (!_deleteArmed) {
+      setState(() => _deleteArmed = true);
+      _deleteDisarmTimer?.cancel();
+      _deleteDisarmTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (mounted) setState(() => _deleteArmed = false);
+      });
+      return;
+    }
+    Navigator.of(context).pop(const _ExpenseSheetDelete());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = widget.group.members
+        .map((m) => m.devicePublicKey)
+        .where((k) => k.isNotEmpty)
+        .toList();
+
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    final reason = _reasonCtrl.text.trim();
+    final canSave = amount > 0 && reason.isNotEmpty && _split.isNotEmpty;
+    final allSelected =
+        keys.isNotEmpty && _split.length == keys.length;
+
+    return _IosModalShell(
+      title: _isEditing ? 'Edit Expense' : 'Add Expense',
+      children: [
+        // Amount row — centered huge input with currency suffix + bottom rule.
+        _IosAmountRow(
+          controller: _amountCtrl,
+          onChanged: (_) => setState(() {}),
+        ),
+        _IosFormGroup(
+          label: 'For what?',
+          child: _IosFormInput(
+            controller: _reasonCtrl,
+            hint: 'e.g., Dinner, Hotel, Taxi',
+            maxLength: 80,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        _IosFormGroup(
+          label: 'Paid by',
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final pk in keys)
+                _IosSharedChip(
+                  label: widget.group.displayNameFor(widget.myPublicKey, pk),
+                  dotColor: Color(memberColorFor(widget.group, pk)),
+                  active: _paidBy == pk,
+                  onTap: () => setState(() => _paidBy = pk),
+                ),
+            ],
+          ),
+        ),
+        _IosFormGroup(
+          label: 'Split between',
+          labelTrailing: _IosTextAction(
+            label: allSelected ? 'None' : 'All',
+            onTap: () => setState(() {
+              _split = allSelected ? <String>{} : keys.toSet();
+            }),
+          ),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final pk in keys)
+                _IosSharedChip(
+                  label: widget.group.displayNameFor(widget.myPublicKey, pk),
+                  dotColor: Color(memberColorFor(widget.group, pk)),
+                  active: _split.contains(pk),
+                  onTap: () => setState(() {
+                    if (_split.contains(pk)) {
+                      _split = {..._split}..remove(pk);
+                    } else {
+                      _split = {..._split, pk};
+                    }
+                  }),
+                ),
+            ],
+          ),
+        ),
+        _IosFormSubmit(
+          label: _isEditing ? 'Save' : 'Add',
+          icon: Icons.check,
+          enabled: canSave,
+          onTap: _submit,
+        ),
+        if (_isEditing) ...[
+          const SizedBox(height: 10),
+          _IosDangerButton(
+            label: _deleteArmed
+                ? 'Tap again to delete'
+                : 'Delete expense',
+            icon: Icons.delete_outline,
+            armed: _deleteArmed,
+            onTap: _onDeleteTap,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _GroupCardBalanceLine extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  const _GroupCardBalanceLine({
+    required this.group,
+    required this.myPublicKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final balances = computeBalancesFor(group);
+    final myBalance = balances[myPublicKey] ?? 0.0;
+    if (myBalance.abs() < 0.5) {
+      return Text(
+        'all settled',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppColors.textTertiary(context),
+              fontWeight: FontWeight.w600,
+            ),
+      );
+    }
+    final isOwed = myBalance > 0;
+    final text = isOwed
+        ? "you're owed ${_formatEtb(myBalance)}"
+        : 'you owe ${_formatEtb(myBalance.abs())}';
+    return Text(
+      text,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: isOwed ? AppColors.incomeSuccess : AppColors.red,
+            fontWeight: FontWeight.w700,
+          ),
+    );
+  }
+}
+
+// ============================================================================
+// Group settings sheet — edit name + your display name, copy invite, leave.
+// ============================================================================
+
+abstract class _GroupSettingsResult {
+  const _GroupSettingsResult();
+}
+
+class _GroupSettingsSave extends _GroupSettingsResult {
+  final String name;
+  final String displayName;
+  const _GroupSettingsSave(this.name, this.displayName);
+}
+
+class _GroupSettingsCopyInvite extends _GroupSettingsResult {
+  const _GroupSettingsCopyInvite();
+}
+
+class _GroupSettingsLeave extends _GroupSettingsResult {
+  const _GroupSettingsLeave();
+}
+
+class _GroupSettingsSheet extends StatefulWidget {
+  final String initialName;
+  final String initialDisplayName;
+  const _GroupSettingsSheet({
+    required this.initialName,
+    required this.initialDisplayName,
+  });
+
+  @override
+  State<_GroupSettingsSheet> createState() => _GroupSettingsSheetState();
+}
+
+class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
+  late final TextEditingController _nameCtrl =
+      TextEditingController(text: widget.initialName);
+  late final TextEditingController _displayCtrl =
+      TextEditingController(text: widget.initialDisplayName);
+  bool _leaveArmed = false;
+  Timer? _disarmTimer;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _displayCtrl.dispose();
+    _disarmTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onLeaveTap() {
+    if (!_leaveArmed) {
+      setState(() => _leaveArmed = true);
+      _disarmTimer?.cancel();
+      _disarmTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (mounted) setState(() => _leaveArmed = false);
+      });
+      return;
+    }
+    Navigator.of(context).pop(const _GroupSettingsLeave());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canSave = _nameCtrl.text.trim().isNotEmpty &&
+        _displayCtrl.text.trim().isNotEmpty &&
+        (_nameCtrl.text.trim() != widget.initialName ||
+            _displayCtrl.text.trim() != widget.initialDisplayName);
+
+    return _IosModalShell(
+      title: 'Edit Group',
+      children: [
+        _IosFormGroup(
+          label: 'Group name',
+          child: _IosFormInput(
+            controller: _nameCtrl,
+            hint: 'Trip to Lalibela, Roommates…',
+            maxLength: 60,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        _IosFormGroup(
+          label: 'Your name',
+          child: _IosFormInput(
+            controller: _displayCtrl,
+            hint: 'How other members see you',
+            maxLength: 40,
+            textCapitalization: TextCapitalization.words,
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        _IosFormSubmit(
+          label: 'Save',
+          icon: Icons.check,
+          enabled: canSave,
+          onTap: () => Navigator.of(context).pop(
+            _GroupSettingsSave(
+              _nameCtrl.text.trim(),
+              _displayCtrl.text.trim(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _IosSecondaryButton(
+          label: 'Copy invite',
+          icon: Icons.content_copy,
+          onTap: () =>
+              Navigator.of(context).pop(const _GroupSettingsCopyInvite()),
+        ),
+        const SizedBox(height: 10),
+        _IosDangerButton(
+          label: _leaveArmed ? 'Tap again to confirm' : 'Leave group',
+          icon: Icons.logout,
+          armed: _leaveArmed,
+          onTap: _onLeaveTap,
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// iOS-styled modal shell + form atoms.
+// Match the iOS web-view styling pixel-for-pixel:
+//   - Modal bg: --bg-dark (page color, NOT card white)
+//   - 24px corner radius top, 24px padding all sides
+//   - Handle: 36×4 px borderColor 2px-radius, 20px below
+//   - Form labels: 13px / w600 / UPPERCASE / 0.5px letter-spacing / textSecondary
+//   - Form inputs: 14/16 padding, 12px radius, bg = cardColor, 1px border
+//   - Submit: linear gradient #6366F1 → #818CF8, 16px / w600, 12px radius
+//   - Shared chip: 5/10 padding, 999px radius, bg cardColor, border borderColor
+//     Active: primaryLight border + rgba(99,102,241,0.08) bg
+// ============================================================================
+
+const Color _iosPrimary = Color(0xFF6366F1);
+const Color _iosPrimaryLight = Color(0xFF818CF8);
+const Color _iosNegative = Color(0xFFEF4444);
+
+class _IosModalShell extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+  const _IosModalShell({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = AppColors.background(context);
+    final cardColor = AppColors.cardColor(context);
+    final textPrimary = AppColors.textPrimary(context);
+    final borderColor = AppColors.borderColor(context);
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final safeBottom = mediaQuery.viewPadding.bottom;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: keyboardInset),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: Container(
+          color: bg,
+          constraints: BoxConstraints(
+            maxHeight: mediaQuery.size.height * 0.9,
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(24, 0, 24, 24 + safeBottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle — 36×4, borderColor, 2px radius, 20px below
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 10, bottom: 20),
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: borderColor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  // Header — title left, close button right
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: textPrimary,
+                          ),
+                        ),
+                        // 32×32 rounded-square close button (matches iOS)
+                        InkWell(
+                          onTap: () => Navigator.of(context).pop(),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: cardColor,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.close,
+                              size: 16,
+                              color: textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ...children,
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IosFormGroup extends StatelessWidget {
+  final String label;
+  final Widget child;
+  final Widget? labelTrailing;
+  const _IosFormGroup({
+    required this.label,
+    required this.child,
+    this.labelTrailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textSecondary = AppColors.textSecondary(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: textSecondary,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                if (labelTrailing != null) labelTrailing!,
+              ],
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _IosFormInput extends StatelessWidget {
+  final TextEditingController controller;
+  final String? hint;
+  final int? maxLength;
+  final TextCapitalization textCapitalization;
+  final ValueChanged<String>? onChanged;
+  const _IosFormInput({
+    required this.controller,
+    this.hint,
+    this.maxLength,
+    this.textCapitalization = TextCapitalization.none,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context);
+    final textPrimary = AppColors.textPrimary(context);
+    final textMuted = AppColors.textTertiary(context);
+    return TextField(
+      controller: controller,
+      maxLength: maxLength,
+      textCapitalization: textCapitalization,
+      onChanged: onChanged,
+      style: TextStyle(fontSize: 16, color: textPrimary),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: textMuted, fontSize: 16),
+        filled: true,
+        fillColor: cardColor,
+        counterText: '',
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _iosPrimary, width: 2),
+        ),
+      ),
+    );
+  }
+}
+
+class _IosAmountRow extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String>? onChanged;
+  const _IosAmountRow({required this.controller, this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final textPrimary = AppColors.textPrimary(context);
+    final textMuted = AppColors.textTertiary(context);
+    final borderColor = AppColors.borderColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: borderColor, width: 1),
+          ),
+        ),
+        padding: const EdgeInsets.only(top: 12, bottom: 18),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.55,
+              ),
+              child: IntrinsicWidth(
+                child: TextField(
+                  controller: controller,
+                  onChanged: onChanged,
+                  textAlign: TextAlign.center,
+                  autofocus: true,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                  style: TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.w600,
+                    color: textPrimary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    height: 1,
+                  ),
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintText: '0',
+                    hintStyle: TextStyle(
+                      color: textMuted.withValues(alpha: 0.45),
+                      fontSize: 40,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'ETB',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: textMuted,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IosSharedChip extends StatelessWidget {
+  final String label;
+  final Color dotColor;
+  final bool active;
+  final VoidCallback onTap;
+  const _IosSharedChip({
+    required this.label,
+    required this.dotColor,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context);
+    final textPrimary = AppColors.textPrimary(context);
+    final initial = label.trim().isEmpty
+        ? '?'
+        : String.fromCharCode(label.trim().runes.first).toUpperCase();
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.fromLTRB(5, 5, 10, 5),
+        decoration: BoxDecoration(
+          color: active
+              ? const Color(0xFF6366F1).withValues(alpha: 0.08)
+              : cardColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: active ? _iosPrimary : borderColor,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: dotColor,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                initial,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IosTextAction extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _IosTextAction({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: _iosPrimary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IosFormSubmit extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _IosFormSubmit({
+    required this.label,
+    this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Opacity(
+        opacity: enabled ? 1 : 0.6,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(12),
+            child: Ink(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [_iosPrimary, _iosPrimaryLight],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (icon != null) ...[
+                      const SizedBox(width: 8),
+                      Icon(icon, size: 18, color: Colors.white),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IosSecondaryButton extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final VoidCallback onTap;
+  const _IosSecondaryButton({
+    required this.label,
+    this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textPrimary = AppColors.textPrimary(context);
+    final borderColor = AppColors.borderColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: textPrimary),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IosDangerButton extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool armed;
+  final VoidCallback onTap;
+  const _IosDangerButton({
+    required this.label,
+    this.icon,
+    required this.armed,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = AppColors.borderColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
+          decoration: BoxDecoration(
+            color: armed ? _iosNegative.withValues(alpha: 0.10) : null,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: armed ? _iosNegative : borderColor,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: _iosNegative),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: const TextStyle(
+                  color: _iosNegative,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

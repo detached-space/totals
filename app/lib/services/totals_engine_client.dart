@@ -177,6 +177,11 @@ class TotalsEngineClient {
     await _authenticatedRequest('POST', '/groups/$groupId/join', body: {});
   }
 
+  Future<void> leaveGroup(String groupId) async {
+    _engineLog('leaveGroup group=${_logId(groupId)}');
+    await _authenticatedRequest('DELETE', '/groups/$groupId/members/me');
+  }
+
   Future<List<SharedExpenseMember>> listMembers(String groupId) async {
     final response =
         await _authenticatedRequest('GET', '/groups/$groupId/members');

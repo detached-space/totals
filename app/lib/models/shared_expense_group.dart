@@ -28,6 +28,187 @@ class SharedExpenseMember {
   }
 }
 
+/// A pending join request — someone who asked to join the group and is
+/// waiting for an existing member to approve them (i.e., send the group key).
+class PendingApproval {
+  final String publicKey;
+  final String? displayName;
+  final int requestedAt;
+
+  const PendingApproval({
+    required this.publicKey,
+    this.displayName,
+    required this.requestedAt,
+  });
+
+  factory PendingApproval.fromJson(Map<String, dynamic> json) {
+    return PendingApproval(
+      publicKey: json['publicKey'] as String? ?? '',
+      displayName: json['displayName'] as String?,
+      requestedAt: (json['requestedAt'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'publicKey': publicKey,
+        if (displayName != null) 'displayName': displayName,
+        'requestedAt': requestedAt,
+      };
+}
+
+/// A single shared expense (or settlement record). Mirrors the iOS shape so
+/// payloads encrypted on iOS decrypt to the same structure on Android.
+class SharedExpense {
+  final String id;
+  final double amount;
+  final String currency;
+  final String reason;
+  final String paidBy; // pubkey hex
+  final List<String> splitAmong; // pubkey hexes
+  final int timestamp; // ms since epoch (creation)
+  final int? revisedAt; // ms since epoch (last edit) — last-write-wins
+  final bool deleted;
+
+  /// "expense" or "settlement"
+  final String kind;
+
+  /// If this expense was split from a local SMS-parsed transaction, reference
+  /// it here so the personal ledger can reconcile.
+  final String? linkedTxRef;
+
+  /// "pending" (still being submitted) or "synced".
+  final String? status;
+
+  const SharedExpense({
+    required this.id,
+    required this.amount,
+    required this.currency,
+    required this.reason,
+    required this.paidBy,
+    required this.splitAmong,
+    required this.timestamp,
+    this.revisedAt,
+    this.deleted = false,
+    this.kind = 'expense',
+    this.linkedTxRef,
+    this.status,
+  });
+
+  factory SharedExpense.fromJson(Map<String, dynamic> json) {
+    final rawSplit = json['splitAmong'];
+    final split = (rawSplit is List)
+        ? rawSplit.whereType<String>().toList(growable: false)
+        : const <String>[];
+    return SharedExpense(
+      id: json['id'] as String? ?? '',
+      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      currency: json['currency'] as String? ?? 'ETB',
+      reason: json['reason'] as String? ?? '',
+      paidBy: json['paidBy'] as String? ?? '',
+      splitAmong: split,
+      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      revisedAt: (json['revisedAt'] as num?)?.toInt(),
+      deleted: json['deleted'] == true,
+      kind: json['kind'] as String? ?? 'expense',
+      linkedTxRef: json['linkedTxRef'] as String?,
+      status: json['status'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'amount': amount,
+        'currency': currency,
+        'reason': reason,
+        'paidBy': paidBy,
+        'splitAmong': splitAmong,
+        'timestamp': timestamp,
+        if (revisedAt != null) 'revisedAt': revisedAt,
+        if (deleted) 'deleted': true,
+        'kind': kind,
+        if (linkedTxRef != null) 'linkedTxRef': linkedTxRef,
+        if (status != null) 'status': status,
+      };
+
+  SharedExpense copyWith({
+    String? id,
+    double? amount,
+    String? currency,
+    String? reason,
+    String? paidBy,
+    List<String>? splitAmong,
+    int? timestamp,
+    int? revisedAt,
+    bool? deleted,
+    String? kind,
+    String? linkedTxRef,
+    String? status,
+  }) {
+    return SharedExpense(
+      id: id ?? this.id,
+      amount: amount ?? this.amount,
+      currency: currency ?? this.currency,
+      reason: reason ?? this.reason,
+      paidBy: paidBy ?? this.paidBy,
+      splitAmong: splitAmong ?? this.splitAmong,
+      timestamp: timestamp ?? this.timestamp,
+      revisedAt: revisedAt ?? this.revisedAt,
+      deleted: deleted ?? this.deleted,
+      kind: kind ?? this.kind,
+      linkedTxRef: linkedTxRef ?? this.linkedTxRef,
+      status: status ?? this.status,
+    );
+  }
+}
+
+/// One activity log entry — emitted on group create, expense create/edit/delete,
+/// settlement, member join/leave. One entry per changed field for edits.
+class SharedActivityEntry {
+  final String id;
+  final int timestamp;
+
+  /// pubkey of the actor who performed the action
+  final String actor;
+
+  /// e.g. "expense_created", "expense_amount_changed", "expense_reason_changed",
+  /// "expense_paid_by_changed", "expense_split_changed", "expense_date_changed",
+  /// "expense_deleted", "settlement", "member_joined", "member_left",
+  /// "group_renamed".
+  final String kind;
+
+  /// Arbitrary per-kind payload (e.g., {expenseId, before, after}).
+  final Map<String, dynamic> data;
+
+  const SharedActivityEntry({
+    required this.id,
+    required this.timestamp,
+    required this.actor,
+    required this.kind,
+    required this.data,
+  });
+
+  factory SharedActivityEntry.fromJson(Map<String, dynamic> json) {
+    final rawData = json['data'];
+    return SharedActivityEntry(
+      id: json['id'] as String? ?? '',
+      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      actor: json['actor'] as String? ?? '',
+      kind: json['kind'] as String? ?? '',
+      data: rawData is Map
+          ? Map<String, dynamic>.from(rawData)
+          : const <String, dynamic>{},
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'timestamp': timestamp,
+        'actor': actor,
+        'kind': kind,
+        'data': data,
+      };
+}
+
 class SharedExpenseGroup {
   final String id;
   final String name;
@@ -36,7 +217,31 @@ class SharedExpenseGroup {
   final DateTime? expiresAt;
   final SharedExpenseGroupStatus status;
   final List<SharedExpenseMember> members;
+
+  /// Members we treat as "approved" — either us, or someone we've seen a
+  /// group-key-encrypted payload from (proving they have the key).
   final Set<String> approvedMemberKeys;
+
+  /// All shared expenses (and settlement records) for this group.
+  final List<SharedExpense> expenses;
+
+  /// Per-field activity log entries, newest-last.
+  final List<SharedActivityEntry> activity;
+
+  /// pubkey → most recent known display name (from incoming member_meta
+  /// payloads or our own profile).
+  final Map<String, String> displayNames;
+
+  /// People who broadcast a join_request to this group and haven't been
+  /// approved yet. Surfaced as "Approve Bob?" rows in the UI.
+  final List<PendingApproval> pendingApprovals;
+
+  /// pubkeys we've already shared the group key + our member_meta with.
+  /// Lets us avoid re-broadcasting on every receive.
+  final Set<String> keySharedWith;
+
+  /// Last successful sync time (ms epoch) — used for activity badging.
+  final int? lastSyncAt;
 
   const SharedExpenseGroup({
     required this.id,
@@ -47,11 +252,27 @@ class SharedExpenseGroup {
     required this.status,
     required this.members,
     required this.approvedMemberKeys,
+    this.expenses = const [],
+    this.activity = const [],
+    this.displayNames = const {},
+    this.pendingApprovals = const [],
+    this.keySharedWith = const {},
+    this.lastSyncAt,
   });
 
   int get memberCount => members.isEmpty ? 1 : members.length;
 
   bool get hasGroupKey => status == SharedExpenseGroupStatus.ready;
+
+  /// Display name for any member — falls back through (our display name for
+  /// self), incoming member_meta name, then a shortened pubkey label.
+  String displayNameFor(String myPublicKey, String pubkey) {
+    if (pubkey == myPublicKey) return myDisplayName;
+    final fromMeta = displayNames[pubkey];
+    if (fromMeta != null && fromMeta.trim().isNotEmpty) return fromMeta;
+    if (pubkey.length <= 12) return pubkey;
+    return '${pubkey.substring(0, 6)}…${pubkey.substring(pubkey.length - 4)}';
+  }
 
   List<SharedExpenseMember> pendingApprovalMembers(String myPublicKey) {
     if (!hasGroupKey) return const [];
@@ -74,6 +295,12 @@ class SharedExpenseGroup {
     SharedExpenseGroupStatus? status,
     List<SharedExpenseMember>? members,
     Set<String>? approvedMemberKeys,
+    List<SharedExpense>? expenses,
+    List<SharedActivityEntry>? activity,
+    Map<String, String>? displayNames,
+    List<PendingApproval>? pendingApprovals,
+    Set<String>? keySharedWith,
+    int? lastSyncAt,
   }) {
     return SharedExpenseGroup(
       id: id ?? this.id,
@@ -84,11 +311,20 @@ class SharedExpenseGroup {
       status: status ?? this.status,
       members: members ?? this.members,
       approvedMemberKeys: approvedMemberKeys ?? this.approvedMemberKeys,
+      expenses: expenses ?? this.expenses,
+      activity: activity ?? this.activity,
+      displayNames: displayNames ?? this.displayNames,
+      pendingApprovals: pendingApprovals ?? this.pendingApprovals,
+      keySharedWith: keySharedWith ?? this.keySharedWith,
+      lastSyncAt: lastSyncAt ?? this.lastSyncAt,
     );
   }
 
   factory SharedExpenseGroup.fromJson(Map<String, dynamic> json) {
     final rawStatus = json['status'] as String?;
+    final rawDisplayNames = json['displayNames'];
+    final rawPendingApprovals = json['pendingApprovals'];
+
     return SharedExpenseGroup(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? 'Shared group',
@@ -110,6 +346,34 @@ class SharedExpenseGroup {
           ((json['approvedMemberKeys'] as List?) ?? const <dynamic>[])
               .whereType<String>()
               .toSet(),
+      expenses: ((json['expenses'] as List?) ?? const [])
+          .whereType<Map>()
+          .map(
+              (e) => SharedExpense.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      activity: ((json['activity'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((a) =>
+              SharedActivityEntry.fromJson(Map<String, dynamic>.from(a)))
+          .toList(),
+      displayNames: rawDisplayNames is Map
+          ? Map<String, String>.from(
+              rawDisplayNames.map(
+                (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
+              ),
+            )
+          : const {},
+      pendingApprovals: rawPendingApprovals is List
+          ? rawPendingApprovals
+              .whereType<Map>()
+              .map((p) =>
+                  PendingApproval.fromJson(Map<String, dynamic>.from(p)))
+              .toList()
+          : const [],
+      keySharedWith: ((json['keySharedWith'] as List?) ?? const <dynamic>[])
+          .whereType<String>()
+          .toSet(),
+      lastSyncAt: (json['lastSyncAt'] as num?)?.toInt(),
     );
   }
 
@@ -123,6 +387,12 @@ class SharedExpenseGroup {
       'status': status.name,
       'members': members.map((member) => member.toJson()).toList(),
       'approvedMemberKeys': approvedMemberKeys.toList(),
+      'expenses': expenses.map((e) => e.toJson()).toList(),
+      'activity': activity.map((a) => a.toJson()).toList(),
+      'displayNames': displayNames,
+      'pendingApprovals': pendingApprovals.map((p) => p.toJson()).toList(),
+      'keySharedWith': keySharedWith.toList(),
+      if (lastSyncAt != null) 'lastSyncAt': lastSyncAt,
     };
   }
 }
