@@ -37,3 +37,7 @@ class QuickCategorizeTransactionIntent extends NotificationIntent {
   const QuickCategorizeTransactionIntent(this.reference, this.categoryId);
 }
 
+class OpenSharedExpensesIntent extends NotificationIntent {
+  const OpenSharedExpensesIntent();
+}
+

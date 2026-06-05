@@ -31,8 +31,10 @@ class NotificationService {
   static const String _spendingSummaryChannelId = 'spending_summaries';
   static const String _accountSyncChannelId = 'account_sync';
   static const String _budgetChannelId = 'budgets';
+  static const String _sharedExpensesChannelId = 'shared_expenses';
   static const String _historyPrefsKey = 'notification_history_v1';
   static const String _counterpartyActionPrefix = 'txname:';
+  static const String _sharedExpensesPayload = 'shared_expenses';
   static const int _maxHistoryEntries = 200;
   static const int dailySpendingNotificationId = 9001;
   static const int dailySpendingTestNotificationId = 9002;
@@ -101,6 +103,14 @@ class NotificationService {
         'Budget Alerts',
         description: 'Notifications for budget warnings and alerts',
         importance: Importance.defaultImportance,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _sharedExpensesChannelId,
+        'Shared expenses',
+        description: 'Nudges and reminders from shared expenses',
+        importance: Importance.high,
       ),
     );
 
@@ -317,6 +327,10 @@ class NotificationService {
         }
       }
       return CategorizeTransactionIntent(reference);
+    }
+
+    if (raw == _sharedExpensesPayload) {
+      return const OpenSharedExpensesIntent();
     }
 
     return null;
@@ -982,6 +996,55 @@ class NotificationService {
     }
   }
 
+  Future<void> showSharedExpenseNudgeNotification({
+    required String nudgeId,
+    required String groupName,
+    required String payeeName,
+    required double amount,
+  }) async {
+    try {
+      if (amount <= 0) return;
+      await ensureInitialized();
+
+      final cleanPayee = payeeName.trim();
+      final cleanGroup = groupName.trim();
+      final amountText = 'ETB ${formatNumberWithComma(amount)}';
+      final title = cleanPayee.isEmpty
+          ? 'Settle up reminder'
+          : 'Settle up with $cleanPayee';
+      final body = cleanPayee.isEmpty
+          ? 'Pay $amountText${cleanGroup.isEmpty ? '' : ' for $cleanGroup'}.'
+          : 'Pay $amountText to $cleanPayee'
+              '${cleanGroup.isEmpty ? '' : ' for $cleanGroup'}.';
+
+      await _plugin.show(
+        _sharedExpenseNudgeNotificationId(nudgeId),
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _sharedExpensesChannelId,
+            'Shared expenses',
+            channelDescription: 'Nudges and reminders from shared expenses',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        payload: _sharedExpensesPayload,
+      );
+      await _recordHistory(
+        channel: _sharedExpensesChannelId,
+        title: title,
+        body: body,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show shared expense nudge notification: $e');
+      }
+    }
+  }
+
   static Bank? _findBank(int? bankId) {
     if (bankId == null) return null;
     if (bankId == CashConstants.bankId) {
@@ -1020,6 +1083,10 @@ class NotificationService {
 
   static int _failedParseReviewNotificationId(String reviewId) {
     return 200000 + (reviewId.hashCode & 0x7fffffff);
+  }
+
+  static int _sharedExpenseNudgeNotificationId(String nudgeId) {
+    return 300000 + (nudgeId.hashCode & 0x0fffffff);
   }
 
   static String _buildTitle(Bank? bank, Transaction transaction) {

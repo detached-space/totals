@@ -60,6 +60,7 @@ class RedesignShellState extends State<RedesignShell>
   static const int _homeIndex = 0;
   static const int _moneyIndex = 1;
   static const int _budgetIndex = 2;
+  static const int _sharedIndex = 3;
   static const int _settingsIndex = 4;
   final GlobalKey<RedesignMoneyPageState> _moneyPageKey =
       GlobalKey<RedesignMoneyPageState>();
@@ -86,6 +87,7 @@ class RedesignShellState extends State<RedesignShell>
   bool _hasInitializedSmsPermissions = false;
   bool _hasCheckedNotificationPermissions = false;
   String? _pendingNotificationReference;
+  bool _pendingSharedExpensesOpen = false;
 
   @override
   void initState() {
@@ -107,6 +109,8 @@ class RedesignShellState extends State<RedesignShell>
         if (!mounted) return;
         if (intent is CategorizeTransactionIntent) {
           unawaited(_handleNotificationCategorize(intent.reference));
+        } else if (intent is OpenSharedExpensesIntent) {
+          unawaited(_handleSharedExpensesNotification());
         }
       },
     );
@@ -306,6 +310,11 @@ class RedesignShellState extends State<RedesignShell>
         await _openTransactionFromNotification(pendingReference);
       }
 
+      if (_pendingSharedExpensesOpen) {
+        _pendingSharedExpensesOpen = false;
+        _openSharedExpensesFromNotification();
+      }
+
       if (mounted) {
         unawaited(_checkBatteryOptimization());
         unawaited(AppUpdateService.instance.checkOnLaunch(context));
@@ -501,6 +510,23 @@ class RedesignShellState extends State<RedesignShell>
       accountNumber: _cashAccountNumber(provider),
       initialIsDebit: true,
     );
+  }
+
+  Future<void> _handleSharedExpensesNotification() async {
+    if (!_isAuthenticated) {
+      _pendingSharedExpensesOpen = true;
+      await _authenticateIfAvailable();
+      return;
+    }
+
+    _openSharedExpensesFromNotification();
+  }
+
+  void _openSharedExpensesFromNotification() {
+    if (!mounted) return;
+    if (_currentIndex != _sharedIndex) {
+      _onTabSelected(_sharedIndex);
+    }
   }
 
   Future<void> _showQuickAccessAccountsSheet() async {
