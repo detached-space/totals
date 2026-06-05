@@ -496,19 +496,58 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         .debts
         .where((debt) => debt.to == _myPublicKey)
         .toList(growable: false);
-    final amount = debtsOwedToMe.fold<double>(
-      0,
-      (sum, debt) => sum + debt.amount,
-    );
-    final debtorPks = debtsOwedToMe
-        .map((debt) => debt.from)
-        .where((pk) => pk.isNotEmpty)
-        .toSet()
-        .toList(growable: false);
-    if (amount < 0.5 || debtorPks.isEmpty) {
+    final amountByDebtor = <String, double>{};
+    for (final debt in debtsOwedToMe) {
+      if (debt.from.isEmpty || debt.amount < 0.5) continue;
+      amountByDebtor.update(
+        debt.from,
+        (current) => current + debt.amount,
+        ifAbsent: () => debt.amount,
+      );
+    }
+    final targets = amountByDebtor.entries
+        .map((entry) => _NudgeTarget(
+              publicKey: entry.key,
+              amount: entry.value,
+            ))
+        .where((target) => target.amount >= 0.5)
+        .toList(growable: false)
+      ..sort((a, b) {
+        final byAmount = b.amount.compareTo(a.amount);
+        if (byAmount != 0) return byAmount;
+        return group
+            .displayNameFor(_myPublicKey, a.publicKey)
+            .compareTo(group.displayNameFor(_myPublicKey, b.publicKey));
+      });
+    if (targets.isEmpty) {
       _showSnack(context.l10nTextRead('No one owes you right now'));
       return;
     }
+
+    final shouldChooseTargets = group.memberCount > 2 && targets.length > 1;
+    final selectedTargets = shouldChooseTargets
+        ? await showModalBottomSheet<List<_NudgeTarget>>(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            barrierColor: AppColors.black.withValues(alpha: 0.5),
+            builder: (_) => _NudgePickerSheet(
+              group: group,
+              myPublicKey: _myPublicKey,
+              targets: targets,
+            ),
+          )
+        : targets;
+    if (selectedTargets == null || selectedTargets.isEmpty) return;
+
+    final amount = selectedTargets.fold<double>(
+      0,
+      (sum, target) => sum + target.amount,
+    );
+    final debtorPks = selectedTargets
+        .map((target) => target.publicKey)
+        .where((pk) => pk.isNotEmpty)
+        .toList(growable: false);
 
     setState(() => _isMutating = true);
     try {
@@ -4180,6 +4219,210 @@ class _PendingMemberRow extends StatelessWidget {
                 : Text(context.l10nText('Approve')),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _NudgeTarget {
+  final String publicKey;
+  final double amount;
+
+  const _NudgeTarget({
+    required this.publicKey,
+    required this.amount,
+  });
+}
+
+class _NudgePickerSheet extends StatefulWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final List<_NudgeTarget> targets;
+
+  const _NudgePickerSheet({
+    required this.group,
+    required this.myPublicKey,
+    required this.targets,
+  });
+
+  @override
+  State<_NudgePickerSheet> createState() => _NudgePickerSheetState();
+}
+
+class _NudgePickerSheetState extends State<_NudgePickerSheet> {
+  late Set<String> _selectedPks;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedPks = widget.targets.map((target) => target.publicKey).toSet();
+  }
+
+  List<_NudgeTarget> get _selectedTargets => widget.targets
+      .where((target) => _selectedPks.contains(target.publicKey))
+      .toList(growable: false);
+
+  double get _selectedAmount => _selectedTargets.fold<double>(
+        0,
+        (sum, target) => sum + target.amount,
+      );
+
+  void _toggle(String publicKey) {
+    setState(() {
+      if (_selectedPks.contains(publicKey)) {
+        _selectedPks.remove(publicKey);
+      } else {
+        _selectedPks.add(publicKey);
+      }
+    });
+  }
+
+  void _submit() {
+    final selected = _selectedTargets;
+    if (selected.isEmpty) return;
+    Navigator.of(context).pop(selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _IosModalShell(
+      title: context.l10nText('Send a nudge'),
+      children: [
+        _IosFormGroup(
+          label: context.l10nText('People who owe you'),
+          labelTrailing: Text(
+            _formatEtb(_selectedAmount),
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          child: Column(
+            children: [
+              for (final target in widget.targets) ...[
+                _NudgeTargetRow(
+                  group: widget.group,
+                  myPublicKey: widget.myPublicKey,
+                  target: target,
+                  selected: _selectedPks.contains(target.publicKey),
+                  onTap: () => _toggle(target.publicKey),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+        _IosFormSubmit(
+          label: _selectedPks.length == 1
+              ? context.l10nText('Send nudge')
+              : context.l10nText('Send nudges'),
+          icon: Icons.notifications_active_outlined,
+          enabled: _selectedPks.isNotEmpty,
+          onTap: _submit,
+        ),
+      ],
+    );
+  }
+}
+
+class _NudgeTargetRow extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final _NudgeTarget target;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _NudgeTargetRow({
+    required this.group,
+    required this.myPublicKey,
+    required this.target,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final name = group.displayNameFor(myPublicKey, target.publicKey);
+    final color = Color(memberColorFor(group, target.publicKey));
+    final textPrimary = AppColors.textPrimary(context);
+    final textSecondary = AppColors.textSecondary(context);
+    final borderColor = AppColors.borderColor(context);
+    final cardColor = AppColors.cardColor(context);
+    final initial = name.trim().isEmpty
+        ? '?'
+        : String.fromCharCode(name.trim().runes.first).toUpperCase();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.primaryLight.withValues(alpha: 0.08)
+                : cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppColors.primaryLight : borderColor,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatEtb(target.amount),
+                      style: TextStyle(
+                        color: textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Checkbox(
+                value: selected,
+                onChanged: (_) => onTap(),
+                activeColor: AppColors.primaryLight,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

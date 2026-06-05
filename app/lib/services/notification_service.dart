@@ -1013,9 +1013,9 @@ class NotificationService {
           ? 'Settle up reminder'
           : 'Settle up with $cleanPayee';
       final body = cleanPayee.isEmpty
-          ? 'Pay $amountText${cleanGroup.isEmpty ? '' : ' for $cleanGroup'}.'
+          ? 'Pay $amountText${cleanGroup.isEmpty ? '' : ' to $cleanGroup'}.'
           : 'Pay $amountText to $cleanPayee'
-              '${cleanGroup.isEmpty ? '' : ' for $cleanGroup'}.';
+              '${cleanGroup.isEmpty ? '' : ' to $cleanGroup'}.';
 
       await _plugin.show(
         _sharedExpenseNudgeNotificationId(nudgeId),

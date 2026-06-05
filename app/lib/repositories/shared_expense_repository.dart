@@ -53,6 +53,7 @@ class SharedExpenseRepository {
   final SharedExpenseCryptoService _cryptoService;
   final FlutterSecureStorage _secureStorage;
   final Uuid _uuid;
+  static final Set<String> _processingPayloadIds = {};
 
   SharedExpenseRepository({
     TotalsEngineClient? engineClient,
@@ -993,46 +994,57 @@ class SharedExpenseRepository {
     required String myPublicKey,
     required EnginePendingPayload payload,
   }) async {
-    // Re-read the group key on every payload. If a key_exchange establishes the
-    // key, later payloads in the same sync/stream can decrypt immediately.
-    final groupKeyHex = await _readGroupKey(groupId);
-    final groupKeyBytes = groupKeyHex == null
-        ? null
-        : SharedExpenseCryptoService.fromHex(groupKeyHex);
-
-    Map<String, dynamic>? decoded;
-    if (groupKeyBytes != null) {
-      decoded = await _cryptoService.decryptPayloadWithKey(
-        keyBytes: groupKeyBytes,
-        encryptedBlob: payload.encryptedBlob,
-      );
-    }
-    decoded ??= await _cryptoService.decryptGroupKeyPayload(
-      senderPublicKeyHex: payload.senderPublicKey,
-      encryptedBlob: payload.encryptedBlob,
-    );
-
-    if (decoded == null) {
+    if (!_processingPayloadIds.add(payload.id)) {
       _sharedExpenseLog(
-        '_processPendingPayload undecryptable payload=${_logId(payload.id)}',
+        '_processPendingPayload already processing payload=${_logId(payload.id)}',
       );
-      await _acknowledgePayload(payload.id);
       return false;
     }
 
-    final type = decoded['type'] as String?;
-    _sharedExpenseLog(
-      '_processPendingPayload applying type=$type '
-      'sender=${_logId(payload.senderPublicKey)}',
-    );
-    final applied = await _applyPayload(
-      groupId: groupId,
-      senderPk: payload.senderPublicKey,
-      decoded: decoded,
-      myPublicKey: myPublicKey,
-    );
-    await _acknowledgePayload(payload.id);
-    return applied;
+    try {
+      // Re-read the group key on every payload. If a key_exchange establishes
+      // the key, later payloads in the same sync/stream can decrypt immediately.
+      final groupKeyHex = await _readGroupKey(groupId);
+      final groupKeyBytes = groupKeyHex == null
+          ? null
+          : SharedExpenseCryptoService.fromHex(groupKeyHex);
+
+      Map<String, dynamic>? decoded;
+      if (groupKeyBytes != null) {
+        decoded = await _cryptoService.decryptPayloadWithKey(
+          keyBytes: groupKeyBytes,
+          encryptedBlob: payload.encryptedBlob,
+        );
+      }
+      decoded ??= await _cryptoService.decryptGroupKeyPayload(
+        senderPublicKeyHex: payload.senderPublicKey,
+        encryptedBlob: payload.encryptedBlob,
+      );
+
+      if (decoded == null) {
+        _sharedExpenseLog(
+          '_processPendingPayload undecryptable payload=${_logId(payload.id)}',
+        );
+        await _acknowledgePayload(payload.id);
+        return false;
+      }
+
+      final type = decoded['type'] as String?;
+      _sharedExpenseLog(
+        '_processPendingPayload applying type=$type '
+        'sender=${_logId(payload.senderPublicKey)}',
+      );
+      final applied = await _applyPayload(
+        groupId: groupId,
+        senderPk: payload.senderPublicKey,
+        decoded: decoded,
+        myPublicKey: myPublicKey,
+      );
+      await _acknowledgePayload(payload.id);
+      return applied;
+    } finally {
+      _processingPayloadIds.remove(payload.id);
+    }
   }
 
   Future<void> _acknowledgePayload(String payloadId) async {
