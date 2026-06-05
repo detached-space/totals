@@ -35,6 +35,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
+import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/utils/account_share_payload.dart';
@@ -187,6 +188,10 @@ class RedesignShellState extends State<RedesignShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(SmsConfigService().syncRemoteConfig());
+    }
+
     if (state == AppLifecycleState.resumed && _isAuthenticated) {
       unawaited(
         Provider.of<TransactionProvider>(context, listen: false).loadData(),

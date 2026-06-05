@@ -316,6 +316,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(SmsConfigService().syncRemoteConfig());
       Provider.of<TransactionProvider>(context, listen: false).loadData();
     }
   }

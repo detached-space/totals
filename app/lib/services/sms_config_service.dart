@@ -7,6 +7,7 @@ import 'package:totals/models/sms_pattern.dart';
 
 class SmsConfigService {
   static const String _patternsAssetPath = 'assets/sms_patterns.json';
+  static Future<void>? _remoteConfigSyncInFlight;
   List<SmsPattern>? _assetPatternsCache;
 
   Future<List<SmsPattern>> _loadAssetPatterns() async {
@@ -105,9 +106,12 @@ class SmsConfigService {
 
   Future<bool> _hasInternetConnection() async {
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
+      final connectivityResults = await Connectivity().checkConnectivity();
       // Check if we have any connection (mobile, wifi, ethernet, etc.)
-      if (connectivityResult == ConnectivityResult.none) {
+      if (connectivityResults.isEmpty ||
+          connectivityResults.every(
+            (result) => result == ConnectivityResult.none,
+          )) {
         return false;
       }
       // Additional check: try to reach a known server
@@ -201,7 +205,20 @@ class SmsConfigService {
   }
 
   // Method to force fetch remote config (background sync)
-  Future<void> syncRemoteConfig({bool showError = false}) async {
+  Future<void> syncRemoteConfig({bool showError = false}) {
+    final inFlight = _remoteConfigSyncInFlight;
+    if (inFlight != null) return inFlight;
+
+    final sync = _syncRemoteConfig(showError: showError);
+    _remoteConfigSyncInFlight = sync;
+    return sync.whenComplete(() {
+      if (identical(_remoteConfigSyncInFlight, sync)) {
+        _remoteConfigSyncInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _syncRemoteConfig({bool showError = false}) async {
     final hasInternet = await _hasInternetConnection();
     if (!hasInternet) {
       print("debug: No internet connection, skipping remote sync");
