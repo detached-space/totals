@@ -127,6 +127,16 @@ class _EngineResponse {
   });
 }
 
+class _SseEvent {
+  final String event;
+  final String data;
+
+  const _SseEvent({
+    required this.event,
+    required this.data,
+  });
+}
+
 class TotalsEngineClient {
   static const _defaultBaseUrl = 'https://engine-staging.totals.detached.space';
   static const _requestTimeout = Duration(seconds: 12);
@@ -228,6 +238,43 @@ class TotalsEngineClient {
       'pullPending group=${_logId(groupId)} payloads=${parsed.length}',
     );
     return parsed;
+  }
+
+  Stream<EnginePendingPayload> streamPending(String groupId) async* {
+    final headers = await _authHeaders();
+    final uri = _uri('/groups/$groupId/pending/stream');
+    _engineLog('streamPending group=${_logId(groupId)} -> $uri');
+
+    final request = http.Request('GET', uri)..headers.addAll(headers);
+    final response = await _client.send(request).timeout(_requestTimeout);
+    _engineLog(
+      'streamPending group=${_logId(groupId)} <- ${response.statusCode}',
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      final decoded = _decodeBody(bodyText);
+      _engineLog('streamPending errorBody=${_logBody(bodyText)}');
+      throw TotalsEngineException(
+        _errorMessage(decoded) ?? 'Totals Engine stream failed.',
+        statusCode: response.statusCode,
+      );
+    }
+
+    await for (final event in _decodeSseEvents(response.stream)) {
+      if (event.event == 'payload') {
+        final decoded = jsonDecode(event.data);
+        if (decoded is! Map) continue;
+        final payload = EnginePendingPayload.fromJson(
+          Map<String, dynamic>.from(decoded),
+        );
+        if (payload.id.isNotEmpty) yield payload;
+      } else if (event.event == 'error') {
+        throw TotalsEngineException(
+          event.data.isEmpty ? 'Totals Engine stream failed.' : event.data,
+        );
+      }
+    }
   }
 
   Future<void> acknowledgePayload(String payloadId) async {
@@ -454,6 +501,52 @@ class TotalsEngineClient {
           'failed to decode response body: $error body=${_logBody(body)}');
       return <String, dynamic>{};
     }
+  }
+
+  Stream<_SseEvent> _decodeSseEvents(Stream<List<int>> byteStream) async* {
+    var eventName = 'message';
+    final dataLines = <String>[];
+
+    _SseEvent? flush() {
+      if (dataLines.isEmpty) {
+        eventName = 'message';
+        return null;
+      }
+      final event = _SseEvent(
+        event: eventName,
+        data: dataLines.join('\n'),
+      );
+      eventName = 'message';
+      dataLines.clear();
+      return event;
+    }
+
+    await for (final line
+        in byteStream.transform(utf8.decoder).transform(const LineSplitter())) {
+      if (line.isEmpty) {
+        final event = flush();
+        if (event != null) yield event;
+        continue;
+      }
+      if (line.startsWith(':')) continue;
+
+      final separator = line.indexOf(':');
+      final field = separator == -1 ? line : line.substring(0, separator);
+      var value = separator == -1 ? '' : line.substring(separator + 1);
+      if (value.startsWith(' ')) value = value.substring(1);
+
+      switch (field) {
+        case 'event':
+          eventName = value.isEmpty ? 'message' : value;
+          break;
+        case 'data':
+          dataLines.add(value);
+          break;
+      }
+    }
+
+    final event = flush();
+    if (event != null) yield event;
   }
 
   String? _errorMessage(Map<String, dynamic> body) {

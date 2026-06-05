@@ -53,6 +53,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   static const String _accountShareDisplayNameKey =
       'account_share_display_name';
   static const Duration _pollInterval = Duration(seconds: 12);
+  static const Duration _realtimeReconnectDelay = Duration(seconds: 3);
   static const Duration _minBackgroundRefreshGap = Duration(milliseconds: 500);
 
   List<SharedExpenseGroup> _groups = const [];
@@ -65,6 +66,9 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   _CreatingGroupDraft? _creatingGroup;
   Timer? _pollTimer;
   DateTime? _lastBackgroundRefresh;
+  final Map<String, StreamSubscription<SharedExpenseGroup>>
+      _realtimeSubscriptions = {};
+  final Map<String, Timer> _realtimeReconnectTimers = {};
 
   @override
   void initState() {
@@ -78,6 +82,14 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    for (final timer in _realtimeReconnectTimers.values) {
+      timer.cancel();
+    }
+    for (final subscription in _realtimeSubscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _realtimeReconnectTimers.clear();
+    _realtimeSubscriptions.clear();
     super.dispose();
   }
 
@@ -110,6 +122,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _groups = groups;
         _selectedGroup = _updatedSelectedGroup(groups);
       });
+      _syncRealtimeSubscriptions(groups);
     } catch (error) {
       _sharedExpensesPageLog('backgroundRefresh failed: $error');
     }
@@ -139,6 +152,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           _selectedGroup = _updatedSelectedGroup(localGroups);
           _myPublicKey = myPublicKey;
         });
+        _syncRealtimeSubscriptions(localGroups);
       }
 
       if (refreshFromEngine) {
@@ -150,6 +164,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
             _selectedGroup = _updatedSelectedGroup(groups);
             _engineReachable = reachable;
           });
+          _syncRealtimeSubscriptions(groups);
         }
         _sharedExpensesPageLog(
           'loadGroups refreshed groups=${groups.length} reachable=$reachable',
@@ -203,6 +218,102 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     return selected;
   }
 
+  bool _shouldStreamGroup(SharedExpenseGroup group) {
+    return group.id.isNotEmpty &&
+        group.status != SharedExpenseGroupStatus.localOnly;
+  }
+
+  void _syncRealtimeSubscriptions(List<SharedExpenseGroup> groups) {
+    final desiredGroupIds =
+        groups.where(_shouldStreamGroup).map((group) => group.id).toSet();
+
+    for (final groupId in _realtimeSubscriptions.keys.toList()) {
+      if (!desiredGroupIds.contains(groupId)) {
+        _stopRealtimeSubscription(groupId);
+      }
+    }
+    for (final groupId in _realtimeReconnectTimers.keys.toList()) {
+      if (!desiredGroupIds.contains(groupId)) {
+        _realtimeReconnectTimers.remove(groupId)?.cancel();
+      }
+    }
+    for (final groupId in desiredGroupIds) {
+      if (_realtimeSubscriptions.containsKey(groupId)) continue;
+      if (_realtimeReconnectTimers.containsKey(groupId)) continue;
+      _startRealtimeSubscription(groupId);
+    }
+  }
+
+  void _startRealtimeSubscription(String groupId) {
+    if (_realtimeSubscriptions.containsKey(groupId)) return;
+    _sharedExpensesPageLog('realtime subscribe group=${_logId(groupId)}');
+
+    final subscription = _repository.watchGroupRealtime(groupId).listen(
+      _applyRealtimeGroup,
+      onError: (Object error, StackTrace stackTrace) {
+        _sharedExpensesPageLog(
+          'realtime stream failed group=${_logId(groupId)}: $error',
+        );
+        if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+        _realtimeSubscriptions.remove(groupId);
+        _scheduleRealtimeReconnect(groupId);
+      },
+      onDone: () {
+        _sharedExpensesPageLog('realtime stream done group=${_logId(groupId)}');
+        _realtimeSubscriptions.remove(groupId);
+        _scheduleRealtimeReconnect(groupId);
+      },
+    );
+    _realtimeSubscriptions[groupId] = subscription;
+  }
+
+  void _stopRealtimeSubscription(String groupId) {
+    final subscription = _realtimeSubscriptions.remove(groupId);
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
+    _realtimeReconnectTimers.remove(groupId)?.cancel();
+  }
+
+  void _scheduleRealtimeReconnect(String groupId) {
+    if (!mounted) return;
+    if (_realtimeReconnectTimers.containsKey(groupId)) return;
+    _realtimeReconnectTimers[groupId] = Timer(_realtimeReconnectDelay, () {
+      _realtimeReconnectTimers.remove(groupId);
+      if (!mounted) return;
+      final group = _groupInState(groupId);
+      if (group == null || !_shouldStreamGroup(group)) return;
+      if (_realtimeSubscriptions.containsKey(groupId)) return;
+      _startRealtimeSubscription(groupId);
+    });
+  }
+
+  SharedExpenseGroup? _groupInState(String groupId) {
+    for (final group in _groups) {
+      if (group.id == groupId) return group;
+    }
+    return null;
+  }
+
+  void _applyRealtimeGroup(SharedExpenseGroup updatedGroup) {
+    if (!mounted) return;
+    setState(() {
+      var replaced = false;
+      final next = _groups.map((group) {
+        if (group.id != updatedGroup.id) return group;
+        replaced = true;
+        return updatedGroup;
+      }).toList(growable: true);
+      if (!replaced) next.insert(0, updatedGroup);
+
+      _groups = next;
+      _selectedGroup = _selectedGroup?.id == updatedGroup.id
+          ? updatedGroup
+          : _updatedSelectedGroup(next);
+      _engineReachable = true;
+    });
+  }
+
   void _openGroup(SharedExpenseGroup group) {
     _sharedExpensesPageLog('openGroup group=${_logId(group.id)}');
     setState(() => _selectedGroup = group);
@@ -242,6 +353,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           _groups = groups;
           _selectedGroup = null;
         });
+        _syncRealtimeSubscriptions(groups);
         _showSnack(context.l10nTextRead('You left the group'));
       } catch (error) {
         _showSnack(error.toString().replaceFirst('Exception: ', ''));
@@ -253,8 +365,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
     if (result is _GroupSettingsSave) {
       final nameChanged = result.name.trim() != group.name;
-      final displayChanged =
-          result.displayName.trim() != group.myDisplayName;
+      final displayChanged = result.displayName.trim() != group.myDisplayName;
       if (!nameChanged && !displayChanged) return;
       setState(() => _isMutating = true);
       try {
@@ -270,6 +381,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           _groups = groups;
           _selectedGroup = updated;
         });
+        _syncRealtimeSubscriptions(groups);
         _showSnack(context.l10nTextRead('Saved'));
       } catch (error) {
         _showSnack(error.toString().replaceFirst('Exception: ', ''));
@@ -331,10 +443,12 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       }
       if (!mounted) return;
       final groups = await _repository.getGroups();
+      if (!mounted) return;
       setState(() {
         _groups = groups;
         _selectedGroup = updated;
       });
+      _syncRealtimeSubscriptions(groups);
       _showSnack(
         result is _ExpenseSheetDelete
             ? context.l10nTextRead('Expense deleted')
@@ -367,6 +481,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _groups = groups;
         _selectedGroup = updated;
       });
+      _syncRealtimeSubscriptions(groups);
       final name = group.displayNameFor(_myPublicKey, recipientPk);
       _showSnack('Settled with $name');
     } catch (error) {
@@ -433,13 +548,15 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         displayName: input.displayName,
       );
       if (mounted) {
+        final groups = [
+          group,
+          ..._groups.where((existing) => existing.id != group.id),
+        ];
         setState(() {
           _creatingGroup = null;
-          _groups = [
-            group,
-            ..._groups.where((existing) => existing.id != group.id),
-          ];
+          _groups = groups;
         });
+        _syncRealtimeSubscriptions(groups);
       }
       await _copyInvite(group, showSnack: false);
       _showSnack(copiedMessage);
@@ -544,6 +661,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       final groups = await _repository.getGroups();
       if (!mounted) return;
       setState(() => _groups = groups);
+      _syncRealtimeSubscriptions(groups);
       _showSnack(context.l10nTextRead('Join request cancelled'));
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
@@ -579,8 +697,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         onBack: _closeGroup,
         onOpenSettings: () => _openGroupSettings(selectedGroup),
         onAddExpense: _showAddExpenseComingSoon,
-        onEditExpense: (e) =>
-            _openExpenseSheet(selectedGroup, expense: e),
+        onEditExpense: (e) => _openExpenseSheet(selectedGroup, expense: e),
         onSettle: (recipientPk, amount) =>
             _settleWith(selectedGroup, recipientPk, amount),
       );
@@ -674,8 +791,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         onCopyInvite: () => _copyInvite(group),
                         onApproveMember: (member) =>
                             _approveMember(group, member),
-                        onCancelJoinRequest: () =>
-                            _cancelJoinRequest(group),
+                        onCancelJoinRequest: () => _cancelJoinRequest(group),
                       );
                     },
                   ),
@@ -1259,9 +1375,7 @@ class _SharedGroupTransactionsViewState
   Widget build(BuildContext context) {
     final hasQuery = _query.trim().isNotEmpty;
     final queryLower = _query.trim().toLowerCase();
-    final filtered = widget.group.expenses
-        .where((e) => !e.deleted)
-        .where((e) {
+    final filtered = widget.group.expenses.where((e) => !e.deleted).where((e) {
       if (queryLower.isEmpty) return true;
       final reasonMatch = e.reason.toLowerCase().contains(queryLower);
       final payerName = widget.group
@@ -1804,7 +1918,8 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isReady = group.status == SharedExpenseGroupStatus.ready;
-    final balances = isReady ? computeBalancesFor(group) : const <String, double>{};
+    final balances =
+        isReady ? computeBalancesFor(group) : const <String, double>{};
     final myBalance = balances[myPublicKey] ?? 0.0;
     final settled = myBalance.abs() < 0.5;
 
@@ -1838,9 +1953,9 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
         .skip(1)
         .where((m) => m.publicKey.isNotEmpty)
         .toList(growable: false)
-      ..sort((a, b) =>
-          (balances[b.publicKey] ?? 0).abs().compareTo(
-              (balances[a.publicKey] ?? 0).abs()));
+      ..sort((a, b) => (balances[b.publicKey] ?? 0)
+          .abs()
+          .compareTo((balances[a.publicKey] ?? 0).abs()));
     final topTwo = counterparties.take(2).toList(growable: false);
 
     return Container(
@@ -1927,14 +2042,15 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                         final txt = _formatEtb(bal.abs());
                         return Text(
                           isMyCreditor ? '+$txt' : txt,
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                color: isMyCreditor
-                                    ? AppColors.incomeSuccess
-                                    : (bal > 0
-                                        ? AppColors.textPrimary(context)
-                                        : AppColors.red),
-                                fontWeight: FontWeight.w900,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    color: isMyCreditor
+                                        ? AppColors.incomeSuccess
+                                        : (bal > 0
+                                            ? AppColors.textPrimary(context)
+                                            : AppColors.red),
+                                    fontWeight: FontWeight.w900,
+                                  ),
                         );
                       }),
                       const SizedBox(height: 12),
@@ -2135,11 +2251,14 @@ class _SharedExpenseRow extends StatelessWidget {
     final payerColor = Color(memberColorFor(group, expense.paidBy));
     final payerName = group.displayNameFor(myPublicKey, expense.paidBy);
     final isSettlement = expense.kind == 'settlement';
-    final recipient = expense.splitAmong.isNotEmpty ? expense.splitAmong.first : '';
-    final recipientName =
-        recipient.isNotEmpty ? group.displayNameFor(myPublicKey, recipient) : '';
-    final recipientColor =
-        recipient.isNotEmpty ? Color(memberColorFor(group, recipient)) : payerColor;
+    final recipient =
+        expense.splitAmong.isNotEmpty ? expense.splitAmong.first : '';
+    final recipientName = recipient.isNotEmpty
+        ? group.displayNameFor(myPublicKey, recipient)
+        : '';
+    final recipientColor = recipient.isNotEmpty
+        ? Color(memberColorFor(group, recipient))
+        : payerColor;
     final ago = _shortRelative(expense.timestamp);
 
     final content = Padding(
@@ -2164,19 +2283,21 @@ class _SharedExpenseRow extends StatelessWidget {
                   Row(
                     children: [
                       Text(payerName,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: payerColor,
-                                fontWeight: FontWeight.w700,
-                              )),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: payerColor,
+                                    fontWeight: FontWeight.w700,
+                                  )),
                       Text('  →  ',
                           style: TextStyle(
                               color: AppColors.textTertiary(context),
                               fontWeight: FontWeight.w600)),
                       Text(recipientName,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: recipientColor,
-                                fontWeight: FontWeight.w700,
-                              )),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: recipientColor,
+                                    fontWeight: FontWeight.w700,
+                                  )),
                     ],
                   )
                 else
@@ -2203,8 +2324,7 @@ class _SharedExpenseRow extends StatelessWidget {
                           ),
                         ),
                         TextSpan(
-                          text:
-                              ' paid · split ${expense.splitAmong.length}',
+                          text: ' paid · split ${expense.splitAmong.length}',
                         ),
                       ] else
                         const TextSpan(text: 'Settlement'),
@@ -2280,15 +2400,13 @@ class _SharedSettleArrow extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(fromName,
-              style: TextStyle(
-                  color: fromColor, fontWeight: FontWeight.w700)),
+              style: TextStyle(color: fromColor, fontWeight: FontWeight.w700)),
           const SizedBox(width: 6),
           Icon(Icons.arrow_right_alt,
               size: 18, color: AppColors.textTertiary(context)),
           const SizedBox(width: 6),
           Text(toName,
-              style: TextStyle(
-                  color: toColor, fontWeight: FontWeight.w700)),
+              style: TextStyle(color: toColor, fontWeight: FontWeight.w700)),
           const SizedBox(width: 6),
           Container(
             width: 22,
@@ -2296,9 +2414,7 @@ class _SharedSettleArrow extends StatelessWidget {
             decoration: BoxDecoration(color: toColor, shape: BoxShape.circle),
             alignment: Alignment.center,
             child: Text(
-              toName.isNotEmpty
-                  ? toName.characters.first.toUpperCase()
-                  : '?',
+              toName.isNotEmpty ? toName.characters.first.toUpperCase() : '?',
               style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,
@@ -3001,8 +3117,7 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                         side: BorderSide(
                           color: _cancelArmed
                               ? const Color(0xFFBE123C)
-                              : const Color(0xFFBE123C)
-                                  .withValues(alpha: 0.5),
+                              : const Color(0xFFBE123C).withValues(alpha: 0.5),
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -3568,8 +3683,7 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
     final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
     final reason = _reasonCtrl.text.trim();
     final canSave = amount > 0 && reason.isNotEmpty && _split.isNotEmpty;
-    final allSelected =
-        keys.isNotEmpty && _split.length == keys.length;
+    final allSelected = keys.isNotEmpty && _split.length == keys.length;
 
     return _IosModalShell(
       title: _isEditing ? 'Edit Expense' : 'Add Expense',
@@ -3642,9 +3756,7 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
         if (_isEditing) ...[
           const SizedBox(height: 10),
           _IosDangerButton(
-            label: _deleteArmed
-                ? 'Tap again to delete'
-                : 'Delete expense',
+            label: _deleteArmed ? 'Tap again to delete' : 'Delete expense',
             icon: Icons.delete_outline,
             armed: _deleteArmed,
             onTap: _onDeleteTap,
@@ -3858,8 +3970,7 @@ class _IosModalShell extends StatelessWidget {
           child: SafeArea(
             top: false,
             child: SingleChildScrollView(
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(24, 0, 24, 24 + safeBottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,

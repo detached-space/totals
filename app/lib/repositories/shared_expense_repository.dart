@@ -495,8 +495,8 @@ class SharedExpenseRepository {
           .toSet();
 
       final approvedKeys = <String>{
-        ...?local?.approvedMemberKeys
-            .where((k) => k == identity.publicKeyHex || currentMemberKeys.contains(k)),
+        ...?local?.approvedMemberKeys.where(
+            (k) => k == identity.publicKeyHex || currentMemberKeys.contains(k)),
         if (hasKey) identity.publicKeyHex,
       };
       final sharedWith = <String>{
@@ -563,52 +563,12 @@ class SharedExpenseRepository {
     final identity = await _cryptoService.getOrCreateIdentity();
 
     for (final payload in payloads) {
-      // Re-read the group key on every iteration. If the very first payload
-      // in this batch is a key_exchange that establishes the key, any later
-      // payloads in the same batch (group_meta, member_meta, expense …) must
-      // be able to decrypt with the freshly-set key — caching the key bytes
-      // once at the top of the loop would leave us stuck on shared-secret
-      // decrypt for the rest of the batch.
-      final groupKeyHex = await _readGroupKey(groupId);
-      final groupKeyBytes = groupKeyHex == null
-          ? null
-          : SharedExpenseCryptoService.fromHex(groupKeyHex);
-
-      // Try group-key decrypt first (most payloads use it).
-      Map<String, dynamic>? decoded;
-      if (groupKeyBytes != null) {
-        decoded = await _cryptoService.decryptPayloadWithKey(
-          keyBytes: groupKeyBytes,
-          encryptedBlob: payload.encryptedBlob,
-        );
-      }
-      // Fall back to 1:1 shared-secret decrypt for key_exchange / join_request.
-      decoded ??= await _cryptoService.decryptGroupKeyPayload(
-        senderPublicKeyHex: payload.senderPublicKey,
-        encryptedBlob: payload.encryptedBlob,
-      );
-
-      if (decoded == null) {
-        _sharedExpenseLog(
-          'syncGroup undecryptable payload=${_logId(payload.id)}',
-        );
-        // Still ack so we don't keep re-fetching it.
-        await _engineClient.acknowledgePayload(payload.id);
-        continue;
-      }
-
-      final type = decoded['type'] as String?;
-      _sharedExpenseLog(
-        'syncGroup applying type=$type sender=${_logId(payload.senderPublicKey)}',
-      );
-      final applied = await _applyPayload(
+      final applied = await _processPendingPayload(
         groupId: groupId,
-        senderPk: payload.senderPublicKey,
-        decoded: decoded,
         myPublicKey: identity.publicKeyHex,
+        payload: payload,
       );
       if (applied) changed = true;
-      await _engineClient.acknowledgePayload(payload.id);
     }
 
     // Stamp lastSyncAt + retry any pending meta broadcast.
@@ -638,6 +598,23 @@ class SharedExpenseRepository {
 
   /// Legacy alias for callers that still expect the old name.
   Future<bool> processPendingApprovals(String groupId) => syncGroup(groupId);
+
+  Stream<SharedExpenseGroup> watchGroupRealtime(String groupId) async* {
+    final identity = await _cryptoService.getOrCreateIdentity();
+    _sharedExpenseLog('watchGroupRealtime start group=${_logId(groupId)}');
+
+    await for (final payload in _engineClient.streamPending(groupId)) {
+      final changed = await _processPendingPayload(
+        groupId: groupId,
+        myPublicKey: identity.publicKeyHex,
+        payload: payload,
+      );
+      final latest = await _stampRealtimeSync(groupId);
+      if (changed && latest != null) {
+        yield latest;
+      }
+    }
+  }
 
   Future<bool> isEngineReachable() => _engineClient.isReachable();
 
@@ -768,7 +745,11 @@ class SharedExpenseRepository {
         timestamp: ts,
         actor: identity.publicKeyHex,
         kind: 'expense_amount_changed',
-        data: {'expenseId': before.id, 'before': before.amount, 'after': amount},
+        data: {
+          'expenseId': before.id,
+          'before': before.amount,
+          'after': amount
+        },
       ));
     }
     if (reason != before.reason) {
@@ -777,7 +758,11 @@ class SharedExpenseRepository {
         timestamp: ts,
         actor: identity.publicKeyHex,
         kind: 'expense_reason_changed',
-        data: {'expenseId': before.id, 'before': before.reason, 'after': reason},
+        data: {
+          'expenseId': before.id,
+          'before': before.reason,
+          'after': reason
+        },
       ));
     }
     if (paidBy != before.paidBy) {
@@ -786,7 +771,11 @@ class SharedExpenseRepository {
         timestamp: ts,
         actor: identity.publicKeyHex,
         kind: 'expense_paid_by_changed',
-        data: {'expenseId': before.id, 'before': before.paidBy, 'after': paidBy},
+        data: {
+          'expenseId': before.id,
+          'before': before.paidBy,
+          'after': paidBy
+        },
       ));
     }
     if (!_sameList(splitAmong, before.splitAmong)) {
@@ -817,9 +806,8 @@ class SharedExpenseRepository {
     }
 
     var updated = group.copyWith(
-      expenses: group.expenses
-          .map((e) => e.id == before.id ? after : e)
-          .toList(),
+      expenses:
+          group.expenses.map((e) => e.id == before.id ? after : e).toList(),
       activity: activity,
     );
     await _upsertGroup(updated);
@@ -862,9 +850,8 @@ class SharedExpenseRepository {
       status: 'pending',
     );
     var updated = group.copyWith(
-      expenses: group.expenses
-          .map((e) => e.id == expenseId ? deleted : e)
-          .toList(),
+      expenses:
+          group.expenses.map((e) => e.id == expenseId ? deleted : e).toList(),
       activity: [
         ...group.activity,
         SharedActivityEntry(
@@ -959,6 +946,91 @@ class SharedExpenseRepository {
   // -------------------------------------------------------------------------
   // Internal payload routing
   // -------------------------------------------------------------------------
+
+  /// Returns true if the payload changed local state.
+  Future<bool> _processPendingPayload({
+    required String groupId,
+    required String myPublicKey,
+    required EnginePendingPayload payload,
+  }) async {
+    // Re-read the group key on every payload. If a key_exchange establishes the
+    // key, later payloads in the same sync/stream can decrypt immediately.
+    final groupKeyHex = await _readGroupKey(groupId);
+    final groupKeyBytes = groupKeyHex == null
+        ? null
+        : SharedExpenseCryptoService.fromHex(groupKeyHex);
+
+    Map<String, dynamic>? decoded;
+    if (groupKeyBytes != null) {
+      decoded = await _cryptoService.decryptPayloadWithKey(
+        keyBytes: groupKeyBytes,
+        encryptedBlob: payload.encryptedBlob,
+      );
+    }
+    decoded ??= await _cryptoService.decryptGroupKeyPayload(
+      senderPublicKeyHex: payload.senderPublicKey,
+      encryptedBlob: payload.encryptedBlob,
+    );
+
+    if (decoded == null) {
+      _sharedExpenseLog(
+        '_processPendingPayload undecryptable payload=${_logId(payload.id)}',
+      );
+      await _acknowledgePayload(payload.id);
+      return false;
+    }
+
+    final type = decoded['type'] as String?;
+    _sharedExpenseLog(
+      '_processPendingPayload applying type=$type '
+      'sender=${_logId(payload.senderPublicKey)}',
+    );
+    final applied = await _applyPayload(
+      groupId: groupId,
+      senderPk: payload.senderPublicKey,
+      decoded: decoded,
+      myPublicKey: myPublicKey,
+    );
+    await _acknowledgePayload(payload.id);
+    return applied;
+  }
+
+  Future<void> _acknowledgePayload(String payloadId) async {
+    try {
+      await _engineClient.acknowledgePayload(payloadId);
+    } on TotalsEngineException catch (error) {
+      if (error.statusCode == 404) {
+        _sharedExpenseLog(
+          '_acknowledgePayload ignored missing payload=${_logId(payloadId)}',
+        );
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<SharedExpenseGroup?> _stampRealtimeSync(String groupId) async {
+    final after = await _groupById(groupId);
+    if (after == null) return null;
+
+    var latest = after.copyWith(
+      lastSyncAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _upsertGroup(latest);
+
+    if (latest.pendingMetaBroadcast && latest.hasGroupKey) {
+      final retryOk = await _broadcastMetaPayloads(latest);
+      if (retryOk) {
+        final cleared = await _groupById(groupId);
+        if (cleared != null) {
+          latest = cleared.copyWith(pendingMetaBroadcast: false);
+          await _upsertGroup(latest);
+        }
+      }
+    }
+
+    return latest;
+  }
 
   /// Returns true if the payload changed local state.
   Future<bool> _applyPayload({
@@ -1058,9 +1130,8 @@ class SharedExpenseRepository {
             ...group.activity,
             SharedActivityEntry(
               id: _uuid.v4(),
-              timestamp:
-                  (decoded['timestamp'] as num?)?.toInt() ??
-                      DateTime.now().millisecondsSinceEpoch,
+              timestamp: (decoded['timestamp'] as num?)?.toInt() ??
+                  DateTime.now().millisecondsSinceEpoch,
               actor: senderPk,
               kind: 'member_joined',
               data: {},
@@ -1143,8 +1214,9 @@ class SharedExpenseRepository {
   ) async {
     final incoming = SharedExpense.fromJson(decoded);
     if (incoming.id.isEmpty) return false;
-    final existing =
-        group.expenses.where((e) => e.id == incoming.id).toList(growable: false);
+    final existing = group.expenses
+        .where((e) => e.id == incoming.id)
+        .toList(growable: false);
     List<SharedExpense> next;
     final activity = <SharedActivityEntry>[...group.activity];
     final actor = incoming.paidBy.isNotEmpty ? incoming.paidBy : senderPk;
@@ -1176,9 +1248,8 @@ class SharedExpenseRepository {
       final inTs = incoming.revisedAt ?? incoming.timestamp;
       if (inTs <= curTs) return false;
       next = group.expenses
-          .map((e) => e.id == incoming.id
-              ? incoming.copyWith(status: 'synced')
-              : e)
+          .map((e) =>
+              e.id == incoming.id ? incoming.copyWith(status: 'synced') : e)
           .toList();
 
       // Log per-field changes (or a deletion).
