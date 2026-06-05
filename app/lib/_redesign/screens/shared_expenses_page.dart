@@ -2096,12 +2096,13 @@ class _SharedGroupTransactionsViewState
                     else
                       Column(
                         children: [
-                          for (final e in filtered)
+                          for (var i = 0; i < filtered.length; i++)
                             _SharedExpenseRow(
-                              expense: e,
+                              expense: filtered[i],
                               group: widget.group,
                               myPublicKey: widget.myPublicKey,
-                              onTap: () => widget.onEditExpense(e),
+                              showDivider: i < filtered.length - 1,
+                              onTap: () => widget.onEditExpense(filtered[i]),
                             ),
                         ],
                       ),
@@ -3501,12 +3502,13 @@ class _SharedGroupHomeTab extends StatelessWidget {
         else
           Column(
             children: [
-              for (final expense in recent)
+              for (var i = 0; i < recent.length; i++)
                 _SharedExpenseRow(
-                  expense: expense,
+                  expense: recent[i],
                   group: group,
                   myPublicKey: myPublicKey,
-                  onTap: () => onEditExpense(expense),
+                  showDivider: i < recent.length - 1,
+                  onTap: () => onEditExpense(recent[i]),
                 ),
             ],
           ),
@@ -3540,11 +3542,13 @@ class _SharedExpenseRow extends StatelessWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
   final VoidCallback? onTap;
+  final bool showDivider;
   const _SharedExpenseRow({
     required this.expense,
     required this.group,
     required this.myPublicKey,
     this.onTap,
+    this.showDivider = true,
   });
 
   @override
@@ -3567,23 +3571,36 @@ class _SharedExpenseRow extends StatelessWidget {
         : payerColor;
     final ago = _shortRelative(expense.timestamp);
 
-    final content = Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 4,
-            height: 36,
-            decoration: BoxDecoration(
-              color: payerColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final content = Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: showDivider
+            ? Border(
+                bottom: BorderSide(
+                  color: AppColors.borderColor(context),
+                  width: 1,
+                ),
+              )
+            : null,
+      ),
+      child: IntrinsicHeight(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                width: 5,
+                decoration: BoxDecoration(
+                  color: payerColor,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (isSettlement)
                   Row(
@@ -3614,7 +3631,7 @@ class _SharedExpenseRow extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                   ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text.rich(
                   TextSpan(
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -3641,7 +3658,7 @@ class _SharedExpenseRow extends StatelessWidget {
                   ),
                 ),
                 if (linkedRef != null && linkedRef.isNotEmpty) ...[
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 7),
                   GestureDetector(
                     onTap: linkedTransaction == null
                         ? null
@@ -3657,7 +3674,7 @@ class _SharedExpenseRow extends StatelessWidget {
                           size: 13,
                           color: AppColors.primaryLight,
                         ),
-                        const SizedBox(width: 5),
+                        const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             linkedTransaction == null
@@ -3677,17 +3694,26 @@ class _SharedExpenseRow extends StatelessWidget {
                   ),
                 ],
               ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            _formatEtb(expense.amount),
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppColors.textPrimary(context),
-                  fontWeight: FontWeight.w900,
                 ),
+              ),
+              const SizedBox(width: 16),
+              SizedBox(
+                width: 96,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _formatEtb(expense.amount),
+                    textAlign: TextAlign.right,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
@@ -5400,18 +5426,12 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
         ),
         _IosFormGroup(
           label: 'Paid by',
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final pk in keys)
-                _IosSharedChip(
-                  label: widget.group.displayNameFor(widget.myPublicKey, pk),
-                  dotColor: Color(memberColorFor(widget.group, pk)),
-                  active: _paidBy == pk,
-                  onTap: () => setState(() => _paidBy = pk),
-                ),
-            ],
+          child: _IosSharedMemberSelector(
+            group: widget.group,
+            myPublicKey: widget.myPublicKey,
+            memberKeys: keys,
+            isSelected: (pk) => _paidBy == pk,
+            onTap: (pk) => setState(() => _paidBy = pk),
           ),
         ),
         _IosFormGroup(
@@ -5422,24 +5442,18 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
               _split = allSelected ? <String>{} : keys.toSet();
             }),
           ),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final pk in keys)
-                _IosSharedChip(
-                  label: widget.group.displayNameFor(widget.myPublicKey, pk),
-                  dotColor: Color(memberColorFor(widget.group, pk)),
-                  active: _split.contains(pk),
-                  onTap: () => setState(() {
-                    if (_split.contains(pk)) {
-                      _split = {..._split}..remove(pk);
-                    } else {
-                      _split = {..._split, pk};
-                    }
-                  }),
-                ),
-            ],
+          child: _IosSharedMemberSelector(
+            group: widget.group,
+            myPublicKey: widget.myPublicKey,
+            memberKeys: keys,
+            isSelected: _split.contains,
+            onTap: (pk) => setState(() {
+              if (_split.contains(pk)) {
+                _split = {..._split}..remove(pk);
+              } else {
+                _split = {..._split, pk};
+              }
+            }),
           ),
         ),
         _IosFormSubmit(
@@ -6269,6 +6283,54 @@ class _IosAmountRow extends StatelessWidget {
   }
 }
 
+class _IosSharedMemberSelector extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final List<String> memberKeys;
+  final bool Function(String publicKey) isSelected;
+  final ValueChanged<String> onTap;
+
+  const _IosSharedMemberSelector({
+    required this.group,
+    required this.myPublicKey,
+    required this.memberKeys,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (memberKeys.isEmpty) {
+      return Text(
+        context.l10nText('No members'),
+        style: TextStyle(
+          color: AppColors.textTertiary(context),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: memberKeys.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final pk = memberKeys[index];
+          return _IosSharedChip(
+            label: group.displayNameFor(myPublicKey, pk),
+            dotColor: Color(memberColorFor(group, pk)),
+            active: isSelected(pk),
+            onTap: () => onTap(pk),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _IosSharedChip extends StatelessWidget {
   final String label;
   final Color dotColor;
@@ -6294,7 +6356,8 @@ class _IosSharedChip extends StatelessWidget {
       borderRadius: BorderRadius.circular(999),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        padding: const EdgeInsets.fromLTRB(5, 5, 10, 5),
+        height: 36,
+        padding: const EdgeInsets.fromLTRB(6, 6, 12, 6),
         decoration: BoxDecoration(
           color: active
               ? const Color(0xFF6366F1).withValues(alpha: 0.08)
@@ -6308,8 +6371,8 @@ class _IosSharedChip extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 22,
-              height: 22,
+              width: 24,
+              height: 24,
               decoration: BoxDecoration(
                 color: dotColor,
                 shape: BoxShape.circle,
@@ -6324,13 +6387,19 @@ class _IosSharedChip extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: textPrimary,
+            const SizedBox(width: 7),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 132),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: textPrimary,
+                ),
               ),
             ),
           ],
