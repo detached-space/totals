@@ -312,9 +312,14 @@ class SharedExpenseRepository {
     } catch (error) {
       _sharedExpenseLog('leaveGroup engine failed (continuing local): $error');
     }
+    await _deleteLocalGroup(group.id);
+    _sharedExpenseLog('leaveGroup done group=${_logId(group.id)}');
+  }
+
+  Future<void> _deleteLocalGroup(String groupId) async {
     final db = await _groupsDatabase();
-    await db.delete(_groupsTable, where: 'id = ?', whereArgs: [group.id]);
-    await _secureStorage.delete(key: '$_groupKeyPrefix${group.id}');
+    await db.delete(_groupsTable, where: 'id = ?', whereArgs: [groupId]);
+    await _secureStorage.delete(key: '$_groupKeyPrefix$groupId');
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_groupsKey);
     if (raw != null && raw.isNotEmpty) {
@@ -324,13 +329,12 @@ class SharedExpenseRepository {
           final filtered = decoded
               .whereType<Map>()
               .map((g) => Map<String, dynamic>.from(g))
-              .where((g) => g['id'] != group.id)
+              .where((g) => g['id'] != groupId)
               .toList();
           await prefs.setString(_groupsKey, jsonEncode(filtered));
         }
       } catch (_) {/* ignore */}
     }
-    _sharedExpenseLog('leaveGroup done group=${_logId(group.id)}');
   }
 
   /// Update group metadata and/or my own member display name.
@@ -497,11 +501,19 @@ class SharedExpenseRepository {
     final localGroups = await getGroups();
     final localById = {for (final group in localGroups) group.id: group};
     final serverGroups = await _engineClient.listGroups();
+    final serverGroupIds = serverGroups.map((group) => group.id).toSet();
     final identity = await _cryptoService.getOrCreateIdentity();
     _sharedExpenseLog(
       'refreshGroups serverGroups=${serverGroups.length} '
       'localGroups=${localGroups.length}',
     );
+
+    for (final local in localGroups) {
+      if (local.status == SharedExpenseGroupStatus.localOnly) continue;
+      if (serverGroupIds.contains(local.id)) continue;
+      await _deleteLocalGroup(local.id);
+      _sharedExpenseLog('refreshGroups pruned group=${_logId(local.id)}');
+    }
 
     for (final serverGroup in serverGroups) {
       final local = localById[serverGroup.id];
@@ -637,6 +649,10 @@ class SharedExpenseRepository {
         yield latest;
       }
     }
+  }
+
+  Stream<void> watchGroupListRealtime() {
+    return _engineClient.streamGroupListChanges();
   }
 
   Future<bool> isEngineReachable() => _engineClient.isReachable();

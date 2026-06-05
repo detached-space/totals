@@ -313,6 +313,36 @@ class TotalsEngineClient {
     }
   }
 
+  Stream<void> streamGroupListChanges() async* {
+    final headers = await _authHeaders();
+    final uri = _uri('/groups/stream');
+    _engineLog('streamGroupListChanges -> $uri');
+
+    final request = http.Request('GET', uri)..headers.addAll(headers);
+    final response = await _client.send(request).timeout(_requestTimeout);
+    _engineLog('streamGroupListChanges <- ${response.statusCode}');
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      final decoded = _decodeBody(bodyText);
+      _engineLog('streamGroupListChanges errorBody=${_logBody(bodyText)}');
+      throw TotalsEngineException(
+        _errorMessage(decoded) ?? 'Totals Engine group stream failed.',
+        statusCode: response.statusCode,
+      );
+    }
+
+    await for (final event in _decodeSseEvents(response.stream)) {
+      if (event.event == 'groups_changed') {
+        yield null;
+      } else if (event.event == 'error') {
+        throw TotalsEngineException(
+          event.data.isEmpty ? 'Totals Engine group stream failed.' : event.data,
+        );
+      }
+    }
+  }
+
   Future<void> acknowledgePayload(String payloadId) async {
     _engineLog('acknowledgePayload payload=${_logId(payloadId)}');
     await _authenticatedRequest('POST', '/payloads/$payloadId/ack');

@@ -66,6 +66,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   _CreatingGroupDraft? _creatingGroup;
   Timer? _pollTimer;
   DateTime? _lastBackgroundRefresh;
+  StreamSubscription<void>? _groupListRealtimeSubscription;
+  Timer? _groupListRealtimeReconnectTimer;
   final Map<String, StreamSubscription<SharedExpenseGroup>>
       _realtimeSubscriptions = {};
   final Map<String, Timer> _realtimeReconnectTimers = {};
@@ -76,12 +78,15 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     WidgetsBinding.instance.addObserver(this);
     _loadGroups(refreshFromEngine: true, showErrors: false);
     _startPolling();
+    _startGroupListRealtimeSubscription();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    _groupListRealtimeReconnectTimer?.cancel();
+    unawaited(_groupListRealtimeSubscription?.cancel());
     for (final timer in _realtimeReconnectTimers.values) {
       timer.cancel();
     }
@@ -125,6 +130,58 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       _syncRealtimeSubscriptions(groups);
     } catch (error) {
       _sharedExpensesPageLog('backgroundRefresh failed: $error');
+    }
+  }
+
+  void _startGroupListRealtimeSubscription() {
+    if (_groupListRealtimeSubscription != null) return;
+    _sharedExpensesPageLog('group list realtime subscribe');
+    _groupListRealtimeSubscription = _repository.watchGroupListRealtime().listen(
+      (_) => _refreshFromGroupListRealtime(),
+      onError: (Object error, StackTrace stackTrace) {
+        _sharedExpensesPageLog('group list realtime failed: $error');
+        if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+        _groupListRealtimeSubscription = null;
+        _scheduleGroupListRealtimeReconnect();
+      },
+      onDone: () {
+        _sharedExpensesPageLog('group list realtime done');
+        _groupListRealtimeSubscription = null;
+        _scheduleGroupListRealtimeReconnect();
+      },
+    );
+  }
+
+  void _scheduleGroupListRealtimeReconnect() {
+    if (!mounted) return;
+    if (_groupListRealtimeReconnectTimer != null) return;
+    _groupListRealtimeReconnectTimer = Timer(_realtimeReconnectDelay, () {
+      _groupListRealtimeReconnectTimer = null;
+      if (!mounted) return;
+      _startGroupListRealtimeSubscription();
+    });
+  }
+
+  Future<void> _refreshFromGroupListRealtime() async {
+    if (!mounted || _isRefreshing || _isMutating) return;
+    _sharedExpensesPageLog('group list realtime refresh');
+    setState(() => _isRefreshing = true);
+    try {
+      final groups = await _repository.refreshGroups();
+      final reachable = await _repository.isEngineReachable();
+      if (!mounted) return;
+      setState(() {
+        _groups = groups;
+        _selectedGroup = _updatedSelectedGroup(groups);
+        _engineReachable = reachable;
+      });
+      _syncRealtimeSubscriptions(groups);
+    } catch (error, stackTrace) {
+      _sharedExpensesPageLog('group list realtime refresh failed: $error');
+      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+      if (mounted) setState(() => _engineReachable = false);
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
     }
   }
 
@@ -213,9 +270,13 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     final selected = _selectedGroup;
     if (selected == null) return null;
     for (final group in groups) {
-      if (group.id == selected.id) return group;
+      if (group.id == selected.id) return _canOpenGroup(group) ? group : null;
     }
-    return selected;
+    return _canOpenGroup(selected) ? selected : null;
+  }
+
+  bool _canOpenGroup(SharedExpenseGroup group) {
+    return group.status != SharedExpenseGroupStatus.pendingApproval;
   }
 
   bool _shouldStreamGroup(SharedExpenseGroup group) {
@@ -308,7 +369,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
       _groups = next;
       _selectedGroup = _selectedGroup?.id == updatedGroup.id
-          ? updatedGroup
+          ? (_canOpenGroup(updatedGroup) ? updatedGroup : null)
           : _updatedSelectedGroup(next);
       _engineReachable = true;
     });
@@ -316,6 +377,12 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
   void _openGroup(SharedExpenseGroup group) {
     _sharedExpensesPageLog('openGroup group=${_logId(group.id)}');
+    if (!_canOpenGroup(group)) {
+      _showSnack(context.l10nTextRead(
+        'You can open this group after approval.',
+      ));
+      return;
+    }
     setState(() => _selectedGroup = group);
   }
 
@@ -775,7 +842,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   Widget build(BuildContext context) {
     super.build(context);
     final selectedGroup = _selectedGroup;
-    if (selectedGroup != null) {
+    if (selectedGroup != null && _canOpenGroup(selectedGroup)) {
       return _SharedGroupDetailView(
         group: selectedGroup,
         myPublicKey: _myPublicKey,
@@ -5017,9 +5084,8 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
         ),
         _IosFormGroup(
           label: 'New members',
-          child: _IosSwitchRow(
+          child: _IosCheckboxRow(
             title: 'Backfill history',
-            subtitle: 'Share existing expenses and activity on approval.',
             value: _backfillNewMembers,
             onChanged: (value) => setState(() {
               _backfillNewMembers = value;
@@ -5261,15 +5327,13 @@ class _IosFormInput extends StatelessWidget {
   }
 }
 
-class _IosSwitchRow extends StatelessWidget {
+class _IosCheckboxRow extends StatelessWidget {
   final String title;
-  final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
 
-  const _IosSwitchRow({
+  const _IosCheckboxRow({
     required this.title,
-    required this.subtitle,
     required this.value,
     required this.onChanged,
   });
@@ -5279,7 +5343,6 @@ class _IosSwitchRow extends StatelessWidget {
     final cardColor = AppColors.cardColor(context);
     final borderColor = AppColors.borderColor(context);
     final textPrimary = AppColors.textPrimary(context);
-    final textSecondary = AppColors.textSecondary(context);
 
     return InkWell(
       onTap: () => onChanged(!value),
@@ -5295,37 +5358,21 @@ class _IosSwitchRow extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.25,
-                      color: textSecondary,
-                    ),
-                  ),
-                ],
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: textPrimary,
+                ),
               ),
             ),
             const SizedBox(width: 12),
-            Switch(
+            Checkbox(
               value: value,
-              onChanged: onChanged,
+              onChanged: (checked) => onChanged(checked ?? false),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
             ),
           ],
         ),
