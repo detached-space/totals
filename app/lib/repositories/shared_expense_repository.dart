@@ -48,6 +48,7 @@ class SharedExpenseRepository {
   static const _groupsTable = 'shared_expense_groups';
   static const _groupKeyPrefix = 'shared_expense_group_key_';
   static const _legacyInvitePrefixes = ['totals://join/', 'totals//join/'];
+  static const _snapshotPlaintextBudget = 45000;
 
   final TotalsEngineClient _engineClient;
   final SharedExpenseCryptoService _cryptoService;
@@ -286,6 +287,7 @@ class SharedExpenseRepository {
         identity.publicKeyHex: displayName,
       },
       pendingApprovals: existing?.pendingApprovals ?? const [],
+      backfillNewMembers: existing?.backfillNewMembers ?? false,
       keySharedWith: existing?.keySharedWith ?? const {},
     );
     await _upsertGroup(group);
@@ -331,23 +333,32 @@ class SharedExpenseRepository {
     _sharedExpenseLog('leaveGroup done group=${_logId(group.id)}');
   }
 
-  /// Update the group's display name and/or my own member display name.
+  /// Update group metadata and/or my own member display name.
   /// Broadcasts the matching payloads to all approved members.
   Future<SharedExpenseGroup> updateMeta({
     required SharedExpenseGroup group,
     String? name,
     String? myDisplayName,
+    bool? backfillNewMembers,
   }) async {
-    if (name == null && myDisplayName == null) return group;
+    if (name == null &&
+        myDisplayName == null &&
+        backfillNewMembers == null) {
+      return group;
+    }
 
     final identity = await _cryptoService.getOrCreateIdentity();
     final nameChanged = name != null && name.trim() != group.name;
     final displayChanged =
         myDisplayName != null && myDisplayName.trim() != group.myDisplayName;
+    final backfillChanged = backfillNewMembers != null &&
+        backfillNewMembers != group.backfillNewMembers;
+    if (!nameChanged && !displayChanged && !backfillChanged) return group;
 
     final updated = group.copyWith(
       name: nameChanged ? name.trim() : null,
       myDisplayName: displayChanged ? myDisplayName.trim() : null,
+      backfillNewMembers: backfillChanged ? backfillNewMembers : null,
       displayNames: displayChanged
           ? {
               ...group.displayNames,
@@ -370,7 +381,7 @@ class SharedExpenseRepository {
 
     await _upsertGroup(updated);
 
-    if (nameChanged) {
+    if (nameChanged || backfillChanged) {
       await _emitGroupMeta(updated);
     }
     if (displayChanged) {
@@ -414,13 +425,15 @@ class SharedExpenseRepository {
         'approvedPublicKey': member.devicePublicKey,
         'approvedBy': identity.publicKeyHex,
         'approverDisplayName': group.myDisplayName,
+        'backfillNewMembers': group.backfillNewMembers,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
     );
 
-    await _engineClient.submitPayload(
+    await _engineClient.submitTargetedPayload(
       groupId: group.id,
       encryptedBlob: encryptedBlob,
+      recipientPublicKeys: [member.devicePublicKey],
     );
 
     final updated = group.copyWith(
@@ -447,6 +460,13 @@ class SharedExpenseRepository {
         ),
       ],
     );
+    if (updated.backfillNewMembers) {
+      await _emitGroupSnapshotPayload(
+        group: updated,
+        recipientPublicKey: member.devicePublicKey,
+        groupKeyHex: groupKeyHex,
+      );
+    }
     await _upsertGroup(updated);
     _sharedExpenseLog(
       'approveMember done group=${_logId(group.id)} '
@@ -524,6 +544,7 @@ class SharedExpenseRepository {
         activity: local?.activity ?? const [],
         displayNames: local?.displayNames ?? const {},
         pendingApprovals: pruned,
+        backfillNewMembers: local?.backfillNewMembers ?? false,
         keySharedWith: sharedWith,
         lastSyncAt: local?.lastSyncAt,
       );
@@ -1025,6 +1046,12 @@ class SharedExpenseRepository {
         _sharedExpenseLog(
           '_processPendingPayload undecryptable payload=${_logId(payload.id)}',
         );
+        if (groupKeyHex == null) {
+          _sharedExpenseLog(
+            '_processPendingPayload waiting for group key payload=${_logId(payload.id)}',
+          );
+          return false;
+        }
         await _acknowledgePayload(payload.id);
         return false;
       }
@@ -1116,6 +1143,9 @@ class SharedExpenseRepository {
       case 'nudge':
         return _applyNudge(group, senderPk, decoded, myPublicKey);
 
+      case 'group_snapshot':
+        return _applyGroupSnapshot(group, senderPk, decoded);
+
       default:
         _sharedExpenseLog('_applyPayload unknown type=$type');
         return false;
@@ -1133,6 +1163,9 @@ class SharedExpenseRepository {
     final approvedBy = decoded['approvedBy'] as String?;
     final approvedPk = decoded['approvedPublicKey'] as String?;
     final approverName = decoded['approverDisplayName'] as String?;
+    final backfillNewMembers = decoded['backfillNewMembers'] is bool
+        ? decoded['backfillNewMembers'] as bool
+        : null;
     final newDisplayNames = <String, String>{...group.displayNames};
     if (approvedBy != null && approverName != null) {
       newDisplayNames[approvedBy] = approverName;
@@ -1150,6 +1183,7 @@ class SharedExpenseRepository {
     final updated = group.copyWith(
       name: decoded['groupName'] as String? ?? group.name,
       status: SharedExpenseGroupStatus.ready,
+      backfillNewMembers: backfillNewMembers,
       approvedMemberKeys: approvedKeysAfter,
       keySharedWith: {
         ...group.keySharedWith,
@@ -1175,51 +1209,45 @@ class SharedExpenseRepository {
     Map<String, dynamic> decoded,
   ) async {
     final newName = (decoded['name'] as String?)?.trim();
-    if (newName == null || newName.isEmpty || newName == group.name) {
-      // Even without a name change, this proves senderPk holds the key —
-      // log the join if this is the first group-key payload from them.
-      if (!group.approvedMemberKeys.contains(senderPk)) {
-        await _upsertGroup(group.copyWith(
-          approvedMemberKeys: {...group.approvedMemberKeys, senderPk},
-          activity: [
-            ...group.activity,
-            SharedActivityEntry(
-              id: _uuid.v4(),
-              timestamp: (decoded['timestamp'] as num?)?.toInt() ??
-                  DateTime.now().millisecondsSinceEpoch,
-              actor: senderPk,
-              kind: 'member_joined',
-              data: {},
-            ),
-          ],
-        ));
-        return true;
-      }
-      return false;
-    }
-    final activity = [
-      ...group.activity,
-      SharedActivityEntry(
+    final incomingBackfill = decoded['backfillNewMembers'] is bool
+        ? decoded['backfillNewMembers'] as bool
+        : null;
+    final nameChanged =
+        newName != null && newName.isNotEmpty && newName != group.name;
+    final backfillChanged = incomingBackfill != null &&
+        incomingBackfill != group.backfillNewMembers;
+    final isFirstSeen = !group.approvedMemberKeys.contains(senderPk);
+    if (!nameChanged && !backfillChanged && !isFirstSeen) return false;
+
+    final timestamp = (decoded['timestamp'] as num?)?.toInt() ??
+        DateTime.now().millisecondsSinceEpoch;
+    final activity = [...group.activity];
+    if (nameChanged) {
+      activity.add(SharedActivityEntry(
         id: _uuid.v4(),
-        timestamp: (decoded['timestamp'] as num?)?.toInt() ??
-            DateTime.now().millisecondsSinceEpoch,
+        timestamp: timestamp,
         actor: senderPk,
         kind: 'group_renamed',
         data: {'before': group.name, 'after': newName},
-      ),
-      if (!group.approvedMemberKeys.contains(senderPk))
-        SharedActivityEntry(
-          id: _uuid.v4(),
-          timestamp: (decoded['timestamp'] as num?)?.toInt() ??
-              DateTime.now().millisecondsSinceEpoch,
-          actor: senderPk,
-          kind: 'member_joined',
-          data: {},
-        ),
-    ];
+      ));
+    }
+    if (isFirstSeen) {
+      activity.add(SharedActivityEntry(
+        id: _uuid.v4(),
+        timestamp: timestamp,
+        actor: senderPk,
+        kind: 'member_joined',
+        data: {},
+      ));
+    }
+
     final updated = group.copyWith(
-      name: newName,
-      approvedMemberKeys: {...group.approvedMemberKeys, senderPk},
+      name: nameChanged ? newName : null,
+      backfillNewMembers: backfillChanged ? incomingBackfill : null,
+      approvedMemberKeys: {
+        ...group.approvedMemberKeys,
+        if (senderPk.isNotEmpty) senderPk,
+      },
       activity: activity,
     );
     await _upsertGroup(updated);
@@ -1380,6 +1408,64 @@ class SharedExpenseRepository {
     return true;
   }
 
+  Future<bool> _applyGroupSnapshot(
+    SharedExpenseGroup group,
+    String senderPk,
+    Map<String, dynamic> decoded,
+  ) async {
+    final before = jsonEncode(group.toJson());
+    final incomingExpenses = ((decoded['expenses'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((raw) => SharedExpense.fromJson(Map<String, dynamic>.from(raw)))
+        .where((expense) => expense.id.isNotEmpty)
+        .toList(growable: false);
+    final incomingActivity = ((decoded['activity'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((raw) =>
+            SharedActivityEntry.fromJson(Map<String, dynamic>.from(raw)))
+        .where((entry) => entry.id.isNotEmpty)
+        .toList(growable: false);
+    final incomingMembers = ((decoded['members'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((raw) =>
+            SharedExpenseMember.fromJson(Map<String, dynamic>.from(raw)))
+        .where((member) => member.devicePublicKey.isNotEmpty)
+        .toList(growable: false);
+    final displayNames = _stringMapFromJson(decoded['displayNames']);
+    final approvedMemberKeys =
+        _stringListFromJson(decoded['approvedMemberKeys']).toSet();
+    final groupName = (decoded['groupName'] as String?)?.trim();
+    final incomingBackfill = decoded['backfillNewMembers'] is bool
+        ? decoded['backfillNewMembers'] as bool
+        : null;
+    final createdAt = _snapshotDate(decoded['createdAt']);
+
+    final updated = group.copyWith(
+      name: groupName == null || groupName.isEmpty ? group.name : groupName,
+      createdAt: createdAt ?? group.createdAt,
+      status: SharedExpenseGroupStatus.ready,
+      backfillNewMembers: incomingBackfill,
+      members: incomingMembers.isEmpty
+          ? group.members
+          : _mergeSnapshotMembers(group.members, incomingMembers),
+      approvedMemberKeys: {
+        ...group.approvedMemberKeys,
+        if (senderPk.isNotEmpty) senderPk,
+        ...approvedMemberKeys,
+      },
+      expenses: _mergeSnapshotExpenses(group.expenses, incomingExpenses),
+      activity: _mergeSnapshotActivity(group.activity, incomingActivity),
+      displayNames: {
+        ...group.displayNames,
+        ...displayNames,
+      },
+    );
+
+    if (jsonEncode(updated.toJson()) == before) return false;
+    await _upsertGroup(updated);
+    return true;
+  }
+
   Future<bool> _applyNudge(
     SharedExpenseGroup group,
     String senderPk,
@@ -1492,6 +1578,92 @@ class SharedExpenseRepository {
     return result;
   }
 
+  Map<String, String> _stringMapFromJson(Object? raw) {
+    if (raw is! Map) return const {};
+    final result = <String, String>{};
+    for (final entry in raw.entries) {
+      final key = entry.key;
+      final value = entry.value;
+      if (key is String && value is String && value.trim().isNotEmpty) {
+        result[key] = value.trim();
+      }
+    }
+    return result;
+  }
+
+  List<String> _stringListFromJson(Object? raw) {
+    if (raw is! List) return const [];
+    return raw.whereType<String>().where((value) => value.isNotEmpty).toList();
+  }
+
+  DateTime? _snapshotDate(Object? raw) {
+    if (raw is num) {
+      return DateTime.fromMillisecondsSinceEpoch(raw.toInt());
+    }
+    if (raw is String) {
+      return DateTime.tryParse(raw);
+    }
+    return null;
+  }
+
+  List<SharedExpenseMember> _mergeSnapshotMembers(
+    List<SharedExpenseMember> existing,
+    List<SharedExpenseMember> incoming,
+  ) {
+    final byPublicKey = <String, SharedExpenseMember>{
+      for (final member in existing)
+        if (member.devicePublicKey.isNotEmpty) member.devicePublicKey: member,
+    };
+    for (final member in incoming) {
+      byPublicKey[member.devicePublicKey] = member;
+    }
+    return byPublicKey.values.toList(growable: false);
+  }
+
+  List<SharedExpense> _mergeSnapshotExpenses(
+    List<SharedExpense> existing,
+    List<SharedExpense> incoming,
+  ) {
+    if (incoming.isEmpty) return existing;
+    final byId = <String, SharedExpense>{
+      for (final expense in existing)
+        if (expense.id.isNotEmpty) expense.id: expense,
+    };
+    for (final expense in incoming) {
+      final current = byId[expense.id];
+      final next = expense.copyWith(status: 'synced');
+      if (current == null) {
+        byId[expense.id] = next;
+        continue;
+      }
+      final currentTs = current.revisedAt ?? current.timestamp;
+      final nextTs = next.revisedAt ?? next.timestamp;
+      if (nextTs > currentTs) {
+        byId[expense.id] = next;
+      }
+    }
+    final merged = byId.values.toList(growable: false)
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return merged;
+  }
+
+  List<SharedActivityEntry> _mergeSnapshotActivity(
+    List<SharedActivityEntry> existing,
+    List<SharedActivityEntry> incoming,
+  ) {
+    if (incoming.isEmpty) return existing;
+    final byId = <String, SharedActivityEntry>{
+      for (final entry in existing)
+        if (entry.id.isNotEmpty) entry.id: entry,
+    };
+    for (final entry in incoming) {
+      byId.putIfAbsent(entry.id, () => entry);
+    }
+    final merged = byId.values.toList(growable: false)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return merged;
+  }
+
   Future<bool> _applyJoinRequest(
     SharedExpenseGroup group,
     String senderPk,
@@ -1595,6 +1767,122 @@ class SharedExpenseRepository {
     );
   }
 
+  Future<void> _emitGroupSnapshotPayload({
+    required SharedExpenseGroup group,
+    required String recipientPublicKey,
+    required String groupKeyHex,
+  }) async {
+    final keyBytes = SharedExpenseCryptoService.fromHex(groupKeyHex);
+    final snapshotId = _uuid.v4();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final basePayload = <String, dynamic>{
+      'type': 'group_snapshot',
+      'snapshotId': snapshotId,
+      'timestamp': timestamp,
+      'groupId': group.id,
+    };
+
+    await _emitGroupSnapshotPart(
+      groupId: group.id,
+      recipientPublicKey: recipientPublicKey,
+      keyBytes: keyBytes,
+      payload: {
+        ...basePayload,
+        'part': 'meta',
+        'groupName': group.name,
+        'backfillNewMembers': group.backfillNewMembers,
+        'createdAt': group.createdAt.millisecondsSinceEpoch,
+        'members': group.members.map((member) => member.toJson()).toList(),
+        'approvedMemberKeys': group.approvedMemberKeys.toList(),
+        'displayNames': group.displayNames,
+      },
+    );
+
+    final expenseMaps = group.expenses
+        .map((expense) => expense.copyWith(status: 'synced').toJson())
+        .toList(growable: false);
+    for (final chunk in _snapshotMapChunks(
+      basePayload: basePayload,
+      fieldName: 'expenses',
+      values: expenseMaps,
+    )) {
+      await _emitGroupSnapshotPart(
+        groupId: group.id,
+        recipientPublicKey: recipientPublicKey,
+        keyBytes: keyBytes,
+        payload: {
+          ...basePayload,
+          'part': 'expenses',
+          'expenses': chunk,
+        },
+      );
+    }
+
+    final activityMaps =
+        group.activity.map((entry) => entry.toJson()).toList(growable: false);
+    for (final chunk in _snapshotMapChunks(
+      basePayload: basePayload,
+      fieldName: 'activity',
+      values: activityMaps,
+    )) {
+      await _emitGroupSnapshotPart(
+        groupId: group.id,
+        recipientPublicKey: recipientPublicKey,
+        keyBytes: keyBytes,
+        payload: {
+          ...basePayload,
+          'part': 'activity',
+          'activity': chunk,
+        },
+      );
+    }
+  }
+
+  Future<void> _emitGroupSnapshotPart({
+    required String groupId,
+    required String recipientPublicKey,
+    required List<int> keyBytes,
+    required Map<String, dynamic> payload,
+  }) async {
+    final encrypted = await _cryptoService.encryptPayloadWithKey(
+      keyBytes: keyBytes,
+      payload: payload,
+    );
+    await _engineClient.submitTargetedPayload(
+      groupId: groupId,
+      encryptedBlob: encrypted,
+      recipientPublicKeys: [recipientPublicKey],
+    );
+  }
+
+  List<List<Map<String, dynamic>>> _snapshotMapChunks({
+    required Map<String, dynamic> basePayload,
+    required String fieldName,
+    required List<Map<String, dynamic>> values,
+  }) {
+    final chunks = <List<Map<String, dynamic>>>[];
+    var current = <Map<String, dynamic>>[];
+
+    for (final value in values) {
+      final candidate = [...current, value];
+      final candidatePayload = {
+        ...basePayload,
+        'part': fieldName,
+        fieldName: candidate,
+      };
+      if (current.isNotEmpty &&
+          jsonEncode(candidatePayload).length > _snapshotPlaintextBudget) {
+        chunks.add(current);
+        current = [value];
+      } else {
+        current = candidate;
+      }
+    }
+
+    if (current.isNotEmpty) chunks.add(current);
+    return chunks;
+  }
+
   /// Broadcast my display name AND the current group name to all approved
   /// members. Returns true if both submissions succeeded.
   Future<bool> _broadcastMetaPayloads(SharedExpenseGroup group) async {
@@ -1609,6 +1897,7 @@ class SharedExpenseRepository {
           payload: {
             'type': 'group_meta',
             'name': group.name,
+            'backfillNewMembers': group.backfillNewMembers,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
           },
         );
@@ -1652,6 +1941,7 @@ class SharedExpenseRepository {
         payload: {
           'type': 'group_meta',
           'name': group.name,
+          'backfillNewMembers': group.backfillNewMembers,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         },
       );

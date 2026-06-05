@@ -333,6 +333,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       builder: (sheetContext) => _GroupSettingsSheet(
         initialName: group.name,
         initialDisplayName: group.myDisplayName,
+        initialBackfillNewMembers: group.backfillNewMembers,
       ),
     );
     if (result == null || !mounted) return;
@@ -366,13 +367,17 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     if (result is _GroupSettingsSave) {
       final nameChanged = result.name.trim() != group.name;
       final displayChanged = result.displayName.trim() != group.myDisplayName;
-      if (!nameChanged && !displayChanged) return;
+      final backfillChanged =
+          result.backfillNewMembers != group.backfillNewMembers;
+      if (!nameChanged && !displayChanged && !backfillChanged) return;
       setState(() => _isMutating = true);
       try {
         final updated = await _repository.updateMeta(
           group: group,
           name: nameChanged ? result.name.trim() : null,
           myDisplayName: displayChanged ? result.displayName.trim() : null,
+          backfillNewMembers:
+              backfillChanged ? result.backfillNewMembers : null,
         );
         if (!mounted) return;
         final groups = await _repository.getGroups();
@@ -4920,7 +4925,12 @@ abstract class _GroupSettingsResult {
 class _GroupSettingsSave extends _GroupSettingsResult {
   final String name;
   final String displayName;
-  const _GroupSettingsSave(this.name, this.displayName);
+  final bool backfillNewMembers;
+  const _GroupSettingsSave(
+    this.name,
+    this.displayName,
+    this.backfillNewMembers,
+  );
 }
 
 class _GroupSettingsCopyInvite extends _GroupSettingsResult {
@@ -4934,9 +4944,11 @@ class _GroupSettingsLeave extends _GroupSettingsResult {
 class _GroupSettingsSheet extends StatefulWidget {
   final String initialName;
   final String initialDisplayName;
+  final bool initialBackfillNewMembers;
   const _GroupSettingsSheet({
     required this.initialName,
     required this.initialDisplayName,
+    required this.initialBackfillNewMembers,
   });
 
   @override
@@ -4948,6 +4960,7 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
       TextEditingController(text: widget.initialName);
   late final TextEditingController _displayCtrl =
       TextEditingController(text: widget.initialDisplayName);
+  late bool _backfillNewMembers = widget.initialBackfillNewMembers;
   bool _leaveArmed = false;
   Timer? _disarmTimer;
 
@@ -4976,7 +4989,8 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
     final canSave = _nameCtrl.text.trim().isNotEmpty &&
         _displayCtrl.text.trim().isNotEmpty &&
         (_nameCtrl.text.trim() != widget.initialName ||
-            _displayCtrl.text.trim() != widget.initialDisplayName);
+            _displayCtrl.text.trim() != widget.initialDisplayName ||
+            _backfillNewMembers != widget.initialBackfillNewMembers);
 
     return _IosModalShell(
       title: 'Edit Group',
@@ -5001,6 +5015,17 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
             onChanged: (_) => setState(() {}),
           ),
         ),
+        _IosFormGroup(
+          label: 'New members',
+          child: _IosSwitchRow(
+            title: 'Backfill history',
+            subtitle: 'Share existing expenses and activity on approval.',
+            value: _backfillNewMembers,
+            onChanged: (value) => setState(() {
+              _backfillNewMembers = value;
+            }),
+          ),
+        ),
         _IosFormSubmit(
           label: 'Save',
           icon: Icons.check,
@@ -5009,6 +5034,7 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
             _GroupSettingsSave(
               _nameCtrl.text.trim(),
               _displayCtrl.text.trim(),
+              _backfillNewMembers,
             ),
           ),
         ),
@@ -5229,6 +5255,79 @@ class _IosFormInput extends StatelessWidget {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: _iosPrimary, width: 2),
+        ),
+      ),
+    );
+  }
+}
+
+class _IosSwitchRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _IosSwitchRow({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context);
+    final textPrimary = AppColors.textPrimary(context);
+    final textSecondary = AppColors.textSecondary(context);
+
+    return InkWell(
+      onTap: () => onChanged(!value),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 68),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.25,
+                      color: textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Switch(
+              value: value,
+              onChanged: onChanged,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ],
         ),
       ),
     );

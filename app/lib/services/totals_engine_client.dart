@@ -223,6 +223,24 @@ class TotalsEngineClient {
     );
   }
 
+  Future<void> submitTargetedPayload({
+    required String groupId,
+    required String encryptedBlob,
+    required List<String> recipientPublicKeys,
+  }) async {
+    _engineLog(
+      'submitTargetedPayload group=${_logId(groupId)} recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
+    );
+    await _authenticatedRequest(
+      'POST',
+      '/groups/$groupId/payloads/targeted',
+      body: {
+        'encryptedBlob': encryptedBlob,
+        'recipientPublicKeys': recipientPublicKeys,
+      },
+    );
+  }
+
   Future<void> submitNudge({
     required String groupId,
     required String encryptedBlob,

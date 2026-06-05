@@ -236,6 +236,9 @@ class SharedExpenseGroup {
   /// approved yet. Surfaced as "Approve Bob?" rows in the UI.
   final List<PendingApproval> pendingApprovals;
 
+  /// When true, approving a new member sends them the existing group history.
+  final bool backfillNewMembers;
+
   /// pubkeys we've already shared the group key + our member_meta with.
   /// Lets us avoid re-broadcasting on every receive.
   final Set<String> keySharedWith;
@@ -261,6 +264,7 @@ class SharedExpenseGroup {
     this.activity = const [],
     this.displayNames = const {},
     this.pendingApprovals = const [],
+    this.backfillNewMembers = false,
     this.keySharedWith = const {},
     this.lastSyncAt,
     this.pendingMetaBroadcast = false,
@@ -305,6 +309,7 @@ class SharedExpenseGroup {
     List<SharedActivityEntry>? activity,
     Map<String, String>? displayNames,
     List<PendingApproval>? pendingApprovals,
+    bool? backfillNewMembers,
     Set<String>? keySharedWith,
     int? lastSyncAt,
     bool? pendingMetaBroadcast,
@@ -322,6 +327,7 @@ class SharedExpenseGroup {
       activity: activity ?? this.activity,
       displayNames: displayNames ?? this.displayNames,
       pendingApprovals: pendingApprovals ?? this.pendingApprovals,
+      backfillNewMembers: backfillNewMembers ?? this.backfillNewMembers,
       keySharedWith: keySharedWith ?? this.keySharedWith,
       lastSyncAt: lastSyncAt ?? this.lastSyncAt,
       pendingMetaBroadcast: pendingMetaBroadcast ?? this.pendingMetaBroadcast,
@@ -378,6 +384,9 @@ class SharedExpenseGroup {
                   PendingApproval.fromJson(Map<String, dynamic>.from(p)))
               .toList()
           : const [],
+      backfillNewMembers: json['backfillNewMembers'] is bool
+          ? json['backfillNewMembers'] as bool
+          : true,
       keySharedWith: ((json['keySharedWith'] as List?) ?? const <dynamic>[])
           .whereType<String>()
           .toSet(),
@@ -400,6 +409,7 @@ class SharedExpenseGroup {
       'activity': activity.map((a) => a.toJson()).toList(),
       'displayNames': displayNames,
       'pendingApprovals': pendingApprovals.map((p) => p.toJson()).toList(),
+      'backfillNewMembers': backfillNewMembers,
       'keySharedWith': keySharedWith.toList(),
       if (lastSyncAt != null) 'lastSyncAt': lastSyncAt,
       if (pendingMetaBroadcast) 'pendingMetaBroadcast': true,
