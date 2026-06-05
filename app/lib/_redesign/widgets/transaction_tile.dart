@@ -27,6 +27,9 @@ class TransactionTile extends StatelessWidget {
   /// When true the tile is rendered faded with a grey chip.
   final bool isMisc;
 
+  /// Whether this transaction is linked to a shared expense.
+  final bool isShared;
+
   final String amount;
   final Color amountColor;
   final String name;
@@ -51,6 +54,7 @@ class TransactionTile extends StatelessWidget {
     required this.name,
     this.isSelfTransfer = false,
     this.isMisc = false,
+    this.isShared = false,
     this.timestamp,
     this.selected = false,
     this.onTap,
@@ -108,14 +112,21 @@ class TransactionTile extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      TransactionCategoryChip(
-                        label: category,
-                        category: categoryModel,
-                        isCategorized: isCategorized,
-                        isDebit: isDebit,
-                        isSelfTransfer: isSelfTransfer,
-                        isMisc: isMisc,
-                        onTap: onCategoryTap,
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          TransactionCategoryChip(
+                            label: category,
+                            category: categoryModel,
+                            isCategorized: isCategorized,
+                            isDebit: isDebit,
+                            isSelfTransfer: isSelfTransfer,
+                            isMisc: isMisc,
+                            onTap: onCategoryTap,
+                          ),
+                          if (isShared) const _SharedTransactionChip(),
+                        ],
                       ),
                     ],
                   ),
@@ -161,6 +172,32 @@ class TransactionTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SharedTransactionChip extends StatelessWidget {
+  const _SharedTransactionChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        context.l10nText('Shared'),
+        style: const TextStyle(
+          color: AppColors.primaryLight,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
       ),
     );
   }

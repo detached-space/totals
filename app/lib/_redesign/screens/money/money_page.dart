@@ -2107,6 +2107,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       isDebit: !isCredit,
       isSelfTransfer: isSelfTransfer,
       isMisc: isMisc,
+      isShared: provider.isSharedExpenseTransaction(transaction),
       amount: _amountLabel(
         context,
         transaction.amount,

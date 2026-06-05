@@ -65,7 +65,7 @@ class SharedExpense {
   final String reason;
   final String paidBy; // pubkey hex
   final List<String> splitAmong; // pubkey hexes
-  final int timestamp; // ms since epoch (creation)
+  final int timestamp; // ms since epoch (when the expense was paid)
   final int? revisedAt; // ms since epoch (last edit) — last-write-wins
   final bool deleted;
 
@@ -143,6 +143,7 @@ class SharedExpense {
     String? kind,
     String? linkedTxRef,
     String? status,
+    bool clearLinkedTxRef = false,
   }) {
     return SharedExpense(
       id: id ?? this.id,
@@ -155,7 +156,7 @@ class SharedExpense {
       revisedAt: revisedAt ?? this.revisedAt,
       deleted: deleted ?? this.deleted,
       kind: kind ?? this.kind,
-      linkedTxRef: linkedTxRef ?? this.linkedTxRef,
+      linkedTxRef: clearLinkedTxRef ? null : (linkedTxRef ?? this.linkedTxRef),
       status: status ?? this.status,
     );
   }

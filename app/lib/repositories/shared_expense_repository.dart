@@ -683,6 +683,7 @@ class SharedExpenseRepository {
     required String paidBy,
     required List<String> splitAmong,
     required String linkedTxRef,
+    int? timestamp,
   }) async {
     return createExpense(
       group: group,
@@ -691,6 +692,7 @@ class SharedExpenseRepository {
       paidBy: paidBy,
       splitAmong: splitAmong,
       linkedTxRef: linkedTxRef,
+      timestamp: timestamp,
     );
   }
 
@@ -707,8 +709,15 @@ class SharedExpenseRepository {
     String currency = 'ETB',
     String kind = 'expense',
     String? linkedTxRef,
+    int? timestamp,
   }) async {
     final identity = await _cryptoService.getOrCreateIdentity();
+    final normalizedLinkedTxRef = _normalizeLinkedTxRef(linkedTxRef);
+    if (normalizedLinkedTxRef != null &&
+        await _isLinkedTxRefUsed(normalizedLinkedTxRef)) {
+      throw Exception('This transaction is already linked to a shared expense.');
+    }
+    final createdAt = DateTime.now().millisecondsSinceEpoch;
     final expense = SharedExpense(
       id: _uuid.v4(),
       amount: amount,
@@ -716,15 +725,15 @@ class SharedExpenseRepository {
       reason: reason,
       paidBy: paidBy,
       splitAmong: splitAmong,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
+      timestamp: timestamp ?? createdAt,
       kind: kind,
-      linkedTxRef: linkedTxRef,
+      linkedTxRef: normalizedLinkedTxRef,
       status: 'pending',
     );
 
     final activityEntry = SharedActivityEntry(
       id: _uuid.v4(),
-      timestamp: expense.timestamp,
+      timestamp: createdAt,
       actor: identity.publicKeyHex,
       kind: kind == 'settlement' ? 'settlement_created' : 'expense_created',
       data: {
@@ -764,15 +773,27 @@ class SharedExpenseRepository {
     required String paidBy,
     required List<String> splitAmong,
     int? timestamp,
+    String? linkedTxRef,
+    bool clearLinkedTxRef = false,
   }) async {
     final identity = await _cryptoService.getOrCreateIdentity();
     final ts = DateTime.now().millisecondsSinceEpoch;
+    final normalizedLinkedTxRef = clearLinkedTxRef
+        ? null
+        : _normalizeLinkedTxRef(linkedTxRef ?? before.linkedTxRef);
+    if (normalizedLinkedTxRef != null &&
+        normalizedLinkedTxRef != before.linkedTxRef &&
+        await _isLinkedTxRefUsed(normalizedLinkedTxRef)) {
+      throw Exception('This transaction is already linked to a shared expense.');
+    }
     final after = before.copyWith(
       amount: amount,
       reason: reason,
       paidBy: paidBy,
       splitAmong: splitAmong,
       timestamp: timestamp ?? before.timestamp,
+      linkedTxRef: normalizedLinkedTxRef,
+      clearLinkedTxRef: clearLinkedTxRef,
       revisedAt: ts,
       status: 'pending',
     );
@@ -843,6 +864,19 @@ class SharedExpenseRepository {
         },
       ));
     }
+    if (normalizedLinkedTxRef != before.linkedTxRef) {
+      activity.add(SharedActivityEntry(
+        id: _uuid.v4(),
+        timestamp: ts,
+        actor: identity.publicKeyHex,
+        kind: 'expense_linked_transaction_changed',
+        data: {
+          'expenseId': before.id,
+          'before': before.linkedTxRef,
+          'after': normalizedLinkedTxRef,
+        },
+      ));
+    }
 
     var updated = group.copyWith(
       expenses:
@@ -863,6 +897,17 @@ class SharedExpenseRepository {
       _sharedExpenseLog('updateExpense submit failed: $error');
     }
     return updated;
+  }
+
+  String? _normalizeLinkedTxRef(String? linkedTxRef) {
+    final trimmed = linkedTxRef?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed;
+  }
+
+  Future<bool> _isLinkedTxRefUsed(String linkedTxRef) async {
+    final refs = await getAllLinkedTxRefs();
+    return refs.contains(linkedTxRef);
   }
 
   Future<SharedExpenseGroup> deleteExpense({

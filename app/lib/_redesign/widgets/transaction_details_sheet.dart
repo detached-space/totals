@@ -15,6 +15,7 @@ import 'package:totals/utils/transaction_link_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/_redesign/screens/shared_expenses_page.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -28,11 +29,13 @@ Future<void> showTransactionDetailsSheet({
   bool allowAutoCategorizationRuleUpdates = true,
 }) async {
   FocusManager.instance.primaryFocus?.unfocus();
+  final hostContext = context;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => _TransactionDetailsSheet(
+      hostContext: hostContext,
       transaction: transaction,
       provider: provider,
       initiallyExpandCategory: initiallyExpandCategory,
@@ -43,6 +46,7 @@ Future<void> showTransactionDetailsSheet({
 }
 
 class _TransactionDetailsSheet extends StatefulWidget {
+  final BuildContext hostContext;
   final Transaction transaction;
   final TransactionProvider provider;
   final bool initiallyExpandCategory;
@@ -50,6 +54,7 @@ class _TransactionDetailsSheet extends StatefulWidget {
   final bool allowAutoCategorizationRuleUpdates;
 
   const _TransactionDetailsSheet({
+    required this.hostContext,
     required this.transaction,
     required this.provider,
     this.initiallyExpandCategory = false,
@@ -87,6 +92,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   TransactionProvider get _provider => widget.provider;
 
   bool get _isCredit => _tx.type == 'CREDIT';
+  bool get _canSplitWithGroup =>
+      widget.hostContext.mounted &&
+      _tx.reference.trim().isNotEmpty &&
+      _tx.type?.toUpperCase() == 'DEBIT';
   String? get _autoCategorizationCounterparty =>
       _provider.resolvePrimaryCounterparty(_tx);
 
@@ -365,6 +374,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final previousEnabled = _autoCategorizeFutureTransactions;
     final previousDraftIds =
         List<int>.from(_autoCategorizationDraftCategoryIds);
+    final revertedMessage = context.l10nTextRead(
+      'Could not update auto-categorization. Changes were reverted.',
+    );
     final nextEnabled = !previousEnabled;
     final nextDraftIds = nextEnabled
         ? _tx.selectedCategoryIds
@@ -386,11 +398,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     } catch (_) {
       messenger?.showSnackBar(
         SnackBar(
-          content: Text(
-            context.l10nTextRead(
-              'Could not update auto-categorization. Changes were reverted.',
-            ),
-          ),
+          content: Text(revertedMessage),
         ),
       );
       if (!mounted) return;
@@ -414,6 +422,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final previousEnabled = _autoCategorizeFutureTransactions;
     final previousDraftIds =
         List<int>.from(_autoCategorizationDraftCategoryIds);
+    final revertedMessage = context.l10nTextRead(
+      'Could not update auto-categorization. Changes were reverted.',
+    );
     final nextDraftIds = _autoCategorizationDraftCategoryIds
         .where((id) => id != categoryId)
         .toList(growable: false);
@@ -431,11 +442,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     } catch (_) {
       messenger?.showSnackBar(
         SnackBar(
-          content: Text(
-            context.l10nTextRead(
-              'Could not update auto-categorization. Changes were reverted.',
-            ),
-          ),
+          content: Text(revertedMessage),
         ),
       );
       if (!mounted) return;
@@ -496,6 +503,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final hadExistingRules = _provider
         .autoCategorizationRulesForTransaction(previousTransaction)
         .isNotEmpty;
+    final revertedMessage = context.l10nTextRead(
+      'Could not update category. Changes were reverted.',
+    );
     _dismissComposerState(clearDraft: true);
     setState(() => _isApplyingCategory = true);
 
@@ -534,11 +544,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     } catch (_) {
       messenger?.showSnackBar(
         SnackBar(
-          content: Text(
-            context.l10nTextRead(
-              'Could not update category. Changes were reverted.',
-            ),
-          ),
+          content: Text(revertedMessage),
         ),
       );
     } finally {
@@ -946,6 +952,22 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
   }
 
+  Future<void> _splitWithGroup() async {
+    final hostContext = widget.hostContext;
+    final transaction = _tx;
+    _dismissComposerState();
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    final didSplit = await showSplitTransactionWithGroupFlow(
+      context: hostContext,
+      transaction: transaction,
+    );
+    if (didSplit) {
+      unawaited(_provider.loadData());
+    }
+  }
+
   @override
   void dispose() {
     _counterpartyFocus.removeListener(_handleCounterpartyFocusChange);
@@ -1138,6 +1160,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
                       const SizedBox(height: 20),
 
+                      if (_canSplitWithGroup) ...[
+                        _buildSplitWithGroupButton(),
+                        const SizedBox(height: 10),
+                      ],
+
                       // Delete button
                       SizedBox(
                         width: double.infinity,
@@ -1163,6 +1190,25 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSplitWithGroupButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: _splitWithGroup,
+        icon: const Icon(AppIcons.group_outlined, size: 18),
+        label: Text(context.l10nText('Split with group')),
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.primaryLight,
+          foregroundColor: AppColors.white,
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
           ),
         ),
       ),

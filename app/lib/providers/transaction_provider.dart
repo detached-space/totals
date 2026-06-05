@@ -9,6 +9,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/services/bank_config_service.dart';
@@ -159,6 +160,7 @@ class TransactionProvider with ChangeNotifier {
   final AccountRepository _accountRepo = AccountRepository();
   final CategoryRepository _categoryRepo = CategoryRepository();
   final BankConfigService _bankConfigService = BankConfigService();
+  final SharedExpenseRepository _sharedExpenseRepo = SharedExpenseRepository();
   final BudgetAlertService _budgetAlertService = BudgetAlertService();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
@@ -190,6 +192,7 @@ class TransactionProvider with ChangeNotifier {
   DateTime _selectedDate = DateTime.now();
 
   List<Transaction> _allTransactions = [];
+  Set<String> _sharedExpenseLinkedRefs = {};
 
   // Redesign home cached metrics
   List<Transaction> _todayTransactions = [];
@@ -212,6 +215,7 @@ class TransactionProvider with ChangeNotifier {
   // Getters
   List<Transaction> get transactions => _transactions;
   List<Transaction> get allTransactions => _allTransactions;
+  Set<String> get sharedExpenseLinkedRefs => _sharedExpenseLinkedRefs;
   List<Category> get categories => _categories;
   List<AutoCategorizationRule> get autoCategorizationRules =>
       _autoCategorizationRules;
@@ -223,6 +227,19 @@ class TransactionProvider with ChangeNotifier {
   List<BankSummary> get bankSummaries => _bankSummaries;
   List<AccountSummary> get accountSummaries => _accountSummaries;
   DateTime get selectedDate => _selectedDate;
+
+  bool isSharedExpenseTransaction(Transaction transaction) {
+    return _sharedExpenseLinkedRefs.contains(transaction.reference);
+  }
+
+  Transaction? transactionByReference(String? reference) {
+    final normalized = reference?.trim();
+    if (normalized == null || normalized.isEmpty) return null;
+    for (final transaction in _allTransactions) {
+      if (transaction.reference == normalized) return transaction;
+    }
+    return null;
+  }
   List<Transaction> get todayTransactions => _todayTransactions;
   List<Transaction> get monthTransactions => _monthTransactions;
   TransactionTotals get todayTotals => _todayTotals;
@@ -433,7 +450,9 @@ class TransactionProvider with ChangeNotifier {
     try {
       _accounts = await _accountRepo.getAccounts();
       // print all the accounts
-      print("debug: Accounts: ${_accounts.map((a) => a.balance).join(', ')}");
+      debugPrint(
+        "debug: Accounts: ${_accounts.map((a) => a.balance).join(', ')}",
+      );
 
       _categories = await _categoryRepo.getCategories();
       _categoryById = {
@@ -443,7 +462,16 @@ class TransactionProvider with ChangeNotifier {
       await _reloadAutoCategorizationState();
 
       _allTransactions = await _transactionRepo.getTransactions();
-      print("debug: Transactions: ${_allTransactions.length}");
+      try {
+        _sharedExpenseLinkedRefs =
+            await _sharedExpenseRepo.getAllLinkedTxRefs();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('debug: Could not load shared expense links: $error');
+        }
+        _sharedExpenseLinkedRefs = {};
+      }
+      debugPrint("debug: Transactions: ${_allTransactions.length}");
 
       final banks = await _bankConfigService.getBanks();
       _bankNamesById = {
@@ -465,7 +493,7 @@ class TransactionProvider with ChangeNotifier {
       _recomputeRedesignHomeMetrics(_allTransactions);
       _dataVersion += 1;
     } catch (e) {
-      print("debug: Error loading data: $e");
+      debugPrint("debug: Error loading data: $e");
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -568,7 +596,9 @@ class TransactionProvider with ChangeNotifier {
         }
       }).toList();
 
-      print("debug: Account Transactions: ${accountTransactions.length}");
+      debugPrint(
+        "debug: Account Transactions: ${accountTransactions.length}",
+      );
 
       // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
       // This handles legacy data or parsing failures where account wasn't captured.
@@ -750,7 +780,9 @@ class TransactionProvider with ChangeNotifier {
             transactionDateStart.isAtSameMomentAs(selectedDateStart);
         if (!dateMatch) return false;
       } catch (e) {
-        print("debug: Error parsing transaction date: ${t.time}, error: $e");
+        debugPrint(
+          "debug: Error parsing transaction date: ${t.time}, error: $e",
+        );
         return false;
       }
 
@@ -1357,7 +1389,9 @@ class TransactionProvider with ChangeNotifier {
       try {
         await _budgetAlertService.checkAndNotifyBudgetAlerts();
       } catch (e) {
-        print("debug: Error checking budget alerts after transaction: $e");
+        debugPrint(
+          "debug: Error checking budget alerts after transaction: $e",
+        );
       }
     }
   }
@@ -1545,7 +1579,7 @@ class TransactionProvider with ChangeNotifier {
       await _recomputeAfterTransactionMutation();
       await WidgetService.refreshWidget();
     } catch (e) {
-      print("debug: Error recomputing state after categorizing: $e");
+      debugPrint("debug: Error recomputing state after categorizing: $e");
     }
 
     if (transactionType == 'DEBIT') {
@@ -1554,7 +1588,9 @@ class TransactionProvider with ChangeNotifier {
           await _budgetAlertService
               .checkAndNotifyBudgetAlertsForCategory(categoryId);
         } catch (e) {
-          print("debug: Error checking budget alerts after categorizing: $e");
+          debugPrint(
+            "debug: Error checking budget alerts after categorizing: $e",
+          );
         }
       }
     }

@@ -801,7 +801,7 @@ class AppLocalizations {
     "No unshared transactions": "ያልተጋሩ ትራንዛክሽኖች የሉም",
     "No matching expenses": "ተመሳሳይ ወጪዎች የሉም",
     "Shared group synced": "የጋራ ቡድን ተመሳስሏል",
-    "Totals Engine is not reachable yet": "የTotals ሞተር እስካሁን አይገኝም",
+    "Totals Engine is not reachable": "የTotals ሞተር አይገኝም",
     "Local changes sync when Totals Engine is reachable":
         "የTotals ሞተር ሲገኝ የአካባቢ ለውጦች ይመሳሰላሉ",
     "That transaction is already shared in this group":

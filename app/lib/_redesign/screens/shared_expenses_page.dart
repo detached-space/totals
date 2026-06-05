@@ -3,12 +3,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/shared_expense_group.dart';
+import 'package:totals/models/transaction.dart';
+import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
 
@@ -34,6 +38,180 @@ String _formatEtb(num amount) {
     if (remaining > 1 && remaining % 3 == 1) buffer.write(',');
   }
   return '${sign}ETB $buffer';
+}
+
+String _formatExpenseAmountInput(double? amount) {
+  if (amount == null || amount <= 0) return '';
+  final normalized = amount.abs();
+  if (normalized == normalized.roundToDouble()) {
+    return normalized.toStringAsFixed(0);
+  }
+  return normalized
+      .toStringAsFixed(2)
+      .replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+String _splitReasonForTransaction(Transaction transaction) {
+  final note = transaction.note?.trim();
+  if (note != null && note.isNotEmpty) return _trimExpenseReason(note);
+
+  final isCredit = transaction.type?.toUpperCase() == 'CREDIT';
+  final party = isCredit ? transaction.creditor : transaction.receiver;
+  final trimmedParty = party?.trim();
+  if (trimmedParty != null && trimmedParty.isNotEmpty) {
+    return _trimExpenseReason(trimmedParty);
+  }
+
+  return 'Shared expense';
+}
+
+int? _timestampFromTransaction(Transaction transaction) {
+  final raw = transaction.time?.trim();
+  if (raw == null || raw.isEmpty) return null;
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return null;
+  return parsed.toLocal().millisecondsSinceEpoch;
+}
+
+String _transactionCounterpartyLabel(Transaction transaction) {
+  final receiver = transaction.receiver?.trim();
+  if (receiver != null && receiver.isNotEmpty) return receiver;
+  final creditor = transaction.creditor?.trim();
+  if (creditor != null && creditor.isNotEmpty) return creditor;
+  final note = transaction.note?.trim();
+  if (note != null && note.isNotEmpty) return note;
+  return 'Transaction';
+}
+
+String _transactionDateLabel(Transaction transaction) {
+  final timestamp = _timestampFromTransaction(transaction);
+  if (timestamp == null) return '';
+  return _formatSharedDate(DateTime.fromMillisecondsSinceEpoch(timestamp));
+}
+
+String _transactionLinkSummary(Transaction transaction) {
+  final date = _transactionDateLabel(transaction);
+  final pieces = [
+    _transactionCounterpartyLabel(transaction),
+    _formatEtb(transaction.amount.abs()),
+    if (date.isNotEmpty) date,
+  ];
+  return pieces.join(' · ');
+}
+
+String _trimExpenseReason(String value) {
+  final trimmed = value.trim();
+  if (trimmed.length <= 80) return trimmed;
+  return trimmed.substring(0, 80);
+}
+
+Set<String> _memberKeysForGroup(SharedExpenseGroup group) {
+  return group.members
+      .map((member) => member.devicePublicKey)
+      .where((key) => key.isNotEmpty)
+      .toSet();
+}
+
+Future<bool> showSplitTransactionWithGroupFlow({
+  required BuildContext context,
+  required Transaction transaction,
+  SharedExpenseRepository? repository,
+}) async {
+  final repo = repository ?? SharedExpenseRepository();
+  final messenger = ScaffoldMessenger.maybeOf(context);
+
+  void showSnack(String message) {
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  final linkedTxRef = transaction.reference.trim();
+  if (linkedTxRef.isEmpty) {
+    showSnack(context.l10nTextRead(
+      'This transaction cannot be split because it has no reference.',
+    ));
+    return false;
+  }
+
+  try {
+    final myPublicKey = await repo.myPublicKey();
+    final linkedRefs = await repo.getAllLinkedTxRefs();
+    if (linkedRefs.contains(linkedTxRef)) {
+      if (context.mounted) {
+        showSnack(context.l10nTextRead(
+          'This transaction is already split with a group.',
+        ));
+      }
+      return false;
+    }
+
+    final groups = (await repo.getGroups())
+        .where((group) => group.hasGroupKey)
+        .toList(growable: true)
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    if (!context.mounted) return false;
+    if (groups.isEmpty) {
+      showSnack(context.l10nTextRead(
+        'Create or join an approved shared group before splitting.',
+      ));
+      return false;
+    }
+
+    final selectedGroup = await showModalBottomSheet<SharedExpenseGroup>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _SplitGroupPickerSheet(
+        groups: groups,
+        myPublicKey: myPublicKey,
+        amount: transaction.amount.abs(),
+      ),
+    );
+    if (selectedGroup == null || !context.mounted) return false;
+
+    final result = await showModalBottomSheet<_ExpenseSheetResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _ExpenseDraftSheet(
+        group: selectedGroup,
+        myPublicKey: myPublicKey,
+        initialAmount: transaction.amount.abs(),
+        initialReason: _splitReasonForTransaction(transaction),
+        initialTimestamp: _timestampFromTransaction(transaction),
+        initialLinkedTxRef: linkedTxRef,
+      ),
+    );
+    if (result is! _ExpenseSheetSave || !context.mounted) return false;
+
+    await repo.splitTransactionIntoGroup(
+      group: selectedGroup,
+      amount: result.amount,
+      reason: result.reason,
+      paidBy: result.paidBy,
+      splitAmong: result.splitAmong,
+      linkedTxRef: result.linkedTxRef ?? linkedTxRef,
+      timestamp: result.timestamp,
+    );
+
+    if (!context.mounted) return true;
+    showSnack(
+      context.l10nTextRead('Expense added to ${selectedGroup.name}'),
+    );
+    return true;
+  } catch (error) {
+    if (context.mounted) {
+      showSnack(error.toString().replaceFirst('Exception: ', ''));
+    }
+    return false;
+  }
 }
 
 class RedesignSharedExpensesPage extends StatefulWidget {
@@ -502,6 +680,9 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
             reason: result.reason,
             paidBy: result.paidBy,
             splitAmong: result.splitAmong,
+            timestamp: result.timestamp,
+            linkedTxRef: result.linkedTxRef,
+            clearLinkedTxRef: result.linkedTxRef == null,
           );
         } else {
           updated = await _repository.createExpense(
@@ -510,6 +691,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
             reason: result.reason,
             paidBy: result.paidBy,
             splitAmong: result.splitAmong,
+            timestamp: result.timestamp,
+            linkedTxRef: result.linkedTxRef,
           );
         }
       }
@@ -521,6 +704,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _selectedGroup = updated;
       });
       _syncRealtimeSubscriptions(groups);
+      unawaited(context.read<TransactionProvider>().loadData());
       _showSnack(
         result is _ExpenseSheetDelete
             ? context.l10nTextRead('Expense deleted')
@@ -902,7 +1086,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         const SizedBox(height: 12),
                         _EngineStatusBanner(
                           label: context.l10nText(
-                            'Totals Engine is not reachable yet',
+                            'Totals Engine is not reachable',
                           ),
                         ),
                       ],
@@ -1036,6 +1220,169 @@ class _ActionBar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _SplitGroupPickerSheet extends StatelessWidget {
+  final List<SharedExpenseGroup> groups;
+  final String myPublicKey;
+  final double amount;
+
+  const _SplitGroupPickerSheet({
+    required this.groups,
+    required this.myPublicKey,
+    required this.amount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textSecondary = AppColors.textSecondary(context);
+    return _IosModalShell(
+      title: 'Split with group',
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Text(
+            'Choose where to add ${_formatEtb(amount)}.',
+            style: TextStyle(
+              color: textSecondary,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        for (final group in groups) ...[
+          _SplitGroupOption(
+            group: group,
+            myPublicKey: myPublicKey,
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _SplitGroupOption extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+
+  const _SplitGroupOption({
+    required this.group,
+    required this.myPublicKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context);
+    final textPrimary = AppColors.textPrimary(context);
+    final textSecondary = AppColors.textSecondary(context);
+    final memberKeys = _memberKeysForGroup(group).toList(growable: false);
+    final visibleMembers = memberKeys.take(3).toList(growable: false);
+
+    return InkWell(
+      onTap: () => Navigator.of(context).pop(group),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 42,
+              height: 32,
+              child: Stack(
+                children: [
+                  for (var i = 0; i < visibleMembers.length; i++)
+                    Positioned(
+                      left: i * 12,
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Color(memberColorFor(group, visibleMembers[i])),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: cardColor, width: 2),
+                        ),
+                        child: Text(
+                          group
+                              .displayNameFor(myPublicKey, visibleMembers[i])
+                              .trim()
+                              .characters
+                              .take(1)
+                              .toString()
+                              .toUpperCase(),
+                          style: const TextStyle(
+                            color: AppColors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (visibleMembers.isEmpty)
+                    Container(
+                      width: 28,
+                      height: 28,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cardColor, width: 2),
+                      ),
+                      child: const Icon(
+                        AppIcons.group_outlined,
+                        size: 14,
+                        color: AppColors.white,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    group.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    group.memberCount == 1
+                        ? '1 member'
+                        : '${group.memberCount} members',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              AppIcons.chevron_right,
+              size: 18,
+              color: AppColors.textTertiary(context),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3202,6 +3549,11 @@ class _SharedExpenseRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final transactionProvider = context.watch<TransactionProvider>();
+    final linkedRef = expense.linkedTxRef?.trim();
+    final linkedTransaction = transactionProvider.transactionByReference(
+      linkedRef,
+    );
     final payerColor = Color(memberColorFor(group, expense.paidBy));
     final payerName = group.displayNameFor(myPublicKey, expense.paidBy);
     final isSettlement = expense.kind == 'settlement';
@@ -3288,6 +3640,42 @@ class _SharedExpenseRow extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (linkedRef != null && linkedRef.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  GestureDetector(
+                    onTap: linkedTransaction == null
+                        ? null
+                        : () => showTransactionDetailsSheet(
+                              context: context,
+                              transaction: linkedTransaction,
+                              provider: transactionProvider,
+                            ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          AppIcons.receipt_long_rounded,
+                          size: 13,
+                          color: AppColors.primaryLight,
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            linkedTransaction == null
+                                ? 'Linked · ${_logId(linkedRef)}'
+                                : 'Linked · ${_transactionLinkSummary(linkedTransaction)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.primaryLight,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -3590,6 +3978,10 @@ class _ActivityRow extends StatelessWidget {
         return 'changed the split';
       case 'expense_date_changed':
         return 'updated the date';
+      case 'expense_linked_transaction_changed':
+        return e.data['after'] == null
+            ? 'removed the linked transaction'
+            : 'linked a transaction';
       case 'expense_deleted':
         return 'deleted "${e.data['reason'] ?? 'an expense'}"';
       case 'settlement_created':
@@ -4773,11 +5165,15 @@ class _ExpenseSheetSave extends _ExpenseSheetResult {
   final String reason;
   final String paidBy;
   final List<String> splitAmong;
+  final int timestamp;
+  final String? linkedTxRef;
   const _ExpenseSheetSave({
     required this.amount,
     required this.reason,
     required this.paidBy,
     required this.splitAmong,
+    required this.timestamp,
+    this.linkedTxRef,
   });
 }
 
@@ -4789,10 +5185,19 @@ class _ExpenseDraftSheet extends StatefulWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
   final SharedExpense? editing;
+  final double? initialAmount;
+  final String? initialReason;
+  final int? initialTimestamp;
+  final String? initialLinkedTxRef;
+
   const _ExpenseDraftSheet({
     required this.group,
     required this.myPublicKey,
     this.editing,
+    this.initialAmount,
+    this.initialReason,
+    this.initialTimestamp,
+    this.initialLinkedTxRef,
   });
 
   @override
@@ -4801,24 +5206,30 @@ class _ExpenseDraftSheet extends StatefulWidget {
 
 class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   late final TextEditingController _amountCtrl = TextEditingController(
-    text: widget.editing == null
-        ? ''
-        : widget.editing!.amount
-            .toStringAsFixed(widget.editing!.amount % 1 == 0 ? 0 : 2),
+    text: _formatExpenseAmountInput(
+      widget.editing?.amount ?? widget.initialAmount,
+    ),
   );
-  late final TextEditingController _reasonCtrl =
-      TextEditingController(text: widget.editing?.reason ?? '');
+  late final TextEditingController _reasonCtrl = TextEditingController(
+    text: widget.editing?.reason ?? widget.initialReason ?? '',
+  );
   late String _paidBy = widget.editing?.paidBy ?? widget.myPublicKey;
   late Set<String> _split = widget.editing != null
       ? widget.editing!.splitAmong.toSet()
-      : widget.group.members
-          .map((m) => m.devicePublicKey)
-          .where((k) => k.isNotEmpty)
-          .toSet();
+      : _memberKeysForGroup(widget.group);
+  late DateTime _paidAt = DateTime.fromMillisecondsSinceEpoch(
+    widget.editing?.timestamp ??
+        widget.initialTimestamp ??
+        DateTime.now().millisecondsSinceEpoch,
+  );
+  late String? _linkedTxRef =
+      widget.editing?.linkedTxRef ?? widget.initialLinkedTxRef;
   bool _deleteArmed = false;
   Timer? _deleteDisarmTimer;
 
   bool get _isEditing => widget.editing != null;
+  bool get _requiresLinkedTransaction =>
+      widget.editing == null && widget.initialLinkedTxRef != null;
 
   @override
   void dispose() {
@@ -4837,7 +5248,81 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
       reason: reason,
       paidBy: _paidBy,
       splitAmong: _split.toList(),
+      timestamp: _paidAt.millisecondsSinceEpoch,
+      linkedTxRef: _linkedTxRef,
     ));
+  }
+
+  Future<void> _pickPaidAt() async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _paidAt,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _paidAt = DateTime(
+        selected.year,
+        selected.month,
+        selected.day,
+        _paidAt.hour,
+        _paidAt.minute,
+      );
+    });
+  }
+
+  Transaction? _linkedTransaction(TransactionProvider provider) {
+    return provider.transactionByReference(_linkedTxRef);
+  }
+
+  Future<void> _pickLinkedTransaction() async {
+    final provider = context.read<TransactionProvider>();
+    final currentRef = _linkedTxRef;
+    final linkedRefs = provider.sharedExpenseLinkedRefs
+        .where((ref) => ref != currentRef)
+        .toSet();
+    final candidates = provider.allTransactions
+        .where((transaction) =>
+            transaction.reference.trim().isNotEmpty &&
+            !linkedRefs.contains(transaction.reference))
+        .toList(growable: false)
+      ..sort((a, b) {
+        final aTime = _timestampFromTransaction(a) ?? 0;
+        final bTime = _timestampFromTransaction(b) ?? 0;
+        return bTime.compareTo(aTime);
+      });
+
+    final selected = await showModalBottomSheet<Transaction>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _LinkedTransactionPickerSheet(
+        transactions: candidates,
+        selectedRef: currentRef,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _linkedTxRef = selected.reference;
+      final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+      if (amount <= 0) {
+        _amountCtrl.text = _formatExpenseAmountInput(selected.amount.abs());
+      }
+      if (_reasonCtrl.text.trim().isEmpty) {
+        _reasonCtrl.text = _splitReasonForTransaction(selected);
+      }
+      final timestamp = _timestampFromTransaction(selected);
+      if (timestamp != null) {
+        _paidAt = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      }
+    });
+  }
+
+  void _clearLinkedTransaction() {
+    if (_requiresLinkedTransaction) return;
+    setState(() => _linkedTxRef = null);
   }
 
   void _onDeleteTap() {
@@ -4854,6 +5339,8 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final transactionProvider = context.watch<TransactionProvider>();
+    final linkedTransaction = _linkedTransaction(transactionProvider);
     final keys = widget.group.members
         .map((m) => m.devicePublicKey)
         .where((k) => k.isNotEmpty)
@@ -4880,6 +5367,35 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
             maxLength: 80,
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) => setState(() {}),
+          ),
+        ),
+        _IosFormGroup(
+          label: 'When',
+          child: _IosValueRow(
+            icon: AppIcons.calendar_today_outlined,
+            title: _formatSharedDate(_paidAt),
+            onTap: _pickPaidAt,
+          ),
+        ),
+        _IosFormGroup(
+          label: 'Transaction',
+          labelTrailing: _linkedTxRef == null || _requiresLinkedTransaction
+              ? null
+              : _IosTextAction(
+                  label: 'Remove',
+                  onTap: _clearLinkedTransaction,
+                ),
+          child: _IosValueRow(
+            icon: AppIcons.receipt_long_rounded,
+            title: linkedTransaction == null
+                ? _linkedTxRef == null
+                    ? 'Link transaction'
+                    : 'Linked transaction'
+                : _transactionCounterpartyLabel(linkedTransaction),
+            subtitle: linkedTransaction == null
+                ? _linkedTxRef ?? 'Optional'
+                : _transactionLinkSummary(linkedTransaction),
+            onTap: _pickLinkedTransaction,
           ),
         ),
         _IosFormGroup(
@@ -4942,6 +5458,175 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _LinkedTransactionPickerSheet extends StatefulWidget {
+  final List<Transaction> transactions;
+  final String? selectedRef;
+
+  const _LinkedTransactionPickerSheet({
+    required this.transactions,
+    required this.selectedRef,
+  });
+
+  @override
+  State<_LinkedTransactionPickerSheet> createState() =>
+      _LinkedTransactionPickerSheetState();
+}
+
+class _LinkedTransactionPickerSheetState
+    extends State<_LinkedTransactionPickerSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Transaction> _filteredTransactions() {
+    final query = _query.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? widget.transactions
+        : widget.transactions.where((transaction) {
+            return transaction.reference.toLowerCase().contains(query) ||
+                _transactionCounterpartyLabel(transaction)
+                    .toLowerCase()
+                    .contains(query) ||
+                (transaction.note?.toLowerCase().contains(query) ?? false);
+          }).toList(growable: false);
+    return filtered.take(80).toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredTransactions();
+    return _IosModalShell(
+      title: 'Link Transaction',
+      children: [
+        _IosSearchField(
+          controller: _searchCtrl,
+          hint: 'Search transactions',
+          onChanged: (value) => setState(() => _query = value),
+        ),
+        const SizedBox(height: 16),
+        if (filtered.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Text(
+              context.l10nText('No available transactions'),
+              style: TextStyle(
+                color: AppColors.textSecondary(context),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else
+          for (final transaction in filtered) ...[
+            _LinkedTransactionOption(
+              transaction: transaction,
+              selected: transaction.reference == widget.selectedRef,
+              onTap: () => Navigator.of(context).pop(transaction),
+            ),
+            const SizedBox(height: 10),
+          ],
+      ],
+    );
+  }
+}
+
+class _LinkedTransactionOption extends StatelessWidget {
+  final Transaction transaction;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _LinkedTransactionOption({
+    required this.transaction,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textPrimary = AppColors.textPrimary(context);
+    final textSecondary = AppColors.textSecondary(context);
+    final cardColor = AppColors.cardColor(context);
+    final borderColor =
+        selected ? AppColors.primaryLight : AppColors.borderColor(context);
+    final date = _transactionDateLabel(transaction);
+    final subtitle = [
+      _formatEtb(transaction.amount.abs()),
+      if (date.isNotEmpty) date,
+      _logId(transaction.reference),
+    ].join(' · ');
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.primaryLight.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                AppIcons.receipt_long_rounded,
+                color: AppColors.primaryLight,
+                size: 17,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _transactionCounterpartyLabel(transaction),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              const Icon(
+                AppIcons.check_circle_rounded,
+                color: AppColors.primaryLight,
+                size: 18,
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -5375,6 +6060,131 @@ class _IosCheckboxRow extends StatelessWidget {
               visualDensity: VisualDensity.compact,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IosValueRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  const _IosValueRow({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context);
+    final textPrimary = AppColors.textPrimary(context);
+    final textSecondary = AppColors.textSecondary(context);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 58),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: AppColors.primaryLight),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: textPrimary,
+                    ),
+                  ),
+                  if (subtitle != null && subtitle!.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              AppIcons.chevron_right,
+              size: 17,
+              color: AppColors.textTertiary(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IosSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final ValueChanged<String> onChanged;
+
+  const _IosSearchField({
+    required this.controller,
+    required this.hint,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      style: TextStyle(color: AppColors.textPrimary(context), fontSize: 15),
+      decoration: InputDecoration(
+        hintText: context.l10nText(hint),
+        hintStyle: TextStyle(color: AppColors.textTertiary(context)),
+        prefixIcon: Icon(
+          AppIcons.search,
+          size: 18,
+          color: AppColors.textTertiary(context),
+        ),
+        filled: true,
+        fillColor: AppColors.cardColor(context),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.borderColor(context)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: AppColors.borderColor(context)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _iosPrimary, width: 2),
         ),
       ),
     );
