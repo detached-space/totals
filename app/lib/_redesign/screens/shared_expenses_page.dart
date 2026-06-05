@@ -491,6 +491,48 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     }
   }
 
+  Future<void> _sendNudge(SharedExpenseGroup group) async {
+    final debtsOwedToMe = settlementPlanFor(group)
+        .debts
+        .where((debt) => debt.to == _myPublicKey)
+        .toList(growable: false);
+    final amount = debtsOwedToMe.fold<double>(
+      0,
+      (sum, debt) => sum + debt.amount,
+    );
+    final debtorPks = debtsOwedToMe
+        .map((debt) => debt.from)
+        .where((pk) => pk.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (amount < 0.5 || debtorPks.isEmpty) {
+      _showSnack(context.l10nTextRead('No one owes you right now'));
+      return;
+    }
+
+    setState(() => _isMutating = true);
+    try {
+      final updated = await _repository.sendNudge(
+        group: group,
+        amount: amount,
+        debtorPks: debtorPks,
+      );
+      if (!mounted) return;
+      final groups = await _repository.getGroups();
+      if (!mounted) return;
+      setState(() {
+        _groups = groups;
+        _selectedGroup = updated;
+      });
+      _syncRealtimeSubscriptions(groups);
+      _showSnack(context.l10nTextRead('Nudge sent'));
+    } catch (error) {
+      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
   void _showAddExpenseComingSoon() {
     final group = _selectedGroup;
     if (group != null) {
@@ -700,6 +742,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         onEditExpense: (e) => _openExpenseSheet(selectedGroup, expense: e),
         onSettle: (recipientPk, amount) =>
             _settleWith(selectedGroup, recipientPk, amount),
+        onSendNudge: () => _sendNudge(selectedGroup),
       );
     }
 
@@ -1141,6 +1184,7 @@ class _SharedGroupDetailView extends StatefulWidget {
   final VoidCallback onAddExpense;
   final ValueChanged<SharedExpense> onEditExpense;
   final void Function(String recipientPk, double amount) onSettle;
+  final VoidCallback onSendNudge;
 
   const _SharedGroupDetailView({
     required this.group,
@@ -1151,6 +1195,7 @@ class _SharedGroupDetailView extends StatefulWidget {
     required this.onAddExpense,
     required this.onEditExpense,
     required this.onSettle,
+    required this.onSendNudge,
   });
 
   @override
@@ -1232,6 +1277,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                       group: widget.group,
                       members: members,
                       myPublicKey: widget.myPublicKey,
+                      onNudge: widget.onSendNudge,
                     ),
                     const SizedBox(height: 16),
                     _SharedGroupTabs(
@@ -2659,11 +2705,13 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
   final SharedExpenseGroup group;
   final List<_SharedMemberView> members;
   final String myPublicKey;
+  final VoidCallback? onNudge;
 
   const _SharedBalanceSummaryCard({
     required this.group,
     required this.members,
     required this.myPublicKey,
+    this.onNudge,
   });
 
   @override
@@ -2673,6 +2721,7 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
         isReady ? computeBalancesFor(group) : const <String, double>{};
     final myBalance = balances[myPublicKey] ?? 0.0;
     final settled = myBalance.abs() < 0.5;
+    final showNudgeAction = isReady && !settled && myBalance > 0;
 
     final String label;
     final Color amountColor;
@@ -2695,9 +2744,9 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
         ? context.l10nText('Waiting for group approval')
         : settled
             ? context.l10nText('Everything is even')
-            : myBalance > 0
-                ? context.l10nText('Across your shared groups')
-                : context.l10nText('Send a nudge or settle up');
+            : showNudgeAction
+                ? context.l10nText('Send a nudge')
+                : context.l10nText('Across your shared groups');
 
     // Counterparties — sorted by absolute balance, biggest first.
     final counterparties = members
@@ -2750,11 +2799,9 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                         ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    subtitleText,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
-                        ),
+                  _SharedBalanceSubtitle(
+                    text: subtitleText,
+                    onTap: showNudgeAction ? onNudge : null,
                   ),
                 ],
               ),
@@ -2811,6 +2858,51 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedBalanceSubtitle extends StatelessWidget {
+  final String text;
+  final VoidCallback? onTap;
+
+  const _SharedBalanceSubtitle({
+    required this.text,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final baseStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: AppColors.textSecondary(context),
+        );
+    if (onTap == null) {
+      return Text(text, style: baseStyle);
+    }
+
+    final linkStyle = baseStyle?.copyWith(
+      color: AppColors.primaryLight,
+      fontWeight: FontWeight.w800,
+      decoration: TextDecoration.underline,
+      decorationColor: AppColors.primaryLight.withValues(alpha: 0.55),
+    );
+
+    return Semantics(
+      button: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(text, style: linkStyle),
+            ),
+          ),
         ),
       ),
     );
@@ -3391,6 +3483,8 @@ class _ActivityRow extends StatelessWidget {
         return 'deleted "${e.data['reason'] ?? 'an expense'}"';
       case 'settlement_created':
         return 'settled up · ${_formatEtb(e.data['amount'] ?? 0)}';
+      case 'nudge_sent':
+        return 'sent a nudge · ${_formatEtb(e.data['amount'] ?? 0)}';
       default:
         return e.kind;
     }

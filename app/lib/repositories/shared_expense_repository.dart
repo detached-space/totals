@@ -897,6 +897,32 @@ class SharedExpenseRepository {
     );
   }
 
+  Future<SharedExpenseGroup> sendNudge({
+    required SharedExpenseGroup group,
+    required double amount,
+    required List<String> debtorPks,
+  }) async {
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final activityEntry = SharedActivityEntry(
+      id: _uuid.v4(),
+      timestamp: ts,
+      actor: identity.publicKeyHex,
+      kind: 'nudge_sent',
+      data: {
+        'amount': amount,
+        'debtorPks': debtorPks,
+      },
+    );
+
+    await _emitNudgePayload(group, activityEntry, debtorPks);
+    final updated = group.copyWith(
+      activity: [...group.activity, activityEntry],
+    );
+    await _upsertGroup(updated);
+    return updated;
+  }
+
   // -------------------------------------------------------------------------
   // Balance / settlement helpers (delegating to top-level functions so widgets
   // can call them without holding a repository instance).
@@ -1060,6 +1086,9 @@ class SharedExpenseRepository {
 
       case 'join_request':
         return _applyJoinRequest(group, senderPk, decoded, myPublicKey);
+
+      case 'nudge':
+        return _applyNudge(group, senderPk, decoded);
 
       default:
         _sharedExpenseLog('_applyPayload unknown type=$type');
@@ -1325,6 +1354,38 @@ class SharedExpenseRepository {
     return true;
   }
 
+  Future<bool> _applyNudge(
+    SharedExpenseGroup group,
+    String senderPk,
+    Map<String, dynamic> decoded,
+  ) async {
+    final id = decoded['id'] as String? ?? '';
+    if (id.isEmpty || group.activity.any((entry) => entry.id == id)) {
+      return false;
+    }
+
+    final debtorPks = ((decoded['debtorPks'] as List?) ?? const [])
+        .whereType<String>()
+        .toList(growable: false);
+    final entry = SharedActivityEntry(
+      id: id,
+      timestamp: (decoded['timestamp'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch,
+      actor: decoded['actor'] as String? ?? senderPk,
+      kind: 'nudge_sent',
+      data: {
+        'amount': (decoded['amount'] as num?)?.toDouble() ?? 0.0,
+        'debtorPks': debtorPks,
+      },
+    );
+
+    final updated = group.copyWith(
+      activity: [...group.activity, entry],
+    );
+    await _upsertGroup(updated);
+    return true;
+  }
+
   Future<bool> _applyJoinRequest(
     SharedExpenseGroup group,
     String senderPk,
@@ -1397,6 +1458,33 @@ class SharedExpenseRepository {
     await _engineClient.submitPayload(
       groupId: group.id,
       encryptedBlob: encrypted,
+    );
+  }
+
+  Future<void> _emitNudgePayload(
+    SharedExpenseGroup group,
+    SharedActivityEntry entry,
+    List<String> recipientPublicKeys,
+  ) async {
+    final groupKeyHex = await _readGroupKey(group.id);
+    if (groupKeyHex == null) {
+      throw const TotalsEngineException('No group key — cannot send nudge.');
+    }
+    final encrypted = await _cryptoService.encryptPayloadWithKey(
+      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+      payload: {
+        'type': 'nudge',
+        'id': entry.id,
+        'timestamp': entry.timestamp,
+        'actor': entry.actor,
+        'amount': entry.data['amount'],
+        'debtorPks': entry.data['debtorPks'],
+      },
+    );
+    await _engineClient.submitNudge(
+      groupId: group.id,
+      encryptedBlob: encrypted,
+      recipientPublicKeys: recipientPublicKeys,
     );
   }
 

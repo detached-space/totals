@@ -223,6 +223,24 @@ class TotalsEngineClient {
     );
   }
 
+  Future<void> submitNudge({
+    required String groupId,
+    required String encryptedBlob,
+    required List<String> recipientPublicKeys,
+  }) async {
+    _engineLog(
+      'submitNudge group=${_logId(groupId)} recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
+    );
+    await _authenticatedRequest(
+      'POST',
+      '/groups/$groupId/nudges',
+      body: {
+        'encryptedBlob': encryptedBlob,
+        'recipientPublicKeys': recipientPublicKeys,
+      },
+    );
+  }
+
   Future<List<EnginePendingPayload>> pullPending(String groupId) async {
     final response =
         await _authenticatedRequest('GET', '/groups/$groupId/pending');
