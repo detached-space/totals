@@ -113,6 +113,18 @@ String _transactionLinkSummary(Transaction transaction) {
   return pieces.join(' · ');
 }
 
+int _lastGroupEventTimestamp(SharedExpenseGroup group) {
+  var latest = group.createdAt.millisecondsSinceEpoch;
+  for (final entry in group.activity) {
+    if (entry.timestamp > latest) latest = entry.timestamp;
+  }
+  for (final expense in group.expenses) {
+    final timestamp = expense.revisedAt ?? expense.timestamp;
+    if (timestamp > latest) latest = timestamp;
+  }
+  return latest;
+}
+
 String _trimExpenseReason(String value) {
   final trimmed = value.trim();
   if (trimmed.length <= 80) return trimmed;
@@ -5199,13 +5211,6 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                             color: AppColors.textSecondary(context),
                           ),
                         ),
-                        if (group.status == SharedExpenseGroupStatus.ready)
-                          const SizedBox(height: 8),
-                        if (group.status == SharedExpenseGroupStatus.ready)
-                          _GroupCardBalanceLine(
-                            group: group,
-                            myPublicKey: myPublicKey,
-                          ),
                       ],
                     ),
                   ),
@@ -5242,6 +5247,31 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                   ),
                 ],
               ),
+              if (group.status == SharedExpenseGroupStatus.ready) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: _GroupCardBalanceLine(
+                        group: group,
+                        myPublicKey: myPublicKey,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Updated ${_shortRelative(_lastGroupEventTimestamp(group))}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiary(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
                 const SizedBox(height: 16),
                 Wrap(
@@ -6003,6 +6033,8 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   late final TextEditingController _reasonCtrl = TextEditingController(
     text: widget.editing?.reason ?? widget.initialReason ?? '',
   );
+  late final FocusNode _amountFocusNode = FocusNode();
+  late final FocusNode _reasonFocusNode = FocusNode();
   late String _paidBy = widget.editing?.paidBy ?? widget.myPublicKey;
   late Set<String> _split = widget.editing != null
       ? widget.editing!.splitAmong.toSet()
@@ -6018,15 +6050,38 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   Timer? _deleteDisarmTimer;
 
   bool get _isEditing => widget.editing != null;
+  bool get _startsFromLinkedTransaction =>
+      widget.editing == null && widget.initialLinkedTxRef != null;
   bool get _requiresLinkedTransaction =>
       widget.editing == null && widget.initialLinkedTxRef != null;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_startsFromLinkedTransaction) {
+        _focusReasonField();
+      } else {
+        _amountFocusNode.requestFocus();
+      }
+    });
+  }
 
   @override
   void dispose() {
     _amountCtrl.dispose();
     _reasonCtrl.dispose();
+    _amountFocusNode.dispose();
+    _reasonFocusNode.dispose();
     _deleteDisarmTimer?.cancel();
     super.dispose();
+  }
+
+  void _focusReasonField() {
+    _reasonFocusNode.requestFocus();
+    final text = _reasonCtrl.text;
+    _reasonCtrl.selection = TextSelection.collapsed(offset: text.length);
   }
 
   void _submit() {
@@ -6108,6 +6163,7 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
         _paidAt = DateTime.fromMillisecondsSinceEpoch(timestamp);
       }
     });
+    _focusReasonField();
   }
 
   void _clearLinkedTransaction() {
@@ -6147,12 +6203,16 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
         // Amount row — centered huge input with currency suffix + bottom rule.
         _IosAmountRow(
           controller: _amountCtrl,
+          focusNode: _amountFocusNode,
+          autofocus: !_startsFromLinkedTransaction,
           onChanged: (_) => setState(() {}),
         ),
         _IosFormGroup(
           label: 'For what?',
           child: _IosFormInput(
             controller: _reasonCtrl,
+            focusNode: _reasonFocusNode,
+            autofocus: _startsFromLinkedTransaction,
             hint: 'e.g., Dinner, Hotel, Taxi',
             maxLength: 80,
             textCapitalization: TextCapitalization.sentences,
@@ -6424,6 +6484,8 @@ class _GroupCardBalanceLine extends StatelessWidget {
     if (myBalance.abs() < 0.5) {
       return Text(
         'All settled',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: AppColors.textTertiary(context),
               fontWeight: FontWeight.w600,
@@ -6436,6 +6498,8 @@ class _GroupCardBalanceLine extends StatelessWidget {
         : 'You owe ${_formatEtb(myBalance.abs())}';
     return Text(
       text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: isOwed ? AppColors.incomeSuccess : AppColors.red,
             fontWeight: FontWeight.w700,
@@ -6750,12 +6814,16 @@ class _IosFormGroup extends StatelessWidget {
 
 class _IosFormInput extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode? focusNode;
+  final bool autofocus;
   final String? hint;
   final int? maxLength;
   final TextCapitalization textCapitalization;
   final ValueChanged<String>? onChanged;
   const _IosFormInput({
     required this.controller,
+    this.focusNode,
+    this.autofocus = false,
     this.hint,
     this.maxLength,
     this.textCapitalization = TextCapitalization.none,
@@ -6770,6 +6838,8 @@ class _IosFormInput extends StatelessWidget {
     final textMuted = AppColors.textTertiary(context);
     return TextField(
       controller: controller,
+      focusNode: focusNode,
+      autofocus: autofocus,
       maxLength: maxLength,
       textCapitalization: textCapitalization,
       onChanged: onChanged,
@@ -6984,8 +7054,15 @@ class _IosSearchField extends StatelessWidget {
 
 class _IosAmountRow extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode? focusNode;
+  final bool autofocus;
   final ValueChanged<String>? onChanged;
-  const _IosAmountRow({required this.controller, this.onChanged});
+  const _IosAmountRow({
+    required this.controller,
+    this.focusNode,
+    this.autofocus = true,
+    this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -7013,9 +7090,10 @@ class _IosAmountRow extends StatelessWidget {
               child: IntrinsicWidth(
                 child: TextField(
                   controller: controller,
+                  focusNode: focusNode,
                   onChanged: onChanged,
                   textAlign: TextAlign.center,
-                  autofocus: true,
+                  autofocus: autofocus,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [
