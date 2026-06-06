@@ -46,9 +46,23 @@ String _formatExpenseAmountInput(double? amount) {
   if (normalized == normalized.roundToDouble()) {
     return normalized.toStringAsFixed(0);
   }
-  return normalized
-      .toStringAsFixed(2)
-      .replaceFirst(RegExp(r'\.?0+$'), '');
+  return normalized.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+Map<String, double> _memberSpentTotalsFor(SharedExpenseGroup group) {
+  final totals = <String, double>{
+    for (final member in group.members) member.devicePublicKey: 0.0,
+  };
+  for (final expense in group.expenses) {
+    if (expense.deleted) continue;
+    if (expense.amount <= 0 || expense.paidBy.isEmpty) continue;
+    totals.update(
+      expense.paidBy,
+      (current) => current + expense.amount,
+      ifAbsent: () => expense.amount,
+    );
+  }
+  return totals;
 }
 
 String _splitReasonForTransaction(Transaction transaction) {
@@ -314,7 +328,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   void _startGroupListRealtimeSubscription() {
     if (_groupListRealtimeSubscription != null) return;
     _sharedExpensesPageLog('group list realtime subscribe');
-    _groupListRealtimeSubscription = _repository.watchGroupListRealtime().listen(
+    _groupListRealtimeSubscription =
+        _repository.watchGroupListRealtime().listen(
       (_) => _refreshFromGroupListRealtime(),
       onError: (Object error, StackTrace stackTrace) {
         _sharedExpensesPageLog('group list realtime failed: $error');
@@ -747,6 +762,47 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     }
   }
 
+  Future<void> _settleDebt(
+    SharedExpenseGroup group,
+    SettlementDebt debt,
+  ) async {
+    if (debt.from == _myPublicKey) {
+      await _settleWith(group, debt.to, debt.amount);
+      return;
+    }
+    if (debt.to != _myPublicKey) {
+      _showSnack(
+          context.l10nTextRead('Only people in this debt can settle it'));
+      return;
+    }
+
+    setState(() => _isMutating = true);
+    try {
+      final updated = await _repository.createExpense(
+        group: group,
+        amount: debt.amount,
+        reason: 'Settlement',
+        paidBy: debt.from,
+        splitAmong: [debt.to],
+        kind: 'settlement',
+      );
+      if (!mounted) return;
+      final groups = await _repository.getGroups();
+      if (!mounted) return;
+      setState(() {
+        _groups = groups;
+        _selectedGroup = updated;
+      });
+      _syncRealtimeSubscriptions(groups);
+      final name = group.displayNameFor(_myPublicKey, debt.from);
+      _showSnack('Settled with $name');
+    } catch (error) {
+      _showSnack(error.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isMutating = false);
+    }
+  }
+
   Future<void> _sendNudge(SharedExpenseGroup group) async {
     final debtsOwedToMe = settlementPlanFor(group)
         .debts
@@ -796,6 +852,33 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         : targets;
     if (selectedTargets == null || selectedTargets.isEmpty) return;
 
+    await _submitNudgeTargets(group, selectedTargets);
+  }
+
+  Future<void> _sendNudgeToDebtor(
+    SharedExpenseGroup group,
+    String debtorPk,
+    double amount,
+  ) async {
+    if (debtorPk.isEmpty || amount < 0.5) {
+      _showSnack(context.l10nTextRead('No one owes you right now'));
+      return;
+    }
+    await _submitNudgeTargets(
+      group,
+      [
+        _NudgeTarget(
+          publicKey: debtorPk,
+          amount: amount,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submitNudgeTargets(
+    SharedExpenseGroup group,
+    List<_NudgeTarget> selectedTargets,
+  ) async {
     final amount = selectedTargets.fold<double>(
       0,
       (sum, target) => sum + target.amount,
@@ -804,6 +887,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         .map((target) => target.publicKey)
         .where((pk) => pk.isNotEmpty)
         .toList(growable: false);
+    if (debtorPks.isEmpty || amount < 0.5) {
+      _showSnack(context.l10nTextRead('No one owes you right now'));
+      return;
+    }
 
     setState(() => _isMutating = true);
     try {
@@ -1035,9 +1122,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         onOpenSettings: () => _openGroupSettings(selectedGroup),
         onAddExpense: _showAddExpenseComingSoon,
         onEditExpense: (e) => _openExpenseSheet(selectedGroup, expense: e),
-        onSettle: (recipientPk, amount) =>
-            _settleWith(selectedGroup, recipientPk, amount),
+        onSettleDebt: (debt) => _settleDebt(selectedGroup, debt),
         onSendNudge: () => _sendNudge(selectedGroup),
+        onNudgeDebt: (debtorPk, amount) =>
+            _sendNudgeToDebtor(selectedGroup, debtorPk, amount),
       );
     }
 
@@ -1307,7 +1395,8 @@ class _SplitGroupOption extends StatelessWidget {
                         height: 28,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: Color(memberColorFor(group, visibleMembers[i])),
+                          color:
+                              Color(memberColorFor(group, visibleMembers[i])),
                           shape: BoxShape.circle,
                           border: Border.all(color: cardColor, width: 2),
                         ),
@@ -1641,8 +1730,9 @@ class _SharedGroupDetailView extends StatefulWidget {
   final VoidCallback onOpenSettings;
   final VoidCallback onAddExpense;
   final ValueChanged<SharedExpense> onEditExpense;
-  final void Function(String recipientPk, double amount) onSettle;
+  final ValueChanged<SettlementDebt> onSettleDebt;
   final VoidCallback onSendNudge;
+  final void Function(String debtorPk, double amount) onNudgeDebt;
 
   const _SharedGroupDetailView({
     required this.group,
@@ -1652,8 +1742,9 @@ class _SharedGroupDetailView extends StatefulWidget {
     required this.onOpenSettings,
     required this.onAddExpense,
     required this.onEditExpense,
-    required this.onSettle,
+    required this.onSettleDebt,
     required this.onSendNudge,
+    required this.onNudgeDebt,
   });
 
   @override
@@ -1663,6 +1754,7 @@ class _SharedGroupDetailView extends StatefulWidget {
 class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
   int _selectedTab = 0;
   bool _showTransactions = false;
+  bool _showMembers = false;
 
   static const List<Color> _memberColors = [
     AppColors.primaryLight,
@@ -1677,6 +1769,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.group.id != widget.group.id) {
       _showTransactions = false;
+      _showMembers = false;
       _selectedTab = 0;
     }
   }
@@ -1694,24 +1787,18 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
     }
 
     final members = _memberViews(context);
+    if (_showMembers) {
+      return _SharedGroupMembersView(
+        group: widget.group,
+        members: members,
+        onBack: () => setState(() => _showMembers = false),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 84),
-        child: SizedBox(
-          width: 52,
-          height: 52,
-          child: FloatingActionButton(
-            onPressed: widget.onAddExpense,
-            backgroundColor: AppColors.primaryLight,
-            foregroundColor: AppColors.white,
-            elevation: 8,
-            shape: const CircleBorder(),
-            child: const Icon(AppIcons.add, size: 26),
-          ),
-        ),
-      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: _SharedExpenseFab(onPressed: widget.onAddExpense),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -1722,13 +1809,11 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _SharedGroupDetailTopBar(
-                      onBack: widget.onBack,
-                      onOpenSettings: widget.onOpenSettings,
-                    ),
-                    const SizedBox(height: 16),
-                    _SharedGroupIdentityHeader(
                       group: widget.group,
                       members: members,
+                      onBack: widget.onBack,
+                      onOpenSettings: widget.onOpenSettings,
+                      onOpenMembers: () => setState(() => _showMembers = true),
                     ),
                     const SizedBox(height: 18),
                     _SharedBalanceSummaryCard(
@@ -1758,7 +1843,8 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                       group: widget.group,
                       myPublicKey: widget.myPublicKey,
                       onEditExpense: widget.onEditExpense,
-                      onSettle: widget.onSettle,
+                      onSettleDebt: widget.onSettleDebt,
+                      onNudgeDebt: widget.onNudgeDebt,
                     ),
                   1 => _SharedGroupActivitiesTab(
                       group: widget.group,
@@ -1841,6 +1927,237 @@ class _SharedMemberView {
     final trimmed = label.trim();
     if (trimmed.isEmpty) return '?';
     return String.fromCharCode(trimmed.runes.first).toUpperCase();
+  }
+}
+
+class _SharedExpenseFab extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const _SharedExpenseFab({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      minimum: const EdgeInsets.only(right: 4, bottom: 92),
+      child: SizedBox(
+        width: 52,
+        height: 52,
+        child: FloatingActionButton(
+          onPressed: onPressed,
+          backgroundColor: AppColors.primaryLight,
+          foregroundColor: AppColors.white,
+          elevation: 8,
+          shape: const CircleBorder(),
+          child: const Icon(AppIcons.add, size: 26),
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedGroupMembersView extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final List<_SharedMemberView> members;
+  final VoidCallback onBack;
+
+  const _SharedGroupMembersView({
+    required this.group,
+    required this.members,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final spentTotals = _memberSpentTotalsFor(group);
+    final balances = computeBalancesFor(group);
+
+    return Scaffold(
+      backgroundColor: AppColors.background(context),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: _SharedMembersTopBar(onBack: onBack),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
+              sliver: SliverList.separated(
+                itemCount: members.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final member = members[index];
+                  return _SharedMemberDetailCard(
+                    member: member,
+                    spent: spentTotals[member.publicKey] ?? 0,
+                    balance: balances[member.publicKey] ?? 0,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedMembersTopBar extends StatelessWidget {
+  final VoidCallback onBack;
+
+  const _SharedMembersTopBar({required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: onBack,
+            icon: const Icon(AppIcons.arrow_back_rounded, size: 25),
+            style: IconButton.styleFrom(
+              foregroundColor: AppColors.textPrimary(context),
+              minimumSize: const Size(44, 44),
+              padding: EdgeInsets.zero,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              context.l10nText('Members'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedMemberDetailCard extends StatelessWidget {
+  final _SharedMemberView member;
+  final double spent;
+  final double balance;
+
+  const _SharedMemberDetailCard({
+    required this.member,
+    required this.spent,
+    required this.balance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final balanceColor = balance > 0.5
+        ? AppColors.incomeSuccess
+        : balance < -0.5
+            ? AppColors.red
+            : AppColors.textPrimary(context);
+
+    return Container(
+      constraints: const BoxConstraints(minHeight: 82),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Row(
+        children: [
+          _SharedMemberCircle(
+            member: member,
+            size: 46,
+            fontSize: 18,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  member.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0,
+                      ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${context.l10nText('Spent')}: ${_formatEtb(spent)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 118,
+            child: Text(
+              balance.abs() < 0.5 ? _formatEtb(0) : _formatEtb(balance),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: balanceColor,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedMemberCircle extends StatelessWidget {
+  final _SharedMemberView member;
+  final double size;
+  final double fontSize;
+
+  const _SharedMemberCircle({
+    required this.member,
+    required this.size,
+    required this.fontSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: member.color,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        member.initial,
+        style: TextStyle(
+          color: AppColors.white,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
   }
 }
 
@@ -2032,21 +2349,8 @@ class _SharedGroupTransactionsViewState
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 84),
-        child: SizedBox(
-          width: 52,
-          height: 52,
-          child: FloatingActionButton(
-            onPressed: widget.onAddExpense,
-            backgroundColor: AppColors.primaryLight,
-            foregroundColor: AppColors.white,
-            elevation: 8,
-            shape: const CircleBorder(),
-            child: const Icon(AppIcons.add, size: 26),
-          ),
-        ),
-      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      floatingActionButton: _SharedExpenseFab(onPressed: widget.onAddExpense),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -3008,134 +3312,193 @@ class _SharedTransactionsEmptyState extends StatelessWidget {
 }
 
 class _SharedGroupDetailTopBar extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final List<_SharedMemberView> members;
   final VoidCallback onBack;
   final VoidCallback onOpenSettings;
+  final VoidCallback onOpenMembers;
 
   const _SharedGroupDetailTopBar({
+    required this.group,
+    required this.members,
     required this.onBack,
     required this.onOpenSettings,
+    required this.onOpenMembers,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        InkWell(
-          onTap: onBack,
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  AppIcons.chevron_left,
-                  size: 20,
-                  color: AppColors.textTertiary(context),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  context.l10nText('Groups'),
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.textTertiary(context),
-                        fontWeight: FontWeight.w700,
+    return SizedBox(
+      height: 67,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 44,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final centerMaxWidth =
+                    (constraints.maxWidth - 132).clamp(120.0, 220.0).toDouble();
+
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: centerMaxWidth),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: onOpenMembers,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              child: _SharedGroupAppBarTitle(group: group),
+                            ),
+                          ),
+                        ),
                       ),
-                ),
-              ],
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: InkWell(
+                        onTap: onBack,
+                        borderRadius: BorderRadius.circular(14),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                AppIcons.chevron_left,
+                                size: 20,
+                                color: AppColors.textTertiary(context),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                context.l10nText('Groups'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyLarge
+                                    ?.copyWith(
+                                      color: AppColors.textTertiary(context),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        onPressed: onOpenSettings,
+                        icon: const Icon(AppIcons.more_horiz, size: 24),
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.cardColor(context),
+                          foregroundColor: AppColors.textSecondary(context),
+                          side: BorderSide(
+                            color: AppColors.borderColor(context),
+                          ),
+                          minimumSize: const Size(44, 44),
+                          shape: const CircleBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
-        ),
-        const Spacer(),
-        IconButton(
-          onPressed: onOpenSettings,
-          icon: const Icon(AppIcons.more_horiz, size: 24),
-          style: IconButton.styleFrom(
-            backgroundColor: AppColors.cardColor(context),
-            foregroundColor: AppColors.textSecondary(context),
-            side: BorderSide(color: AppColors.borderColor(context)),
-            minimumSize: const Size(44, 44),
-            shape: const CircleBorder(),
+          Transform.translate(
+            offset: const Offset(0, -5),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onOpenMembers,
+                borderRadius: BorderRadius.circular(999),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: _StackedMemberAvatars(
+                    members: members,
+                    maxVisible: 4,
+                    showOverflowCount: true,
+                    size: 23,
+                    overlap: 15,
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-class _SharedGroupIdentityHeader extends StatelessWidget {
+class _SharedGroupAppBarTitle extends StatelessWidget {
   final SharedExpenseGroup group;
-  final List<_SharedMemberView> members;
 
-  const _SharedGroupIdentityHeader({
+  const _SharedGroupAppBarTitle({
     required this.group,
-    required this.members,
   });
 
   @override
   Widget build(BuildContext context) {
-    final pillColor =
-        AppColors.isDark(context) ? AppColors.darkSurface : AppColors.slate900;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          decoration: BoxDecoration(
-            color: pillColor,
-            borderRadius: BorderRadius.circular(999),
+    return Text(
+      group.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            color: AppColors.textPrimary(context),
+            fontWeight: FontWeight.w900,
           ),
-          child: Text(
-            group.name.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.2,
-                ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            _StackedMemberAvatars(members: members),
-            const SizedBox(width: 10),
-            Text(
-              group.memberCount == 1
-                  ? context.l10nText('1 member')
-                  : '${group.memberCount} ${context.l10nText('members')}',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textTertiary(context),
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }
 
 class _StackedMemberAvatars extends StatelessWidget {
   final List<_SharedMemberView> members;
+  final int maxVisible;
+  final bool showOverflowCount;
+  final double size;
+  final double overlap;
 
-  const _StackedMemberAvatars({required this.members});
+  const _StackedMemberAvatars({
+    required this.members,
+    this.maxVisible = 4,
+    this.showOverflowCount = false,
+    this.size = 28,
+    this.overlap = 19,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final visibleMembers = members.take(4).toList(growable: false);
+    final shouldShowOverflow = showOverflowCount && members.length > maxVisible;
+    final visibleCount =
+        shouldShowOverflow ? (maxVisible > 0 ? maxVisible - 1 : 0) : maxVisible;
+    final visibleMembers = members.take(visibleCount).toList(growable: false);
+    final overflowCount =
+        shouldShowOverflow ? members.length - visibleMembers.length : 0;
+    final itemCount = visibleMembers.length + (shouldShowOverflow ? 1 : 0);
+    if (itemCount == 0) return const SizedBox.shrink();
+
     return SizedBox(
-      width: 24.0 + ((visibleMembers.length - 1).clamp(0, 3) * 19.0),
-      height: 28,
+      width: size + ((itemCount - 1) * overlap),
+      height: size,
       child: Stack(
         children: [
           for (var i = 0; i < visibleMembers.length; i++)
             Positioned(
-              left: i * 19,
+              left: i * overlap,
               child: Container(
-                width: 28,
-                height: 28,
+                width: size,
+                height: size,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: visibleMembers[i].color,
@@ -3147,7 +3510,31 @@ class _StackedMemberAvatars extends StatelessWidget {
                 ),
                 child: Text(
                   visibleMembers[i].initial,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: AppColors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+              ),
+            ),
+          if (shouldShowOverflow)
+            Positioned(
+              left: visibleMembers.length * overlap,
+              child: Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.textSecondary(context),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: AppColors.background(context),
+                    width: 2,
+                  ),
+                ),
+                child: Text(
+                  '+$overflowCount',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: AppColors.white,
                         fontWeight: FontWeight.w900,
                       ),
@@ -3199,13 +3586,13 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
     }
 
     final amountText = _formatEtb(myBalance.abs());
-    final subtitleText = !isReady
+    final String? subtitleText = !isReady
         ? context.l10nText('Waiting for group approval')
         : settled
             ? context.l10nText('Everything is even')
             : showNudgeAction
                 ? context.l10nText('Send a nudge')
-                : context.l10nText('Across your shared groups');
+                : null;
 
     // Counterparties — sorted by absolute balance, biggest first.
     final counterparties = members
@@ -3257,11 +3644,13 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                           letterSpacing: 0,
                         ),
                   ),
-                  const SizedBox(height: 8),
-                  _SharedBalanceSubtitle(
-                    text: subtitleText,
-                    onTap: showNudgeAction ? onNudge : null,
-                  ),
+                  if (subtitleText != null) ...[
+                    const SizedBox(height: 8),
+                    _SharedBalanceSubtitle(
+                      text: subtitleText,
+                      onTap: showNudgeAction ? onNudge : null,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -3462,7 +3851,8 @@ class _SharedGroupHomeTab extends StatelessWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
   final ValueChanged<SharedExpense> onEditExpense;
-  final void Function(String recipientPk, double amount) onSettle;
+  final ValueChanged<SettlementDebt> onSettleDebt;
+  final void Function(String debtorPk, double amount) onNudgeDebt;
 
   const _SharedGroupHomeTab({
     required this.members,
@@ -3470,8 +3860,40 @@ class _SharedGroupHomeTab extends StatelessWidget {
     required this.group,
     required this.myPublicKey,
     required this.onEditExpense,
-    required this.onSettle,
+    required this.onSettleDebt,
+    required this.onNudgeDebt,
   });
+
+  Future<void> _openDebtActions(
+    BuildContext context,
+    SettlementDebt debt,
+  ) async {
+    final action = await showModalBottomSheet<_DebtAction>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _DebtActionSheet(
+        debt: debt,
+        group: group,
+        myPublicKey: myPublicKey,
+      ),
+    );
+    if (action == null || !context.mounted) return;
+
+    switch (action) {
+      case _DebtAction.settle:
+        if (debt.from == myPublicKey || debt.to == myPublicKey) {
+          onSettleDebt(debt);
+        }
+        break;
+      case _DebtAction.nudge:
+        if (debt.to == myPublicKey) {
+          onNudgeDebt(debt.from, debt.amount);
+        }
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3513,10 +3935,10 @@ class _SharedGroupHomeTab extends StatelessWidget {
             ],
           ),
         const SizedBox(height: 22),
-        _SharedSectionHeader(label: context.l10nText('SETTLE')),
+        _SharedSectionHeader(label: context.l10nText('Debts')),
         const SizedBox(height: 8),
         if (plan.debts.isEmpty)
-          _SharedSettleEmptyRow(members: members)
+          const _SharedSettleEmptyRow()
         else
           Column(
             children: [
@@ -3525,9 +3947,7 @@ class _SharedGroupHomeTab extends StatelessWidget {
                   debt: debt,
                   group: group,
                   myPublicKey: myPublicKey,
-                  onTap: debt.from == myPublicKey
-                      ? () => onSettle(debt.to, debt.amount)
-                      : null,
+                  onTap: () => _openDebtActions(context, debt),
                 ),
             ],
           ),
@@ -3601,99 +4021,122 @@ class _SharedExpenseRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (isSettlement)
-                  Row(
-                    children: [
-                      Text(payerName,
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  children: [
+                    if (isSettlement)
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              payerName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
                                     color: payerColor,
                                     fontWeight: FontWeight.w700,
-                                  )),
-                      Text('  →  ',
-                          style: TextStyle(
-                              color: AppColors.textTertiary(context),
-                              fontWeight: FontWeight.w600)),
-                      Text(recipientName,
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  ),
+                            ),
+                          ),
+                          Text('  →  ',
+                              style: TextStyle(
+                                  color: AppColors.textTertiary(context),
+                                  fontWeight: FontWeight.w600)),
+                          Flexible(
+                            child: Text(
+                              recipientName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
                                     color: recipientColor,
                                     fontWeight: FontWeight.w700,
-                                  )),
-                    ],
-                  )
-                else
-                  Text(
-                    expense.reason.isEmpty ? '(no reason)' : expense.reason,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                const SizedBox(height: 4),
-                Text.rich(
-                  TextSpan(
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textTertiary(context),
-                        ),
-                    children: [
-                      if (!isSettlement) ...[
-                        TextSpan(
-                          text: payerName,
-                          style: TextStyle(
-                            color: payerColor,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        TextSpan(
-                          text: ' paid · split ${expense.splitAmong.length}',
-                        ),
-                      ] else
-                        const TextSpan(text: 'Settlement'),
-                      if (ago.isNotEmpty) TextSpan(text: ' · $ago'),
-                      if (expense.status == 'pending')
-                        const TextSpan(text: ' · sending…'),
-                    ],
-                  ),
-                ),
-                if (linkedRef != null && linkedRef.isNotEmpty) ...[
-                  const SizedBox(height: 7),
-                  GestureDetector(
-                    onTap: linkedTransaction == null
-                        ? null
-                        : () => showTransactionDetailsSheet(
-                              context: context,
-                              transaction: linkedTransaction,
-                              provider: transactionProvider,
+                                  ),
                             ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          AppIcons.receipt_long_rounded,
-                          size: 13,
-                          color: AppColors.primaryLight,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            linkedTransaction == null
-                                ? 'Linked · ${_logId(linkedRef)}'
-                                : 'Linked · ${_transactionLinkSummary(linkedTransaction)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        expense.reason.isEmpty ? '(no reason)' : expense.reason,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    const SizedBox(height: 4),
+                    Text.rich(
+                      TextSpan(
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textTertiary(context),
+                            ),
+                        children: [
+                          if (!isSettlement) ...[
+                            TextSpan(
+                              text: payerName,
+                              style: TextStyle(
+                                color: payerColor,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            TextSpan(
+                              text:
+                                  ' paid · split ${expense.splitAmong.length}',
+                            ),
+                          ] else
+                            const TextSpan(text: 'Settlement'),
+                          if (ago.isNotEmpty) TextSpan(text: ' · $ago'),
+                          if (expense.status == 'pending')
+                            const TextSpan(text: ' · sending…'),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (linkedRef != null && linkedRef.isNotEmpty) ...[
+                      const SizedBox(height: 7),
+                      GestureDetector(
+                        onTap: linkedTransaction == null
+                            ? null
+                            : () => showTransactionDetailsSheet(
+                                  context: context,
+                                  transaction: linkedTransaction,
+                                  provider: transactionProvider,
+                                ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              AppIcons.receipt_long_rounded,
+                              size: 13,
+                              color: AppColors.primaryLight,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                linkedTransaction == null
+                                    ? 'Linked · ${_logId(linkedRef)}'
+                                    : 'Linked · ${_transactionLinkSummary(linkedTransaction)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
                                       color: AppColors.primaryLight,
                                       fontWeight: FontWeight.w700,
                                     ),
-                          ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(width: 16),
@@ -3733,12 +4176,12 @@ class _SharedSettleArrow extends StatelessWidget {
   final SettlementDebt debt;
   final SharedExpenseGroup group;
   final String myPublicKey;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
   const _SharedSettleArrow({
     required this.debt,
     required this.group,
     required this.myPublicKey,
-    this.onTap,
+    required this.onTap,
   });
 
   @override
@@ -3747,78 +4190,283 @@ class _SharedSettleArrow extends StatelessWidget {
     final toName = group.displayNameFor(myPublicKey, debt.to);
     final fromColor = Color(memberColorFor(group, debt.from));
     final toColor = Color(memberColorFor(group, debt.to));
+    final nameStyle = Theme.of(context).textTheme.bodyLarge?.copyWith(
+          color: AppColors.textPrimary(context),
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+        );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.zero,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 76),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: AppColors.borderColor(context)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      _SharedDebtAvatar(
+                        name: fromName,
+                        color: fromColor,
+                        size: 40,
+                        fontSize: 15,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              fromName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: nameStyle,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _formatEtb(debt.amount),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: AppColors.red,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(
+                  width: 48,
+                  child: Icon(
+                    Icons.arrow_forward,
+                    size: 26,
+                    color: AppColors.incomeSuccess,
+                  ),
+                ),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          toName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: nameStyle,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      _SharedDebtAvatar(
+                        name: toName,
+                        color: toColor,
+                        size: 40,
+                        fontSize: 15,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedDebtAvatar extends StatelessWidget {
+  final String name;
+  final Color color;
+  final double size;
+  final double fontSize;
+
+  const _SharedDebtAvatar({
+    required this.name,
+    required this.color,
+    this.size = 22,
+    this.fontSize = 11,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: Text(
+        name.isNotEmpty ? name.characters.first.toUpperCase() : '?',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+enum _DebtAction { settle, nudge }
+
+class _DebtAmountRow extends StatelessWidget {
+  final double amount;
+
+  const _DebtAmountRow({required this.amount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
       child: Row(
         children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(color: fromColor, shape: BoxShape.circle),
-            alignment: Alignment.center,
-            child: Text(
-              fromName.isNotEmpty
-                  ? fromName.characters.first.toUpperCase()
-                  : '?',
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800),
+          Text(
+            context.l10nText('Amount').toUpperCase(),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary(context),
+              letterSpacing: 0.5,
             ),
           ),
-          const SizedBox(width: 6),
-          Text(fromName,
-              style: TextStyle(color: fromColor, fontWeight: FontWeight.w700)),
-          const SizedBox(width: 6),
-          Icon(Icons.arrow_right_alt,
-              size: 18, color: AppColors.textTertiary(context)),
-          const SizedBox(width: 6),
-          Text(toName,
-              style: TextStyle(color: toColor, fontWeight: FontWeight.w700)),
-          const SizedBox(width: 6),
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(color: toColor, shape: BoxShape.circle),
-            alignment: Alignment.center,
+          const SizedBox(width: 16),
+          Expanded(
             child: Text(
-              toName.isNotEmpty ? toName.characters.first.toUpperCase() : '?',
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800),
-            ),
-          ),
-          const Spacer(),
-          Text(_formatEtb(debt.amount),
+              _formatEtb(amount),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppColors.textPrimary(context),
                     fontWeight: FontWeight.w900,
-                  )),
-          if (onTap != null) ...[
-            const SizedBox(width: 8),
-            OutlinedButton(
-              onPressed: onTap,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primaryLight,
-                minimumSize: const Size(0, 32),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                side: BorderSide(
-                  color: AppColors.primaryLight.withValues(alpha: 0.5),
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                textStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              child: const Text('Settle'),
+                    letterSpacing: 0,
+                  ),
             ),
-          ],
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _DebtSheetTitle extends StatelessWidget {
+  final String debtLabel;
+  final String debtorName;
+  final Color debtorColor;
+
+  const _DebtSheetTitle({
+    required this.debtLabel,
+    required this.debtorName,
+    required this.debtorColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final baseStyle = TextStyle(
+      fontSize: 20,
+      fontWeight: FontWeight.w600,
+      color: AppColors.textPrimary(context),
+    );
+    return Text.rich(
+      TextSpan(
+        style: baseStyle,
+        children: [
+          TextSpan(text: debtLabel),
+          TextSpan(
+            text: ' · ',
+            style: TextStyle(color: AppColors.textPrimary(context)),
+          ),
+          TextSpan(
+            text: debtorName,
+            style: TextStyle(color: debtorColor),
+          ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _DebtActionSheet extends StatelessWidget {
+  final SettlementDebt debt;
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+
+  const _DebtActionSheet({
+    required this.debt,
+    required this.group,
+    required this.myPublicKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fromName = group.displayNameFor(myPublicKey, debt.from);
+    final fromColor = Color(memberColorFor(group, debt.from));
+    final canSettle = debt.from == myPublicKey || debt.to == myPublicKey;
+    final canNudge = debt.to == myPublicKey;
+
+    return _IosModalShell(
+      title: context.l10nText('Debt'),
+      titleWidget: _DebtSheetTitle(
+        debtLabel: context.l10nText('Debt'),
+        debtorName: fromName,
+        debtorColor: fromColor,
+      ),
+      children: [
+        _DebtAmountRow(amount: debt.amount),
+        IgnorePointer(
+          ignoring: !canSettle,
+          child: Opacity(
+            opacity: canSettle ? 1 : 0.45,
+            child: _IosValueRow(
+              icon: AppIcons.check_circle_rounded,
+              title: context.l10nText('Mark as settled'),
+              subtitle: canSettle
+                  ? context.l10nText('Record that this debt was paid')
+                  : context.l10nText(
+                      'Only people in this debt can mark it settled',
+                    ),
+              showChevron: false,
+              onTap: () => Navigator.of(context).pop(_DebtAction.settle),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        IgnorePointer(
+          ignoring: !canNudge,
+          child: Opacity(
+            opacity: canNudge ? 1 : 0.45,
+            child: _IosValueRow(
+              icon: AppIcons.notifications_outlined,
+              title: context.l10nText('Nudge'),
+              subtitle: canNudge
+                  ? context.l10nText('Remind them to pay you')
+                  : context.l10nText('You can nudge people who owe you'),
+              showChevron: false,
+              onTap: () => Navigator.of(context).pop(_DebtAction.nudge),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -4102,17 +4750,15 @@ class _SharedSectionHeader extends StatelessWidget {
           ),
         ),
         if (actionLabel != null && onAction != null)
-          TextButton.icon(
+          TextButton(
             onPressed: onAction,
-            iconAlignment: IconAlignment.end,
-            icon: const Icon(AppIcons.arrow_forward, size: 16),
-            label: Text(actionLabel!),
             style: TextButton.styleFrom(
               foregroundColor: AppColors.primaryLight,
               textStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w900,
                   ),
             ),
+            child: Text(actionLabel!),
           ),
       ],
     );
@@ -4181,19 +4827,10 @@ class _SharedDetailEmptyBlock extends StatelessWidget {
 }
 
 class _SharedSettleEmptyRow extends StatelessWidget {
-  final List<_SharedMemberView> members;
-
-  const _SharedSettleEmptyRow({required this.members});
+  const _SharedSettleEmptyRow();
 
   @override
   Widget build(BuildContext context) {
-    final from = members.isNotEmpty ? members.first : null;
-    final to = members.length > 1
-        ? members[1]
-        : members.isNotEmpty
-            ? members.first
-            : null;
-
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
@@ -4204,58 +4841,13 @@ class _SharedSettleEmptyRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: from == null || to == null || from == to
-                ? Text(
-                    context.l10nText('Nothing to settle'),
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w800,
-                        ),
-                  )
-                : Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          from.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: from.color,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 10),
-                        child: Icon(
-                          AppIcons.arrow_forward,
-                          color: AppColors.primaryLight,
-                          size: 18,
-                        ),
-                      ),
-                      Flexible(
-                        child: Text(
-                          to.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: to.color,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                      ),
-                    ],
+            child: Text(
+              context.l10nText('No debts'),
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w800,
                   ),
-          ),
-          const SizedBox(width: 16),
-          Text(
-            _formatEtb(0),
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppColors.textPrimary(context),
-                  fontWeight: FontWeight.w900,
-                ),
+            ),
           ),
         ],
       ),
@@ -4434,57 +5026,64 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
+                        Text(
+                          group.memberCount == 1
+                              ? context.l10nText('1 member')
+                              : '${group.memberCount} ${context.l10nText('members')}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary(context),
+                          ),
+                        ),
+                        if (group.status == SharedExpenseGroupStatus.ready)
+                          const SizedBox(height: 8),
                         if (group.status == SharedExpenseGroupStatus.ready)
                           _GroupCardBalanceLine(
                             group: group,
                             myPublicKey: myPublicKey,
                           ),
-                        if (group.status == SharedExpenseGroupStatus.ready)
-                          const SizedBox(height: 8),
-                        Text(
-                          '${group.memberCount} ${context.l10nText('members')}',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: AppColors.textSecondary(context),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          shortKey(group.id),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: AppColors.textTertiary(context),
-                            letterSpacing: 0,
-                          ),
-                        ),
                       ],
                     ),
                   ),
-                  _StatusChip(label: statusLabel, color: statusColor),
+                  const SizedBox(width: 12),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed:
+                            group.status == SharedExpenseGroupStatus.localOnly
+                                ? null
+                                : onCopyInvite,
+                        icon: const Icon(AppIcons.copy, size: 17),
+                        tooltip: context.l10nText('Copy code'),
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.cardColor(context),
+                          foregroundColor: AppColors.textSecondary(context),
+                          disabledForegroundColor:
+                              AppColors.textTertiary(context),
+                          side: BorderSide(
+                            color: AppColors.borderColor(context),
+                          ),
+                          minimumSize: const Size(36, 36),
+                          fixedSize: const Size(36, 36),
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _StatusChip(label: statusLabel, color: statusColor),
+                    ],
+                  ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed:
-                        group.status == SharedExpenseGroupStatus.localOnly
-                            ? null
-                            : onCopyInvite,
-                    icon: const Icon(AppIcons.copy, size: 17),
-                    label: Text(context.l10nText('Copy code')),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary(context),
-                      minimumSize: const Size(0, 42),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      side: BorderSide(color: AppColors.borderColor(context)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-                  if (group.status == SharedExpenseGroupStatus.pendingApproval)
+              if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
                     OutlinedButton.icon(
                       onPressed: _onCancelTap,
                       icon: Icon(
@@ -4517,8 +5116,9 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                         ),
                       ),
                     ),
-                ],
-              ),
+                  ],
+                ),
+              ],
               if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
                 const SizedBox(height: 16),
                 _InlineNote(
@@ -5659,7 +6259,7 @@ class _GroupCardBalanceLine extends StatelessWidget {
     final myBalance = balances[myPublicKey] ?? 0.0;
     if (myBalance.abs() < 0.5) {
       return Text(
-        'all settled',
+        'All settled',
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: AppColors.textTertiary(context),
               fontWeight: FontWeight.w600,
@@ -5668,8 +6268,8 @@ class _GroupCardBalanceLine extends StatelessWidget {
     }
     final isOwed = myBalance > 0;
     final text = isOwed
-        ? "you're owed ${_formatEtb(myBalance)}"
-        : 'you owe ${_formatEtb(myBalance.abs())}';
+        ? "You're owed ${_formatEtb(myBalance)}"
+        : 'You owe ${_formatEtb(myBalance.abs())}';
     return Text(
       text,
       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -5842,7 +6442,12 @@ const Color _iosNegative = Color(0xFFEF4444);
 class _IosModalShell extends StatelessWidget {
   final String title;
   final List<Widget> children;
-  const _IosModalShell({required this.title, required this.children});
+  final Widget? titleWidget;
+  const _IosModalShell({
+    required this.title,
+    required this.children,
+    this.titleWidget,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -5890,15 +6495,19 @@ class _IosModalShell extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 24),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: textPrimary,
-                          ),
+                        Expanded(
+                          child: titleWidget ??
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                  color: textPrimary,
+                                ),
+                              ),
                         ),
                         // 32×32 rounded-square close button (matches iOS)
                         InkWell(
@@ -6085,12 +6694,14 @@ class _IosValueRow extends StatelessWidget {
   final String title;
   final String? subtitle;
   final VoidCallback onTap;
+  final bool showChevron;
 
   const _IosValueRow({
     required this.icon,
     required this.title,
     this.subtitle,
     required this.onTap,
+    this.showChevron = true,
   });
 
   @override
@@ -6146,12 +6757,14 @@ class _IosValueRow extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            Icon(
-              AppIcons.chevron_right,
-              size: 17,
-              color: AppColors.textTertiary(context),
-            ),
+            if (showChevron) ...[
+              const SizedBox(width: 10),
+              Icon(
+                AppIcons.chevron_right,
+                size: 17,
+                color: AppColors.textTertiary(context),
+              ),
+            ],
           ],
         ),
       ),
