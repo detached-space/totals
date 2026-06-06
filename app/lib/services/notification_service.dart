@@ -30,6 +30,7 @@ class NotificationService {
   static const String _failedParseReviewChannelId = 'failed_parse_review';
   static const String _spendingSummaryChannelId = 'spending_summaries';
   static const String _accountSyncChannelId = 'account_sync';
+  static const String _accountSyncCompleteChannelId = 'account_sync_complete';
   static const String _budgetChannelId = 'budgets';
   static const String _sharedExpensesChannelId = 'shared_expenses';
   static const String _historyPrefsKey = 'notification_history_v1';
@@ -97,6 +98,14 @@ class NotificationService {
         'Account sync',
         description: 'Background sync of account transactions',
         importance: Importance.low,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _accountSyncCompleteChannelId,
+        'Account sync results',
+        description: 'Completion summaries for account transaction syncs',
+        importance: Importance.defaultImportance,
       ),
     );
     await androidPlugin?.createNotificationChannel(
@@ -936,21 +945,21 @@ class NotificationService {
         body,
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            _accountSyncChannelId,
-            'Account sync',
-            channelDescription: 'Background sync of account transactions',
-            importance: Importance.low,
-            priority: Priority.low,
+            _accountSyncCompleteChannelId,
+            'Account sync results',
+            channelDescription:
+                'Completion summaries for account transaction syncs',
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
             autoCancel: true,
             showProgress: false,
             ongoing: false,
-            onlyAlertOnce: true,
           ),
           iOS: DarwinNotificationDetails(),
         ),
       );
       await _recordHistory(
-        channel: _accountSyncChannelId,
+        channel: _accountSyncCompleteChannelId,
         title: title,
         body: body,
       );

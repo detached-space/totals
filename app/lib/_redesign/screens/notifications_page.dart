@@ -152,6 +152,7 @@ class _ChannelChip extends StatelessWidget {
       'transactions' => 'Transaction',
       'daily_spending' => 'Daily',
       'account_sync' => 'Sync',
+      'account_sync_complete' => 'Sync',
       'budgets' => 'Budget',
       _ => 'Other',
     };
