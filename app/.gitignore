@@ -42,5 +42,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Firebase config files
+/android/app/google-services.json
+/android/app/src/*/google-services.json
+/service-files/google-services*.json
+
 # FVM Version Cache
 .fvm/

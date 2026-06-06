@@ -190,6 +190,23 @@ class TotalsEngineClient {
     await _authenticatedRequest('POST', '/groups/$groupId/join', body: {});
   }
 
+  Future<void> updatePushRegistration({
+    required String? pushToken,
+    required String? pushPlatform,
+  }) async {
+    _engineLog(
+      'updatePushRegistration platform=${pushPlatform ?? '-'} token=${pushToken == null ? 'clear' : 'set'}',
+    );
+    await _authenticatedRequest(
+      'PUT',
+      '/groups/push-registration',
+      body: {
+        'pushToken': pushToken,
+        'pushPlatform': pushPlatform,
+      },
+    );
+  }
+
   Future<void> leaveGroup(String groupId) async {
     _engineLog('leaveGroup group=${_logId(groupId)}');
     await _authenticatedRequest('DELETE', '/groups/$groupId/members/me');

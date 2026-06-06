@@ -8,6 +8,7 @@ import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/shared_expense_group.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
+import 'package:totals/services/shared_expense_push_notification_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 import 'package:uuid/uuid.dart';
 
@@ -247,6 +248,7 @@ class SharedExpenseRepository {
       _sharedExpenseLog(
         'createGroup engine success group=${_logId(group.id)}',
       );
+      await SharedExpensePushNotificationService.instance.syncRegistration();
       return group;
     } catch (error, stackTrace) {
       _sharedExpenseLog('createGroup engine failed, using local group: $error');
@@ -349,6 +351,7 @@ class SharedExpenseRepository {
       'joinGroup done group=${_logId(groupId)} status=${result.status.name} '
       'syncApplied=$changed',
     );
+    await SharedExpensePushNotificationService.instance.syncRegistration();
     return result;
   }
 

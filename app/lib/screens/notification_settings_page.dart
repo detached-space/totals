@@ -6,6 +6,7 @@ import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/shared_expense_push_notification_service.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/widget_refresh_settings_service.dart';
@@ -100,6 +101,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     await NotificationSettingsService.instance
         .setSharedExpenseNotificationsEnabled(value);
     await NotificationScheduler.syncSharedExpenseNotificationSchedule();
+    await SharedExpensePushNotificationService.instance.syncRegistration();
   }
 
   Future<void> _setDailyEnabled(bool value) async {

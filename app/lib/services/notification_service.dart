@@ -1122,7 +1122,7 @@ class NotificationService {
 
       final cleanGroupName = groupName?.trim() ?? '';
       final hasSingleGroup = groupCount == 1 && cleanGroupName.isNotEmpty;
-      const title = 'Settle Up has new activity';
+      const title = 'Shared Expenses has a new update';
       final body = hasSingleGroup
           ? updateCount == 1
               ? '$cleanGroupName has a new shared expense update to review.'

@@ -35,6 +35,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/shared_expense_notification_coordinator.dart';
+import 'package:totals/services/shared_expense_push_notification_service.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
@@ -99,6 +100,7 @@ class RedesignShellState extends State<RedesignShell>
     BackgroundRefreshSignalService.instance.ensureListening();
     unawaited(BankDetectionStartupService.runOnAppOpen());
     unawaited(SharedExpenseNotificationCoordinator.instance.start());
+    unawaited(SharedExpensePushNotificationService.instance.start());
     unawaited(_loadActiveProfileId());
 
     _widgetLaunchIntentSub = WidgetLaunchIntentService.instance.stream.listen(

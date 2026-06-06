@@ -16,6 +16,7 @@ import 'package:totals/services/notification_scheduler.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
+import 'package:totals/services/shared_expense_push_notification_service.dart';
 import 'package:totals/_redesign/screens/onboarding_page.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/_redesign/theme/theme.dart';
@@ -99,6 +100,7 @@ Widget _buildUiScaledApp({
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SharedExpensePushNotificationService.registerBackgroundHandler();
   try {
     await dotenv.load(fileName: '.env', isOptional: true);
   } catch (e) {
