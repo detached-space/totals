@@ -5895,6 +5895,17 @@ class _NudgePickerSheetState extends State<_NudgePickerSheet> {
   Widget build(BuildContext context) {
     return _IosModalShell(
       title: context.l10nText('Send a nudge'),
+      footer: [
+        _IosFormSubmit(
+          label: _selectedPks.length == 1
+              ? context.l10nText('Send nudge')
+              : context.l10nText('Send nudges'),
+          icon: Icons.notifications_active_outlined,
+          enabled: _selectedPks.isNotEmpty,
+          onTap: _submit,
+          topPadding: 0,
+        ),
+      ],
       children: [
         _IosFormGroup(
           label: context.l10nText('People who owe you'),
@@ -5920,14 +5931,6 @@ class _NudgePickerSheetState extends State<_NudgePickerSheet> {
               ],
             ],
           ),
-        ),
-        _IosFormSubmit(
-          label: _selectedPks.length == 1
-              ? context.l10nText('Send nudge')
-              : context.l10nText('Send nudges'),
-          icon: Icons.notifications_active_outlined,
-          enabled: _selectedPks.isNotEmpty,
-          onTap: _submit,
         ),
       ],
     );
@@ -6115,108 +6118,154 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final formBottomPadding = keyboardInset > 0 ? 8.0 : 4.0;
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
       child: Container(
+        constraints: BoxConstraints(
+          maxHeight: mediaQuery.size.height * 0.9,
+        ),
         decoration: BoxDecoration(
           color: AppColors.background(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: SafeArea(
           top: false,
-          child: SingleChildScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: EdgeInsets.fromLTRB(
-              20,
-              18,
-              20,
-              20 + mediaQuery.padding.bottom,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 22),
-                Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxHeight = constraints.hasBoundedHeight
+                  ? constraints.maxHeight
+                  : mediaQuery.size.height * 0.9;
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w800,
+                    Flexible(
+                      child: SingleChildScrollView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: EdgeInsets.fromLTRB(
+                          20,
+                          18,
+                          20,
+                          formBottomPadding,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 22),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    widget.title,
+                                    style:
+                                        theme.textTheme.headlineSmall?.copyWith(
+                                      color: AppColors.textPrimary(context),
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  icon: const Icon(AppIcons.close_rounded),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor:
+                                        AppColors.cardColor(context),
+                                    foregroundColor:
+                                        AppColors.textPrimary(context),
+                                    minimumSize: const Size(48, 48),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 28),
+                            _SheetTextField(
+                              controller: _groupController,
+                              label: widget.groupLabel,
+                              hint: widget.groupHint,
+                              textInputAction: TextInputAction.next,
+                              showError: _hasTriedSubmit &&
+                                  _groupController.text.trim().isEmpty,
+                              onChanged: (_) => setState(() {}),
+                            ),
+                            const SizedBox(height: 20),
+                            _SheetTextField(
+                              controller: _nameController,
+                              label: widget.nameLabel,
+                              hint: widget.nameHint,
+                              textInputAction: TextInputAction.done,
+                              showError: _hasTriedSubmit &&
+                                  _nameController.text.trim().isEmpty,
+                              onChanged: (_) => setState(() {}),
+                              onSubmitted: (_) => _submit(),
+                            ),
+                            const SizedBox(height: 22),
+                            _PaymentAddressSelector(
+                              label: context.l10nText('PAYMENT ACCOUNT'),
+                              accounts: widget.paymentAccounts,
+                              selected: _paymentAddress,
+                              onChanged: (address) {
+                                setState(() => _paymentAddress = address);
+                              },
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(AppIcons.close_rounded),
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppColors.cardColor(context),
-                        foregroundColor: AppColors.textPrimary(context),
-                        minimumSize: const Size(48, 48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                    SizedBox(height: actionTopGap),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        0,
+                        20,
+                        bottomSafeArea + actionBottomGap,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _submit,
+                          iconAlignment: IconAlignment.end,
+                          icon: const Icon(
+                            AppIcons.check_rounded,
+                            size: 20,
+                          ),
+                          label: Text(widget.primaryLabel),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.primaryLight,
+                            foregroundColor: AppColors.white,
+                            minimumSize: const Size(0, 58),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            textStyle: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 28),
-                _SheetTextField(
-                  controller: _groupController,
-                  label: widget.groupLabel,
-                  hint: widget.groupHint,
-                  textInputAction: TextInputAction.next,
-                  showError:
-                      _hasTriedSubmit && _groupController.text.trim().isEmpty,
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 20),
-                _SheetTextField(
-                  controller: _nameController,
-                  label: widget.nameLabel,
-                  hint: widget.nameHint,
-                  textInputAction: TextInputAction.done,
-                  showError:
-                      _hasTriedSubmit && _nameController.text.trim().isEmpty,
-                  onChanged: (_) => setState(() {}),
-                  onSubmitted: (_) => _submit(),
-                ),
-                const SizedBox(height: 22),
-                _PaymentAddressSelector(
-                  label: context.l10nText('PAYMENT ACCOUNT'),
-                  accounts: widget.paymentAccounts,
-                  selected: _paymentAddress,
-                  onChanged: (address) {
-                    setState(() => _paymentAddress = address);
-                  },
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _submit,
-                    iconAlignment: IconAlignment.end,
-                    icon: const Icon(AppIcons.check_rounded, size: 20),
-                    label: Text(widget.primaryLabel),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primaryLight,
-                      foregroundColor: AppColors.white,
-                      minimumSize: const Size(0, 58),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      textStyle: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 48),
-              ],
-            ),
+              );
+            },
           ),
         ),
       ),
@@ -6679,6 +6728,23 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
 
     return _IosModalShell(
       title: _isEditing ? 'Edit Expense' : 'Add Expense',
+      footer: [
+        _IosFormSubmit(
+          label: _isEditing ? 'Save' : 'Add',
+          enabled: canSave,
+          onTap: _submit,
+          topPadding: 0,
+        ),
+        if (_isEditing) ...[
+          const SizedBox(height: 10),
+          _IosDangerButton(
+            label: _deleteArmed ? 'Tap again to delete' : 'Delete expense',
+            icon: Icons.delete_outline,
+            armed: _deleteArmed,
+            onTap: _onDeleteTap,
+          ),
+        ],
+      ],
       children: [
         // Amount row — centered huge input with currency suffix + bottom rule.
         _IosAmountRow(
@@ -6760,20 +6826,6 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
             }),
           ),
         ),
-        _IosFormSubmit(
-          label: _isEditing ? 'Save' : 'Add',
-          enabled: canSave,
-          onTap: _submit,
-        ),
-        if (_isEditing) ...[
-          const SizedBox(height: 10),
-          _IosDangerButton(
-            label: _deleteArmed ? 'Tap again to delete' : 'Delete expense',
-            icon: Icons.delete_outline,
-            armed: _deleteArmed,
-            onTap: _onDeleteTap,
-          ),
-        ],
       ],
     );
   }
@@ -7075,6 +7127,35 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
 
     return _IosModalShell(
       title: 'Edit Group',
+      footer: [
+        _IosFormSubmit(
+          label: 'Save',
+          enabled: canSave,
+          onTap: () => Navigator.of(context).pop(
+            _GroupSettingsSave(
+              _nameCtrl.text.trim(),
+              _displayCtrl.text.trim(),
+              _backfillNewMembers,
+              _paymentAddress,
+            ),
+          ),
+          topPadding: 0,
+        ),
+        const SizedBox(height: 10),
+        _IosSecondaryButton(
+          label: 'Copy invite',
+          icon: Icons.content_copy,
+          onTap: () =>
+              Navigator.of(context).pop(const _GroupSettingsCopyInvite()),
+        ),
+        const SizedBox(height: 10),
+        _IosDangerButton(
+          label: _leaveArmed ? 'Tap again to confirm' : 'Leave group',
+          icon: Icons.logout,
+          armed: _leaveArmed,
+          onTap: _onLeaveTap,
+        ),
+      ],
       children: [
         _IosFormGroup(
           label: 'Group name',
@@ -7117,32 +7198,6 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
             },
           ),
         ),
-        _IosFormSubmit(
-          label: 'Save',
-          enabled: canSave,
-          onTap: () => Navigator.of(context).pop(
-            _GroupSettingsSave(
-              _nameCtrl.text.trim(),
-              _displayCtrl.text.trim(),
-              _backfillNewMembers,
-              _paymentAddress,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _IosSecondaryButton(
-          label: 'Copy invite',
-          icon: Icons.content_copy,
-          onTap: () =>
-              Navigator.of(context).pop(const _GroupSettingsCopyInvite()),
-        ),
-        const SizedBox(height: 10),
-        _IosDangerButton(
-          label: _leaveArmed ? 'Tap again to confirm' : 'Leave group',
-          icon: Icons.logout,
-          armed: _leaveArmed,
-          onTap: _onLeaveTap,
-        ),
       ],
     );
   }
@@ -7168,10 +7223,12 @@ const Color _iosNegative = Color(0xFFEF4444);
 class _IosModalShell extends StatelessWidget {
   final String title;
   final List<Widget> children;
+  final List<Widget> footer;
   final Widget? titleWidget;
   const _IosModalShell({
     required this.title,
     required this.children,
+    this.footer = const [],
     this.titleWidget,
   });
 
@@ -7183,12 +7240,21 @@ class _IosModalShell extends StatelessWidget {
     final borderColor = AppColors.borderColor(context);
     final mediaQuery = MediaQuery.of(context);
     final keyboardInset = mediaQuery.viewInsets.bottom;
-    final safeBottom = mediaQuery.viewPadding.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final hasFooter = footer.isNotEmpty;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final formBottomPadding = hasFooter
+        ? (keyboardInset > 0 ? 8.0 : 4.0)
+        : (keyboardInset > 0 ? 16.0 : 24.0);
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: keyboardInset),
+      padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         child: Container(
@@ -7198,67 +7264,111 @@ class _IosModalShell extends StatelessWidget {
           ),
           child: SafeArea(
             top: false,
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.fromLTRB(24, 0, 24, 24 + safeBottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Handle — 36×4, borderColor, 2px radius, 20px below
-                  Center(
-                    child: Container(
-                      margin: const EdgeInsets.only(top: 10, bottom: 20),
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: borderColor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  // Header — title left, close button right
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: titleWidget ??
-                              Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w600,
-                                  color: textPrimary,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final maxHeight = constraints.hasBoundedHeight
+                    ? constraints.maxHeight
+                    : mediaQuery.size.height * 0.9;
+
+                return ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxHeight),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Flexible(
+                        child: SingleChildScrollView(
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: EdgeInsets.fromLTRB(
+                            24,
+                            0,
+                            24,
+                            formBottomPadding,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Handle — 36×4, borderColor, 2px radius, 20px below
+                              Center(
+                                child: Container(
+                                  margin: const EdgeInsets.only(
+                                    top: 10,
+                                    bottom: 20,
+                                  ),
+                                  width: 36,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: borderColor,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
                                 ),
                               ),
+                              // Header — title left, close button right
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 24),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: titleWidget ??
+                                          Text(
+                                            title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w600,
+                                              color: textPrimary,
+                                            ),
+                                          ),
+                                    ),
+                                    // 32×32 rounded-square close button (matches iOS)
+                                    InkWell(
+                                      onTap: () => Navigator.of(context).pop(),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          color: cardColor,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 16,
+                                          color: textPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              ...children,
+                            ],
+                          ),
                         ),
-                        // 32×32 rounded-square close button (matches iOS)
-                        InkWell(
-                          onTap: () => Navigator.of(context).pop(),
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: cardColor,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.close,
-                              size: 16,
-                              color: textPrimary,
-                            ),
+                      ),
+                      if (hasFooter) ...[
+                        SizedBox(height: actionTopGap),
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            24,
+                            0,
+                            24,
+                            bottomSafeArea + actionBottomGap,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: footer,
                           ),
                         ),
                       ],
-                    ),
+                    ],
                   ),
-                  ...children,
-                ],
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -7792,17 +7902,19 @@ class _IosFormSubmit extends StatelessWidget {
   final IconData? icon;
   final bool enabled;
   final VoidCallback onTap;
+  final double topPadding;
   const _IosFormSubmit({
     required this.label,
     this.icon,
     required this.enabled,
     required this.onTap,
+    this.topPadding = 24,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 24),
+      padding: EdgeInsets.only(top: topPadding),
       child: Opacity(
         opacity: enabled ? 1 : 0.6,
         child: Material(
