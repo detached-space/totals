@@ -233,6 +233,7 @@ class TotalsEngineClient {
     required String groupId,
     required String encryptedBlob,
     String kind = 'group',
+    String? encryptedNotificationPreview,
   }) async {
     _engineLog(
       'submitPayload group=${_logId(groupId)} kind=$kind encryptedBytes=${encryptedBlob.length ~/ 2}',
@@ -240,7 +241,12 @@ class TotalsEngineClient {
     await _authenticatedRequest(
       'POST',
       '/groups/$groupId/payloads',
-      body: {'encryptedBlob': encryptedBlob, 'kind': kind},
+      body: {
+        'encryptedBlob': encryptedBlob,
+        'kind': kind,
+        if (encryptedNotificationPreview != null)
+          'encryptedNotificationPreview': encryptedNotificationPreview,
+      },
     );
   }
 
@@ -249,6 +255,7 @@ class TotalsEngineClient {
     required String encryptedBlob,
     required List<String> recipientPublicKeys,
     String kind = 'group',
+    String? encryptedNotificationPreview,
   }) async {
     _engineLog(
       'submitTargetedPayload group=${_logId(groupId)} kind=$kind recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
@@ -260,6 +267,8 @@ class TotalsEngineClient {
         'encryptedBlob': encryptedBlob,
         'recipientPublicKeys': recipientPublicKeys,
         'kind': kind,
+        if (encryptedNotificationPreview != null)
+          'encryptedNotificationPreview': encryptedNotificationPreview,
       },
     );
   }
@@ -268,6 +277,7 @@ class TotalsEngineClient {
     required String groupId,
     required String encryptedBlob,
     required List<String> recipientPublicKeys,
+    String? encryptedNotificationPreview,
   }) async {
     _engineLog(
       'submitNudge group=${_logId(groupId)} recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
@@ -279,6 +289,8 @@ class TotalsEngineClient {
         'encryptedBlob': encryptedBlob,
         'recipientPublicKeys': recipientPublicKeys,
         'kind': 'nudge',
+        if (encryptedNotificationPreview != null)
+          'encryptedNotificationPreview': encryptedNotificationPreview,
       },
     );
   }

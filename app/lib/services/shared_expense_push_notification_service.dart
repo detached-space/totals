@@ -4,9 +4,12 @@ import 'dart:ui';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/shared_expense_crypto_service.dart';
+import 'package:totals/services/shared_expense_push_preview_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 
 class SharedExpensePushNotificationService {
@@ -158,14 +161,46 @@ Future<void> _showLocalNotificationForMessage(RemoteMessage message) async {
   if (!enabled) return;
 
   final notification = message.notification;
+  final preview = await _decryptPreviewForMessage(message);
   await NotificationService.instance.showSharedExpenseEventNotification(
-    eventId: _cleanDataValue(message.data['payloadId']) ??
+    eventId: preview?.eventId ??
+        _cleanDataValue(message.data['payloadId']) ??
         message.messageId ??
         DateTime.now().millisecondsSinceEpoch.toString(),
-    title: notification?.title ?? 'Shared Expenses has a new update',
-    body: notification?.body ?? _fallbackBodyForKind(message.data['kind']),
-    groupId: _cleanDataValue(message.data['groupId']),
+    title: preview?.title ??
+        notification?.title ??
+        'Shared Expenses has a new update',
+    body: preview?.body ??
+        notification?.body ??
+        _fallbackBodyForKind(message.data['kind']),
+    groupId: preview?.groupId ?? _cleanDataValue(message.data['groupId']),
   );
+}
+
+Future<SharedExpensePushPreview?> _decryptPreviewForMessage(
+  RemoteMessage message,
+) async {
+  final encryptedPreview = _cleanDataValue(
+    message.data['encryptedNotificationPreview'],
+  );
+  final groupId = _cleanDataValue(message.data['groupId']);
+  if (encryptedPreview == null || groupId == null) return null;
+
+  try {
+    final groupKeyHex =
+        await SharedExpenseRepository().notificationGroupKey(groupId);
+    if (groupKeyHex == null || groupKeyHex.isEmpty) return null;
+    return SharedExpensePushPreviewService.decrypt(
+      cryptoService: SharedExpenseCryptoService(),
+      groupKeyHex: groupKeyHex,
+      encryptedBlob: encryptedPreview,
+    );
+  } catch (error) {
+    if (kDebugMode) {
+      debugPrint('debug: Failed to decrypt shared expense push preview: $error');
+    }
+    return null;
+  }
 }
 
 String _fallbackBodyForKind(Object? rawKind) {

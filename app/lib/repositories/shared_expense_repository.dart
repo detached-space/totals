@@ -9,6 +9,7 @@ import 'package:totals/models/shared_expense_group.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
+import 'package:totals/services/shared_expense_push_preview_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 import 'package:uuid/uuid.dart';
 
@@ -1341,7 +1342,11 @@ class SharedExpenseRepository {
     await _upsertGroup(updated);
 
     try {
-      await _emitExpensePayload(updated, expense);
+      await _emitExpensePayload(
+        updated,
+        expense,
+        previewEntry: activityEntry,
+      );
       updated = updated.copyWith(
         expenses: updated.expenses
             .map((e) => e.id == expense.id ? e.copyWith(status: 'synced') : e)
@@ -1476,7 +1481,12 @@ class SharedExpenseRepository {
     await _upsertGroup(updated);
 
     try {
-      await _emitExpensePayload(updated, after);
+      final previewEntries = activity.sublist(group.activity.length);
+      await _emitExpensePayload(
+        updated,
+        after,
+        previewEntry: previewEntries.isEmpty ? null : previewEntries.last,
+      );
       updated = updated.copyWith(
         expenses: updated.expenses
             .map((e) => e.id == after.id ? e.copyWith(status: 'synced') : e)
@@ -1523,24 +1533,26 @@ class SharedExpenseRepository {
       revisedAt: ts,
       status: 'pending',
     );
+    final activityEntry = SharedActivityEntry(
+      id: _uuid.v4(),
+      timestamp: ts,
+      actor: identity.publicKeyHex,
+      kind: 'expense_deleted',
+      data: {'expenseId': expenseId, 'reason': existing.reason},
+    );
     var updated = group.copyWith(
       expenses:
           group.expenses.map((e) => e.id == expenseId ? deleted : e).toList(),
-      activity: [
-        ...group.activity,
-        SharedActivityEntry(
-          id: _uuid.v4(),
-          timestamp: ts,
-          actor: identity.publicKeyHex,
-          kind: 'expense_deleted',
-          data: {'expenseId': expenseId, 'reason': existing.reason},
-        ),
-      ],
+      activity: [...group.activity, activityEntry],
     );
     await _upsertGroup(updated);
 
     try {
-      await _emitExpensePayload(updated, deleted);
+      await _emitExpensePayload(
+        updated,
+        deleted,
+        previewEntry: activityEntry,
+      );
       updated = updated.copyWith(
         expenses: updated.expenses
             .map((e) => e.id == expenseId ? e.copyWith(status: 'synced') : e)
@@ -2493,6 +2505,7 @@ class SharedExpenseRepository {
   Future<void> _emitExpensePayload(
     SharedExpenseGroup group,
     SharedExpense expense,
+    {SharedActivityEntry? previewEntry}
   ) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) {
@@ -2503,10 +2516,17 @@ class SharedExpenseRepository {
       keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
       payload: payload,
     );
+    final encryptedNotificationPreview = await _encryptedNotificationPreview(
+      group: group,
+      groupKeyHex: groupKeyHex,
+      entry: previewEntry,
+      expense: expense,
+    );
     await _engineClient.submitPayload(
       groupId: group.id,
       encryptedBlob: encrypted,
       kind: 'expense',
+      encryptedNotificationPreview: encryptedNotificationPreview,
     );
   }
 
@@ -2531,10 +2551,40 @@ class SharedExpenseRepository {
         'amountByDebtorPk': entry.data['amountByDebtorPk'],
       },
     );
+    final encryptedNotificationPreview = await _encryptedNotificationPreview(
+      group: group,
+      groupKeyHex: groupKeyHex,
+      entry: entry,
+    );
     await _engineClient.submitNudge(
       groupId: group.id,
       encryptedBlob: encrypted,
       recipientPublicKeys: recipientPublicKeys,
+      encryptedNotificationPreview: encryptedNotificationPreview,
+    );
+  }
+
+  Future<String?> notificationGroupKey(String groupId) {
+    return _readGroupKey(groupId);
+  }
+
+  Future<String?> _encryptedNotificationPreview({
+    required SharedExpenseGroup group,
+    required String groupKeyHex,
+    required SharedActivityEntry? entry,
+    SharedExpense? expense,
+  }) {
+    final preview = entry == null
+        ? null
+        : SharedExpensePushPreviewService.buildForActivity(
+            group: group,
+            entry: entry,
+            expense: expense,
+          );
+    return SharedExpensePushPreviewService.encrypt(
+      cryptoService: _cryptoService,
+      groupKeyHex: groupKeyHex,
+      preview: preview,
     );
   }
 
