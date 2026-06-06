@@ -77,9 +77,12 @@ class SharedExpensePushPreviewService {
 
     switch (entry.kind) {
       case 'nudge_sent':
+        final amount = _doubleValue(entry.data['amount']);
+        final amountText =
+            amount > 0 ? 'ETB ${formatNumberWithComma(amount)}' : 'what you owe';
         return SharedExpensePushPreview(
-          title: 'Payment reminder',
-          body: '$actorName sent a payment reminder on $groupName.',
+          title: 'Settle up with $actorName',
+          body: 'Pay $amountText to $actorName on $groupName.',
           groupId: group.id,
           eventId: entry.id,
         );

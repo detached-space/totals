@@ -79,6 +79,46 @@ class SharedExpenseNotificationCoordinator {
     _groupListReconnectTimer = null;
   }
 
+  Future<void> markActivitySeenFromPush({
+    required String groupId,
+    required String eventId,
+  }) async {
+    final cleanGroupId = groupId.trim();
+    final cleanEventId = eventId.trim();
+    if (cleanGroupId.isEmpty || cleanEventId.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = _seenKey(cleanGroupId);
+    final merged = <String>[
+      ...?prefs.getStringList(key),
+      cleanEventId,
+    ];
+    final deduped = <String>[];
+    for (final id in merged) {
+      if (id.isEmpty || deduped.contains(id)) continue;
+      deduped.add(id);
+    }
+    final start = deduped.length > _maxSeenEntriesPerGroup
+        ? deduped.length - _maxSeenEntriesPerGroup
+        : 0;
+    await prefs.setStringList(key, deduped.sublist(start));
+  }
+
+  Future<bool> isActivitySeen({
+    required String groupId,
+    required String eventId,
+  }) async {
+    final cleanGroupId = groupId.trim();
+    final cleanEventId = eventId.trim();
+    if (cleanGroupId.isEmpty || cleanEventId.isEmpty) return false;
+
+    final prefs = await SharedPreferences.getInstance();
+    return prefs
+            .getStringList(_seenKey(cleanGroupId))
+            ?.contains(cleanEventId) ??
+        false;
+  }
+
   Future<void> _seedExistingActivity(List<SharedExpenseGroup> groups) async {
     final prefs = await SharedPreferences.getInstance();
     for (final group in groups) {

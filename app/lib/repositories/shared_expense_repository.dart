@@ -1202,7 +1202,14 @@ class SharedExpenseRepository {
       if (current == null || current.status != 'pending') continue;
 
       try {
-        await _emitExpensePayload(latest, current);
+        final activityEntries =
+            _activityEntriesForExpensePayload(latest, current);
+        await _emitExpensePayload(
+          latest,
+          current,
+          previewEntry: activityEntries.isEmpty ? null : activityEntries.last,
+          activityEntries: activityEntries,
+        );
         final afterSend = await _groupById(group.id);
         if (afterSend == null) return changed;
         final sentVersion = current.revisedAt ?? current.timestamp;
@@ -1357,6 +1364,7 @@ class SharedExpenseRepository {
         updated,
         expense,
         previewEntry: activityEntry,
+        activityEntries: [activityEntry],
       );
       updated = updated.copyWith(
         expenses: updated.expenses
@@ -1497,6 +1505,7 @@ class SharedExpenseRepository {
         updated,
         after,
         previewEntry: previewEntries.isEmpty ? null : previewEntries.last,
+        activityEntries: previewEntries,
       );
       updated = updated.copyWith(
         expenses: updated.expenses
@@ -1563,6 +1572,7 @@ class SharedExpenseRepository {
         updated,
         deleted,
         previewEntry: activityEntry,
+        activityEntries: [activityEntry],
       );
       updated = updated.copyWith(
         expenses: updated.expenses
@@ -1961,10 +1971,11 @@ class SharedExpenseRepository {
 
     final timestamp = (decoded['timestamp'] as num?)?.toInt() ??
         DateTime.now().millisecondsSinceEpoch;
+    final incomingActivity = _activityFromPayload(decoded);
     final activity = [...group.activity];
     if (nameChanged) {
       activity.add(SharedActivityEntry(
-        id: _uuid.v4(),
+        id: _activityIdOrNew(incomingActivity, 'group_renamed'),
         timestamp: timestamp,
         actor: senderPk,
         kind: 'group_renamed',
@@ -1973,7 +1984,7 @@ class SharedExpenseRepository {
     }
     if (isFirstSeen) {
       activity.add(SharedActivityEntry(
-        id: _uuid.v4(),
+        id: _activityIdOrNew(incomingActivity, 'member_joined'),
         timestamp: timestamp,
         actor: senderPk,
         kind: 'member_joined',
@@ -2044,10 +2055,11 @@ class SharedExpenseRepository {
       return false;
     }
 
+    final incomingActivity = _activityFromPayload(decoded);
     final activity = [...group.activity];
     if (isFirstSeen) {
       activity.add(SharedActivityEntry(
-        id: _uuid.v4(),
+        id: _activityIdOrNew(incomingActivity, 'member_joined'),
         timestamp: (decoded['timestamp'] as num?)?.toInt() ??
             DateTime.now().millisecondsSinceEpoch,
         actor: senderPk,
@@ -2100,12 +2112,25 @@ class SharedExpenseRepository {
     final activity = <SharedActivityEntry>[...group.activity];
     final actor = incoming.paidBy.isNotEmpty ? incoming.paidBy : senderPk;
     final ts = incoming.revisedAt ?? incoming.timestamp;
+    final incomingActivity = _activityFromPayload(decoded);
+    final incomingActivities = _activitiesFromPayload(decoded);
 
     if (existing.isEmpty) {
       next = [...group.expenses, incoming.copyWith(status: 'synced')];
       if (!incoming.deleted) {
         activity.add(SharedActivityEntry(
-          id: _uuid.v4(),
+          id: _activityIdOrNew(
+            _activityForKind(
+              incomingActivities,
+              incomingActivity,
+              incoming.kind == 'settlement'
+                  ? 'settlement_created'
+                  : 'expense_created',
+            ),
+            incoming.kind == 'settlement'
+                ? 'settlement_created'
+                : 'expense_created',
+          ),
           timestamp: ts,
           actor: actor,
           kind: incoming.kind == 'settlement'
@@ -2134,7 +2159,14 @@ class SharedExpenseRepository {
       // Log per-field changes (or a deletion).
       if (incoming.deleted && !cur.deleted) {
         activity.add(SharedActivityEntry(
-          id: _uuid.v4(),
+          id: _activityIdOrNew(
+            _activityForKind(
+              incomingActivities,
+              incomingActivity,
+              'expense_deleted',
+            ),
+            'expense_deleted',
+          ),
           timestamp: ts,
           actor: actor,
           kind: 'expense_deleted',
@@ -2143,7 +2175,14 @@ class SharedExpenseRepository {
       } else if (!incoming.deleted) {
         if (incoming.amount != cur.amount) {
           activity.add(SharedActivityEntry(
-            id: _uuid.v4(),
+            id: _activityIdOrNew(
+              _activityForKind(
+                incomingActivities,
+                incomingActivity,
+                'expense_amount_changed',
+              ),
+              'expense_amount_changed',
+            ),
             timestamp: ts,
             actor: actor,
             kind: 'expense_amount_changed',
@@ -2156,7 +2195,14 @@ class SharedExpenseRepository {
         }
         if (incoming.reason != cur.reason) {
           activity.add(SharedActivityEntry(
-            id: _uuid.v4(),
+            id: _activityIdOrNew(
+              _activityForKind(
+                incomingActivities,
+                incomingActivity,
+                'expense_reason_changed',
+              ),
+              'expense_reason_changed',
+            ),
             timestamp: ts,
             actor: actor,
             kind: 'expense_reason_changed',
@@ -2169,7 +2215,14 @@ class SharedExpenseRepository {
         }
         if (incoming.paidBy != cur.paidBy) {
           activity.add(SharedActivityEntry(
-            id: _uuid.v4(),
+            id: _activityIdOrNew(
+              _activityForKind(
+                incomingActivities,
+                incomingActivity,
+                'expense_paid_by_changed',
+              ),
+              'expense_paid_by_changed',
+            ),
             timestamp: ts,
             actor: actor,
             kind: 'expense_paid_by_changed',
@@ -2182,7 +2235,14 @@ class SharedExpenseRepository {
         }
         if (!_sameList(incoming.splitAmong, cur.splitAmong)) {
           activity.add(SharedActivityEntry(
-            id: _uuid.v4(),
+            id: _activityIdOrNew(
+              _activityForKind(
+                incomingActivities,
+                incomingActivity,
+                'expense_split_changed',
+              ),
+              'expense_split_changed',
+            ),
             timestamp: ts,
             actor: actor,
             kind: 'expense_split_changed',
@@ -2202,6 +2262,65 @@ class SharedExpenseRepository {
     );
     await _upsertGroup(updated);
     return true;
+  }
+
+  SharedActivityEntry? _activityFromPayload(Map<String, dynamic> decoded) {
+    final raw = decoded['activity'];
+    if (raw is! Map) return null;
+    final entry = SharedActivityEntry.fromJson(Map<String, dynamic>.from(raw));
+    if (entry.id.isEmpty || entry.kind.isEmpty) return null;
+    return entry;
+  }
+
+  List<SharedActivityEntry> _activitiesFromPayload(
+    Map<String, dynamic> decoded,
+  ) {
+    final raw = decoded['activities'];
+    if (raw is! List) return const <SharedActivityEntry>[];
+    return raw
+        .whereType<Map>()
+        .map((item) =>
+            SharedActivityEntry.fromJson(Map<String, dynamic>.from(item)))
+        .where((entry) => entry.id.isNotEmpty && entry.kind.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  SharedActivityEntry? _activityForKind(
+    List<SharedActivityEntry> entries,
+    SharedActivityEntry? fallback,
+    String expectedKind,
+  ) {
+    for (final entry in entries.reversed) {
+      if (entry.kind == expectedKind) return entry;
+    }
+    if (fallback != null && fallback.kind == expectedKind) return fallback;
+    return null;
+  }
+
+  String _activityIdOrNew(SharedActivityEntry? entry, String expectedKind) {
+    if (entry != null && entry.kind == expectedKind && entry.id.isNotEmpty) {
+      return entry.id;
+    }
+    return _uuid.v4();
+  }
+
+  List<SharedActivityEntry> _activityEntriesForExpensePayload(
+    SharedExpenseGroup group,
+    SharedExpense expense,
+  ) {
+    final versionTimestamp = expense.revisedAt ?? expense.timestamp;
+    final entriesForVersion = group.activity
+        .where((entry) =>
+            entry.data['expenseId'] == expense.id &&
+            entry.timestamp == versionTimestamp)
+        .toList(growable: false);
+    if (entriesForVersion.isNotEmpty) return entriesForVersion;
+
+    final entriesForExpense = group.activity
+        .where((entry) => entry.data['expenseId'] == expense.id)
+        .toList(growable: false);
+    if (entriesForExpense.isEmpty) return const <SharedActivityEntry>[];
+    return [entriesForExpense.last];
   }
 
   Future<bool> _applyGroupSnapshot(
@@ -2524,14 +2643,28 @@ class SharedExpenseRepository {
 
   Future<void> _emitExpensePayload(
     SharedExpenseGroup group,
-    SharedExpense expense,
-    {SharedActivityEntry? previewEntry}
-  ) async {
+    SharedExpense expense, {
+    SharedActivityEntry? previewEntry,
+    List<SharedActivityEntry> activityEntries = const <SharedActivityEntry>[],
+  }) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) {
       throw const TotalsEngineException('No group key — cannot share expense.');
     }
-    final payload = {'type': 'expense', ...expense.toJson()};
+    final payloadActivities = activityEntries.isNotEmpty
+        ? activityEntries
+        : [
+            if (previewEntry != null) previewEntry,
+          ];
+    final payload = {
+      'type': 'expense',
+      ...expense.toJson(),
+      if (previewEntry != null) 'activity': previewEntry.toJson(),
+      if (payloadActivities.isNotEmpty)
+        'activities': payloadActivities
+            .map((entry) => entry.toJson())
+            .toList(growable: false),
+    };
     final encrypted = await _cryptoService.encryptPayloadWithKey(
       keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
       payload: payload,
@@ -2773,6 +2906,8 @@ class SharedExpenseRepository {
             'name': groupName,
             'backfillNewMembers': group.backfillNewMembers,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
+            if (groupRenamePreviewEntry != null)
+              'activity': groupRenamePreviewEntry.toJson(),
           },
         );
         await _engineClient.submitPayload(
@@ -2845,6 +2980,7 @@ class SharedExpenseRepository {
             'paymentAddress': paymentAddress.toJson(),
           'memberMetaUpdatedAt': memberMetaUpdatedAt,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
+          if (previewEntry != null) 'activity': previewEntry.toJson(),
         },
       );
       await _engineClient.submitPayload(

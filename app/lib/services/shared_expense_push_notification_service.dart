@@ -9,6 +9,7 @@ import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
+import 'package:totals/services/shared_expense_notification_coordinator.dart';
 import 'package:totals/services/shared_expense_push_preview_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 
@@ -81,7 +82,8 @@ class SharedExpensePushNotificationService {
     try {
       final enabled = await NotificationSettingsService.instance
           .isSharedExpenseNotificationsEnabled();
-      final token = enabled ? await FirebaseMessaging.instance.getToken() : null;
+      final token =
+          enabled ? await FirebaseMessaging.instance.getToken() : null;
       await TotalsEngineClient().updatePushRegistration(
         pushToken: token,
         pushPlatform: token == null ? null : 'fcm',
@@ -161,7 +163,22 @@ Future<void> _showLocalNotificationForMessage(RemoteMessage message) async {
   if (!enabled) return;
 
   final notification = message.notification;
+  final hasEncryptedPreview =
+      _cleanDataValue(message.data['encryptedNotificationPreview']) != null;
   final preview = await _decryptPreviewForMessage(message);
+  if (hasEncryptedPreview && preview == null) return;
+  if (preview != null) {
+    final coordinator = SharedExpenseNotificationCoordinator.instance;
+    final alreadySeen = await coordinator.isActivitySeen(
+      groupId: preview.groupId,
+      eventId: preview.eventId,
+    );
+    if (alreadySeen) return;
+    await coordinator.markActivitySeenFromPush(
+      groupId: preview.groupId,
+      eventId: preview.eventId,
+    );
+  }
   await NotificationService.instance.showSharedExpenseEventNotification(
     eventId: preview?.eventId ??
         _cleanDataValue(message.data['payloadId']) ??
@@ -216,7 +233,8 @@ Future<SharedExpensePushPreview?> _decryptPreviewForMessage(
     return preview;
   } catch (error) {
     if (kDebugMode) {
-      debugPrint('debug: Failed to decrypt shared expense push preview: $error');
+      debugPrint(
+          'debug: Failed to decrypt shared expense push preview: $error');
     }
     return null;
   }
