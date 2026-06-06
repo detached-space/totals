@@ -266,7 +266,8 @@ Future<bool> showSplitTransactionWithGroupFlow({
     );
     if (selectedGroup == null || !context.mounted) return false;
 
-    final result = await showModalBottomSheet<_ExpenseSheetResult>(
+    var didSplit = false;
+    await showModalBottomSheet<_ExpenseSheetResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -277,43 +278,57 @@ Future<bool> showSplitTransactionWithGroupFlow({
         initialAmount: transaction.amount.abs(),
         initialReason: _splitReasonForTransaction(transaction),
         initialLinkedTxRef: linkedTxRef,
+        submittingLabel: 'Adding',
+        onSubmit: (result) async {
+          if (result is! _ExpenseSheetSave) return false;
+
+          final effectiveLinkedTxRef =
+              (result.linkedTxRef?.trim().isNotEmpty ?? false)
+                  ? result.linkedTxRef!.trim()
+                  : linkedTxRef;
+          sharingTxRef = effectiveLinkedTxRef;
+          transactionProvider?.markSharedExpenseSharing(effectiveLinkedTxRef);
+
+          try {
+            final updatedGroup = await repo.splitTransactionIntoGroup(
+              group: selectedGroup,
+              amount: result.amount,
+              reason: result.reason,
+              paidBy: result.paidBy,
+              splitAmong: result.splitAmong,
+              linkedTxRef: effectiveLinkedTxRef,
+              timestamp: result.timestamp,
+            );
+            await transactionProvider?.refreshSharedExpenseLinks();
+            didSplit = true;
+
+            if (!context.mounted) return true;
+            if (_hasPendingLinkedExpense(
+              group: updatedGroup,
+              linkedTxRef: effectiveLinkedTxRef,
+            )) {
+              showSnack(context.l10nTextRead(
+                "Saved locally. We'll send it when you're connected.",
+              ));
+              return true;
+            }
+
+            showSnack(
+              context.l10nTextRead('Expense added to ${selectedGroup.name}'),
+            );
+            return true;
+          } catch (error) {
+            if (context.mounted) {
+              showSnack(error.toString().replaceFirst('Exception: ', ''));
+            }
+            return false;
+          } finally {
+            transactionProvider?.unmarkSharedExpenseSharing(sharingTxRef);
+          }
+        },
       ),
     );
-    if (result is! _ExpenseSheetSave || !context.mounted) return false;
-
-    final effectiveLinkedTxRef =
-        (result.linkedTxRef?.trim().isNotEmpty ?? false)
-            ? result.linkedTxRef!.trim()
-            : linkedTxRef;
-    sharingTxRef = effectiveLinkedTxRef;
-    transactionProvider?.markSharedExpenseSharing(effectiveLinkedTxRef);
-
-    final updatedGroup = await repo.splitTransactionIntoGroup(
-      group: selectedGroup,
-      amount: result.amount,
-      reason: result.reason,
-      paidBy: result.paidBy,
-      splitAmong: result.splitAmong,
-      linkedTxRef: effectiveLinkedTxRef,
-      timestamp: result.timestamp,
-    );
-    await transactionProvider?.refreshSharedExpenseLinks();
-
-    if (!context.mounted) return true;
-    if (_hasPendingLinkedExpense(
-      group: updatedGroup,
-      linkedTxRef: effectiveLinkedTxRef,
-    )) {
-      showSnack(context.l10nTextRead(
-        "Saved locally. We'll send it when you're connected.",
-      ));
-      return true;
-    }
-
-    showSnack(
-      context.l10nTextRead('Expense added to ${selectedGroup.name}'),
-    );
-    return true;
+    return didSplit;
   } catch (error) {
     if (context.mounted) {
       showSnack(error.toString().replaceFirst('Exception: ', ''));
@@ -977,7 +992,81 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       ));
       return;
     }
-    final result = await showModalBottomSheet<_ExpenseSheetResult>(
+
+    Future<bool> submitExpenseResult(_ExpenseSheetResult result) async {
+      if (!mounted) return false;
+      final mutationLabel = result is _ExpenseSheetDelete
+          ? 'Deleting'
+          : expense != null
+              ? 'Saving'
+              : 'Sending';
+      final successMessage = result is _ExpenseSheetDelete
+          ? context.l10nTextRead('Expense deleted')
+          : expense != null
+              ? context.l10nTextRead('Expense updated')
+              : context.l10nTextRead('Expense added');
+      _beginMutation(mutationLabel);
+      final transactionProvider = context.read<TransactionProvider>();
+      String? sharingTxRef;
+      if (result is _ExpenseSheetSave &&
+          (result.linkedTxRef?.trim().isNotEmpty ?? false)) {
+        sharingTxRef = result.linkedTxRef!.trim();
+        transactionProvider.markSharedExpenseSharing(sharingTxRef);
+      }
+      try {
+        SharedExpenseGroup updated = group;
+        if (result is _ExpenseSheetDelete && expense != null) {
+          updated = await _repository.deleteExpense(
+            group: group,
+            expenseId: expense.id,
+          );
+        } else if (result is _ExpenseSheetSave) {
+          if (expense != null) {
+            updated = await _repository.updateExpense(
+              group: group,
+              before: expense,
+              amount: result.amount,
+              reason: result.reason,
+              paidBy: result.paidBy,
+              splitAmong: result.splitAmong,
+              timestamp: result.timestamp,
+              linkedTxRef: result.linkedTxRef,
+              clearLinkedTxRef: result.linkedTxRef == null,
+            );
+          } else {
+            updated = await _repository.createExpense(
+              group: group,
+              amount: result.amount,
+              reason: result.reason,
+              paidBy: result.paidBy,
+              splitAmong: result.splitAmong,
+              timestamp: result.timestamp,
+              linkedTxRef: result.linkedTxRef,
+            );
+          }
+        }
+        if (!mounted) return true;
+        final groups = await _repository.getGroups();
+        if (!mounted) return true;
+        setState(() {
+          _groups = groups;
+          _selectedGroup = updated;
+        });
+        _syncRealtimeSubscriptions(groups);
+        await transactionProvider.refreshSharedExpenseLinks();
+        unawaited(transactionProvider.loadData());
+        _showSnack(successMessage);
+        return true;
+      } catch (error) {
+        _showSnack(error.toString().replaceFirst('Exception: ', ''));
+        return false;
+      } finally {
+        transactionProvider.unmarkSharedExpenseSharing(sharingTxRef);
+        _endMutation();
+      }
+    }
+
+    await showModalBottomSheet<_ExpenseSheetResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -986,76 +1075,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         group: group,
         myPublicKey: _myPublicKey,
         editing: expense,
+        submittingLabel: expense == null ? 'Adding' : 'Saving',
+        onSubmit: submitExpenseResult,
       ),
     );
-    if (result == null || !mounted) return;
-    final mutationLabel = result is _ExpenseSheetDelete
-        ? 'Deleting'
-        : expense != null
-            ? 'Saving'
-            : 'Sending';
-    final successMessage = result is _ExpenseSheetDelete
-        ? context.l10nTextRead('Expense deleted')
-        : expense != null
-            ? context.l10nTextRead('Expense updated')
-            : context.l10nTextRead('Expense added');
-    _beginMutation(mutationLabel);
-    final transactionProvider = context.read<TransactionProvider>();
-    String? sharingTxRef;
-    if (result is _ExpenseSheetSave &&
-        (result.linkedTxRef?.trim().isNotEmpty ?? false)) {
-      sharingTxRef = result.linkedTxRef!.trim();
-      transactionProvider.markSharedExpenseSharing(sharingTxRef);
-    }
-    try {
-      SharedExpenseGroup updated = group;
-      if (result is _ExpenseSheetDelete && expense != null) {
-        updated = await _repository.deleteExpense(
-          group: group,
-          expenseId: expense.id,
-        );
-      } else if (result is _ExpenseSheetSave) {
-        if (expense != null) {
-          updated = await _repository.updateExpense(
-            group: group,
-            before: expense,
-            amount: result.amount,
-            reason: result.reason,
-            paidBy: result.paidBy,
-            splitAmong: result.splitAmong,
-            timestamp: result.timestamp,
-            linkedTxRef: result.linkedTxRef,
-            clearLinkedTxRef: result.linkedTxRef == null,
-          );
-        } else {
-          updated = await _repository.createExpense(
-            group: group,
-            amount: result.amount,
-            reason: result.reason,
-            paidBy: result.paidBy,
-            splitAmong: result.splitAmong,
-            timestamp: result.timestamp,
-            linkedTxRef: result.linkedTxRef,
-          );
-        }
-      }
-      if (!mounted) return;
-      final groups = await _repository.getGroups();
-      if (!mounted) return;
-      setState(() {
-        _groups = groups;
-        _selectedGroup = updated;
-      });
-      _syncRealtimeSubscriptions(groups);
-      await transactionProvider.refreshSharedExpenseLinks();
-      unawaited(transactionProvider.loadData());
-      _showSnack(successMessage);
-    } catch (error) {
-      _showSnack(error.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      transactionProvider.unmarkSharedExpenseSharing(sharingTxRef);
-      _endMutation();
-    }
   }
 
   Future<void> _settleWith(
@@ -1751,6 +1774,9 @@ class _SplitGroupOption extends StatelessWidget {
     final textSecondary = AppColors.textSecondary(context);
     final memberKeys = _memberKeysForGroup(group).toList(growable: false);
     final visibleMembers = memberKeys.take(3).toList(growable: false);
+    final avatarStackWidth = visibleMembers.isEmpty
+        ? 28.0
+        : 28.0 + ((visibleMembers.length - 1) * 12.0);
 
     return InkWell(
       onTap: () => Navigator.of(context).pop(group),
@@ -1765,9 +1791,10 @@ class _SplitGroupOption extends StatelessWidget {
         child: Row(
           children: [
             SizedBox(
-              width: 42,
+              width: avatarStackWidth,
               height: 32,
               child: Stack(
+                clipBehavior: Clip.none,
                 children: [
                   for (var i = 0; i < visibleMembers.length; i++)
                     Positioned(
@@ -6708,6 +6735,10 @@ class _ExpenseSheetDelete extends _ExpenseSheetResult {
   const _ExpenseSheetDelete();
 }
 
+typedef _ExpenseSheetSubmit = Future<bool> Function(
+  _ExpenseSheetResult result,
+);
+
 class _ExpenseDraftSheet extends StatefulWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
@@ -6715,6 +6746,8 @@ class _ExpenseDraftSheet extends StatefulWidget {
   final double? initialAmount;
   final String? initialReason;
   final String? initialLinkedTxRef;
+  final String? submittingLabel;
+  final _ExpenseSheetSubmit? onSubmit;
 
   const _ExpenseDraftSheet({
     required this.group,
@@ -6723,6 +6756,8 @@ class _ExpenseDraftSheet extends StatefulWidget {
     this.initialAmount,
     this.initialReason,
     this.initialLinkedTxRef,
+    this.submittingLabel,
+    this.onSubmit,
   });
 
   @override
@@ -6750,6 +6785,8 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   late String? _linkedTxRef =
       widget.editing?.linkedTxRef ?? widget.initialLinkedTxRef;
   bool _deleteArmed = false;
+  bool _isSubmitting = false;
+  String? _submittingLabel;
   Timer? _deleteDisarmTimer;
 
   bool get _isEditing => widget.editing != null;
@@ -6787,18 +6824,60 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
     _reasonCtrl.selection = TextSelection.collapsed(offset: text.length);
   }
 
+  Future<void> _submitResult(
+    _ExpenseSheetResult result, {
+    required String submittingLabel,
+  }) async {
+    if (_isSubmitting) return;
+    final submit = widget.onSubmit;
+    if (submit == null) {
+      Navigator.of(context).pop(result);
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _isSubmitting = true;
+      _submittingLabel = submittingLabel;
+    });
+
+    var shouldClose = false;
+    try {
+      shouldClose = await submit(result);
+    } catch (_) {
+      shouldClose = false;
+    }
+    if (!mounted) return;
+    if (shouldClose) {
+      Navigator.of(context).pop(result);
+      return;
+    }
+    setState(() {
+      _isSubmitting = false;
+      _submittingLabel = null;
+    });
+  }
+
   void _submit() {
     final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
     final reason = _reasonCtrl.text.trim();
-    if (amount <= 0 || reason.isEmpty || _split.isEmpty) return;
-    Navigator.of(context).pop(_ExpenseSheetSave(
-      amount: amount,
-      reason: reason,
-      paidBy: _paidBy,
-      splitAmong: _split.toList(),
-      timestamp: _paidAt.millisecondsSinceEpoch,
-      linkedTxRef: _linkedTxRef,
-    ));
+    if (_isSubmitting || amount <= 0 || reason.isEmpty || _split.isEmpty) {
+      return;
+    }
+    unawaited(
+      _submitResult(
+        _ExpenseSheetSave(
+          amount: amount,
+          reason: reason,
+          paidBy: _paidBy,
+          splitAmong: _split.toList(),
+          timestamp: _paidAt.millisecondsSinceEpoch,
+          linkedTxRef: _linkedTxRef,
+        ),
+        submittingLabel:
+            widget.submittingLabel ?? (_isEditing ? 'Saving' : 'Adding'),
+      ),
+    );
   }
 
   Future<void> _pickPaidAt() async {
@@ -6871,6 +6950,7 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   }
 
   void _onDeleteTap() {
+    if (_isSubmitting) return;
     if (!_deleteArmed) {
       setState(() => _deleteArmed = true);
       _deleteDisarmTimer?.cancel();
@@ -6879,7 +6959,12 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
       });
       return;
     }
-    Navigator.of(context).pop(const _ExpenseSheetDelete());
+    unawaited(
+      _submitResult(
+        const _ExpenseSheetDelete(),
+        submittingLabel: 'Deleting',
+      ),
+    );
   }
 
   @override
@@ -6896,107 +6981,118 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
     final canSave = amount > 0 && reason.isNotEmpty && _split.isNotEmpty;
     final allSelected = keys.isNotEmpty && _split.length == keys.length;
 
-    return _IosModalShell(
-      title: _isEditing ? 'Edit Expense' : 'Add Expense',
-      footer: [
-        _IosFormSubmit(
-          label: _isEditing ? 'Save' : 'Add',
-          enabled: canSave,
-          onTap: _submit,
-          topPadding: 0,
-        ),
-        if (_isEditing) ...[
-          const SizedBox(height: 10),
-          _IosDangerButton(
-            label: _deleteArmed ? 'Tap again to delete' : 'Delete expense',
-            icon: Icons.delete_outline,
-            armed: _deleteArmed,
-            onTap: _onDeleteTap,
+    return PopScope(
+      canPop: !_isSubmitting,
+      child: _IosModalShell(
+        title: _isEditing ? 'Edit Expense' : 'Add Expense',
+        closeEnabled: !_isSubmitting,
+        footer: [
+          _IosFormSubmit(
+            label: _isSubmitting
+                ? (_submittingLabel ??
+                    (widget.submittingLabel ??
+                        (_isEditing ? 'Saving' : 'Adding')))
+                : _isEditing
+                    ? 'Save'
+                    : 'Add',
+            enabled: canSave && !_isSubmitting,
+            isBusy: _isSubmitting,
+            onTap: _submit,
+            topPadding: 0,
           ),
+          if (_isEditing) ...[
+            const SizedBox(height: 10),
+            _IosDangerButton(
+              label: _deleteArmed ? 'Tap again to delete' : 'Delete expense',
+              icon: Icons.delete_outline,
+              armed: _deleteArmed,
+              onTap: _isSubmitting ? null : _onDeleteTap,
+            ),
+          ],
         ],
-      ],
-      children: [
-        // Amount row — centered huge input with currency suffix + bottom rule.
-        _IosAmountRow(
-          controller: _amountCtrl,
-          focusNode: _amountFocusNode,
-          autofocus: !_startsFromLinkedTransaction,
-          onChanged: (_) => setState(() {}),
-        ),
-        _IosFormGroup(
-          label: 'For what?',
-          child: _IosFormInput(
-            controller: _reasonCtrl,
-            focusNode: _reasonFocusNode,
-            autofocus: _startsFromLinkedTransaction,
-            hint: 'e.g., Dinner, Hotel, Taxi',
-            maxLength: 80,
-            textCapitalization: TextCapitalization.sentences,
+        children: [
+          // Amount row — centered huge input with currency suffix + bottom rule.
+          _IosAmountRow(
+            controller: _amountCtrl,
+            focusNode: _amountFocusNode,
+            autofocus: !_startsFromLinkedTransaction,
             onChanged: (_) => setState(() {}),
           ),
-        ),
-        _IosFormGroup(
-          label: 'When',
-          child: _IosValueRow(
-            icon: AppIcons.calendar_today_outlined,
-            title: _formatSharedDate(_paidAt),
-            onTap: _pickPaidAt,
+          _IosFormGroup(
+            label: 'For what?',
+            child: _IosFormInput(
+              controller: _reasonCtrl,
+              focusNode: _reasonFocusNode,
+              autofocus: _startsFromLinkedTransaction,
+              hint: 'e.g., Dinner, Hotel, Taxi',
+              maxLength: 80,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(() {}),
+            ),
           ),
-        ),
-        _IosFormGroup(
-          label: 'Transaction',
-          labelTrailing: _linkedTxRef == null || _requiresLinkedTransaction
-              ? null
-              : _IosTextAction(
-                  label: 'Remove',
-                  onTap: _clearLinkedTransaction,
-                ),
-          child: _IosValueRow(
-            icon: AppIcons.receipt_long_rounded,
-            title: linkedTransaction == null
-                ? _linkedTxRef == null
-                    ? 'Link transaction'
-                    : 'Linked transaction'
-                : _transactionCounterpartyLabel(linkedTransaction),
-            subtitle: linkedTransaction == null
-                ? _linkedTxRef ?? 'Optional'
-                : _transactionLinkSummary(linkedTransaction),
-            onTap: _pickLinkedTransaction,
+          _IosFormGroup(
+            label: 'When',
+            child: _IosValueRow(
+              icon: AppIcons.calendar_today_outlined,
+              title: _formatSharedDate(_paidAt),
+              onTap: _pickPaidAt,
+            ),
           ),
-        ),
-        _IosFormGroup(
-          label: 'Paid by',
-          child: _IosSharedMemberSelector(
-            group: widget.group,
-            myPublicKey: widget.myPublicKey,
-            memberKeys: keys,
-            isSelected: (pk) => _paidBy == pk,
-            onTap: (pk) => setState(() => _paidBy = pk),
+          _IosFormGroup(
+            label: 'Transaction',
+            labelTrailing: _linkedTxRef == null || _requiresLinkedTransaction
+                ? null
+                : _IosTextAction(
+                    label: 'Remove',
+                    onTap: _clearLinkedTransaction,
+                  ),
+            child: _IosValueRow(
+              icon: AppIcons.receipt_long_rounded,
+              title: linkedTransaction == null
+                  ? _linkedTxRef == null
+                      ? 'Link transaction'
+                      : 'Linked transaction'
+                  : _transactionCounterpartyLabel(linkedTransaction),
+              subtitle: linkedTransaction == null
+                  ? _linkedTxRef ?? 'Optional'
+                  : _transactionLinkSummary(linkedTransaction),
+              onTap: _pickLinkedTransaction,
+            ),
           ),
-        ),
-        _IosFormGroup(
-          label: 'Split between',
-          labelTrailing: _IosTextAction(
-            label: allSelected ? 'None' : 'All',
-            onTap: () => setState(() {
-              _split = allSelected ? <String>{} : keys.toSet();
-            }),
+          _IosFormGroup(
+            label: 'Paid by',
+            child: _IosSharedMemberSelector(
+              group: widget.group,
+              myPublicKey: widget.myPublicKey,
+              memberKeys: keys,
+              isSelected: (pk) => _paidBy == pk,
+              onTap: (pk) => setState(() => _paidBy = pk),
+            ),
           ),
-          child: _IosSharedMemberSelector(
-            group: widget.group,
-            myPublicKey: widget.myPublicKey,
-            memberKeys: keys,
-            isSelected: _split.contains,
-            onTap: (pk) => setState(() {
-              if (_split.contains(pk)) {
-                _split = {..._split}..remove(pk);
-              } else {
-                _split = {..._split, pk};
-              }
-            }),
+          _IosFormGroup(
+            label: 'Split between',
+            labelTrailing: _IosTextAction(
+              label: allSelected ? 'None' : 'All',
+              onTap: () => setState(() {
+                _split = allSelected ? <String>{} : keys.toSet();
+              }),
+            ),
+            child: _IosSharedMemberSelector(
+              group: widget.group,
+              myPublicKey: widget.myPublicKey,
+              memberKeys: keys,
+              isSelected: _split.contains,
+              onTap: (pk) => setState(() {
+                if (_split.contains(pk)) {
+                  _split = {..._split}..remove(pk);
+                } else {
+                  _split = {..._split, pk};
+                }
+              }),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -7395,11 +7491,13 @@ class _IosModalShell extends StatelessWidget {
   final List<Widget> children;
   final List<Widget> footer;
   final Widget? titleWidget;
+  final bool closeEnabled;
   const _IosModalShell({
     required this.title,
     required this.children,
     this.footer = const [],
     this.titleWidget,
+    this.closeEnabled = true,
   });
 
   @override
@@ -7494,21 +7592,26 @@ class _IosModalShell extends StatelessWidget {
                                           ),
                                     ),
                                     // 32×32 rounded-square close button (matches iOS)
-                                    InkWell(
-                                      onTap: () => Navigator.of(context).pop(),
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Container(
-                                        width: 32,
-                                        height: 32,
-                                        decoration: BoxDecoration(
-                                          color: cardColor,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        child: Icon(
-                                          Icons.close,
-                                          size: 16,
-                                          color: textPrimary,
+                                    Opacity(
+                                      opacity: closeEnabled ? 1 : 0.45,
+                                      child: InkWell(
+                                        onTap: closeEnabled
+                                            ? () => Navigator.of(context).pop()
+                                            : null,
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Container(
+                                          width: 32,
+                                          height: 32,
+                                          decoration: BoxDecoration(
+                                            color: cardColor,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Icon(
+                                            Icons.close,
+                                            size: 16,
+                                            color: textPrimary,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -8071,12 +8174,14 @@ class _IosFormSubmit extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool enabled;
+  final bool isBusy;
   final VoidCallback onTap;
   final double topPadding;
   const _IosFormSubmit({
     required this.label,
     this.icon,
     required this.enabled,
+    this.isBusy = false,
     required this.onTap,
     this.topPadding = 24,
   });
@@ -8086,11 +8191,11 @@ class _IosFormSubmit extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(top: topPadding),
       child: Opacity(
-        opacity: enabled ? 1 : 0.6,
+        opacity: enabled || isBusy ? 1 : 0.6,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: enabled ? onTap : null,
+            onTap: enabled && !isBusy ? onTap : null,
             borderRadius: BorderRadius.circular(12),
             child: Ink(
               decoration: BoxDecoration(
@@ -8109,6 +8214,17 @@ class _IosFormSubmit extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (isBusy) ...[
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     Text(
                       label,
                       style: const TextStyle(
@@ -8117,7 +8233,7 @@ class _IosFormSubmit extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (icon != null) ...[
+                    if (!isBusy && icon != null) ...[
                       const SizedBox(width: 8),
                       Icon(icon, size: 18, color: Colors.white),
                     ],
@@ -8186,7 +8302,7 @@ class _IosDangerButton extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool armed;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   const _IosDangerButton({
     required this.label,
     this.icon,
@@ -8197,39 +8313,42 @@ class _IosDangerButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final borderColor = AppColors.borderColor(context);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
-          decoration: BoxDecoration(
-            color: armed ? _iosNegative.withValues(alpha: 0.10) : null,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: armed ? _iosNegative : borderColor,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: _iosNegative),
-                const SizedBox(width: 8),
-              ],
-              Text(
-                label,
-                style: const TextStyle(
-                  color: _iosNegative,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+    return Opacity(
+      opacity: onTap == null ? 0.55 : 1,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
+            decoration: BoxDecoration(
+              color: armed ? _iosNegative.withValues(alpha: 0.10) : null,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: armed ? _iosNegative : borderColor,
               ),
-            ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 16, color: _iosNegative),
+                  const SizedBox(width: 8),
+                ],
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: _iosNegative,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
