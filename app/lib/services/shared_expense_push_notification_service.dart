@@ -187,14 +187,33 @@ Future<SharedExpensePushPreview?> _decryptPreviewForMessage(
   if (encryptedPreview == null || groupId == null) return null;
 
   try {
+    final cryptoService = SharedExpenseCryptoService();
     final groupKeyHex =
         await SharedExpenseRepository().notificationGroupKey(groupId);
-    if (groupKeyHex == null || groupKeyHex.isEmpty) return null;
-    return SharedExpensePushPreviewService.decrypt(
-      cryptoService: SharedExpenseCryptoService(),
-      groupKeyHex: groupKeyHex,
+    if (groupKeyHex != null && groupKeyHex.isNotEmpty) {
+      final preview = await SharedExpensePushPreviewService.decrypt(
+        cryptoService: cryptoService,
+        groupKeyHex: groupKeyHex,
+        encryptedBlob: encryptedPreview,
+      );
+      if (preview != null) return preview;
+    }
+
+    final senderPublicKey = _cleanDataValue(message.data['senderPublicKey']);
+    if (senderPublicKey == null) return null;
+    final decoded = await cryptoService.decryptGroupKeyPayload(
+      senderPublicKeyHex: senderPublicKey,
       encryptedBlob: encryptedPreview,
     );
+    if (decoded == null ||
+        decoded['type'] != 'shared_expense_push_preview_v1') {
+      return null;
+    }
+    final preview = SharedExpensePushPreview.fromJson(decoded);
+    if (preview.title.trim().isEmpty || preview.body.trim().isEmpty) {
+      return null;
+    }
+    return preview;
   } catch (error) {
     if (kDebugMode) {
       debugPrint('debug: Failed to decrypt shared expense push preview: $error');

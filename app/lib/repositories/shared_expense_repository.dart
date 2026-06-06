@@ -511,6 +511,7 @@ class SharedExpenseRepository {
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
     final approverMetaUpdatedAt =
         _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
+    final approvalEventId = _uuid.v4();
 
     // Send the group key encrypted with a 1:1 shared secret.
     final encryptedBlob = await _cryptoService.encryptGroupKeyPayload(
@@ -532,12 +533,22 @@ class SharedExpenseRepository {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
     );
+    final encryptedNotificationPreview =
+        await _cryptoService.encryptPayloadWithKey(
+      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+      payload: SharedExpensePushPreviewService.memberApproved(
+        group: group,
+        approverName: approverDisplayName,
+        eventId: approvalEventId,
+      ).toJson(),
+    );
 
     await _engineClient.submitTargetedPayload(
       groupId: group.id,
       encryptedBlob: encryptedBlob,
       recipientPublicKeys: [member.devicePublicKey],
       kind: 'key_exchange',
+      encryptedNotificationPreview: encryptedNotificationPreview,
     );
 
     final updated = group.copyWith(
@@ -556,7 +567,7 @@ class SharedExpenseRepository {
       activity: [
         ...group.activity,
         SharedActivityEntry(
-          id: _uuid.v4(),
+          id: approvalEventId,
           timestamp: DateTime.now().millisecondsSinceEpoch,
           actor: identity.publicKeyHex,
           kind: 'member_approved',
@@ -1919,7 +1930,16 @@ class SharedExpenseRepository {
     );
     await _upsertGroup(updated);
     // We now have the key — announce our display name to the approver.
-    await _emitMemberMeta(updated);
+    await _emitMemberMeta(
+      updated,
+      previewEntry: SharedActivityEntry(
+        id: _uuid.v4(),
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        actor: myPublicKey,
+        kind: 'member_joined',
+        data: {'displayName': updated.myDisplayName},
+      ),
+    );
     return true;
   }
 
@@ -2734,6 +2754,15 @@ class SharedExpenseRepository {
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
     final memberMetaUpdatedAt =
         _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
+    final groupRenamePreviewEntry = _latestOwnActivity(
+      group: group,
+      actorPk: identity.publicKeyHex,
+      kind: 'group_renamed',
+      matches: (entry) {
+        final after = entry.data['after'];
+        return after is String && after.trim() == groupName;
+      },
+    );
     var allOk = true;
     if (groupName.isNotEmpty && !_isFallbackGroupName(groupName)) {
       try {
@@ -2750,6 +2779,11 @@ class SharedExpenseRepository {
           groupId: group.id,
           encryptedBlob: encrypted,
           kind: 'group_meta',
+          encryptedNotificationPreview: await _encryptedNotificationPreview(
+            group: group,
+            groupKeyHex: groupKeyHex,
+            entry: groupRenamePreviewEntry,
+          ),
         );
       } catch (e) {
         _sharedExpenseLog('group_meta send failed: $e');
@@ -2785,7 +2819,10 @@ class SharedExpenseRepository {
     return allOk;
   }
 
-  Future<void> _emitMemberMeta(SharedExpenseGroup group) async {
+  Future<void> _emitMemberMeta(
+    SharedExpenseGroup group, {
+    SharedActivityEntry? previewEntry,
+  }) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return;
     final identity = await _cryptoService.getOrCreateIdentity();
@@ -2814,6 +2851,11 @@ class SharedExpenseRepository {
         groupId: group.id,
         encryptedBlob: encrypted,
         kind: 'member_meta',
+        encryptedNotificationPreview: await _encryptedNotificationPreview(
+          group: group,
+          groupKeyHex: groupKeyHex,
+          entry: previewEntry,
+        ),
       );
     } catch (e) {
       _sharedExpenseLog('_emitMemberMeta failed: $e — flagging for retry');
@@ -2824,6 +2866,20 @@ class SharedExpenseRepository {
     }
   }
 
+  SharedActivityEntry? _latestOwnActivity({
+    required SharedExpenseGroup group,
+    required String actorPk,
+    required String kind,
+    bool Function(SharedActivityEntry entry)? matches,
+  }) {
+    for (final entry in group.activity.reversed) {
+      if (entry.actor != actorPk || entry.kind != kind) continue;
+      if (matches != null && !matches(entry)) continue;
+      return entry;
+    }
+    return null;
+  }
+
   Future<void> _broadcastJoinRequest(SharedExpenseGroup group) async {
     final identity = await _cryptoService.getOrCreateIdentity();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -2832,6 +2888,7 @@ class SharedExpenseRepository {
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
     final memberMetaUpdatedAt =
         _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
+    final joinRequestEventId = _uuid.v4();
     final payload = {
       'type': 'join_request',
       'publicKey': identity.publicKeyHex,
@@ -2849,10 +2906,20 @@ class SharedExpenseRepository {
           recipientPublicKeyHex: member.devicePublicKey,
           payload: payload,
         );
+        final encryptedNotificationPreview =
+            await _cryptoService.encryptGroupKeyPayload(
+          recipientPublicKeyHex: member.devicePublicKey,
+          payload: SharedExpensePushPreviewService.joinRequest(
+            group: group,
+            requesterName: displayName,
+            eventId: joinRequestEventId,
+          ).toJson(),
+        );
         await _engineClient.submitPayload(
           groupId: group.id,
           encryptedBlob: encrypted,
           kind: 'join_request',
+          encryptedNotificationPreview: encryptedNotificationPreview,
         );
       } catch (error) {
         _sharedExpenseLog(

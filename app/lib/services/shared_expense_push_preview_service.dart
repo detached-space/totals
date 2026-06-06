@@ -34,6 +34,36 @@ class SharedExpensePushPreview {
 }
 
 class SharedExpensePushPreviewService {
+  static SharedExpensePushPreview joinRequest({
+    required SharedExpenseGroup group,
+    required String requesterName,
+    required String eventId,
+  }) {
+    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
+    final name = requesterName.trim().isEmpty ? 'Someone' : requesterName;
+    return SharedExpensePushPreview(
+      title: 'Join request',
+      body: '$name wants to join $groupName.',
+      groupId: group.id,
+      eventId: eventId,
+    );
+  }
+
+  static SharedExpensePushPreview memberApproved({
+    required SharedExpenseGroup group,
+    required String approverName,
+    required String eventId,
+  }) {
+    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
+    final name = approverName.trim().isEmpty ? 'A member' : approverName;
+    return SharedExpensePushPreview(
+      title: 'Join request approved',
+      body: '$name approved your request to join $groupName.',
+      groupId: group.id,
+      eventId: eventId,
+    );
+  }
+
   static SharedExpensePushPreview? buildForActivity({
     required SharedExpenseGroup group,
     required SharedActivityEntry entry,
@@ -131,6 +161,23 @@ class SharedExpensePushPreviewService {
         return SharedExpensePushPreview(
           title: 'Shared expense removed',
           body: '$actorName removed $reason from $groupName.',
+          groupId: group.id,
+          eventId: entry.id,
+        );
+      case 'member_joined':
+        return SharedExpensePushPreview(
+          title: 'New group member',
+          body: '$actorName joined $groupName.',
+          groupId: group.id,
+          eventId: entry.id,
+        );
+      case 'group_renamed':
+        final nextName = _stringValue(entry.data['after']).trim();
+        return SharedExpensePushPreview(
+          title: 'Group renamed',
+          body: nextName.isEmpty
+              ? '$actorName renamed a shared group.'
+              : '$actorName renamed the group to $nextName.',
           groupId: group.id,
           eventId: entry.id,
         );
