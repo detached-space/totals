@@ -56,6 +56,46 @@ class PendingApproval {
       };
 }
 
+class SharedPaymentAddress {
+  final int bankId;
+  final String accountNumber;
+  final String accountHolderName;
+
+  const SharedPaymentAddress({
+    required this.bankId,
+    required this.accountNumber,
+    this.accountHolderName = '',
+  });
+
+  bool get isValid => bankId > 0 && accountNumber.trim().isNotEmpty;
+
+  factory SharedPaymentAddress.fromJson(Map<String, dynamic> json) {
+    return SharedPaymentAddress(
+      bankId: (json['bankId'] as num?)?.toInt() ?? 0,
+      accountNumber: json['accountNumber'] as String? ?? '',
+      accountHolderName: json['accountHolderName'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'bankId': bankId,
+        'accountNumber': accountNumber,
+        if (accountHolderName.trim().isNotEmpty)
+          'accountHolderName': accountHolderName,
+      };
+
+  @override
+  bool operator ==(Object other) {
+    return other is SharedPaymentAddress &&
+        other.bankId == bankId &&
+        other.accountNumber == accountNumber &&
+        other.accountHolderName == accountHolderName;
+  }
+
+  @override
+  int get hashCode => Object.hash(bankId, accountNumber, accountHolderName);
+}
+
 /// A single shared expense (or settlement record). Mirrors the iOS shape so
 /// payloads encrypted on iOS decrypt to the same structure on Android.
 class SharedExpense {
@@ -233,6 +273,12 @@ class SharedExpenseGroup {
   /// payloads or our own profile).
   final Map<String, String> displayNames;
 
+  /// pubkey -> account members prefer to be paid through.
+  final Map<String, SharedPaymentAddress> paymentAddresses;
+
+  /// This device's preferred account for receiving group payments.
+  final SharedPaymentAddress? myPaymentAddress;
+
   /// People who broadcast a join_request to this group and haven't been
   /// approved yet. Surfaced as "Approve Bob?" rows in the UI.
   final List<PendingApproval> pendingApprovals;
@@ -264,6 +310,8 @@ class SharedExpenseGroup {
     this.expenses = const [],
     this.activity = const [],
     this.displayNames = const {},
+    this.paymentAddresses = const {},
+    this.myPaymentAddress,
     this.pendingApprovals = const [],
     this.backfillNewMembers = false,
     this.keySharedWith = const {},
@@ -309,6 +357,8 @@ class SharedExpenseGroup {
     List<SharedExpense>? expenses,
     List<SharedActivityEntry>? activity,
     Map<String, String>? displayNames,
+    Map<String, SharedPaymentAddress>? paymentAddresses,
+    SharedPaymentAddress? myPaymentAddress,
     List<PendingApproval>? pendingApprovals,
     bool? backfillNewMembers,
     Set<String>? keySharedWith,
@@ -327,6 +377,8 @@ class SharedExpenseGroup {
       expenses: expenses ?? this.expenses,
       activity: activity ?? this.activity,
       displayNames: displayNames ?? this.displayNames,
+      paymentAddresses: paymentAddresses ?? this.paymentAddresses,
+      myPaymentAddress: myPaymentAddress ?? this.myPaymentAddress,
       pendingApprovals: pendingApprovals ?? this.pendingApprovals,
       backfillNewMembers: backfillNewMembers ?? this.backfillNewMembers,
       keySharedWith: keySharedWith ?? this.keySharedWith,
@@ -338,7 +390,9 @@ class SharedExpenseGroup {
   factory SharedExpenseGroup.fromJson(Map<String, dynamic> json) {
     final rawStatus = json['status'] as String?;
     final rawDisplayNames = json['displayNames'];
+    final rawPaymentAddresses = json['paymentAddresses'];
     final rawPendingApprovals = json['pendingApprovals'];
+    final rawMyPaymentAddress = json['myPaymentAddress'];
 
     return SharedExpenseGroup(
       id: json['id'] as String? ?? '',
@@ -363,13 +417,12 @@ class SharedExpenseGroup {
               .toSet(),
       expenses: ((json['expenses'] as List?) ?? const [])
           .whereType<Map>()
-          .map(
-              (e) => SharedExpense.fromJson(Map<String, dynamic>.from(e)))
+          .map((e) => SharedExpense.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       activity: ((json['activity'] as List?) ?? const [])
           .whereType<Map>()
-          .map((a) =>
-              SharedActivityEntry.fromJson(Map<String, dynamic>.from(a)))
+          .map(
+              (a) => SharedActivityEntry.fromJson(Map<String, dynamic>.from(a)))
           .toList(),
       displayNames: rawDisplayNames is Map
           ? Map<String, String>.from(
@@ -378,11 +431,31 @@ class SharedExpenseGroup {
               ),
             )
           : const {},
+      paymentAddresses: rawPaymentAddresses is Map
+          ? {
+              for (final entry in rawPaymentAddresses.entries)
+                if (entry.key is String && entry.value is Map)
+                  (entry.key as String): SharedPaymentAddress.fromJson(
+                    Map<String, dynamic>.from(entry.value as Map),
+                  ),
+            }
+              .entries
+              .where((entry) => entry.value.isValid)
+              .fold<Map<String, SharedPaymentAddress>>(
+              <String, SharedPaymentAddress>{},
+              (map, entry) => map..[entry.key] = entry.value,
+            )
+          : const {},
+      myPaymentAddress: rawMyPaymentAddress is Map
+          ? SharedPaymentAddress.fromJson(
+              Map<String, dynamic>.from(rawMyPaymentAddress),
+            )
+          : null,
       pendingApprovals: rawPendingApprovals is List
           ? rawPendingApprovals
               .whereType<Map>()
-              .map((p) =>
-                  PendingApproval.fromJson(Map<String, dynamic>.from(p)))
+              .map(
+                  (p) => PendingApproval.fromJson(Map<String, dynamic>.from(p)))
               .toList()
           : const [],
       backfillNewMembers: json['backfillNewMembers'] is bool
@@ -409,6 +482,11 @@ class SharedExpenseGroup {
       'expenses': expenses.map((e) => e.toJson()).toList(),
       'activity': activity.map((a) => a.toJson()).toList(),
       'displayNames': displayNames,
+      'paymentAddresses': paymentAddresses.map(
+        (key, value) => MapEntry(key, value.toJson()),
+      ),
+      if (myPaymentAddress != null)
+        'myPaymentAddress': myPaymentAddress!.toJson(),
       'pendingApprovals': pendingApprovals.map((p) => p.toJson()).toList(),
       'backfillNewMembers': backfillNewMembers,
       'keySharedWith': keySharedWith.toList(),

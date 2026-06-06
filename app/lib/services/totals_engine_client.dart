@@ -93,6 +93,7 @@ class EnginePendingPayload {
   final String groupId;
   final String senderPublicKey;
   final String encryptedBlob;
+  final String kind;
   final DateTime createdAt;
 
   const EnginePendingPayload({
@@ -100,6 +101,7 @@ class EnginePendingPayload {
     required this.groupId,
     required this.senderPublicKey,
     required this.encryptedBlob,
+    this.kind = 'group',
     required this.createdAt,
   });
 
@@ -109,6 +111,7 @@ class EnginePendingPayload {
       groupId: json['groupId'] as String? ?? '',
       senderPublicKey: json['senderPublicKey'] as String? ?? '',
       encryptedBlob: json['encryptedBlob'] as String? ?? '',
+      kind: json['kind'] as String? ?? 'group',
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
     );
@@ -212,14 +215,15 @@ class TotalsEngineClient {
   Future<void> submitPayload({
     required String groupId,
     required String encryptedBlob,
+    String kind = 'group',
   }) async {
     _engineLog(
-      'submitPayload group=${_logId(groupId)} encryptedBytes=${encryptedBlob.length ~/ 2}',
+      'submitPayload group=${_logId(groupId)} kind=$kind encryptedBytes=${encryptedBlob.length ~/ 2}',
     );
     await _authenticatedRequest(
       'POST',
       '/groups/$groupId/payloads',
-      body: {'encryptedBlob': encryptedBlob},
+      body: {'encryptedBlob': encryptedBlob, 'kind': kind},
     );
   }
 
@@ -227,9 +231,10 @@ class TotalsEngineClient {
     required String groupId,
     required String encryptedBlob,
     required List<String> recipientPublicKeys,
+    String kind = 'group',
   }) async {
     _engineLog(
-      'submitTargetedPayload group=${_logId(groupId)} recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
+      'submitTargetedPayload group=${_logId(groupId)} kind=$kind recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
     );
     await _authenticatedRequest(
       'POST',
@@ -237,6 +242,7 @@ class TotalsEngineClient {
       body: {
         'encryptedBlob': encryptedBlob,
         'recipientPublicKeys': recipientPublicKeys,
+        'kind': kind,
       },
     );
   }
@@ -255,6 +261,7 @@ class TotalsEngineClient {
       body: {
         'encryptedBlob': encryptedBlob,
         'recipientPublicKeys': recipientPublicKeys,
+        'kind': 'nudge',
       },
     );
   }
@@ -337,7 +344,9 @@ class TotalsEngineClient {
         yield null;
       } else if (event.event == 'error') {
         throw TotalsEngineException(
-          event.data.isEmpty ? 'Totals Engine group stream failed.' : event.data,
+          event.data.isEmpty
+              ? 'Totals Engine group stream failed.'
+              : event.data,
         );
       }
     }

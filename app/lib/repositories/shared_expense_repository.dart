@@ -43,12 +43,19 @@ class SettlementDebt {
   });
 }
 
+enum _PendingPayloadProcessResult {
+  changed,
+  acknowledged,
+  deferred,
+}
+
 class SharedExpenseRepository {
   static const _groupsKey = 'shared_expense_groups_v1';
   static const _groupsTable = 'shared_expense_groups';
   static const _groupKeyPrefix = 'shared_expense_group_key_';
   static const _legacyInvitePrefixes = ['totals://join/', 'totals//join/'];
   static const _snapshotPlaintextBudget = 45000;
+  static const _maxPendingPullPages = 8;
   static const _fallbackGroupName = 'Shared group';
   static const _fallbackDisplayName = 'Me';
 
@@ -192,6 +199,7 @@ class SharedExpenseRepository {
   Future<SharedExpenseGroup> createGroup({
     required String name,
     required String displayName,
+    SharedPaymentAddress? paymentAddress,
   }) async {
     final identity = await _cryptoService.getOrCreateIdentity();
     _sharedExpenseLog('createGroup start name="$name"');
@@ -216,6 +224,13 @@ class SharedExpenseRepository {
         ],
         approvedMemberKeys: {identity.publicKeyHex},
         displayNames: {identity.publicKeyHex: displayName},
+        paymentAddresses: {
+          if (paymentAddress != null && paymentAddress.isValid)
+            identity.publicKeyHex: paymentAddress,
+        },
+        myPaymentAddress: paymentAddress != null && paymentAddress.isValid
+            ? paymentAddress
+            : null,
         activity: [
           SharedActivityEntry(
             id: _uuid.v4(),
@@ -246,6 +261,13 @@ class SharedExpenseRepository {
         ],
         approvedMemberKeys: {identity.publicKeyHex},
         displayNames: {identity.publicKeyHex: displayName},
+        paymentAddresses: {
+          if (paymentAddress != null && paymentAddress.isValid)
+            identity.publicKeyHex: paymentAddress,
+        },
+        myPaymentAddress: paymentAddress != null && paymentAddress.isValid
+            ? paymentAddress
+            : null,
       );
       await _writeGroupKey(
         localId,
@@ -260,6 +282,7 @@ class SharedExpenseRepository {
   Future<SharedExpenseGroup> joinGroup({
     required String inviteOrCode,
     required String displayName,
+    SharedPaymentAddress? paymentAddress,
   }) async {
     final groupId = parseInviteCode(inviteOrCode);
     if (groupId == null) {
@@ -294,6 +317,14 @@ class SharedExpenseRepository {
         ...?existing?.displayNames,
         identity.publicKeyHex: displayName,
       },
+      paymentAddresses: {
+        ...?existing?.paymentAddresses,
+        if (paymentAddress != null && paymentAddress.isValid)
+          identity.publicKeyHex: paymentAddress,
+      },
+      myPaymentAddress: paymentAddress != null && paymentAddress.isValid
+          ? paymentAddress
+          : existing?.myPaymentAddress,
       pendingApprovals: existing?.pendingApprovals ?? const [],
       backfillNewMembers: existing?.backfillNewMembers ?? false,
       keySharedWith: existing?.keySharedWith ?? const {},
@@ -352,29 +383,50 @@ class SharedExpenseRepository {
     String? name,
     String? myDisplayName,
     bool? backfillNewMembers,
+    SharedPaymentAddress? paymentAddress,
   }) async {
     if (name == null &&
         myDisplayName == null &&
-        backfillNewMembers == null) {
+        backfillNewMembers == null &&
+        paymentAddress == null) {
       return group;
     }
 
     final identity = await _cryptoService.getOrCreateIdentity();
+    final currentPaymentAddress =
+        _bestKnownPaymentAddress(group, identity.publicKeyHex);
+    final nextPaymentAddress = paymentAddress != null && paymentAddress.isValid
+        ? paymentAddress
+        : null;
     final nameChanged = name != null && name.trim() != group.name;
     final displayChanged =
         myDisplayName != null && myDisplayName.trim() != group.myDisplayName;
     final backfillChanged = backfillNewMembers != null &&
         backfillNewMembers != group.backfillNewMembers;
-    if (!nameChanged && !displayChanged && !backfillChanged) return group;
+    final paymentChanged = nextPaymentAddress != null &&
+        nextPaymentAddress != currentPaymentAddress;
+    if (!nameChanged &&
+        !displayChanged &&
+        !backfillChanged &&
+        !paymentChanged) {
+      return group;
+    }
 
     final updated = group.copyWith(
       name: nameChanged ? name.trim() : null,
       myDisplayName: displayChanged ? myDisplayName.trim() : null,
       backfillNewMembers: backfillChanged ? backfillNewMembers : null,
+      myPaymentAddress: paymentChanged ? nextPaymentAddress : null,
       displayNames: displayChanged
           ? {
               ...group.displayNames,
               identity.publicKeyHex: myDisplayName.trim(),
+            }
+          : null,
+      paymentAddresses: paymentChanged
+          ? {
+              ...group.paymentAddresses,
+              identity.publicKeyHex: nextPaymentAddress,
             }
           : null,
       activity: nameChanged
@@ -396,7 +448,7 @@ class SharedExpenseRepository {
     if (nameChanged || backfillChanged) {
       await _emitGroupMeta(updated);
     }
-    if (displayChanged) {
+    if (displayChanged || paymentChanged) {
       await _emitMemberMeta(updated);
     }
     return updated;
@@ -428,6 +480,8 @@ class SharedExpenseRepository {
     final groupName = _bestKnownGroupName(group);
     final approverDisplayName =
         _bestKnownDisplayName(group, identity.publicKeyHex);
+    final approverPaymentAddress =
+        _bestKnownPaymentAddress(group, identity.publicKeyHex);
 
     // Send the group key encrypted with a 1:1 shared secret.
     final encryptedBlob = await _cryptoService.encryptGroupKeyPayload(
@@ -441,6 +495,8 @@ class SharedExpenseRepository {
         'approvedBy': identity.publicKeyHex,
         if (!_isFallbackDisplayName(approverDisplayName))
           'approverDisplayName': approverDisplayName,
+        if (approverPaymentAddress != null && approverPaymentAddress.isValid)
+          'approverPaymentAddress': approverPaymentAddress.toJson(),
         'backfillNewMembers': group.backfillNewMembers,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
@@ -450,6 +506,7 @@ class SharedExpenseRepository {
       groupId: group.id,
       encryptedBlob: encryptedBlob,
       recipientPublicKeys: [member.devicePublicKey],
+      kind: 'key_exchange',
     );
 
     final updated = group.copyWith(
@@ -476,13 +533,12 @@ class SharedExpenseRepository {
         ),
       ],
     );
-    if (updated.backfillNewMembers) {
-      await _emitGroupSnapshotPayload(
-        group: updated,
-        recipientPublicKey: member.devicePublicKey,
-        groupKeyHex: groupKeyHex,
-      );
-    }
+    await _emitGroupSnapshotPayload(
+      group: updated,
+      recipientPublicKey: member.devicePublicKey,
+      groupKeyHex: groupKeyHex,
+      includeHistory: updated.backfillNewMembers,
+    );
     await _upsertGroup(updated);
     _sharedExpenseLog(
       'approveMember done group=${_logId(group.id)} '
@@ -569,6 +625,15 @@ class SharedExpenseRepository {
                   {identity.publicKeyHex: myDisplayName},
                   protectedPublicKey: identity.publicKeyHex,
                 );
+      final myPaymentAddress =
+          _bestKnownPaymentAddress(local, identity.publicKeyHex);
+      final paymentAddresses =
+          myPaymentAddress == null || !myPaymentAddress.isValid
+              ? local.paymentAddresses
+              : _mergePaymentAddresses(
+                  local.paymentAddresses,
+                  {identity.publicKeyHex: myPaymentAddress},
+                );
 
       final merged = SharedExpenseGroup(
         id: serverGroup.id,
@@ -584,6 +649,8 @@ class SharedExpenseRepository {
         expenses: local.expenses,
         activity: local.activity,
         displayNames: displayNames,
+        paymentAddresses: paymentAddresses,
+        myPaymentAddress: myPaymentAddress,
         pendingApprovals: pruned,
         backfillNewMembers: local.backfillNewMembers,
         keySharedWith: sharedWith,
@@ -668,6 +735,19 @@ class SharedExpenseRepository {
     return group.myDisplayName;
   }
 
+  SharedPaymentAddress? _bestKnownPaymentAddress(
+    SharedExpenseGroup group,
+    String myPublicKey,
+  ) {
+    final local = group.myPaymentAddress;
+    if (local != null && local.isValid) return local;
+
+    final fromMap = group.paymentAddresses[myPublicKey];
+    if (fromMap != null && fromMap.isValid) return fromMap;
+
+    return null;
+  }
+
   Future<List<SharedExpenseGroup>> _repairCachedGroups(
     List<SharedExpenseGroup> groups, {
     bool persist = true,
@@ -689,6 +769,7 @@ class SharedExpenseRepository {
           ? group.myDisplayName
           : _bestKnownDisplayName(group, myPublicKey);
       var displayNames = group.displayNames;
+      var paymentAddresses = group.paymentAddresses;
       if (myPublicKey != null &&
           myDisplayName.trim().isNotEmpty &&
           !_isFallbackDisplayName(myDisplayName)) {
@@ -698,11 +779,24 @@ class SharedExpenseRepository {
           protectedPublicKey: myPublicKey,
         );
       }
+      final myPaymentAddress = myPublicKey == null
+          ? group.myPaymentAddress
+          : _bestKnownPaymentAddress(group, myPublicKey);
+      if (myPublicKey != null &&
+          myPaymentAddress != null &&
+          myPaymentAddress.isValid) {
+        paymentAddresses = _mergePaymentAddresses(
+          group.paymentAddresses,
+          {myPublicKey: myPaymentAddress},
+        );
+      }
 
       final next = group.copyWith(
         name: name,
         myDisplayName: myDisplayName,
         displayNames: displayNames,
+        paymentAddresses: paymentAddresses,
+        myPaymentAddress: myPaymentAddress,
       );
       if (jsonEncode(next.toJson()) != jsonEncode(group.toJson())) {
         changed = true;
@@ -772,6 +866,56 @@ class SharedExpenseRepository {
     return merged;
   }
 
+  SharedPaymentAddress? _trustedIncomingPaymentAddress(Object? rawAddress) {
+    if (rawAddress is! Map) return null;
+    final address = SharedPaymentAddress.fromJson(
+      Map<String, dynamic>.from(rawAddress),
+    );
+    return address.isValid ? address : null;
+  }
+
+  Map<String, SharedPaymentAddress> _mergePaymentAddresses(
+    Map<String, SharedPaymentAddress> existing,
+    Map<String, SharedPaymentAddress> incoming,
+  ) {
+    final merged = <String, SharedPaymentAddress>{...existing};
+    for (final entry in incoming.entries) {
+      if (entry.key.isEmpty || !entry.value.isValid) continue;
+      merged[entry.key] = entry.value;
+    }
+    return merged;
+  }
+
+  Map<String, SharedPaymentAddress> _paymentAddressMapFromJson(Object? raw) {
+    if (raw is! Map) return const {};
+    final result = <String, SharedPaymentAddress>{};
+    for (final entry in raw.entries) {
+      final key = entry.key;
+      final address = _trustedIncomingPaymentAddress(entry.value);
+      if (key is String && key.isNotEmpty && address != null) {
+        result[key] = address;
+      }
+    }
+    return result;
+  }
+
+  Map<String, dynamic> _outboundPaymentAddresses(
+    SharedExpenseGroup group,
+    String myPublicKey,
+  ) {
+    final addresses = <String, dynamic>{};
+    for (final entry in group.paymentAddresses.entries) {
+      if (!entry.value.isValid) continue;
+      addresses[entry.key] = entry.value.toJson();
+    }
+
+    final myPaymentAddress = _bestKnownPaymentAddress(group, myPublicKey);
+    if (myPaymentAddress != null && myPaymentAddress.isValid) {
+      addresses[myPublicKey] = myPaymentAddress.toJson();
+    }
+    return addresses;
+  }
+
   Map<String, String> _outboundDisplayNames(
     SharedExpenseGroup group,
     String myPublicKey,
@@ -806,20 +950,38 @@ class SharedExpenseRepository {
       return false;
     }
     _sharedExpenseLog('syncGroup start group=${_logId(groupId)}');
-    final payloads = await _engineClient.pullPending(groupId);
-    _sharedExpenseLog(
-      'syncGroup payloads=${payloads.length} group=${_logId(groupId)}',
-    );
     var changed = false;
     final identity = await _cryptoService.getOrCreateIdentity();
 
-    for (final payload in payloads) {
-      final applied = await _processPendingPayload(
-        groupId: groupId,
-        myPublicKey: identity.publicKeyHex,
-        payload: payload,
+    for (var page = 0; page < _maxPendingPullPages; page++) {
+      final payloads = await _engineClient.pullPending(groupId);
+      _sharedExpenseLog(
+        'syncGroup page=${page + 1} payloads=${payloads.length} '
+        'group=${_logId(groupId)}',
       );
-      if (applied) changed = true;
+      if (payloads.isEmpty) break;
+
+      var completedAny = false;
+      for (final payload in payloads) {
+        final result = await _processPendingPayload(
+          groupId: groupId,
+          myPublicKey: identity.publicKeyHex,
+          payload: payload,
+        );
+        if (result == _PendingPayloadProcessResult.changed) {
+          changed = true;
+          completedAny = true;
+        } else if (result == _PendingPayloadProcessResult.acknowledged) {
+          completedAny = true;
+        }
+      }
+
+      if (!completedAny) {
+        _sharedExpenseLog(
+          'syncGroup deferred visible payloads group=${_logId(groupId)}',
+        );
+        break;
+      }
     }
 
     // Stamp lastSyncAt + retry any pending outbound work.
@@ -914,13 +1076,13 @@ class SharedExpenseRepository {
     _sharedExpenseLog('watchGroupRealtime start group=${_logId(groupId)}');
 
     await for (final payload in _engineClient.streamPending(groupId)) {
-      final changed = await _processPendingPayload(
+      final result = await _processPendingPayload(
         groupId: groupId,
         myPublicKey: identity.publicKeyHex,
         payload: payload,
       );
       final latest = await _stampRealtimeSync(groupId);
-      if (changed && latest != null) {
+      if (result == _PendingPayloadProcessResult.changed && latest != null) {
         SharedExpenseRealtimeBus.instance.publish(latest);
         yield latest;
       }
@@ -991,7 +1153,8 @@ class SharedExpenseRepository {
     final normalizedLinkedTxRef = _normalizeLinkedTxRef(linkedTxRef);
     if (normalizedLinkedTxRef != null &&
         await _isLinkedTxRefUsed(normalizedLinkedTxRef)) {
-      throw Exception('This transaction is already linked to a shared expense.');
+      throw Exception(
+          'This transaction is already linked to a shared expense.');
     }
     final createdAt = DateTime.now().millisecondsSinceEpoch;
     final expense = SharedExpense(
@@ -1060,7 +1223,8 @@ class SharedExpenseRepository {
     if (normalizedLinkedTxRef != null &&
         normalizedLinkedTxRef != before.linkedTxRef &&
         await _isLinkedTxRefUsed(normalizedLinkedTxRef)) {
-      throw Exception('This transaction is already linked to a shared expense.');
+      throw Exception(
+          'This transaction is already linked to a shared expense.');
     }
     final after = before.copyWith(
       amount: amount,
@@ -1346,8 +1510,9 @@ class SharedExpenseRepository {
   // Internal payload routing
   // -------------------------------------------------------------------------
 
-  /// Returns true if the payload changed local state.
-  Future<bool> _processPendingPayload({
+  /// Applies one payload if possible. A deferred payload is left unacked so it
+  /// can be retried after key/identity state recovers.
+  Future<_PendingPayloadProcessResult> _processPendingPayload({
     required String groupId,
     required String myPublicKey,
     required EnginePendingPayload payload,
@@ -1356,7 +1521,7 @@ class SharedExpenseRepository {
       _sharedExpenseLog(
         '_processPendingPayload already processing payload=${_logId(payload.id)}',
       );
-      return false;
+      return _PendingPayloadProcessResult.deferred;
     }
 
     try {
@@ -1387,13 +1552,18 @@ class SharedExpenseRepository {
           _sharedExpenseLog(
             '_processPendingPayload waiting for group key payload=${_logId(payload.id)}',
           );
-          return false;
         }
-        await _acknowledgePayload(payload.id);
-        return false;
+        return _PendingPayloadProcessResult.deferred;
       }
 
       final type = decoded['type'] as String?;
+      if (!_isKnownPayloadType(type)) {
+        _sharedExpenseLog(
+          '_processPendingPayload deferring unknown type=$type '
+          'payload=${_logId(payload.id)}',
+        );
+        return _PendingPayloadProcessResult.deferred;
+      }
       _sharedExpenseLog(
         '_processPendingPayload applying type=$type '
         'sender=${_logId(payload.senderPublicKey)}',
@@ -1405,9 +1575,27 @@ class SharedExpenseRepository {
         myPublicKey: myPublicKey,
       );
       await _acknowledgePayload(payload.id);
-      return applied;
+      return applied
+          ? _PendingPayloadProcessResult.changed
+          : _PendingPayloadProcessResult.acknowledged;
     } finally {
       _processingPayloadIds.remove(payload.id);
+    }
+  }
+
+  bool _isKnownPayloadType(String? type) {
+    switch (type) {
+      case 'group_key':
+      case 'key_exchange':
+      case 'group_meta':
+      case 'member_meta':
+      case 'expense':
+      case 'join_request':
+      case 'nudge':
+      case 'group_snapshot':
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -1511,6 +1699,15 @@ class SharedExpenseRepository {
     if (approvedBy != null && approverName != null) {
       newDisplayNames[approvedBy] = approverName;
     }
+    final approverPaymentAddress = _trustedIncomingPaymentAddress(
+      decoded['approverPaymentAddress'],
+    );
+    final newPaymentAddresses = <String, SharedPaymentAddress>{
+      ...group.paymentAddresses
+    };
+    if (approvedBy != null && approverPaymentAddress != null) {
+      newPaymentAddresses[approvedBy] = approverPaymentAddress;
+    }
     // The sender of this key_exchange is, by definition, the approver — they
     // hold the group key (otherwise they couldn't have shared it). Always
     // mark them approved, even when the payload omits the explicit fields
@@ -1531,6 +1728,7 @@ class SharedExpenseRepository {
         if (senderPk.isNotEmpty) senderPk,
       },
       displayNames: newDisplayNames,
+      paymentAddresses: newPaymentAddresses,
       pendingApprovals: group.pendingApprovals
           .where((p) =>
               p.publicKey != senderPk &&
@@ -1606,10 +1804,21 @@ class SharedExpenseRepository {
       rawName: decoded['displayName'],
       protectFallback: senderPk == myPublicKey,
     );
-    if (displayName == null || displayName.isEmpty) return false;
+    final paymentAddress = _trustedIncomingPaymentAddress(
+      decoded['paymentAddress'],
+    );
+    if ((displayName == null || displayName.isEmpty) &&
+        paymentAddress == null) {
+      return false;
+    }
     final current = group.displayNames[senderPk];
+    final currentPaymentAddress = group.paymentAddresses[senderPk];
     final isFirstSeen = !group.approvedMemberKeys.contains(senderPk);
-    if (current == displayName && !isFirstSeen) return false;
+    if (current == displayName &&
+        (paymentAddress == null || currentPaymentAddress == paymentAddress) &&
+        !isFirstSeen) {
+      return false;
+    }
 
     final activity = [...group.activity];
     if (isFirstSeen) {
@@ -1624,7 +1833,18 @@ class SharedExpenseRepository {
     }
 
     final updated = group.copyWith(
-      displayNames: {...group.displayNames, senderPk: displayName},
+      displayNames: displayName == null
+          ? group.displayNames
+          : {...group.displayNames, senderPk: displayName},
+      paymentAddresses: paymentAddress == null
+          ? group.paymentAddresses
+          : {
+              ...group.paymentAddresses,
+              senderPk: paymentAddress,
+            },
+      myPaymentAddress: senderPk == myPublicKey && paymentAddress != null
+          ? paymentAddress
+          : null,
       approvedMemberKeys: {...group.approvedMemberKeys, senderPk},
       activity: activity,
     );
@@ -1779,6 +1999,8 @@ class SharedExpenseRepository {
         .where((member) => member.devicePublicKey.isNotEmpty)
         .toList(growable: false);
     final displayNames = _stringMapFromJson(decoded['displayNames']);
+    final paymentAddresses =
+        _paymentAddressMapFromJson(decoded['paymentAddresses']);
     final approvedMemberKeys =
         _stringListFromJson(decoded['approvedMemberKeys']).toSet();
     final groupName = _trustedIncomingGroupName(group, decoded['groupName']);
@@ -1807,6 +2029,11 @@ class SharedExpenseRepository {
         displayNames,
         protectedPublicKey: myPublicKey,
       ),
+      paymentAddresses: _mergePaymentAddresses(
+        group.paymentAddresses,
+        paymentAddresses,
+      ),
+      myPaymentAddress: paymentAddresses[myPublicKey] ?? group.myPaymentAddress,
     );
 
     if (jsonEncode(updated.toJson()) == before) return false;
@@ -1961,6 +2188,9 @@ class SharedExpenseRepository {
       current: group.displayNames[pk],
       rawName: decoded['displayName'],
     );
+    final paymentAddress = _trustedIncomingPaymentAddress(
+      decoded['paymentAddress'],
+    );
     final approvalDisplayName = displayName ?? group.displayNames[pk];
     final ts = (decoded['timestamp'] as num?)?.toInt() ??
         DateTime.now().millisecondsSinceEpoch;
@@ -1992,9 +2222,16 @@ class SharedExpenseRepository {
     if (displayName != null && displayName.isNotEmpty) {
       newDisplayNames[pk] = displayName;
     }
+    final newPaymentAddresses = <String, SharedPaymentAddress>{
+      ...group.paymentAddresses
+    };
+    if (paymentAddress != null) {
+      newPaymentAddresses[pk] = paymentAddress;
+    }
     final updated = group.copyWith(
       pendingApprovals: newPending,
       displayNames: newDisplayNames,
+      paymentAddresses: newPaymentAddresses,
       approvedMemberKeys:
           group.approvedMemberKeys.where((k) => k != pk).toSet(),
       keySharedWith: group.keySharedWith.where((k) => k != pk).toSet(),
@@ -2023,6 +2260,7 @@ class SharedExpenseRepository {
     await _engineClient.submitPayload(
       groupId: group.id,
       encryptedBlob: encrypted,
+      kind: 'expense',
     );
   }
 
@@ -2058,6 +2296,7 @@ class SharedExpenseRepository {
     required SharedExpenseGroup group,
     required String recipientPublicKey,
     required String groupKeyHex,
+    required bool includeHistory,
   }) async {
     final keyBytes = SharedExpenseCryptoService.fromHex(groupKeyHex);
     final snapshotId = _uuid.v4();
@@ -2087,8 +2326,14 @@ class SharedExpenseRepository {
           group,
           identity.publicKeyHex,
         ),
+        'paymentAddresses': _outboundPaymentAddresses(
+          group,
+          identity.publicKeyHex,
+        ),
       },
     );
+
+    if (!includeHistory) return;
 
     final expenseMaps = group.expenses
         .map((expense) => expense.copyWith(status: 'synced').toJson())
@@ -2144,6 +2389,7 @@ class SharedExpenseRepository {
       groupId: groupId,
       encryptedBlob: encrypted,
       recipientPublicKeys: [recipientPublicKey],
+      kind: 'group_snapshot',
     );
   }
 
@@ -2184,6 +2430,8 @@ class SharedExpenseRepository {
     final identity = await _cryptoService.getOrCreateIdentity();
     final groupName = _bestKnownGroupName(group);
     final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
+    final paymentAddress =
+        _bestKnownPaymentAddress(group, identity.publicKeyHex);
     var allOk = true;
     if (groupName.isNotEmpty && !_isFallbackGroupName(groupName)) {
       try {
@@ -2199,25 +2447,32 @@ class SharedExpenseRepository {
         await _engineClient.submitPayload(
           groupId: group.id,
           encryptedBlob: encrypted,
+          kind: 'group_meta',
         );
       } catch (e) {
         _sharedExpenseLog('group_meta send failed: $e');
         allOk = false;
       }
     }
-    if (displayName.isNotEmpty && !_isFallbackDisplayName(displayName)) {
+    final hasDisplayName =
+        displayName.isNotEmpty && !_isFallbackDisplayName(displayName);
+    final hasPaymentAddress = paymentAddress != null && paymentAddress.isValid;
+    if (hasDisplayName || hasPaymentAddress) {
       try {
         final encrypted = await _cryptoService.encryptPayloadWithKey(
           keyBytes: keyBytes,
           payload: {
             'type': 'member_meta',
-            'displayName': displayName,
+            if (hasDisplayName) 'displayName': displayName,
+            if (paymentAddress != null && paymentAddress.isValid)
+              'paymentAddress': paymentAddress.toJson(),
             'timestamp': DateTime.now().millisecondsSinceEpoch,
           },
         );
         await _engineClient.submitPayload(
           groupId: group.id,
           encryptedBlob: encrypted,
+          kind: 'member_meta',
         );
       } catch (e) {
         _sharedExpenseLog('member_meta send failed: $e');
@@ -2244,6 +2499,7 @@ class SharedExpenseRepository {
       await _engineClient.submitPayload(
         groupId: group.id,
         encryptedBlob: encrypted,
+        kind: 'group_meta',
       );
     } catch (e) {
       _sharedExpenseLog('_emitGroupMeta failed: $e — flagging for retry');
@@ -2259,7 +2515,10 @@ class SharedExpenseRepository {
     if (groupKeyHex == null) return;
     final identity = await _cryptoService.getOrCreateIdentity();
     final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
-    if (displayName.trim().isEmpty || _isFallbackDisplayName(displayName)) {
+    final paymentAddress =
+        _bestKnownPaymentAddress(group, identity.publicKeyHex);
+    if ((displayName.trim().isEmpty || _isFallbackDisplayName(displayName)) &&
+        paymentAddress == null) {
       return;
     }
     try {
@@ -2267,13 +2526,16 @@ class SharedExpenseRepository {
         keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
         payload: {
           'type': 'member_meta',
-          'displayName': displayName,
+          if (!_isFallbackDisplayName(displayName)) 'displayName': displayName,
+          if (paymentAddress != null && paymentAddress.isValid)
+            'paymentAddress': paymentAddress.toJson(),
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         },
       );
       await _engineClient.submitPayload(
         groupId: group.id,
         encryptedBlob: encrypted,
+        kind: 'member_meta',
       );
     } catch (e) {
       _sharedExpenseLog('_emitMemberMeta failed: $e — flagging for retry');
@@ -2288,10 +2550,14 @@ class SharedExpenseRepository {
     final identity = await _cryptoService.getOrCreateIdentity();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
+    final paymentAddress =
+        _bestKnownPaymentAddress(group, identity.publicKeyHex);
     final payload = {
       'type': 'join_request',
       'publicKey': identity.publicKeyHex,
       if (!_isFallbackDisplayName(displayName)) 'displayName': displayName,
+      if (paymentAddress != null && paymentAddress.isValid)
+        'paymentAddress': paymentAddress.toJson(),
       'timestamp': timestamp,
     };
     for (final member in group.members) {
@@ -2305,6 +2571,7 @@ class SharedExpenseRepository {
         await _engineClient.submitPayload(
           groupId: group.id,
           encryptedBlob: encrypted,
+          kind: 'join_request',
         );
       } catch (error) {
         _sharedExpenseLog(

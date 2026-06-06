@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,8 +10,11 @@ import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/shared_expense_group.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -47,6 +51,60 @@ String _formatExpenseAmountInput(double? amount) {
     return normalized.toStringAsFixed(0);
   }
   return normalized.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+final List<Bank> _sharedExpenseBanks = [
+  Bank(
+    id: CashConstants.bankId,
+    name: CashConstants.bankName,
+    shortName: CashConstants.bankShortName,
+    codes: const [],
+    image: CashConstants.bankImage,
+    colors: CashConstants.bankColors,
+  ),
+  ...AllBanksFromAssets.getAllBanks(),
+];
+
+Bank _sharedExpenseBankFor(int bankId) {
+  for (final bank in _sharedExpenseBanks) {
+    if (bank.id == bankId) return bank;
+  }
+  return Bank(
+    id: bankId,
+    name: 'Bank',
+    shortName: bankId > 0 ? 'Bank $bankId' : 'Bank',
+    codes: const [],
+    image: '',
+  );
+}
+
+String _sharedPaymentBankLabel(BuildContext context, int bankId) {
+  final bank = _sharedExpenseBankFor(bankId);
+  final label = bank.shortName.trim().isNotEmpty
+      ? bank.shortName.trim()
+      : bank.name.trim();
+  return context.l10nText(label.isEmpty ? 'Bank' : label);
+}
+
+String _paymentAccountNumber(SharedPaymentAddress address) {
+  return address.accountNumber.trim();
+}
+
+Future<void> _copyPaymentAccountNumber(
+  BuildContext context,
+  SharedPaymentAddress address,
+) async {
+  final accountNumber = _paymentAccountNumber(address);
+  if (accountNumber.isEmpty) return;
+  await Clipboard.setData(ClipboardData(text: accountNumber));
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(context.l10nTextRead('Account number copied')),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 2),
+    ),
+  );
 }
 
 Map<String, double> _memberSpentTotalsFor(SharedExpenseGroup group) {
@@ -313,6 +371,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   final AccountRepository _accountRepository = AccountRepository();
   static const String _accountShareDisplayNameKey =
       'account_share_display_name';
+  static const String _sharedExpensePaymentAddressKey =
+      'shared_expense_payment_address';
   static const Duration _pollInterval = Duration(seconds: 12);
   static const Duration _realtimeReconnectDelay = Duration(seconds: 3);
   static const Duration _minBackgroundRefreshGap = Duration(milliseconds: 500);
@@ -547,6 +607,86 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     return '';
   }
 
+  List<AccountSummary> _selectablePaymentAccounts(
+      TransactionProvider provider) {
+    final accounts = List<AccountSummary>.from(provider.accountSummaries)
+      ..sort((a, b) {
+        if (a.bankId == CashConstants.bankId) return -1;
+        if (b.bankId == CashConstants.bankId) return 1;
+        return a.bankId.compareTo(b.bankId);
+      });
+    if (accounts.isEmpty) {
+      accounts.add(
+        AccountSummary(
+          bankId: CashConstants.bankId,
+          accountNumber: CashConstants.defaultAccountNumber,
+          accountHolderName: CashConstants.defaultAccountHolderName,
+          totalTransactions: 0,
+          totalCredit: 0,
+          totalDebit: 0,
+          settledBalance: 0,
+          balance: 0,
+          pendingCredit: 0,
+        ),
+      );
+    }
+    return accounts;
+  }
+
+  SharedPaymentAddress _addressFromAccount(AccountSummary account) {
+    return SharedPaymentAddress(
+      bankId: account.bankId,
+      accountNumber: account.accountNumber,
+      accountHolderName: account.accountHolderName,
+    );
+  }
+
+  Future<SharedPaymentAddress> _defaultPaymentAddress(
+    TransactionProvider provider,
+  ) async {
+    final accounts = _selectablePaymentAccounts(provider);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_sharedExpensePaymentAddressKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          final saved = SharedPaymentAddress.fromJson(
+            Map<String, dynamic>.from(decoded),
+          );
+          if (saved.isValid) {
+            for (final account in accounts) {
+              if (account.bankId == saved.bankId &&
+                  account.accountNumber == saved.accountNumber) {
+                return _addressFromAccount(account);
+              }
+            }
+          }
+        }
+      }
+    } catch (error, stackTrace) {
+      _sharedExpensesPageLog('defaultPaymentAddress failed: $error');
+      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+    }
+    return _addressFromAccount(accounts.first);
+  }
+
+  Future<void> _saveDefaultPaymentAddress(
+    SharedPaymentAddress paymentAddress,
+  ) async {
+    if (!paymentAddress.isValid) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _sharedExpensePaymentAddressKey,
+        jsonEncode(paymentAddress.toJson()),
+      );
+    } catch (error, stackTrace) {
+      _sharedExpensesPageLog('saveDefaultPaymentAddress failed: $error');
+      if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
   SharedExpenseGroup? _updatedSelectedGroup(List<SharedExpenseGroup> groups) {
     final selected = _selectedGroup;
     if (selected == null) return null;
@@ -707,6 +847,12 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 
   Future<void> _openGroupSettings(SharedExpenseGroup group) async {
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
+    final accounts = _selectablePaymentAccounts(provider);
+    final initialPaymentAddress = group.myPaymentAddress ??
+        (_myPublicKey.isEmpty ? null : group.paymentAddresses[_myPublicKey]) ??
+        await _defaultPaymentAddress(provider);
+    if (!mounted) return;
     final result = await showModalBottomSheet<_GroupSettingsResult>(
       context: context,
       isScrollControlled: true,
@@ -716,6 +862,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         initialName: group.name,
         initialDisplayName: group.myDisplayName,
         initialBackfillNewMembers: group.backfillNewMembers,
+        paymentAccounts: accounts,
+        initialPaymentAddress: initialPaymentAddress,
       ),
     );
     if (result == null || !mounted) return;
@@ -751,15 +899,23 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       final displayChanged = result.displayName.trim() != group.myDisplayName;
       final backfillChanged =
           result.backfillNewMembers != group.backfillNewMembers;
-      if (!nameChanged && !displayChanged && !backfillChanged) return;
+      final paymentChanged = result.paymentAddress != initialPaymentAddress;
+      if (!nameChanged &&
+          !displayChanged &&
+          !backfillChanged &&
+          !paymentChanged) {
+        return;
+      }
       setState(() => _isMutating = true);
       try {
+        await _saveDefaultPaymentAddress(result.paymentAddress);
         final updated = await _repository.updateMeta(
           group: group,
           name: nameChanged ? result.name.trim() : null,
           myDisplayName: displayChanged ? result.displayName.trim() : null,
           backfillNewMembers:
               backfillChanged ? result.backfillNewMembers : null,
+          paymentAddress: paymentChanged ? result.paymentAddress : null,
         );
         if (!mounted) return;
         final groups = await _repository.getGroups();
@@ -1060,7 +1216,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
   Future<void> _createGroup() async {
     final copiedMessage = context.l10nTextRead('Invite code copied');
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
     final displayName = await _defaultDisplayName();
+    final accounts = _selectablePaymentAccounts(provider);
+    final paymentAddress = await _defaultPaymentAddress(provider);
     if (!mounted) return;
 
     final input = await showModalBottomSheet<_GroupFormResult>(
@@ -1075,6 +1234,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         nameLabel: sheetContext.l10nText('YOUR NAME'),
         nameHint: sheetContext.l10nText('How other members see you'),
         initialName: displayName,
+        paymentAccounts: accounts,
+        initialPaymentAddress: paymentAddress,
       ),
     );
     if (input == null) return;
@@ -1089,9 +1250,11 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     });
     try {
       await _saveDefaultDisplayName(input.displayName);
+      await _saveDefaultPaymentAddress(input.paymentAddress);
       final group = await _repository.createGroup(
         name: input.groupName,
         displayName: input.displayName,
+        paymentAddress: input.paymentAddress,
       );
       if (mounted) {
         final groups = [
@@ -1124,7 +1287,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   Future<void> _joinGroup() async {
     final requestedMessage = context.l10nTextRead('Join request sent');
     final joinedMessage = context.l10nTextRead('Joined group');
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
     final displayName = await _defaultDisplayName();
+    final accounts = _selectablePaymentAccounts(provider);
+    final paymentAddress = await _defaultPaymentAddress(provider);
     if (!mounted) return;
 
     final input = await showModalBottomSheet<_GroupFormResult>(
@@ -1139,6 +1305,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         nameLabel: sheetContext.l10nText('YOUR NAME'),
         nameHint: sheetContext.l10nText('How other members see you'),
         initialName: displayName,
+        paymentAccounts: accounts,
+        initialPaymentAddress: paymentAddress,
       ),
     );
     if (input == null) return;
@@ -1147,9 +1315,11 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     setState(() => _isMutating = true);
     try {
       await _saveDefaultDisplayName(input.displayName);
+      await _saveDefaultPaymentAddress(input.paymentAddress);
       final joined = await _repository.joinGroup(
         inviteOrCode: input.groupName,
         displayName: input.displayName,
+        paymentAddress: input.paymentAddress,
       );
       await _loadGroups(refreshFromEngine: true, showErrors: false);
       _showSnack(joined.hasGroupKey ? joinedMessage : requestedMessage);
@@ -2038,12 +2208,17 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
       final color = member.devicePublicKey.isEmpty
           ? _memberColors[i % _memberColors.length]
           : Color(memberColorFor(widget.group, member.devicePublicKey));
+      final paymentAddress = isMe
+          ? widget.group.myPaymentAddress ??
+              widget.group.paymentAddresses[member.devicePublicKey]
+          : widget.group.paymentAddresses[member.devicePublicKey];
       views.add(
         _SharedMemberView(
           label: label,
           shortKey: widget.shortKey(member.devicePublicKey),
           color: color,
           publicKey: member.devicePublicKey,
+          paymentAddress: paymentAddress,
         ),
       );
     }
@@ -2056,12 +2231,14 @@ class _SharedMemberView {
   final String shortKey;
   final Color color;
   final String publicKey;
+  final SharedPaymentAddress? paymentAddress;
 
   const _SharedMemberView({
     required this.label,
     required this.shortKey,
     required this.color,
     this.publicKey = '',
+    this.paymentAddress,
   });
 
   String get initial {
@@ -2202,68 +2379,205 @@ class _SharedMemberDetailCard extends StatelessWidget {
         : balance < -0.5
             ? AppColors.red
             : AppColors.textPrimary(context);
+    final paymentAddress = member.paymentAddress;
 
     return Container(
-      constraints: const BoxConstraints(minHeight: 82),
+      constraints: const BoxConstraints(minHeight: 94),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.cardColor(context),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.borderColor(context)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _SharedMemberCircle(
-            member: member,
-            size: 46,
-            fontSize: 18,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  member.label,
+          Row(
+            children: [
+              _SharedMemberCircle(
+                member: member,
+                size: 46,
+                fontSize: 18,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      member.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.textPrimary(context),
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0,
+                          ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${context.l10nText('Spent')}: ${_formatEtb(spent)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary(context),
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 118,
+                child: Text(
+                  balance.abs() < 0.5 ? _formatEtb(0) : _formatEtb(balance),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary(context),
+                        color: balanceColor,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          if (paymentAddress != null && paymentAddress.isValid) ...[
+            const SizedBox(height: 12),
+            _SharedPaymentAccountRow(
+              address: paymentAddress,
+              title: context.l10nText('Payment account'),
+              copyable: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedPaymentAccountRow extends StatelessWidget {
+  final SharedPaymentAddress address;
+  final String title;
+  final bool copyable;
+
+  const _SharedPaymentAccountRow({
+    required this.address,
+    required this.title,
+    required this.copyable,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bank = _sharedExpenseBankFor(address.bankId);
+    final bankName = _sharedPaymentBankLabel(context, address.bankId);
+    final accountNumber = _paymentAccountNumber(address);
+    final content = Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.background(context).withValues(alpha: 0.34),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Row(
+        children: [
+          _PaymentBankIcon(bank: bank, size: 34),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textTertiary(context),
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0,
                       ),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${context.l10nText('Spent')}: ${_formatEtb(spent)}',
+                  '$bankName · $accountNumber',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary(context),
-                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w800,
                         letterSpacing: 0,
                       ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 118,
-            child: Text(
-              balance.abs() < 0.5 ? _formatEtb(0) : _formatEtb(balance),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: balanceColor,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0,
-                  ),
+          if (copyable) ...[
+            const SizedBox(width: 10),
+            Icon(
+              AppIcons.copy,
+              size: 18,
+              color: AppColors.textSecondary(context),
             ),
-          ),
+          ],
         ],
+      ),
+    );
+
+    if (!copyable) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _copyPaymentAccountNumber(context, address),
+        borderRadius: BorderRadius.circular(10),
+        child: content,
+      ),
+    );
+  }
+}
+
+class _PaymentBankIcon extends StatelessWidget {
+  final Bank bank;
+  final double size;
+
+  const _PaymentBankIcon({
+    required this.bank,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipOval(
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: bank.image.isEmpty
+            ? _PaymentBankFallback()
+            : Image.asset(
+                bank.image,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _PaymentBankFallback(),
+              ),
+      ),
+    );
+  }
+}
+
+class _PaymentBankFallback extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      alignment: Alignment.center,
+      color: AppColors.cardColor(context),
+      child: Icon(
+        AppIcons.account_balance_rounded,
+        size: 22,
+        color: AppColors.textSecondary(context),
       ),
     );
   }
@@ -4596,9 +4910,12 @@ class _DebtActionSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fromName = group.displayNameFor(myPublicKey, debt.from);
+    final toName = group.displayNameFor(myPublicKey, debt.to);
     final fromColor = Color(memberColorFor(group, debt.from));
     final canSettle = debt.from == myPublicKey || debt.to == myPublicKey;
     final canNudge = debt.to == myPublicKey;
+    final payToAddress =
+        debt.from == myPublicKey ? group.paymentAddresses[debt.to] : null;
 
     return _IosModalShell(
       title: context.l10nText('Debt'),
@@ -4609,6 +4926,14 @@ class _DebtActionSheet extends StatelessWidget {
       ),
       children: [
         _DebtAmountRow(amount: debt.amount),
+        if (payToAddress != null && payToAddress.isValid) ...[
+          _SharedPaymentAccountRow(
+            address: payToAddress,
+            title: '${context.l10nText('Pay')} $toName',
+            copyable: true,
+          ),
+          const SizedBox(height: 10),
+        ],
         IgnorePointer(
           ignoring: !canSettle,
           child: Opacity(
@@ -5715,10 +6040,12 @@ class _NudgeTargetRow extends StatelessWidget {
 class _GroupFormResult {
   final String groupName;
   final String displayName;
+  final SharedPaymentAddress paymentAddress;
 
   const _GroupFormResult({
     required this.groupName,
     required this.displayName,
+    required this.paymentAddress,
   });
 }
 
@@ -5730,6 +6057,8 @@ class _GroupFormSheet extends StatefulWidget {
   final String nameLabel;
   final String nameHint;
   final String initialName;
+  final List<AccountSummary> paymentAccounts;
+  final SharedPaymentAddress initialPaymentAddress;
 
   const _GroupFormSheet({
     required this.title,
@@ -5739,6 +6068,8 @@ class _GroupFormSheet extends StatefulWidget {
     required this.nameLabel,
     required this.nameHint,
     required this.initialName,
+    required this.paymentAccounts,
+    required this.initialPaymentAddress,
   });
 
   @override
@@ -5748,6 +6079,7 @@ class _GroupFormSheet extends StatefulWidget {
 class _GroupFormSheetState extends State<_GroupFormSheet> {
   late final TextEditingController _groupController;
   late final TextEditingController _nameController;
+  late SharedPaymentAddress _paymentAddress;
   bool _hasTriedSubmit = false;
 
   @override
@@ -5755,6 +6087,7 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
     super.initState();
     _groupController = TextEditingController();
     _nameController = TextEditingController(text: widget.initialName);
+    _paymentAddress = widget.initialPaymentAddress;
   }
 
   @override
@@ -5774,6 +6107,7 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
       _GroupFormResult(
         groupName: groupName,
         displayName: displayName,
+        paymentAddress: _paymentAddress,
       ),
     );
   }
@@ -5851,6 +6185,15 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
                   onChanged: (_) => setState(() {}),
                   onSubmitted: (_) => _submit(),
                 ),
+                const SizedBox(height: 22),
+                _PaymentAddressSelector(
+                  label: context.l10nText('PAYMENT ACCOUNT'),
+                  accounts: widget.paymentAccounts,
+                  selected: _paymentAddress,
+                  onChanged: (address) {
+                    setState(() => _paymentAddress = address);
+                  },
+                ),
                 const SizedBox(height: 28),
                 SizedBox(
                   width: double.infinity,
@@ -5912,15 +6255,17 @@ class _SheetTextField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: AppColors.textSecondary(context),
-            fontWeight: FontWeight.w900,
-            letterSpacing: 0,
+        if (label.trim().isNotEmpty) ...[
+          Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: AppColors.textSecondary(context),
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
           ),
-        ),
-        const SizedBox(height: 10),
+          const SizedBox(height: 10),
+        ],
         TextField(
           controller: controller,
           textInputAction: textInputAction,
@@ -5968,6 +6313,150 @@ class _SheetTextField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PaymentAddressSelector extends StatelessWidget {
+  final String label;
+  final List<AccountSummary> accounts;
+  final SharedPaymentAddress selected;
+  final ValueChanged<SharedPaymentAddress> onChanged;
+
+  const _PaymentAddressSelector({
+    required this.label,
+    required this.accounts,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  SharedPaymentAddress _addressFor(AccountSummary account) {
+    return SharedPaymentAddress(
+      bankId: account.bankId,
+      accountNumber: account.accountNumber,
+      accountHolderName: account.accountHolderName,
+    );
+  }
+
+  bool _isSelected(AccountSummary account) {
+    return account.bankId == selected.bankId &&
+        account.accountNumber == selected.accountNumber;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: AppColors.textSecondary(context),
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0,
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 92,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: accounts.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final account = accounts[index];
+              final address = _addressFor(account);
+              return _PaymentAddressChip(
+                bank: _sharedExpenseBankFor(account.bankId),
+                title: _sharedPaymentBankLabel(context, account.bankId),
+                selected: _isSelected(account),
+                onTap: () => onChanged(address),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentAddressChip extends StatelessWidget {
+  final Bank bank;
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PaymentAddressChip({
+    required this.bank,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderColor =
+        selected ? AppColors.primaryLight : AppColors.borderColor(context);
+    final textColor =
+        selected ? AppColors.primaryLight : AppColors.textSecondary(context);
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: title,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: 82,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                width: 54,
+                height: 54,
+                padding: EdgeInsets.all(selected ? 3 : 4),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.primaryLight.withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: borderColor,
+                    width: selected ? 2 : 1,
+                  ),
+                ),
+                child: ClipOval(
+                  child: bank.image.isEmpty
+                      ? _PaymentBankFallback()
+                      : Image.asset(
+                          bank.image,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _PaymentBankFallback(),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: textColor,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  letterSpacing: 0,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6519,10 +7008,12 @@ class _GroupSettingsSave extends _GroupSettingsResult {
   final String name;
   final String displayName;
   final bool backfillNewMembers;
+  final SharedPaymentAddress paymentAddress;
   const _GroupSettingsSave(
     this.name,
     this.displayName,
     this.backfillNewMembers,
+    this.paymentAddress,
   );
 }
 
@@ -6538,10 +7029,14 @@ class _GroupSettingsSheet extends StatefulWidget {
   final String initialName;
   final String initialDisplayName;
   final bool initialBackfillNewMembers;
+  final List<AccountSummary> paymentAccounts;
+  final SharedPaymentAddress initialPaymentAddress;
   const _GroupSettingsSheet({
     required this.initialName,
     required this.initialDisplayName,
     required this.initialBackfillNewMembers,
+    required this.paymentAccounts,
+    required this.initialPaymentAddress,
   });
 
   @override
@@ -6554,6 +7049,7 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
   late final TextEditingController _displayCtrl =
       TextEditingController(text: widget.initialDisplayName);
   late bool _backfillNewMembers = widget.initialBackfillNewMembers;
+  late SharedPaymentAddress _paymentAddress = widget.initialPaymentAddress;
   bool _leaveArmed = false;
   Timer? _disarmTimer;
 
@@ -6583,7 +7079,8 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
         _displayCtrl.text.trim().isNotEmpty &&
         (_nameCtrl.text.trim() != widget.initialName ||
             _displayCtrl.text.trim() != widget.initialDisplayName ||
-            _backfillNewMembers != widget.initialBackfillNewMembers);
+            _backfillNewMembers != widget.initialBackfillNewMembers ||
+            _paymentAddress != widget.initialPaymentAddress);
 
     return _IosModalShell(
       title: 'Edit Group',
@@ -6618,6 +7115,17 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
             }),
           ),
         ),
+        _IosFormGroup(
+          label: 'Payment account',
+          child: _PaymentAddressSelector(
+            label: '',
+            accounts: widget.paymentAccounts,
+            selected: _paymentAddress,
+            onChanged: (address) {
+              setState(() => _paymentAddress = address);
+            },
+          ),
+        ),
         _IosFormSubmit(
           label: 'Save',
           enabled: canSave,
@@ -6626,6 +7134,7 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
               _nameCtrl.text.trim(),
               _displayCtrl.text.trim(),
               _backfillNewMembers,
+              _paymentAddress,
             ),
           ),
         ),
