@@ -35,6 +35,7 @@ class NotificationService {
   static const String _historyPrefsKey = 'notification_history_v1';
   static const String _counterpartyActionPrefix = 'txname:';
   static const String _sharedExpensesPayload = 'shared_expenses';
+  static const String _sharedExpensesPayloadPrefix = 'shared_expenses:';
   static const int _maxHistoryEntries = 200;
   static const int dailySpendingNotificationId = 9001;
   static const int dailySpendingTestNotificationId = 9002;
@@ -333,7 +334,23 @@ class NotificationService {
       return const OpenSharedExpensesIntent();
     }
 
+    if (raw.startsWith(_sharedExpensesPayloadPrefix)) {
+      final groupId = Uri.decodeComponent(
+        raw.substring(_sharedExpensesPayloadPrefix.length),
+      ).trim();
+      return OpenSharedExpensesIntent(
+        groupId: groupId.isEmpty ? null : groupId,
+        openActivities: groupId.isNotEmpty,
+      );
+    }
+
     return null;
+  }
+
+  String _sharedExpensesNotificationPayload(String? groupId) {
+    final trimmed = groupId?.trim();
+    if (trimmed == null || trimmed.isEmpty) return _sharedExpensesPayload;
+    return '$_sharedExpensesPayloadPrefix${Uri.encodeComponent(trimmed)}';
   }
 
   Future<void> emitLaunchIntentIfAny() async {
@@ -1001,6 +1018,7 @@ class NotificationService {
     required String groupName,
     required String payeeName,
     required double amount,
+    String? groupId,
   }) async {
     try {
       if (amount <= 0) return;
@@ -1034,7 +1052,7 @@ class NotificationService {
           ),
           iOS: DarwinNotificationDetails(),
         ),
-        payload: _sharedExpensesPayload,
+        payload: _sharedExpensesNotificationPayload(groupId),
       );
       await _recordHistory(
         channel: _sharedExpensesChannelId,
@@ -1052,6 +1070,7 @@ class NotificationService {
     required String eventId,
     required String title,
     required String body,
+    String? groupId,
   }) async {
     try {
       final enabled = await NotificationSettingsService.instance
@@ -1073,7 +1092,7 @@ class NotificationService {
           ),
           iOS: DarwinNotificationDetails(),
         ),
-        payload: _sharedExpensesPayload,
+        payload: _sharedExpensesNotificationPayload(groupId),
       );
       await _recordHistory(
         channel: _sharedExpensesChannelId,

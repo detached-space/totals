@@ -67,6 +67,8 @@ class RedesignShellState extends State<RedesignShell>
       GlobalKey<RedesignMoneyPageState>();
   final GlobalKey<RedesignBudgetPageState> _budgetPageKey =
       GlobalKey<RedesignBudgetPageState>();
+  final SharedExpenseNavigationController _sharedExpenseNavigationController =
+      SharedExpenseNavigationController();
   final PageController _pageController =
       PageController(initialPage: _homeIndex);
   DateTime? _lastProfileTabTapAt;
@@ -88,7 +90,7 @@ class RedesignShellState extends State<RedesignShell>
   bool _hasInitializedSmsPermissions = false;
   bool _hasCheckedNotificationPermissions = false;
   String? _pendingNotificationReference;
-  bool _pendingSharedExpensesOpen = false;
+  OpenSharedExpensesIntent? _pendingSharedExpensesIntent;
 
   @override
   void initState() {
@@ -112,7 +114,7 @@ class RedesignShellState extends State<RedesignShell>
         if (intent is CategorizeTransactionIntent) {
           unawaited(_handleNotificationCategorize(intent.reference));
         } else if (intent is OpenSharedExpensesIntent) {
-          unawaited(_handleSharedExpensesNotification());
+          unawaited(_handleSharedExpensesNotification(intent));
         }
       },
     );
@@ -313,9 +315,10 @@ class RedesignShellState extends State<RedesignShell>
         await _openTransactionFromNotification(pendingReference);
       }
 
-      if (_pendingSharedExpensesOpen) {
-        _pendingSharedExpensesOpen = false;
-        _openSharedExpensesFromNotification();
+      final pendingSharedExpensesIntent = _pendingSharedExpensesIntent;
+      if (pendingSharedExpensesIntent != null) {
+        _pendingSharedExpensesIntent = null;
+        _openSharedExpensesFromNotification(pendingSharedExpensesIntent);
       }
 
       if (mounted) {
@@ -515,21 +518,29 @@ class RedesignShellState extends State<RedesignShell>
     );
   }
 
-  Future<void> _handleSharedExpensesNotification() async {
+  Future<void> _handleSharedExpensesNotification(
+    OpenSharedExpensesIntent intent,
+  ) async {
     if (!_isAuthenticated) {
-      _pendingSharedExpensesOpen = true;
+      _pendingSharedExpensesIntent = intent;
       await _authenticateIfAvailable();
       return;
     }
 
-    _openSharedExpensesFromNotification();
+    _openSharedExpensesFromNotification(intent);
   }
 
-  void _openSharedExpensesFromNotification() {
+  void _openSharedExpensesFromNotification(OpenSharedExpensesIntent intent) {
     if (!mounted) return;
     if (_currentIndex != _sharedIndex) {
       _onTabSelected(_sharedIndex);
     }
+    final groupId = intent.groupId?.trim();
+    if (groupId == null || groupId.isEmpty || !intent.openActivities) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _sharedExpenseNavigationController.openActivitiesForGroup(groupId);
+    });
   }
 
   Future<void> _showQuickAccessAccountsSheet() async {
@@ -771,7 +782,9 @@ class RedesignShellState extends State<RedesignShell>
               const RedesignHomePage(),
               RedesignMoneyPage(key: _moneyPageKey),
               RedesignBudgetPage(key: _budgetPageKey),
-              const RedesignSharedExpensesPage(),
+              RedesignSharedExpensesPage(
+                navigationController: _sharedExpenseNavigationController,
+              ),
               RedesignSettingsPage(
                 key: ValueKey('settings-${_activeProfileId ?? 'none'}'),
               ),

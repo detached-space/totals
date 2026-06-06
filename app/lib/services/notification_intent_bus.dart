@@ -38,6 +38,11 @@ class QuickCategorizeTransactionIntent extends NotificationIntent {
 }
 
 class OpenSharedExpensesIntent extends NotificationIntent {
-  const OpenSharedExpensesIntent();
-}
+  final String? groupId;
+  final bool openActivities;
 
+  const OpenSharedExpensesIntent({
+    this.groupId,
+    this.openActivities = false,
+  });
+}

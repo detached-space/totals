@@ -304,6 +304,7 @@ class SharedExpenseNotificationCoordinator {
 
     await NotificationService.instance.showSharedExpenseNudgeNotification(
       nudgeId: entry.id,
+      groupId: group.id,
       groupName: group.name,
       payeeName: group.displayNameFor(_myPublicKey, entry.actor),
       amount: amount,
@@ -330,6 +331,7 @@ class SharedExpenseNotificationCoordinator {
 
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Shared expense added',
       body: body,
     );
@@ -349,6 +351,7 @@ class SharedExpenseNotificationCoordinator {
     final amountText = 'ETB ${formatNumberWithComma(amount)}';
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Debt settled',
       body: '$actorName marked $amountText settled on ${group.name}.',
     );
@@ -369,6 +372,7 @@ class SharedExpenseNotificationCoordinator {
     final amountText = 'ETB ${formatNumberWithComma(amount)}';
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Shared expense updated',
       body: '$actorName changed $reason to $amountText on ${group.name}.',
     );
@@ -385,6 +389,7 @@ class SharedExpenseNotificationCoordinator {
     final reason = _reasonText(entry.data['after']);
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Shared expense renamed',
       body: '$actorName renamed an expense to $reason on ${group.name}.',
     );
@@ -405,6 +410,7 @@ class SharedExpenseNotificationCoordinator {
     final reason = _entryReason(entry, expense);
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Payer changed',
       body:
           '$actorName changed who paid for $reason to $payerName on ${group.name}.',
@@ -422,6 +428,7 @@ class SharedExpenseNotificationCoordinator {
     final reason = _entryReason(entry, expense);
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Split updated',
       body: '$actorName changed who is included in $reason on ${group.name}.',
     );
@@ -438,6 +445,7 @@ class SharedExpenseNotificationCoordinator {
     final reason = _entryReason(entry, expense);
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Expense date updated',
       body: '$actorName changed the date for $reason on ${group.name}.',
     );
@@ -455,6 +463,7 @@ class SharedExpenseNotificationCoordinator {
     final linked = _stringValue(entry.data['after']).trim().isNotEmpty;
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: linked ? 'Transaction linked' : 'Transaction unlinked',
       body: linked
           ? '$actorName linked a transaction to $reason on ${group.name}.'
@@ -473,6 +482,7 @@ class SharedExpenseNotificationCoordinator {
     final reason = _entryReason(entry, expense);
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Shared expense removed',
       body: '$actorName removed $reason from ${group.name}.',
     );
@@ -485,6 +495,7 @@ class SharedExpenseNotificationCoordinator {
     final actorName = group.displayNameFor(_myPublicKey, entry.actor);
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'New group member',
       body: '$actorName joined ${group.name}.',
     );
@@ -498,6 +509,7 @@ class SharedExpenseNotificationCoordinator {
     final nextName = _stringValue(entry.data['after']).trim();
     await NotificationService.instance.showSharedExpenseEventNotification(
       eventId: entry.id,
+      groupId: group.id,
       title: 'Group renamed',
       body: nextName.isEmpty
           ? '$actorName renamed a shared group.'

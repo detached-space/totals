@@ -228,8 +228,41 @@ Future<bool> showSplitTransactionWithGroupFlow({
   }
 }
 
+class SharedExpenseNavigationController {
+  _RedesignSharedExpensesPageState? _state;
+  String? _pendingActivitiesGroupId;
+
+  void openActivitiesForGroup(String groupId) {
+    final trimmed = groupId.trim();
+    if (trimmed.isEmpty) return;
+    final state = _state;
+    if (state == null) {
+      _pendingActivitiesGroupId = trimmed;
+      return;
+    }
+    state._openGroupActivitiesFromNotification(trimmed);
+  }
+
+  void _attach(_RedesignSharedExpensesPageState state) {
+    _state = state;
+    final pendingGroupId = _pendingActivitiesGroupId;
+    if (pendingGroupId == null) return;
+    _pendingActivitiesGroupId = null;
+    state._openGroupActivitiesFromNotification(pendingGroupId);
+  }
+
+  void _detach(_RedesignSharedExpensesPageState state) {
+    if (_state == state) _state = null;
+  }
+}
+
 class RedesignSharedExpensesPage extends StatefulWidget {
-  const RedesignSharedExpensesPage({super.key});
+  final SharedExpenseNavigationController? navigationController;
+
+  const RedesignSharedExpensesPage({
+    super.key,
+    this.navigationController,
+  });
 
   @override
   State<RedesignSharedExpensesPage> createState() =>
@@ -247,6 +280,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   static const Duration _pollInterval = Duration(seconds: 12);
   static const Duration _realtimeReconnectDelay = Duration(seconds: 3);
   static const Duration _minBackgroundRefreshGap = Duration(milliseconds: 500);
+  static const int _activitiesTabIndex = 1;
 
   List<SharedExpenseGroup> _groups = const [];
   String _myPublicKey = '';
@@ -255,6 +289,9 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   bool _engineReachable = true;
   String? _approvingMemberKey;
   SharedExpenseGroup? _selectedGroup;
+  String? _pendingNotificationGroupId;
+  int _selectedGroupInitialTabIndex = 0;
+  int _selectedGroupOpenRequestId = 0;
   _CreatingGroupDraft? _creatingGroup;
   Timer? _pollTimer;
   DateTime? _lastBackgroundRefresh;
@@ -268,14 +305,25 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.navigationController?._attach(this);
     _loadGroups(refreshFromEngine: true, showErrors: false);
     _startPolling();
     _startGroupListRealtimeSubscription();
   }
 
   @override
+  void didUpdateWidget(covariant RedesignSharedExpensesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.navigationController != widget.navigationController) {
+      oldWidget.navigationController?._detach(this);
+      widget.navigationController?._attach(this);
+    }
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.navigationController?._detach(this);
     _pollTimer?.cancel();
     _groupListRealtimeReconnectTimer?.cancel();
     unawaited(_groupListRealtimeSubscription?.cancel());
@@ -320,6 +368,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _selectedGroup = _updatedSelectedGroup(groups);
       });
       _syncRealtimeSubscriptions(groups);
+      _tryOpenPendingNotificationGroup();
     } catch (error) {
       _sharedExpensesPageLog('backgroundRefresh failed: $error');
     }
@@ -369,6 +418,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _engineReachable = reachable;
       });
       _syncRealtimeSubscriptions(groups);
+      _tryOpenPendingNotificationGroup();
     } catch (error, stackTrace) {
       _sharedExpensesPageLog('group list realtime refresh failed: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
@@ -403,6 +453,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           _myPublicKey = myPublicKey;
         });
         _syncRealtimeSubscriptions(localGroups);
+        _tryOpenPendingNotificationGroup();
       }
 
       if (refreshFromEngine) {
@@ -415,6 +466,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
             _engineReachable = reachable;
           });
           _syncRealtimeSubscriptions(groups);
+          _tryOpenPendingNotificationGroup();
         }
         _sharedExpensesPageLog(
           'loadGroups refreshed groups=${groups.length} reachable=$reachable',
@@ -566,17 +618,51 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           : _updatedSelectedGroup(next);
       _engineReachable = true;
     });
+    _tryOpenPendingNotificationGroup();
   }
 
-  void _openGroup(SharedExpenseGroup group) {
+  void _openGroupActivitiesFromNotification(String groupId) {
+    final trimmed = groupId.trim();
+    if (trimmed.isEmpty) return;
+    _pendingNotificationGroupId = trimmed;
+    _tryOpenPendingNotificationGroup();
+    if (_pendingNotificationGroupId != null) {
+      unawaited(_loadGroups(refreshFromEngine: true, showErrors: false));
+    }
+  }
+
+  void _tryOpenPendingNotificationGroup() {
+    final groupId = _pendingNotificationGroupId;
+    if (groupId == null || groupId.isEmpty) return;
+    final group = _groupInState(groupId);
+    if (group == null) return;
+    _pendingNotificationGroupId = null;
+    _openGroup(
+      group,
+      initialTabIndex: _activitiesTabIndex,
+      fromNotification: true,
+    );
+  }
+
+  void _openGroup(
+    SharedExpenseGroup group, {
+    int initialTabIndex = 0,
+    bool fromNotification = false,
+  }) {
     _sharedExpensesPageLog('openGroup group=${_logId(group.id)}');
     if (!_canOpenGroup(group)) {
-      _showSnack(context.l10nTextRead(
-        'You can open this group after approval.',
-      ));
+      if (!fromNotification) {
+        _showSnack(context.l10nTextRead(
+          'You can open this group after approval.',
+        ));
+      }
       return;
     }
-    setState(() => _selectedGroup = group);
+    setState(() {
+      _selectedGroup = group;
+      _selectedGroupInitialTabIndex = initialTabIndex;
+      _selectedGroupOpenRequestId += 1;
+    });
   }
 
   void _closeGroup() {
@@ -1117,6 +1203,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       return _SharedGroupDetailView(
         group: selectedGroup,
         myPublicKey: _myPublicKey,
+        initialTabIndex: _selectedGroupInitialTabIndex,
+        openRequestId: _selectedGroupOpenRequestId,
         shortKey: _shortKey,
         onBack: _closeGroup,
         onOpenSettings: () => _openGroupSettings(selectedGroup),
@@ -1725,6 +1813,8 @@ class _CreatingGroupCard extends StatelessWidget {
 class _SharedGroupDetailView extends StatefulWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
+  final int initialTabIndex;
+  final int openRequestId;
   final String Function(String value) shortKey;
   final VoidCallback onBack;
   final VoidCallback onOpenSettings;
@@ -1737,6 +1827,8 @@ class _SharedGroupDetailView extends StatefulWidget {
   const _SharedGroupDetailView({
     required this.group,
     required this.myPublicKey,
+    required this.initialTabIndex,
+    required this.openRequestId,
     required this.shortKey,
     required this.onBack,
     required this.onOpenSettings,
@@ -1752,7 +1844,7 @@ class _SharedGroupDetailView extends StatefulWidget {
 }
 
 class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
-  int _selectedTab = 0;
+  late int _selectedTab;
   bool _showTransactions = false;
   bool _showMembers = false;
 
@@ -1765,13 +1857,26 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _selectedTab = _normalizedTabIndex(widget.initialTabIndex);
+  }
+
+  @override
   void didUpdateWidget(covariant _SharedGroupDetailView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.group.id != widget.group.id) {
+    if (oldWidget.group.id != widget.group.id ||
+        oldWidget.openRequestId != widget.openRequestId) {
       _showTransactions = false;
       _showMembers = false;
-      _selectedTab = 0;
+      _selectedTab = _normalizedTabIndex(widget.initialTabIndex);
     }
+  }
+
+  int _normalizedTabIndex(int value) {
+    if (value < 0) return 0;
+    if (value > 2) return 2;
+    return value;
   }
 
   @override
