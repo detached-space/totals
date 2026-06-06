@@ -41,7 +41,7 @@ String _formatEtb(num amount) {
     buffer.write(digits[i]);
     if (remaining > 1 && remaining % 3 == 1) buffer.write(',');
   }
-  return '${sign}ETB $buffer';
+  return '$sign$buffer ብር';
 }
 
 String _formatExpenseAmountInput(double? amount) {
@@ -1731,13 +1731,16 @@ class _SplitGroupPickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textSecondary = AppColors.textSecondary(context);
+    final chooseText = context
+        .l10n('shared.chooseWhereToAddAmount', 'Choose where to add {amount}.')
+        .replaceFirst('{amount}', _formatEtb(amount));
     return _IosModalShell(
       title: 'Split with group',
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Text(
-            'Choose where to add ${_formatEtb(amount)}.',
+            chooseText,
             style: TextStyle(
               color: textSecondary,
               fontSize: 15,
@@ -3821,7 +3824,7 @@ class _SharedAmountFilterField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: context.l10nText(hint),
         hintStyle: TextStyle(color: AppColors.textTertiary(context)),
-        prefixText: '${context.l10nText('ETB')} ',
+        prefixText: 'ብር ',
         prefixStyle: TextStyle(
           color: AppColors.textSecondary(context),
           fontSize: 13,
@@ -4772,13 +4775,15 @@ class _SharedExpenseRow extends StatelessWidget {
                             ),
                             TextSpan(
                               text:
-                                  ' paid · split ${expense.splitAmong.length}',
+                                  ' ${context.l10nText('paid')} · ${context.l10nText('split')} ${expense.splitAmong.length}',
                             ),
                           ] else
-                            const TextSpan(text: 'Settlement'),
+                            TextSpan(text: context.l10nText('Settlement')),
                           if (ago.isNotEmpty) TextSpan(text: ' · $ago'),
                           if (expense.status == 'pending')
-                            const TextSpan(text: ' · sending…'),
+                            TextSpan(
+                              text: ' · ${context.l10nText('sending')}…',
+                            ),
                         ],
                       ),
                       maxLines: 1,
@@ -4805,8 +4810,8 @@ class _SharedExpenseRow extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 linkedTransaction == null
-                                    ? 'Linked · ${_logId(linkedRef)}'
-                                    : 'Linked · ${_transactionLinkSummary(linkedTransaction)}',
+                                    ? '${context.l10nText('Linked')} · ${_logId(linkedRef)}'
+                                    : '${context.l10nText('Linked')} · ${_transactionLinkSummary(linkedTransaction)}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context)
@@ -5216,6 +5221,34 @@ String _shortRelative(int ts) {
   return '${months[d.month - 1]} ${d.day}';
 }
 
+String _localizedShortRelative(BuildContext context, int ts) {
+  if (ts <= 0) return '';
+  final diff = DateTime.now().millisecondsSinceEpoch - ts;
+  if (diff < 60 * 1000) {
+    return context.l10n('shared.timeJustNow', 'just now');
+  }
+  if (diff < 60 * 60 * 1000) {
+    final count = (diff / (60 * 1000)).floor().toString();
+    return context
+        .l10n('shared.timeMinutesAgo', '{count}m ago')
+        .replaceFirst('{count}', count);
+  }
+  if (diff < 24 * 60 * 60 * 1000) {
+    final count = (diff / (60 * 60 * 1000)).floor().toString();
+    return context
+        .l10n('shared.timeHoursAgo', '{count}h ago')
+        .replaceFirst('{count}', count);
+  }
+  if (diff < 7 * 24 * 60 * 60 * 1000) {
+    final count = (diff / (24 * 60 * 60 * 1000)).floor().toString();
+    return context
+        .l10n('shared.timeDaysAgo', '{count}d ago')
+        .replaceFirst('{count}', count);
+  }
+  final d = DateTime.fromMillisecondsSinceEpoch(ts);
+  return _formatSharedDate(d);
+}
+
 class _SharedGroupActivitiesTab extends StatelessWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
@@ -5328,37 +5361,37 @@ class _ActivityRow extends StatelessWidget {
   String _describe(SharedActivityEntry e, BuildContext context) {
     switch (e.kind) {
       case 'group_created':
-        return 'created the group';
+        return context.l10nText('created the group');
       case 'group_renamed':
-        return 'renamed the group to "${e.data['after'] ?? ''}"';
+        return '${context.l10nText('renamed the group to')} "${e.data['after'] ?? ''}"';
       case 'member_approved':
-        return 'approved a new member';
+        return context.l10nText('approved a new member');
       case 'member_joined':
-        return 'joined the group';
+        return context.l10nText('joined the group');
       case 'member_left':
-        return 'left the group';
+        return context.l10nText('left the group');
       case 'expense_created':
-        return 'added "${e.data['reason'] ?? 'an expense'}" · ${_formatEtb(e.data['amount'] ?? 0)}';
+        return '${context.l10nText('added')} "${e.data['reason'] ?? context.l10nText('an expense')}" · ${_formatEtb(e.data['amount'] ?? 0)}';
       case 'expense_amount_changed':
-        return 'changed amount to ${_formatEtb(e.data['after'] ?? 0)}';
+        return '${context.l10nText('changed amount to')} ${_formatEtb(e.data['after'] ?? 0)}';
       case 'expense_reason_changed':
-        return 'renamed expense to "${e.data['after'] ?? ''}"';
+        return '${context.l10nText('renamed expense to')} "${e.data['after'] ?? ''}"';
       case 'expense_paid_by_changed':
-        return 'changed who paid';
+        return context.l10nText('changed who paid');
       case 'expense_split_changed':
-        return 'changed the split';
+        return context.l10nText('changed the split');
       case 'expense_date_changed':
-        return 'updated the date';
+        return context.l10nText('updated the date');
       case 'expense_linked_transaction_changed':
         return e.data['after'] == null
-            ? 'removed the linked transaction'
-            : 'linked a transaction';
+            ? context.l10nText('removed the linked transaction')
+            : context.l10nText('linked a transaction');
       case 'expense_deleted':
-        return 'deleted "${e.data['reason'] ?? 'an expense'}"';
+        return '${context.l10nText('deleted')} "${e.data['reason'] ?? context.l10nText('an expense')}"';
       case 'settlement_created':
-        return 'settled up · ${_formatEtb(e.data['amount'] ?? 0)}';
+        return '${context.l10nText('settled up')} · ${_formatEtb(e.data['amount'] ?? 0)}';
       case 'nudge_sent':
-        return 'sent a nudge · ${_formatEtb(e.data['amount'] ?? 0)}';
+        return '${context.l10nText('sent a nudge')} · ${_formatEtb(e.data['amount'] ?? 0)}';
       default:
         return e.kind;
     }
@@ -5781,7 +5814,15 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      'Updated ${_shortRelative(_lastGroupEventTimestamp(group))}',
+                      context
+                          .l10n('shared.updatedTime', 'Updated {time}')
+                          .replaceFirst(
+                            '{time}',
+                            _localizedShortRelative(
+                              context,
+                              _lastGroupEventTimestamp(group),
+                            ),
+                          ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.right,
@@ -7050,11 +7091,11 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
               icon: AppIcons.receipt_long_rounded,
               title: linkedTransaction == null
                   ? _linkedTxRef == null
-                      ? 'Link transaction'
-                      : 'Linked transaction'
+                      ? context.l10nText('Link transaction')
+                      : context.l10nText('Linked transaction')
                   : _transactionCounterpartyLabel(linkedTransaction),
               subtitle: linkedTransaction == null
-                  ? _linkedTxRef ?? 'Optional'
+                  ? _linkedTxRef ?? context.l10nText('Optional')
                   : _transactionLinkSummary(linkedTransaction),
               onTap: _pickLinkedTransaction,
             ),
@@ -7280,7 +7321,7 @@ class _GroupCardBalanceLine extends StatelessWidget {
     final myBalance = balances[myPublicKey] ?? 0.0;
     if (myBalance.abs() < 0.5) {
       return Text(
-        'All settled',
+        context.l10nText('All settled'),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -7291,8 +7332,12 @@ class _GroupCardBalanceLine extends StatelessWidget {
     }
     final isOwed = myBalance > 0;
     final text = isOwed
-        ? "You're owed ${_formatEtb(myBalance)}"
-        : 'You owe ${_formatEtb(myBalance.abs())}';
+        ? context
+            .l10n('shared.youAreOwedAmount', "You're owed {amount}")
+            .replaceFirst('{amount}', _formatEtb(myBalance))
+        : context
+            .l10n('shared.youOweAmount', 'You owe {amount}')
+            .replaceFirst('{amount}', _formatEtb(myBalance.abs()));
     return Text(
       text,
       maxLines: 1,
@@ -7581,7 +7626,7 @@ class _IosModalShell extends StatelessWidget {
                                     Expanded(
                                       child: titleWidget ??
                                           Text(
-                                            title,
+                                            context.l10nText(title),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
@@ -7674,7 +7719,7 @@ class _IosFormGroup extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  label.toUpperCase(),
+                  context.l10nText(label).toUpperCase(),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -7726,7 +7771,7 @@ class _IosFormInput extends StatelessWidget {
       onChanged: onChanged,
       style: TextStyle(fontSize: 16, color: textPrimary),
       decoration: InputDecoration(
-        hintText: hint,
+        hintText: hint == null ? null : context.l10nText(hint!),
         hintStyle: TextStyle(color: textMuted, fontSize: 16),
         filled: true,
         fillColor: cardColor,
@@ -7782,7 +7827,7 @@ class _IosCheckboxRow extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                title,
+                context.l10nText(title),
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -8004,7 +8049,7 @@ class _IosAmountRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              'ETB',
+              'ብር',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
@@ -8158,7 +8203,7 @@ class _IosTextAction extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
         child: Text(
-          label,
+          context.l10nText(label),
           style: const TextStyle(
             color: _iosPrimary,
             fontSize: 12,
@@ -8226,7 +8271,7 @@ class _IosFormSubmit extends StatelessWidget {
                       const SizedBox(width: 8),
                     ],
                     Text(
-                      label,
+                      context.l10nText(label),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 16,
@@ -8283,7 +8328,7 @@ class _IosSecondaryButton extends StatelessWidget {
                 const SizedBox(width: 8),
               ],
               Text(
-                label,
+                context.l10nText(label),
                 style: TextStyle(
                   color: textPrimary,
                   fontSize: 13,
@@ -8340,7 +8385,7 @@ class _IosDangerButton extends StatelessWidget {
                   const SizedBox(width: 8),
                 ],
                 Text(
-                  label,
+                  context.l10nText(label),
                   style: const TextStyle(
                     color: _iosNegative,
                     fontSize: 13,
