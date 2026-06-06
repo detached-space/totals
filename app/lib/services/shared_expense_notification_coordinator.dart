@@ -52,6 +52,7 @@ class SharedExpenseNotificationCoordinator {
 
       _busSubscription =
           SharedExpenseRealtimeBus.instance.stream.listen(_handleGroupUpdated);
+      unawaited(_refreshGroupsAndSubscriptions());
     } catch (error, stackTrace) {
       _sharedExpenseNotificationLog('start failed: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);

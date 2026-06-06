@@ -49,6 +49,8 @@ class SharedExpenseRepository {
   static const _groupKeyPrefix = 'shared_expense_group_key_';
   static const _legacyInvitePrefixes = ['totals://join/', 'totals//join/'];
   static const _snapshotPlaintextBudget = 45000;
+  static const _fallbackGroupName = 'Shared group';
+  static const _fallbackDisplayName = 'Me';
 
   final TotalsEngineClient _engineClient;
   final SharedExpenseCryptoService _cryptoService;
@@ -91,17 +93,22 @@ class SharedExpenseRepository {
           .where((group) => group.id.isNotEmpty)
           .toList(growable: false);
       if (groups.isNotEmpty) {
-        _sharedExpenseLog('getGroups loaded ${groups.length} db groups');
-        return groups;
+        final repaired = await _repairCachedGroups(groups);
+        _sharedExpenseLog('getGroups loaded ${repaired.length} db groups');
+        return repaired;
       }
 
       final legacyGroups = await _groupsFromLegacyPrefs();
       if (legacyGroups.isNotEmpty) {
-        _sharedExpenseLog(
-          'getGroups migrating ${legacyGroups.length} legacy pref groups',
+        final repaired = await _repairCachedGroups(
+          legacyGroups,
+          persist: false,
         );
-        await _saveGroups(legacyGroups);
-        return legacyGroups;
+        _sharedExpenseLog(
+          'getGroups migrating ${repaired.length} legacy pref groups',
+        );
+        await _saveGroups(repaired);
+        return repaired;
       }
 
       _sharedExpenseLog('getGroups local cache empty');
@@ -271,7 +278,8 @@ class SharedExpenseRepository {
     final identity = await _cryptoService.getOrCreateIdentity();
     final group = SharedExpenseGroup(
       id: groupId,
-      name: existing?.name ?? 'Shared group',
+      name:
+          existing == null ? _fallbackGroupName : _bestKnownGroupName(existing),
       myDisplayName: displayName,
       createdAt: existing?.createdAt ?? DateTime.now(),
       expiresAt: existing?.expiresAt,
@@ -417,6 +425,9 @@ class SharedExpenseRepository {
       'approveMember start group=${_logId(group.id)} '
       'member=${_logId(member.devicePublicKey)}',
     );
+    final groupName = _bestKnownGroupName(group);
+    final approverDisplayName =
+        _bestKnownDisplayName(group, identity.publicKeyHex);
 
     // Send the group key encrypted with a 1:1 shared secret.
     final encryptedBlob = await _cryptoService.encryptGroupKeyPayload(
@@ -424,11 +435,12 @@ class SharedExpenseRepository {
       payload: {
         'type': 'key_exchange',
         'groupId': group.id,
-        'groupName': group.name,
+        if (!_isFallbackGroupName(groupName)) 'groupName': groupName,
         'groupKey': groupKeyHex,
         'approvedPublicKey': member.devicePublicKey,
         'approvedBy': identity.publicKeyHex,
-        'approverDisplayName': group.myDisplayName,
+        if (!_isFallbackDisplayName(approverDisplayName))
+          'approverDisplayName': approverDisplayName,
         'backfillNewMembers': group.backfillNewMembers,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
@@ -511,13 +523,22 @@ class SharedExpenseRepository {
     for (final local in localGroups) {
       if (local.status == SharedExpenseGroupStatus.localOnly) continue;
       if (serverGroupIds.contains(local.id)) continue;
-      await _deleteLocalGroup(local.id);
-      _sharedExpenseLog('refreshGroups pruned group=${_logId(local.id)}');
+      _sharedExpenseLog(
+        'refreshGroups kept local group missing from server list '
+        'group=${_logId(local.id)}',
+      );
     }
 
     for (final serverGroup in serverGroups) {
       final local = localById[serverGroup.id];
+      if (local == null) {
+        _sharedExpenseLog(
+          'refreshGroups skipped unknown server group=${_logId(serverGroup.id)}',
+        );
+        continue;
+      }
       final hasKey = await _readGroupKey(serverGroup.id) != null;
+      final isReady = hasKey || local.status == SharedExpenseGroupStatus.ready;
 
       // Build a set of pubkeys the server currently lists. If a member has
       // left, drop them from approvedMemberKeys / keySharedWith / pending
@@ -529,36 +550,45 @@ class SharedExpenseRepository {
           .toSet();
 
       final approvedKeys = <String>{
-        ...?local?.approvedMemberKeys.where(
+        ...local.approvedMemberKeys.where(
             (k) => k == identity.publicKeyHex || currentMemberKeys.contains(k)),
-        if (hasKey) identity.publicKeyHex,
+        if (isReady) identity.publicKeyHex,
       };
       final sharedWith = <String>{
-        ...?local?.keySharedWith.where((k) => currentMemberKeys.contains(k)),
+        ...local.keySharedWith.where((k) => currentMemberKeys.contains(k)),
       };
-      final pruned = local?.pendingApprovals
-              .where((p) => currentMemberKeys.contains(p.publicKey))
-              .toList() ??
-          const [];
+      final pruned = local.pendingApprovals
+          .where((p) => currentMemberKeys.contains(p.publicKey))
+          .toList();
+      final myDisplayName = _bestKnownDisplayName(local, identity.publicKeyHex);
+      final displayNames =
+          myDisplayName.trim().isEmpty || _isFallbackDisplayName(myDisplayName)
+              ? local.displayNames
+              : _mergeDisplayNames(
+                  local.displayNames,
+                  {identity.publicKeyHex: myDisplayName},
+                  protectedPublicKey: identity.publicKeyHex,
+                );
 
       final merged = SharedExpenseGroup(
         id: serverGroup.id,
-        name: local?.name ?? 'Shared group',
-        myDisplayName: local?.myDisplayName ?? 'Me',
+        name: _bestKnownGroupName(local),
+        myDisplayName: myDisplayName,
         createdAt: serverGroup.createdAt,
         expiresAt: serverGroup.expiresAt,
-        status: hasKey
+        status: isReady
             ? SharedExpenseGroupStatus.ready
             : SharedExpenseGroupStatus.pendingApproval,
         members: serverGroup.members,
         approvedMemberKeys: approvedKeys,
-        expenses: local?.expenses ?? const [],
-        activity: local?.activity ?? const [],
-        displayNames: local?.displayNames ?? const {},
+        expenses: local.expenses,
+        activity: local.activity,
+        displayNames: displayNames,
         pendingApprovals: pruned,
-        backfillNewMembers: local?.backfillNewMembers ?? false,
+        backfillNewMembers: local.backfillNewMembers,
         keySharedWith: sharedWith,
-        lastSyncAt: local?.lastSyncAt,
+        lastSyncAt: local.lastSyncAt,
+        pendingMetaBroadcast: local.pendingMetaBroadcast,
       );
       await _upsertGroup(merged);
       _sharedExpenseLog(
@@ -580,6 +610,192 @@ class SharedExpenseRepository {
     _sharedExpenseLog('refreshGroups done groups=${groups.length}');
     return groups;
   }
+
+  String _bestKnownGroupName(SharedExpenseGroup group) {
+    final current = group.name.trim();
+    if (current.isNotEmpty && !_isFallbackGroupName(current)) return current;
+
+    final activity = [...group.activity]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    for (final entry in activity) {
+      if (entry.kind == 'group_renamed') {
+        final after = entry.data['after'];
+        if (after is String && after.trim().isNotEmpty) {
+          return after.trim();
+        }
+      }
+    }
+    for (final entry in activity) {
+      if (entry.kind == 'group_created') {
+        final name = entry.data['name'];
+        if (name is String && name.trim().isNotEmpty) {
+          return name.trim();
+        }
+      }
+    }
+    return group.name;
+  }
+
+  String _bestKnownDisplayName(SharedExpenseGroup group, String myPublicKey) {
+    final current = group.myDisplayName.trim();
+    if (current.isNotEmpty && !_isFallbackDisplayName(current)) {
+      return current;
+    }
+
+    final fromDisplayNames = group.displayNames[myPublicKey]?.trim();
+    if (fromDisplayNames != null &&
+        fromDisplayNames.isNotEmpty &&
+        !_isFallbackDisplayName(fromDisplayNames)) {
+      return fromDisplayNames;
+    }
+
+    final activity = [...group.activity]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    for (final entry in activity) {
+      if (entry.actor != myPublicKey) continue;
+      if (entry.kind != 'member_joined') continue;
+      final displayName = entry.data['displayName'];
+      if (displayName is String &&
+          displayName.trim().isNotEmpty &&
+          !_isFallbackDisplayName(displayName)) {
+        return displayName.trim();
+      }
+    }
+
+    if (fromDisplayNames != null && fromDisplayNames.isNotEmpty) {
+      return fromDisplayNames;
+    }
+    return group.myDisplayName;
+  }
+
+  Future<List<SharedExpenseGroup>> _repairCachedGroups(
+    List<SharedExpenseGroup> groups, {
+    bool persist = true,
+  }) async {
+    if (groups.isEmpty) return groups;
+
+    String? myPublicKey;
+    try {
+      final identity = await _cryptoService.getOrCreateIdentity();
+      myPublicKey = identity.publicKeyHex;
+    } catch (error) {
+      _sharedExpenseLog('getGroups skipped display-name repair: $error');
+    }
+    var changed = false;
+    final repaired = <SharedExpenseGroup>[];
+    for (final group in groups) {
+      final name = _bestKnownGroupName(group);
+      final myDisplayName = myPublicKey == null
+          ? group.myDisplayName
+          : _bestKnownDisplayName(group, myPublicKey);
+      var displayNames = group.displayNames;
+      if (myPublicKey != null &&
+          myDisplayName.trim().isNotEmpty &&
+          !_isFallbackDisplayName(myDisplayName)) {
+        displayNames = _mergeDisplayNames(
+          group.displayNames,
+          {myPublicKey: myDisplayName},
+          protectedPublicKey: myPublicKey,
+        );
+      }
+
+      final next = group.copyWith(
+        name: name,
+        myDisplayName: myDisplayName,
+        displayNames: displayNames,
+      );
+      if (jsonEncode(next.toJson()) != jsonEncode(group.toJson())) {
+        changed = true;
+      }
+      repaired.add(next);
+    }
+
+    if (changed && persist) {
+      await _saveGroups(repaired);
+      _sharedExpenseLog('getGroups repaired cached group metadata');
+    }
+    return changed ? repaired : groups;
+  }
+
+  String? _trustedIncomingGroupName(
+    SharedExpenseGroup group,
+    Object? rawName,
+  ) {
+    if (rawName is! String) return null;
+    final incoming = rawName.trim();
+    if (incoming.isEmpty) return null;
+
+    final current = _bestKnownGroupName(group);
+    if (_isFallbackGroupName(incoming) &&
+        current.trim().isNotEmpty &&
+        !_isFallbackGroupName(current)) {
+      return null;
+    }
+    return incoming;
+  }
+
+  String? _trustedIncomingDisplayName({
+    required String? current,
+    required Object? rawName,
+    bool protectFallback = false,
+  }) {
+    if (rawName is! String) return null;
+    final incoming = rawName.trim();
+    if (incoming.isEmpty) return null;
+
+    final currentName = current?.trim() ?? '';
+    if (_isFallbackDisplayName(incoming)) {
+      if (protectFallback) return null;
+      if (currentName.isNotEmpty && !_isFallbackDisplayName(currentName)) {
+        return null;
+      }
+    }
+    return incoming;
+  }
+
+  Map<String, String> _mergeDisplayNames(
+    Map<String, String> existing,
+    Map<String, String> incoming, {
+    String? protectedPublicKey,
+  }) {
+    final merged = <String, String>{...existing};
+    for (final entry in incoming.entries) {
+      final displayName = _trustedIncomingDisplayName(
+        current: merged[entry.key],
+        rawName: entry.value,
+        protectFallback: entry.key == protectedPublicKey,
+      );
+      if (displayName != null) {
+        merged[entry.key] = displayName;
+      }
+    }
+    return merged;
+  }
+
+  Map<String, String> _outboundDisplayNames(
+    SharedExpenseGroup group,
+    String myPublicKey,
+  ) {
+    final names = <String, String>{};
+    for (final entry in group.displayNames.entries) {
+      final displayName = entry.value.trim();
+      if (displayName.isEmpty || _isFallbackDisplayName(displayName)) {
+        continue;
+      }
+      names[entry.key] = displayName;
+    }
+
+    final myDisplayName = _bestKnownDisplayName(group, myPublicKey).trim();
+    if (myDisplayName.isNotEmpty && !_isFallbackDisplayName(myDisplayName)) {
+      names[myPublicKey] = myDisplayName;
+    }
+    return names;
+  }
+
+  bool _isFallbackGroupName(String value) => value.trim() == _fallbackGroupName;
+
+  bool _isFallbackDisplayName(String value) =>
+      value.trim() == _fallbackDisplayName;
 
   /// Pull and apply all pending payloads for one group. Returns true if any
   /// state changed locally.
@@ -606,7 +822,7 @@ class SharedExpenseRepository {
       if (applied) changed = true;
     }
 
-    // Stamp lastSyncAt + retry any pending meta broadcast.
+    // Stamp lastSyncAt + retry any pending outbound work.
     final after = await _groupById(groupId);
     if (after != null) {
       await _upsertGroup(after.copyWith(
@@ -623,6 +839,8 @@ class SharedExpenseRepository {
           }
         }
       }
+      final retriedPendingExpenses = await _retryPendingExpensePayloads(after);
+      if (retriedPendingExpenses) changed = true;
     }
 
     _sharedExpenseLog(
@@ -631,6 +849,59 @@ class SharedExpenseRepository {
     if (changed) {
       final latest = await _groupById(groupId);
       if (latest != null) SharedExpenseRealtimeBus.instance.publish(latest);
+    }
+    return changed;
+  }
+
+  Future<bool> _retryPendingExpensePayloads(SharedExpenseGroup group) async {
+    if (!group.hasGroupKey) return false;
+
+    final pendingIds = group.expenses
+        .where((expense) => expense.status == 'pending')
+        .map((expense) => expense.id)
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+    if (pendingIds.isEmpty) return false;
+
+    var changed = false;
+    for (final expenseId in pendingIds) {
+      final latest = await _groupById(group.id);
+      if (latest == null || !latest.hasGroupKey) return changed;
+
+      SharedExpense? current;
+      for (final expense in latest.expenses) {
+        if (expense.id == expenseId) {
+          current = expense;
+          break;
+        }
+      }
+      if (current == null || current.status != 'pending') continue;
+
+      try {
+        await _emitExpensePayload(latest, current);
+        final afterSend = await _groupById(group.id);
+        if (afterSend == null) return changed;
+        final sentVersion = current.revisedAt ?? current.timestamp;
+        final nextExpenses = afterSend.expenses.map((expense) {
+          if (expense.id != expenseId || expense.status != 'pending') {
+            return expense;
+          }
+          final currentVersion = expense.revisedAt ?? expense.timestamp;
+          if (currentVersion != sentVersion) return expense;
+          return expense.copyWith(status: 'synced');
+        }).toList(growable: false);
+        await _upsertGroup(afterSend.copyWith(expenses: nextExpenses));
+        changed = true;
+        _sharedExpenseLog(
+          'retryPendingExpensePayloads sent expense=${_logId(expenseId)} '
+          'group=${_logId(group.id)}',
+        );
+      } catch (error) {
+        _sharedExpenseLog(
+          'retryPendingExpensePayloads failed expense=${_logId(expenseId)} '
+          'group=${_logId(group.id)}: $error',
+        );
+      }
     }
     return changed;
   }
@@ -1198,7 +1469,7 @@ class SharedExpenseRepository {
         return _applyGroupMeta(group, senderPk, decoded);
 
       case 'member_meta':
-        return _applyMemberMeta(group, senderPk, decoded);
+        return _applyMemberMeta(group, senderPk, decoded, myPublicKey);
 
       case 'expense':
         return _applyExpense(group, senderPk, decoded);
@@ -1210,7 +1481,7 @@ class SharedExpenseRepository {
         return _applyNudge(group, senderPk, decoded);
 
       case 'group_snapshot':
-        return _applyGroupSnapshot(group, senderPk, decoded);
+        return _applyGroupSnapshot(group, senderPk, decoded, myPublicKey);
 
       default:
         _sharedExpenseLog('_applyPayload unknown type=$type');
@@ -1228,7 +1499,11 @@ class SharedExpenseRepository {
     await _writeGroupKey(group.id, groupKeyHex);
     final approvedBy = decoded['approvedBy'] as String?;
     final approvedPk = decoded['approvedPublicKey'] as String?;
-    final approverName = decoded['approverDisplayName'] as String?;
+    final approverName = _trustedIncomingDisplayName(
+      current: approvedBy == null ? null : group.displayNames[approvedBy],
+      rawName: decoded['approverDisplayName'],
+    );
+    final groupName = _trustedIncomingGroupName(group, decoded['groupName']);
     final backfillNewMembers = decoded['backfillNewMembers'] is bool
         ? decoded['backfillNewMembers'] as bool
         : null;
@@ -1247,7 +1522,7 @@ class SharedExpenseRepository {
       if (approvedPk != null) approvedPk,
     };
     final updated = group.copyWith(
-      name: decoded['groupName'] as String? ?? group.name,
+      name: groupName,
       status: SharedExpenseGroupStatus.ready,
       backfillNewMembers: backfillNewMembers,
       approvedMemberKeys: approvedKeysAfter,
@@ -1274,7 +1549,7 @@ class SharedExpenseRepository {
     String senderPk,
     Map<String, dynamic> decoded,
   ) async {
-    final newName = (decoded['name'] as String?)?.trim();
+    final newName = _trustedIncomingGroupName(group, decoded['name']);
     final incomingBackfill = decoded['backfillNewMembers'] is bool
         ? decoded['backfillNewMembers'] as bool
         : null;
@@ -1324,8 +1599,13 @@ class SharedExpenseRepository {
     SharedExpenseGroup group,
     String senderPk,
     Map<String, dynamic> decoded,
+    String myPublicKey,
   ) async {
-    final displayName = (decoded['displayName'] as String?)?.trim();
+    final displayName = _trustedIncomingDisplayName(
+      current: group.displayNames[senderPk],
+      rawName: decoded['displayName'],
+      protectFallback: senderPk == myPublicKey,
+    );
     if (displayName == null || displayName.isEmpty) return false;
     final current = group.displayNames[senderPk];
     final isFirstSeen = !group.approvedMemberKeys.contains(senderPk);
@@ -1478,6 +1758,7 @@ class SharedExpenseRepository {
     SharedExpenseGroup group,
     String senderPk,
     Map<String, dynamic> decoded,
+    String myPublicKey,
   ) async {
     final before = jsonEncode(group.toJson());
     final incomingExpenses = ((decoded['expenses'] as List?) ?? const [])
@@ -1500,14 +1781,14 @@ class SharedExpenseRepository {
     final displayNames = _stringMapFromJson(decoded['displayNames']);
     final approvedMemberKeys =
         _stringListFromJson(decoded['approvedMemberKeys']).toSet();
-    final groupName = (decoded['groupName'] as String?)?.trim();
+    final groupName = _trustedIncomingGroupName(group, decoded['groupName']);
     final incomingBackfill = decoded['backfillNewMembers'] is bool
         ? decoded['backfillNewMembers'] as bool
         : null;
     final createdAt = _snapshotDate(decoded['createdAt']);
 
     final updated = group.copyWith(
-      name: groupName == null || groupName.isEmpty ? group.name : groupName,
+      name: groupName,
       createdAt: createdAt ?? group.createdAt,
       status: SharedExpenseGroupStatus.ready,
       backfillNewMembers: incomingBackfill,
@@ -1521,10 +1802,11 @@ class SharedExpenseRepository {
       },
       expenses: _mergeSnapshotExpenses(group.expenses, incomingExpenses),
       activity: _mergeSnapshotActivity(group.activity, incomingActivity),
-      displayNames: {
-        ...group.displayNames,
-        ...displayNames,
-      },
+      displayNames: _mergeDisplayNames(
+        group.displayNames,
+        displayNames,
+        protectedPublicKey: myPublicKey,
+      ),
     );
 
     if (jsonEncode(updated.toJson()) == before) return false;
@@ -1675,7 +1957,11 @@ class SharedExpenseRepository {
     if (!group.hasGroupKey) return false;
     final pk = decoded['publicKey'] as String? ?? senderPk;
     if (pk.isEmpty || pk == myPublicKey) return false;
-    final displayName = (decoded['displayName'] as String?)?.trim();
+    final displayName = _trustedIncomingDisplayName(
+      current: group.displayNames[pk],
+      rawName: decoded['displayName'],
+    );
+    final approvalDisplayName = displayName ?? group.displayNames[pk];
     final ts = (decoded['timestamp'] as num?)?.toInt() ??
         DateTime.now().millisecondsSinceEpoch;
 
@@ -1684,7 +1970,7 @@ class SharedExpenseRepository {
     final existing =
         group.pendingApprovals.where((p) => p.publicKey == pk).toList();
     if (existing.isNotEmpty &&
-        existing.first.displayName == displayName &&
+        existing.first.displayName == approvalDisplayName &&
         existing.first.requestedAt == ts) {
       return false;
     }
@@ -1698,7 +1984,7 @@ class SharedExpenseRepository {
       ...group.pendingApprovals.where((p) => p.publicKey != pk),
       PendingApproval(
         publicKey: pk,
-        displayName: displayName,
+        displayName: approvalDisplayName,
         requestedAt: ts,
       ),
     ];
@@ -1776,6 +2062,8 @@ class SharedExpenseRepository {
     final keyBytes = SharedExpenseCryptoService.fromHex(groupKeyHex);
     final snapshotId = _uuid.v4();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final groupName = _bestKnownGroupName(group);
     final basePayload = <String, dynamic>{
       'type': 'group_snapshot',
       'snapshotId': snapshotId,
@@ -1790,12 +2078,15 @@ class SharedExpenseRepository {
       payload: {
         ...basePayload,
         'part': 'meta',
-        'groupName': group.name,
+        if (!_isFallbackGroupName(groupName)) 'groupName': groupName,
         'backfillNewMembers': group.backfillNewMembers,
         'createdAt': group.createdAt.millisecondsSinceEpoch,
         'members': group.members.map((member) => member.toJson()).toList(),
         'approvedMemberKeys': group.approvedMemberKeys.toList(),
-        'displayNames': group.displayNames,
+        'displayNames': _outboundDisplayNames(
+          group,
+          identity.publicKeyHex,
+        ),
       },
     );
 
@@ -1890,14 +2181,17 @@ class SharedExpenseRepository {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return false;
     final keyBytes = SharedExpenseCryptoService.fromHex(groupKeyHex);
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final groupName = _bestKnownGroupName(group);
+    final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
     var allOk = true;
-    if (group.name.isNotEmpty) {
+    if (groupName.isNotEmpty && !_isFallbackGroupName(groupName)) {
       try {
         final encrypted = await _cryptoService.encryptPayloadWithKey(
           keyBytes: keyBytes,
           payload: {
             'type': 'group_meta',
-            'name': group.name,
+            'name': groupName,
             'backfillNewMembers': group.backfillNewMembers,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
           },
@@ -1911,13 +2205,13 @@ class SharedExpenseRepository {
         allOk = false;
       }
     }
-    if (group.myDisplayName.isNotEmpty) {
+    if (displayName.isNotEmpty && !_isFallbackDisplayName(displayName)) {
       try {
         final encrypted = await _cryptoService.encryptPayloadWithKey(
           keyBytes: keyBytes,
           payload: {
             'type': 'member_meta',
-            'displayName': group.myDisplayName,
+            'displayName': displayName,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
           },
         );
@@ -1936,12 +2230,13 @@ class SharedExpenseRepository {
   Future<void> _emitGroupMeta(SharedExpenseGroup group) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return;
+    final groupName = _bestKnownGroupName(group);
     try {
       final encrypted = await _cryptoService.encryptPayloadWithKey(
         keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
         payload: {
           'type': 'group_meta',
-          'name': group.name,
+          if (!_isFallbackGroupName(groupName)) 'name': groupName,
           'backfillNewMembers': group.backfillNewMembers,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         },
@@ -1962,12 +2257,17 @@ class SharedExpenseRepository {
   Future<void> _emitMemberMeta(SharedExpenseGroup group) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return;
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
+    if (displayName.trim().isEmpty || _isFallbackDisplayName(displayName)) {
+      return;
+    }
     try {
       final encrypted = await _cryptoService.encryptPayloadWithKey(
         keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
         payload: {
           'type': 'member_meta',
-          'displayName': group.myDisplayName,
+          'displayName': displayName,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         },
       );
@@ -1987,10 +2287,11 @@ class SharedExpenseRepository {
   Future<void> _broadcastJoinRequest(SharedExpenseGroup group) async {
     final identity = await _cryptoService.getOrCreateIdentity();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
     final payload = {
       'type': 'join_request',
       'publicKey': identity.publicKeyHex,
-      'displayName': group.myDisplayName,
+      if (!_isFallbackDisplayName(displayName)) 'displayName': displayName,
       'timestamp': timestamp,
     };
     for (final member in group.members) {
@@ -2080,11 +2381,8 @@ class SharedExpenseRepository {
       return await _secureStorage.read(key: key);
     } catch (error) {
       _sharedExpenseLog(
-        '_readGroupKey decrypt failed group=${_logId(groupId)} error=$error — purging slot',
+        '_readGroupKey failed group=${_logId(groupId)} error=$error',
       );
-      try {
-        await _secureStorage.delete(key: key);
-      } catch (_) {/* ignore */}
       return null;
     }
   }

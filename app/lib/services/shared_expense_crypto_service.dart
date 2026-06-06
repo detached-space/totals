@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
@@ -61,6 +60,21 @@ class SharedExpenseCryptoService {
       return SharedExpenseIdentity(publicKeyHex: existingPublicHex);
     }
 
+    if (existingPrivateHex != null && existingPrivateHex.isNotEmpty) {
+      _cryptoLog('repairing missing identity public key');
+      final keyPair = await _ed25519.newKeyPairFromSeed(
+        fromHex(existingPrivateHex),
+      );
+      final publicKey = await keyPair.extractPublicKey();
+      final publicKeyHex = toHex(publicKey.bytes);
+      await _storage.write(key: _publicKeyKey, value: publicKeyHex);
+      return SharedExpenseIdentity(publicKeyHex: publicKeyHex);
+    }
+
+    if (existingPublicHex != null && existingPublicHex.isNotEmpty) {
+      throw StateError('Shared expense identity is incomplete.');
+    }
+
     _cryptoLog('creating new identity');
     final seed = randomBytes(32);
     final keyPair = await _ed25519.newKeyPairFromSeed(seed);
@@ -74,20 +88,14 @@ class SharedExpenseCryptoService {
     return SharedExpenseIdentity(publicKeyHex: publicKeyHex);
   }
 
-  /// Read a value from secure storage, treating decrypt failures (e.g. the
-  /// Keystore master key rotated after an app reinstall) as "no value stored"
-  /// rather than letting a crash bubble up. The caller will regenerate.
+  /// Read a value from secure storage. Read failures are not treated as a
+  /// missing identity because rotating this key changes group membership.
   Future<String?> _safeRead(String key) async {
     try {
       return await _storage.read(key: key);
     } catch (error) {
-      _cryptoLog('safeRead failed key=$key error=$error — purging slot');
-      // Best effort — try to clear the unreadable entry so a fresh write
-      // succeeds. If that also throws, swallow it.
-      try {
-        await _storage.delete(key: key);
-      } catch (_) {/* ignore */}
-      return null;
+      _cryptoLog('safeRead failed key=$key error=$error');
+      throw StateError('Shared expense identity storage is unavailable.');
     }
   }
 

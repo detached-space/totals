@@ -37,7 +37,13 @@ class SharedExpenseBackgroundNotificationService {
               .toSet(),
       };
 
-      final refreshedGroups = await _repository.refreshGroups();
+      for (final group in beforeGroups) {
+        if (group.id.isEmpty) continue;
+        if (group.status != SharedExpenseGroupStatus.ready) continue;
+        await _repository.syncGroup(group.id);
+      }
+
+      final refreshedGroups = await _repository.getGroups();
       final myPublicKey = await _repository.myPublicKey();
       if (myPublicKey.isEmpty) return;
 

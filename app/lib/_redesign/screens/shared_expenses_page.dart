@@ -205,7 +205,7 @@ Future<bool> showSplitTransactionWithGroupFlow({
     );
     if (result is! _ExpenseSheetSave || !context.mounted) return false;
 
-    await repo.splitTransactionIntoGroup(
+    final updatedGroup = await repo.splitTransactionIntoGroup(
       group: selectedGroup,
       amount: result.amount,
       reason: result.reason,
@@ -216,6 +216,16 @@ Future<bool> showSplitTransactionWithGroupFlow({
     );
 
     if (!context.mounted) return true;
+    if (_hasPendingLinkedExpense(
+      group: updatedGroup,
+      linkedTxRef: result.linkedTxRef ?? linkedTxRef,
+    )) {
+      showSnack(context.l10nTextRead(
+        "Saved locally. We'll send it when you're connected.",
+      ));
+      return true;
+    }
+
     showSnack(
       context.l10nTextRead('Expense added to ${selectedGroup.name}'),
     );
@@ -226,6 +236,20 @@ Future<bool> showSplitTransactionWithGroupFlow({
     }
     return false;
   }
+}
+
+bool _hasPendingLinkedExpense({
+  required SharedExpenseGroup group,
+  required String linkedTxRef,
+}) {
+  final normalized = linkedTxRef.trim();
+  if (normalized.isEmpty) return false;
+  return group.expenses.any(
+    (expense) =>
+        !expense.deleted &&
+        expense.status == 'pending' &&
+        expense.linkedTxRef?.trim() == normalized,
+  );
 }
 
 class SharedExpenseNavigationController {
