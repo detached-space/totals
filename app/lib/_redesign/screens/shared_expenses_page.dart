@@ -3594,15 +3594,49 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                 ? context.l10nText('Send a nudge')
                 : null;
 
-    // Counterparties — sorted by absolute balance, biggest first.
-    final counterparties = members
-        .skip(1)
-        .where((m) => m.publicKey.isNotEmpty)
+    final memberByPublicKey = {
+      for (final member in members)
+        if (member.publicKey.isNotEmpty) member.publicKey: member,
+    };
+    final amountByCounterparty = <String, double>{};
+    if (isReady && !settled) {
+      for (final debt in settlementPlanFor(group).debts) {
+        final String? counterpartyPk;
+        if (myBalance > 0 && debt.to == myPublicKey) {
+          counterpartyPk = debt.from;
+        } else if (myBalance < 0 && debt.from == myPublicKey) {
+          counterpartyPk = debt.to;
+        } else {
+          counterpartyPk = null;
+        }
+        if (counterpartyPk == null || counterpartyPk.isEmpty) continue;
+        amountByCounterparty.update(
+          counterpartyPk,
+          (current) => current + debt.amount,
+          ifAbsent: () => debt.amount,
+        );
+      }
+    }
+    final counterparties = amountByCounterparty.entries
+        .map((entry) {
+          final member = memberByPublicKey[entry.key];
+          final label = member?.label ??
+              group.displayNameFor(
+                myPublicKey,
+                entry.key,
+              );
+          final color =
+              member?.color ?? Color(memberColorFor(group, entry.key));
+          return _SharedDebtCounterpartySummary(
+            label: label,
+            color: color,
+            amount: entry.value,
+          );
+        })
+        .where((summary) => summary.amount >= 0.5)
         .toList(growable: false)
-      ..sort((a, b) => (balances[b.publicKey] ?? 0)
-          .abs()
-          .compareTo((balances[a.publicKey] ?? 0).abs()));
-    final topTwo = counterparties.take(2).toList(growable: false);
+      ..sort((a, b) => b.amount.compareTo(a.amount));
+    final topCounterparties = counterparties.take(2).toList(growable: false);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -3654,7 +3688,7 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                 ],
               ),
             ),
-            if (topTwo.isNotEmpty) ...[
+            if (topCounterparties.isNotEmpty) ...[
               const SizedBox(width: 14),
               VerticalDivider(
                 color: AppColors.borderColor(context),
@@ -3667,38 +3701,27 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final member in topTwo) ...[
+                    for (final counterparty in topCounterparties) ...[
                       Text(
-                        member.label,
+                        counterparty.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style:
                             Theme.of(context).textTheme.labelMedium?.copyWith(
-                                  color: member.color,
+                                  color: counterparty.color,
                                   fontWeight: FontWeight.w900,
                                 ),
                       ),
                       const SizedBox(height: 6),
-                      Builder(builder: (_) {
-                        final bal = balances[member.publicKey] ?? 0.0;
-                        final isMyCreditor = bal < 0;
-                        // From MY perspective:
-                        //   if their balance > 0, they're owed money (someone owes them)
-                        //   if their balance < 0, they owe money (likely me)
-                        final txt = _formatEtb(bal.abs());
-                        return Text(
-                          isMyCreditor ? '+$txt' : txt,
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: isMyCreditor
-                                        ? AppColors.incomeSuccess
-                                        : (bal > 0
-                                            ? AppColors.textPrimary(context)
-                                            : AppColors.red),
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        );
-                      }),
+                      Text(
+                        _formatEtb(counterparty.amount),
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: myBalance > 0
+                                  ? AppColors.incomeSuccess
+                                  : AppColors.red,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
                       const SizedBox(height: 12),
                     ],
                   ],
@@ -3710,6 +3733,18 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SharedDebtCounterpartySummary {
+  final String label;
+  final Color color;
+  final double amount;
+
+  const _SharedDebtCounterpartySummary({
+    required this.label,
+    required this.color,
+    required this.amount,
+  });
 }
 
 class _SharedBalanceSubtitle extends StatelessWidget {
