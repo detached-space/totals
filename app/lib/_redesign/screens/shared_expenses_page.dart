@@ -269,7 +269,6 @@ Future<bool> showSplitTransactionWithGroupFlow({
         myPublicKey: myPublicKey,
         initialAmount: transaction.amount.abs(),
         initialReason: _splitReasonForTransaction(transaction),
-        initialTimestamp: _timestampFromTransaction(transaction),
         initialLinkedTxRef: linkedTxRef,
       ),
     );
@@ -6496,7 +6495,6 @@ class _ExpenseDraftSheet extends StatefulWidget {
   final SharedExpense? editing;
   final double? initialAmount;
   final String? initialReason;
-  final int? initialTimestamp;
   final String? initialLinkedTxRef;
 
   const _ExpenseDraftSheet({
@@ -6505,7 +6503,6 @@ class _ExpenseDraftSheet extends StatefulWidget {
     this.editing,
     this.initialAmount,
     this.initialReason,
-    this.initialTimestamp,
     this.initialLinkedTxRef,
   });
 
@@ -6529,9 +6526,7 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
       ? widget.editing!.splitAmong.toSet()
       : _memberKeysForGroup(widget.group);
   late DateTime _paidAt = DateTime.fromMillisecondsSinceEpoch(
-    widget.editing?.timestamp ??
-        widget.initialTimestamp ??
-        DateTime.now().millisecondsSinceEpoch,
+    widget.editing?.timestamp ?? DateTime.now().millisecondsSinceEpoch,
   );
   late String? _linkedTxRef =
       widget.editing?.linkedTxRef ?? widget.initialLinkedTxRef;
@@ -6646,10 +6641,6 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
       }
       if (_reasonCtrl.text.trim().isEmpty) {
         _reasonCtrl.text = _splitReasonForTransaction(selected);
-      }
-      final timestamp = _timestampFromTransaction(selected);
-      if (timestamp != null) {
-        _paidAt = DateTime.fromMillisecondsSinceEpoch(timestamp);
       }
     });
     _focusReasonField();
