@@ -4041,7 +4041,7 @@ class _SharedGroupHomeTab extends StatelessWidget {
         .where((e) => !e.deleted)
         .toList(growable: false)
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    final recent = active.take(4).toList(growable: false);
+    final recent = active.take(6).toList(growable: false);
     final plan = settlementPlanFor(group);
 
     return Column(

@@ -43,6 +43,7 @@ class NotificationService {
   static const int weeklySpendingTestNotificationId = 9004;
   static const int monthlySpendingNotificationId = 9005;
   static const int monthlySpendingTestNotificationId = 9006;
+  static const int sharedExpenseDigestNotificationId = 9007;
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -1103,6 +1104,62 @@ class NotificationService {
       if (kDebugMode) {
         print('debug: Failed to show shared expense event notification: $e');
       }
+    }
+  }
+
+  Future<bool> showSharedExpenseDigestNotification({
+    required int updateCount,
+    required int groupCount,
+    String? groupName,
+    String? groupId,
+  }) async {
+    try {
+      if (updateCount <= 0) return false;
+      final enabled = await NotificationSettingsService.instance
+          .isSharedExpenseNotificationsEnabled();
+      if (!enabled) return false;
+      await ensureInitialized();
+
+      final cleanGroupName = groupName?.trim() ?? '';
+      final hasSingleGroup = groupCount == 1 && cleanGroupName.isNotEmpty;
+      const title = 'Settle Up has new activity';
+      final body = hasSingleGroup
+          ? updateCount == 1
+              ? '$cleanGroupName has a new shared expense update to review.'
+              : '$cleanGroupName has $updateCount new shared expense updates to review.'
+          : 'You have $updateCount new shared expense '
+              '${updateCount == 1 ? 'update' : 'updates'}'
+              '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
+
+      await _plugin.show(
+        sharedExpenseDigestNotificationId,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _sharedExpensesChannelId,
+            'Shared expenses',
+            channelDescription: 'Notifications from shared expenses',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        payload: hasSingleGroup
+            ? _sharedExpensesNotificationPayload(groupId)
+            : _sharedExpensesPayload,
+      );
+      await _recordHistory(
+        channel: _sharedExpensesChannelId,
+        title: title,
+        body: body,
+      );
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show shared expense digest notification: $e');
+      }
+      return false;
     }
   }
 

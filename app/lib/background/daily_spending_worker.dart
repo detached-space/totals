@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:workmanager/workmanager.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/shared_expense_background_notification_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/services/widget_data_provider.dart';
@@ -16,6 +17,10 @@ const String dailySpendingSummaryTask = 'dailySpendingSummary';
 const String dailySpendingSummaryUniqueName = 'dailySpendingSummaryUnique';
 const String widgetMidnightRefreshTask = 'widgetMidnightRefresh';
 const String widgetMidnightRefreshUniqueName = 'widgetMidnightRefreshUnique';
+const String sharedExpenseNotificationCatchupTask =
+    'sharedExpenseNotificationCatchup';
+const String sharedExpenseNotificationCatchupUniqueName =
+    'sharedExpenseNotificationCatchupUnique';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -38,6 +43,12 @@ void callbackDispatcher() {
           return true;
         }
         await WidgetService.refreshWidget();
+        return true;
+      }
+
+      if (task == sharedExpenseNotificationCatchupTask) {
+        await SharedExpenseBackgroundNotificationService.instance
+            .sendMissedActivityDigestIfNeeded();
         return true;
       }
 

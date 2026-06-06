@@ -48,8 +48,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     final failedParseReview =
         await settings.isFailedParseReviewNotificationsEnabled();
     final budget = await settings.isBudgetAlertsEnabled();
-    final sharedExpenses =
-        await settings.isSharedExpenseNotificationsEnabled();
+    final sharedExpenses = await settings.isSharedExpenseNotificationsEnabled();
     final daily = await settings.isDailySummaryEnabled();
     final weekly = await settings.isWeeklySummaryEnabled();
     final monthly = await settings.isMonthlySummaryEnabled();
@@ -100,6 +99,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     setState(() => _sharedExpensesEnabled = value);
     await NotificationSettingsService.instance
         .setSharedExpenseNotificationsEnabled(value);
+    await NotificationScheduler.syncSharedExpenseNotificationSchedule();
   }
 
   Future<void> _setDailyEnabled(bool value) async {

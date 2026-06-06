@@ -132,6 +132,7 @@ void main() async {
         isInDebugMode: false,
       );
       await NotificationScheduler.syncSpendingSummarySchedule();
+      await NotificationScheduler.syncSharedExpenseNotificationSchedule();
       await WidgetRefreshScheduler.syncWidgetRefreshSchedule();
     } catch (e) {
       // Ignore if not supported on the current platform.
