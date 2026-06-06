@@ -791,6 +791,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                         categoryModel: transactionCategory,
                         isCategorized: t.selectedCategoryIds.isNotEmpty,
                         isDebit: t.type?.toUpperCase() == 'DEBIT',
+                        isSharing: tp.isSharingSharedExpenseTransaction(t),
                         isShared: tp.isSharedExpenseTransaction(t),
                         amount: _formatBudgetEtbFull(context, t.amount),
                         amountColor: t.type?.toUpperCase() == 'DEBIT'
@@ -1484,6 +1485,7 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                     isDebit: !isCredit,
                     isSelfTransfer: isSelfTransfer,
                     isMisc: isMisc,
+                    isSharing: provider.isSharingSharedExpenseTransaction(t),
                     isShared: provider.isSharedExpenseTransaction(t),
                     amount: _formatBudgetEtbFull(context, t.amount),
                     amountColor:

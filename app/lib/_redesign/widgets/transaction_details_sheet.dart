@@ -97,8 +97,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       _tx.reference.trim().isNotEmpty &&
       _tx.type?.toUpperCase() == 'DEBIT';
   bool get _isAlreadySharedExpense => _provider.isSharedExpenseTransaction(_tx);
+  bool get _isSharingSharedExpense =>
+      _provider.isSharingSharedExpenseTransaction(_tx);
   bool get _canSplitWithGroup =>
-      _canShowSplitWithGroup && !_isAlreadySharedExpense;
+      _canShowSplitWithGroup &&
+      !_isAlreadySharedExpense &&
+      !_isSharingSharedExpense;
   String? get _autoCategorizationCounterparty =>
       _provider.resolvePrimaryCounterparty(_tx);
 
@@ -1205,7 +1209,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       child: FilledButton.icon(
         onPressed: _canSplitWithGroup ? _splitWithGroup : null,
         icon: const Icon(AppIcons.group_outlined, size: 18),
-        label: Text(context.l10nText('Split with group')),
+        label: Text(
+          context.l10nText(
+            _isSharingSharedExpense ? 'Sharing' : 'Split with group',
+          ),
+        ),
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primaryLight,
           foregroundColor: AppColors.white,

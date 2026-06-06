@@ -30,6 +30,9 @@ class TransactionTile extends StatelessWidget {
   /// Whether this transaction is linked to a shared expense.
   final bool isShared;
 
+  /// Whether this transaction is currently being linked to a shared expense.
+  final bool isSharing;
+
   final String amount;
   final Color amountColor;
   final String name;
@@ -55,6 +58,7 @@ class TransactionTile extends StatelessWidget {
     this.isSelfTransfer = false,
     this.isMisc = false,
     this.isShared = false,
+    this.isSharing = false,
     this.timestamp,
     this.selected = false,
     this.onTap,
@@ -125,7 +129,16 @@ class TransactionTile extends StatelessWidget {
                             isMisc: isMisc,
                             onTap: onCategoryTap,
                           ),
-                          if (isShared) const _SharedTransactionChip(),
+                          if (isSharing)
+                            _SharedTransactionChip(
+                              label: context.l10nText('Sharing'),
+                              color: AppColors.amber,
+                            )
+                          else if (isShared)
+                            _SharedTransactionChip(
+                              label: context.l10nText('Shared'),
+                              color: AppColors.primaryLight,
+                            ),
                         ],
                       ),
                     ],
@@ -178,20 +191,26 @@ class TransactionTile extends StatelessWidget {
 }
 
 class _SharedTransactionChip extends StatelessWidget {
-  const _SharedTransactionChip();
+  final String label;
+  final Color color;
+
+  const _SharedTransactionChip({
+    required this.label,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: AppColors.primaryLight.withValues(alpha: 0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        context.l10nText('Shared'),
-        style: const TextStyle(
-          color: AppColors.primaryLight,
+        label,
+        style: TextStyle(
+          color: color,
           fontSize: 11,
           fontWeight: FontWeight.w700,
         ),

@@ -193,6 +193,7 @@ class TransactionProvider with ChangeNotifier {
 
   List<Transaction> _allTransactions = [];
   Set<String> _sharedExpenseLinkedRefs = {};
+  final Set<String> _sharedExpenseSharingRefs = {};
 
   // Redesign home cached metrics
   List<Transaction> _todayTransactions = [];
@@ -216,6 +217,8 @@ class TransactionProvider with ChangeNotifier {
   List<Transaction> get transactions => _transactions;
   List<Transaction> get allTransactions => _allTransactions;
   Set<String> get sharedExpenseLinkedRefs => _sharedExpenseLinkedRefs;
+  Set<String> get sharedExpenseSharingRefs =>
+      Set.unmodifiable(_sharedExpenseSharingRefs);
   List<Category> get categories => _categories;
   List<AutoCategorizationRule> get autoCategorizationRules =>
       _autoCategorizationRules;
@@ -232,6 +235,38 @@ class TransactionProvider with ChangeNotifier {
     return _sharedExpenseLinkedRefs.contains(transaction.reference.trim());
   }
 
+  bool isSharingSharedExpenseTransaction(Transaction transaction) {
+    return _sharedExpenseSharingRefs.contains(transaction.reference.trim());
+  }
+
+  void markSharedExpenseSharing(String? reference) {
+    final normalized = reference?.trim();
+    if (normalized == null || normalized.isEmpty) return;
+    if (_sharedExpenseSharingRefs.add(normalized)) {
+      notifyListeners();
+    }
+  }
+
+  void unmarkSharedExpenseSharing(String? reference) {
+    final normalized = reference?.trim();
+    if (normalized == null || normalized.isEmpty) return;
+    if (_sharedExpenseSharingRefs.remove(normalized)) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshSharedExpenseLinks() async {
+    try {
+      _sharedExpenseLinkedRefs = await _sharedExpenseRepo.getAllLinkedTxRefs();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('debug: Could not refresh shared expense links: $error');
+      }
+    } finally {
+      notifyListeners();
+    }
+  }
+
   Transaction? transactionByReference(String? reference) {
     final normalized = reference?.trim();
     if (normalized == null || normalized.isEmpty) return null;
@@ -240,6 +275,7 @@ class TransactionProvider with ChangeNotifier {
     }
     return null;
   }
+
   List<Transaction> get todayTransactions => _todayTransactions;
   List<Transaction> get monthTransactions => _monthTransactions;
   TransactionTotals get todayTotals => _todayTotals;

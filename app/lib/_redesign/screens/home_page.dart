@@ -313,6 +313,9 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                 isDebit: !isCredit,
                                 isSelfTransfer: isSelfTransfer,
                                 isMisc: isMisc,
+                                isSharing:
+                                    provider.isSharingSharedExpenseTransaction(
+                                        transaction),
                                 isShared: provider
                                     .isSharedExpenseTransaction(transaction),
                                 amount: amountLabel,

@@ -203,6 +203,13 @@ Future<bool> showSplitTransactionWithGroupFlow({
 }) async {
   final repo = repository ?? SharedExpenseRepository();
   final messenger = ScaffoldMessenger.maybeOf(context);
+  TransactionProvider? transactionProvider;
+  try {
+    transactionProvider = context.read<TransactionProvider>();
+  } catch (_) {
+    transactionProvider = null;
+  }
+  String? sharingTxRef;
 
   void showSnack(String message) {
     messenger?.showSnackBar(
@@ -274,20 +281,28 @@ Future<bool> showSplitTransactionWithGroupFlow({
     );
     if (result is! _ExpenseSheetSave || !context.mounted) return false;
 
+    final effectiveLinkedTxRef =
+        (result.linkedTxRef?.trim().isNotEmpty ?? false)
+            ? result.linkedTxRef!.trim()
+            : linkedTxRef;
+    sharingTxRef = effectiveLinkedTxRef;
+    transactionProvider?.markSharedExpenseSharing(effectiveLinkedTxRef);
+
     final updatedGroup = await repo.splitTransactionIntoGroup(
       group: selectedGroup,
       amount: result.amount,
       reason: result.reason,
       paidBy: result.paidBy,
       splitAmong: result.splitAmong,
-      linkedTxRef: result.linkedTxRef ?? linkedTxRef,
+      linkedTxRef: effectiveLinkedTxRef,
       timestamp: result.timestamp,
     );
+    await transactionProvider?.refreshSharedExpenseLinks();
 
     if (!context.mounted) return true;
     if (_hasPendingLinkedExpense(
       group: updatedGroup,
-      linkedTxRef: result.linkedTxRef ?? linkedTxRef,
+      linkedTxRef: effectiveLinkedTxRef,
     )) {
       showSnack(context.l10nTextRead(
         "Saved locally. We'll send it when you're connected.",
@@ -304,6 +319,8 @@ Future<bool> showSplitTransactionWithGroupFlow({
       showSnack(error.toString().replaceFirst('Exception: ', ''));
     }
     return false;
+  } finally {
+    transactionProvider?.unmarkSharedExpenseSharing(sharingTxRef);
   }
 }
 
@@ -381,6 +398,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   String _myPublicKey = '';
   bool _isRefreshing = false;
   bool _isMutating = false;
+  String? _mutationLabel;
   bool _engineReachable = true;
   String? _approvingMemberKey;
   SharedExpenseGroup? _selectedGroup;
@@ -699,6 +717,22 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     return group.status != SharedExpenseGroupStatus.pendingApproval;
   }
 
+  void _beginMutation(String label) {
+    if (!mounted) return;
+    setState(() {
+      _isMutating = true;
+      _mutationLabel = label;
+    });
+  }
+
+  void _endMutation() {
+    if (!mounted) return;
+    setState(() {
+      _isMutating = false;
+      _mutationLabel = null;
+    });
+  }
+
   bool _shouldStreamGroup(SharedExpenseGroup group) {
     return group.id.isNotEmpty &&
         group.status != SharedExpenseGroupStatus.localOnly;
@@ -873,7 +907,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     }
 
     if (result is _GroupSettingsLeave) {
-      setState(() => _isMutating = true);
+      _beginMutation('Leaving group');
       try {
         await _repository.leaveGroup(group);
         if (!mounted) return;
@@ -888,7 +922,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       } catch (error) {
         _showSnack(error.toString().replaceFirst('Exception: ', ''));
       } finally {
-        if (mounted) setState(() => _isMutating = false);
+        _endMutation();
       }
       return;
     }
@@ -905,7 +939,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           !paymentChanged) {
         return;
       }
-      setState(() => _isMutating = true);
+      _beginMutation('Saving');
       try {
         await _saveDefaultPaymentAddress(result.paymentAddress);
         final updated = await _repository.updateMeta(
@@ -928,7 +962,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       } catch (error) {
         _showSnack(error.toString().replaceFirst('Exception: ', ''));
       } finally {
-        if (mounted) setState(() => _isMutating = false);
+        _endMutation();
       }
     }
   }
@@ -955,7 +989,24 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       ),
     );
     if (result == null || !mounted) return;
-    setState(() => _isMutating = true);
+    final mutationLabel = result is _ExpenseSheetDelete
+        ? 'Deleting'
+        : expense != null
+            ? 'Saving'
+            : 'Sending';
+    final successMessage = result is _ExpenseSheetDelete
+        ? context.l10nTextRead('Expense deleted')
+        : expense != null
+            ? context.l10nTextRead('Expense updated')
+            : context.l10nTextRead('Expense added');
+    _beginMutation(mutationLabel);
+    final transactionProvider = context.read<TransactionProvider>();
+    String? sharingTxRef;
+    if (result is _ExpenseSheetSave &&
+        (result.linkedTxRef?.trim().isNotEmpty ?? false)) {
+      sharingTxRef = result.linkedTxRef!.trim();
+      transactionProvider.markSharedExpenseSharing(sharingTxRef);
+    }
     try {
       SharedExpenseGroup updated = group;
       if (result is _ExpenseSheetDelete && expense != null) {
@@ -996,18 +1047,14 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _selectedGroup = updated;
       });
       _syncRealtimeSubscriptions(groups);
-      unawaited(context.read<TransactionProvider>().loadData());
-      _showSnack(
-        result is _ExpenseSheetDelete
-            ? context.l10nTextRead('Expense deleted')
-            : expense != null
-                ? context.l10nTextRead('Expense updated')
-                : context.l10nTextRead('Expense added'),
-      );
+      await transactionProvider.refreshSharedExpenseLinks();
+      unawaited(transactionProvider.loadData());
+      _showSnack(successMessage);
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      transactionProvider.unmarkSharedExpenseSharing(sharingTxRef);
+      _endMutation();
     }
   }
 
@@ -1016,7 +1063,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     String recipientPk,
     double amount,
   ) async {
-    setState(() => _isMutating = true);
+    _beginMutation('Settling');
     try {
       final updated = await _repository.settleUpWith(
         group: group,
@@ -1035,7 +1082,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      _endMutation();
     }
   }
 
@@ -1053,7 +1100,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       return;
     }
 
-    setState(() => _isMutating = true);
+    _beginMutation('Settling');
     try {
       final updated = await _repository.createExpense(
         group: group,
@@ -1076,7 +1123,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      _endMutation();
     }
   }
 
@@ -1169,7 +1216,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       return;
     }
 
-    setState(() => _isMutating = true);
+    _beginMutation('Sending nudge');
     try {
       final updated = await _repository.sendNudge(
         group: group,
@@ -1188,7 +1235,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      _endMutation();
     }
   }
 
@@ -1242,6 +1289,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _sharedExpensesPageLog('createGroup submitted name="${input.groupName}"');
     setState(() {
       _isMutating = true;
+      _mutationLabel = 'Creating group';
       _creatingGroup = _CreatingGroupDraft(
         name: input.groupName,
         displayName: input.displayName,
@@ -1277,6 +1325,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       if (mounted) {
         setState(() {
           _isMutating = false;
+          _mutationLabel = null;
           _creatingGroup = null;
         });
       }
@@ -1311,7 +1360,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     if (input == null) return;
 
     _sharedExpensesPageLog('joinGroup submitted code="${input.groupName}"');
-    setState(() => _isMutating = true);
+    _beginMutation('Sending request');
     try {
       await _saveDefaultDisplayName(input.displayName);
       await _saveDefaultPaymentAddress(input.paymentAddress);
@@ -1328,7 +1377,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
       _showSnack(error.toString());
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      _endMutation();
     }
   }
 
@@ -1341,7 +1390,11 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       'approveMember tapped group=${_logId(group.id)} '
       'member=${_logId(member.devicePublicKey)}',
     );
-    setState(() => _approvingMemberKey = member.devicePublicKey);
+    setState(() {
+      _isMutating = true;
+      _mutationLabel = 'Approving';
+      _approvingMemberKey = member.devicePublicKey;
+    });
     try {
       await _repository.approveMember(group: group, member: member);
       await _loadGroups(refreshFromEngine: true, showErrors: false);
@@ -1352,7 +1405,13 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
       _showSnack(error.toString());
     } finally {
-      if (mounted) setState(() => _approvingMemberKey = null);
+      if (mounted) {
+        setState(() {
+          _isMutating = false;
+          _mutationLabel = null;
+          _approvingMemberKey = null;
+        });
+      }
     }
   }
 
@@ -1369,7 +1428,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
   Future<void> _cancelJoinRequest(SharedExpenseGroup group) async {
     _sharedExpensesPageLog('cancelJoinRequest group=${_logId(group.id)}');
-    setState(() => _isMutating = true);
+    _beginMutation('Cancelling request');
     try {
       await _repository.leaveGroup(group);
       if (!mounted) return;
@@ -1381,7 +1440,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
-      if (mounted) setState(() => _isMutating = false);
+      _endMutation();
     }
   }
 
@@ -1414,6 +1473,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         onBack: _closeGroup,
         onOpenSettings: () => _openGroupSettings(selectedGroup),
         onAddExpense: _showAddExpenseComingSoon,
+        isMutating: _isMutating,
+        mutationLabel: _mutationLabel,
         onEditExpense: (e) => _openExpenseSheet(selectedGroup, expense: e),
         onSettleDebt: (debt) => _settleDebt(selectedGroup, debt),
         onSendNudge: () => _sendNudge(selectedGroup),
@@ -1458,6 +1519,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                       const SizedBox(height: 22),
                       _ActionBar(
                         isBusy: _isMutating,
+                        busyLabel: _mutationLabel,
                         isRefreshing: _isRefreshing,
                         onCreate: _createGroup,
                         onJoin: _joinGroup,
@@ -1482,6 +1544,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                     onCreate: _createGroup,
                     onJoin: _joinGroup,
                     isBusy: _isMutating,
+                    busyLabel: _mutationLabel,
                   ),
                 )
               else
@@ -1525,6 +1588,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
 class _ActionBar extends StatelessWidget {
   final bool isBusy;
+  final String? busyLabel;
   final bool isRefreshing;
   final VoidCallback onCreate;
   final VoidCallback onJoin;
@@ -1532,6 +1596,7 @@ class _ActionBar extends StatelessWidget {
 
   const _ActionBar({
     required this.isBusy,
+    required this.busyLabel,
     required this.isRefreshing,
     required this.onCreate,
     required this.onJoin,
@@ -1540,12 +1605,25 @@ class _ActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isCreatingGroup = isBusy && busyLabel == 'Creating group';
+    final isSendingRequest = isBusy && busyLabel == 'Sending request';
     return Row(
       children: [
         FilledButton.icon(
           onPressed: isBusy ? null : onCreate,
-          icon: const Icon(AppIcons.add, size: 18, color: AppColors.white),
-          label: Text(context.l10nText('New')),
+          icon: isCreatingGroup
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.white,
+                  ),
+                )
+              : const Icon(AppIcons.add, size: 18, color: AppColors.white),
+          label: Text(
+            context.l10nText(isCreatingGroup ? 'Creating group' : 'New'),
+          ),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.primaryLight,
             foregroundColor: AppColors.white,
@@ -1559,12 +1637,23 @@ class _ActionBar extends StatelessWidget {
         const SizedBox(width: 10),
         OutlinedButton.icon(
           onPressed: isBusy ? null : onJoin,
-          icon: Icon(
-            AppIcons.lock_outline_rounded,
-            size: 18,
-            color: AppColors.textPrimary(context),
+          icon: isSendingRequest
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primaryLight,
+                  ),
+                )
+              : Icon(
+                  AppIcons.lock_outline_rounded,
+                  size: 18,
+                  color: AppColors.textPrimary(context),
+                ),
+          label: Text(
+            context.l10nText(isSendingRequest ? 'Sending request' : 'Join'),
           ),
-          label: Text(context.l10nText('Join')),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.textPrimary(context),
             minimumSize: const Size(0, 48),
@@ -1806,16 +1895,20 @@ class _EmptySharedState extends StatelessWidget {
   final VoidCallback onCreate;
   final VoidCallback onJoin;
   final bool isBusy;
+  final String? busyLabel;
 
   const _EmptySharedState({
     required this.onCreate,
     required this.onJoin,
     required this.isBusy,
+    required this.busyLabel,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isCreatingGroup = isBusy && busyLabel == 'Creating group';
+    final isSendingRequest = isBusy && busyLabel == 'Sending request';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(36, 60, 36, 96),
@@ -1860,8 +1953,21 @@ class _EmptySharedState extends StatelessWidget {
             width: double.infinity,
             child: FilledButton.icon(
               onPressed: isBusy ? null : onCreate,
-              icon: const Icon(AppIcons.add, color: AppColors.white),
-              label: Text(context.l10nText('Create group')),
+              icon: isCreatingGroup
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
+                  : const Icon(AppIcons.add, color: AppColors.white),
+              label: Text(
+                context.l10nText(
+                  isCreatingGroup ? 'Creating group' : 'Create group',
+                ),
+              ),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primaryLight,
                 foregroundColor: AppColors.white,
@@ -1880,11 +1986,24 @@ class _EmptySharedState extends StatelessWidget {
             width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: isBusy ? null : onJoin,
-              icon: Icon(
-                AppIcons.lock_outline_rounded,
-                color: AppColors.textPrimary(context),
+              icon: isSendingRequest
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.primaryLight,
+                      ),
+                    )
+                  : Icon(
+                      AppIcons.lock_outline_rounded,
+                      color: AppColors.textPrimary(context),
+                    ),
+              label: Text(
+                context.l10nText(
+                  isSendingRequest ? 'Sending request' : 'Join with code',
+                ),
               ),
-              label: Text(context.l10nText('Join with code')),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textPrimary(context),
                 minimumSize: const Size(0, 56),
@@ -1980,7 +2099,7 @@ class _CreatingGroupCard extends StatelessWidget {
                   ),
                 ),
                 _StatusChip(
-                  label: context.l10nText('Creating'),
+                  label: context.l10nText('Creating group'),
                   color: AppColors.blue,
                 ),
               ],
@@ -1999,7 +2118,7 @@ class _CreatingGroupCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    context.l10nText('Preparing invite code'),
+                    context.l10nText('Creating group'),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppColors.textSecondary(context),
                       fontWeight: FontWeight.w700,
@@ -2024,6 +2143,8 @@ class _SharedGroupDetailView extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onOpenSettings;
   final VoidCallback onAddExpense;
+  final bool isMutating;
+  final String? mutationLabel;
   final ValueChanged<SharedExpense> onEditExpense;
   final ValueChanged<SettlementDebt> onSettleDebt;
   final VoidCallback onSendNudge;
@@ -2038,6 +2159,8 @@ class _SharedGroupDetailView extends StatefulWidget {
     required this.onBack,
     required this.onOpenSettings,
     required this.onAddExpense,
+    required this.isMutating,
+    required this.mutationLabel,
     required this.onEditExpense,
     required this.onSettleDebt,
     required this.onSendNudge,
@@ -2092,6 +2215,8 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
         myPublicKey: widget.myPublicKey,
         onBack: () => setState(() => _showTransactions = false),
         onAddExpense: widget.onAddExpense,
+        isMutating: widget.isMutating,
+        mutationLabel: widget.mutationLabel,
         onEditExpense: widget.onEditExpense,
       );
     }
@@ -2108,7 +2233,11 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
     return Scaffold(
       backgroundColor: AppColors.background(context),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: _SharedExpenseFab(onPressed: widget.onAddExpense),
+      floatingActionButton: _SharedExpenseFab(
+        onPressed: widget.onAddExpense,
+        isBusy: widget.isMutating,
+        busyLabel: widget.mutationLabel,
+      ),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -2249,25 +2378,58 @@ class _SharedMemberView {
 
 class _SharedExpenseFab extends StatelessWidget {
   final VoidCallback onPressed;
+  final bool isBusy;
+  final String? busyLabel;
 
-  const _SharedExpenseFab({required this.onPressed});
+  const _SharedExpenseFab({
+    required this.onPressed,
+    this.isBusy = false,
+    this.busyLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final label = context.l10nText(busyLabel ?? 'Sending');
     return SafeArea(
       minimum: const EdgeInsets.only(right: 4, bottom: 92),
-      child: SizedBox(
-        width: 52,
-        height: 52,
-        child: FloatingActionButton(
-          onPressed: onPressed,
-          backgroundColor: AppColors.primaryLight,
-          foregroundColor: AppColors.white,
-          elevation: 8,
-          shape: const CircleBorder(),
-          child: const Icon(AppIcons.add, size: 26),
-        ),
-      ),
+      child: isBusy
+          ? Semantics(
+              enabled: false,
+              child: IgnorePointer(
+                child: FloatingActionButton.extended(
+                  onPressed: () {},
+                  backgroundColor:
+                      AppColors.primaryLight.withValues(alpha: 0.82),
+                  foregroundColor: AppColors.white,
+                  elevation: 8,
+                  icon: const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
+                  ),
+                  label: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            )
+          : SizedBox(
+              width: 52,
+              height: 52,
+              child: FloatingActionButton(
+                onPressed: onPressed,
+                backgroundColor: AppColors.primaryLight,
+                foregroundColor: AppColors.white,
+                elevation: 8,
+                shape: const CircleBorder(),
+                child: const Icon(AppIcons.add, size: 26),
+              ),
+            ),
     );
   }
 }
@@ -2665,6 +2827,8 @@ class _SharedGroupTransactionsView extends StatefulWidget {
   final String myPublicKey;
   final VoidCallback onBack;
   final VoidCallback onAddExpense;
+  final bool isMutating;
+  final String? mutationLabel;
   final ValueChanged<SharedExpense> onEditExpense;
 
   const _SharedGroupTransactionsView({
@@ -2672,6 +2836,8 @@ class _SharedGroupTransactionsView extends StatefulWidget {
     required this.myPublicKey,
     required this.onBack,
     required this.onAddExpense,
+    required this.isMutating,
+    required this.mutationLabel,
     required this.onEditExpense,
   });
 
@@ -2804,7 +2970,11 @@ class _SharedGroupTransactionsViewState
     return Scaffold(
       backgroundColor: AppColors.background(context),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: _SharedExpenseFab(onPressed: widget.onAddExpense),
+      floatingActionButton: _SharedExpenseFab(
+        onPressed: widget.onAddExpense,
+        isBusy: widget.isMutating,
+        busyLabel: widget.mutationLabel,
+      ),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
