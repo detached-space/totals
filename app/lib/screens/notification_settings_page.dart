@@ -26,6 +26,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   bool _transactionEnabled = true;
   bool _failedParseReviewEnabled = true;
   bool _budgetEnabled = true;
+  bool _sharedExpensesEnabled = true;
   bool _dailyEnabled = true;
   bool _weeklyEnabled = false;
   bool _monthlyEnabled = false;
@@ -47,6 +48,8 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     final failedParseReview =
         await settings.isFailedParseReviewNotificationsEnabled();
     final budget = await settings.isBudgetAlertsEnabled();
+    final sharedExpenses =
+        await settings.isSharedExpenseNotificationsEnabled();
     final daily = await settings.isDailySummaryEnabled();
     final weekly = await settings.isWeeklySummaryEnabled();
     final monthly = await settings.isMonthlySummaryEnabled();
@@ -61,6 +64,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       _transactionEnabled = tx;
       _failedParseReviewEnabled = failedParseReview;
       _budgetEnabled = budget;
+      _sharedExpensesEnabled = sharedExpenses;
       _dailyEnabled = daily;
       _weeklyEnabled = weekly;
       _monthlyEnabled = monthly;
@@ -90,6 +94,12 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   Future<void> _setBudgetEnabled(bool value) async {
     setState(() => _budgetEnabled = value);
     await NotificationSettingsService.instance.setBudgetAlertsEnabled(value);
+  }
+
+  Future<void> _setSharedExpensesEnabled(bool value) async {
+    setState(() => _sharedExpensesEnabled = value);
+    await NotificationSettingsService.instance
+        .setSharedExpenseNotificationsEnabled(value);
   }
 
   Future<void> _setDailyEnabled(bool value) async {
@@ -679,6 +689,20 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                       value: _budgetEnabled,
                       onChanged: _setBudgetEnabled,
                       activeColor: AppColors.primaryLight,
+                    ),
+                  ),
+
+                  _SettingTile(
+                    icon: Icons.group_outlined,
+                    iconColor: AppColors.incomeSuccess,
+                    title: context.l10nText('Shared expenses'),
+                    subtitle: context.l10nText(
+                      'Notify for nudges, new splits, and settlements',
+                    ),
+                    trailing: Switch(
+                      value: _sharedExpensesEnabled,
+                      onChanged: _setSharedExpensesEnabled,
+                      activeThumbColor: AppColors.primaryLight,
                     ),
                   ),
 

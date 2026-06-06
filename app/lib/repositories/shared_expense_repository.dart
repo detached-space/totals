@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/shared_expense_group.dart';
-import 'package:totals/services/notification_service.dart';
+import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 import 'package:uuid/uuid.dart';
@@ -628,6 +628,10 @@ class SharedExpenseRepository {
     _sharedExpenseLog(
       'syncGroup done group=${_logId(groupId)} changed=$changed',
     );
+    if (changed) {
+      final latest = await _groupById(groupId);
+      if (latest != null) SharedExpenseRealtimeBus.instance.publish(latest);
+    }
     return changed;
   }
 
@@ -646,6 +650,7 @@ class SharedExpenseRepository {
       );
       final latest = await _stampRealtimeSync(groupId);
       if (changed && latest != null) {
+        SharedExpenseRealtimeBus.instance.publish(latest);
         yield latest;
       }
     }
@@ -1202,7 +1207,7 @@ class SharedExpenseRepository {
         return _applyJoinRequest(group, senderPk, decoded, myPublicKey);
 
       case 'nudge':
-        return _applyNudge(group, senderPk, decoded, myPublicKey);
+        return _applyNudge(group, senderPk, decoded);
 
       case 'group_snapshot':
         return _applyGroupSnapshot(group, senderPk, decoded);
@@ -1531,7 +1536,6 @@ class SharedExpenseRepository {
     SharedExpenseGroup group,
     String senderPk,
     Map<String, dynamic> decoded,
-    String myPublicKey,
   ) async {
     final id = decoded['id'] as String? ?? '';
     if (id.isEmpty || group.activity.any((entry) => entry.id == id)) {
@@ -1559,71 +1563,7 @@ class SharedExpenseRepository {
       activity: [...group.activity, entry],
     );
     await _upsertGroup(updated);
-    await _showNudgeNotificationIfNeeded(
-      group: updated,
-      entry: entry,
-      senderPk: senderPk,
-      myPublicKey: myPublicKey,
-    );
     return true;
-  }
-
-  Future<void> _showNudgeNotificationIfNeeded({
-    required SharedExpenseGroup group,
-    required SharedActivityEntry entry,
-    required String senderPk,
-    required String myPublicKey,
-  }) async {
-    if (myPublicKey.isEmpty) return;
-
-    final actorPk = entry.actor.isNotEmpty ? entry.actor : senderPk;
-    if (actorPk.isEmpty || actorPk == myPublicKey) return;
-
-    final debtorPks = ((entry.data['debtorPks'] as List?) ?? const [])
-        .whereType<String>()
-        .toSet();
-    if (!debtorPks.contains(myPublicKey)) return;
-
-    final amount = _nudgeAmountForRecipient(
-      group: group,
-      actorPk: actorPk,
-      recipientPk: myPublicKey,
-      data: entry.data,
-    );
-    if (amount < 0.5) return;
-
-    await NotificationService.instance.showSharedExpenseNudgeNotification(
-      nudgeId: entry.id,
-      groupName: group.name,
-      payeeName: group.displayNameFor(myPublicKey, actorPk),
-      amount: amount,
-    );
-  }
-
-  double _nudgeAmountForRecipient({
-    required SharedExpenseGroup group,
-    required String actorPk,
-    required String recipientPk,
-    required Map<String, dynamic> data,
-  }) {
-    final amountByDebtorPk = _doubleMapFromJson(data['amountByDebtorPk']);
-    final explicitAmount = amountByDebtorPk[recipientPk];
-    if (explicitAmount != null && explicitAmount > 0) {
-      return explicitAmount;
-    }
-
-    for (final debt in settlementPlanFor(group).debts) {
-      if (debt.from == recipientPk && debt.to == actorPk && debt.amount > 0) {
-        return debt.amount;
-      }
-    }
-
-    final debtorCount = ((data['debtorPks'] as List?) ?? const [])
-        .whereType<String>()
-        .toSet()
-        .length;
-    final fallback = (data['amount'] as num?)?.toDouble() ?? 0.0;
-    return debtorCount <= 1 ? fallback : 0.0;
   }
 
   Map<String, double> _doubleMapFromJson(Object? raw) {

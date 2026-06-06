@@ -1004,6 +1004,9 @@ class NotificationService {
   }) async {
     try {
       if (amount <= 0) return;
+      final enabled = await NotificationSettingsService.instance
+          .isSharedExpenseNotificationsEnabled();
+      if (!enabled) return;
       await ensureInitialized();
 
       final cleanPayee = payeeName.trim();
@@ -1041,6 +1044,45 @@ class NotificationService {
     } catch (e) {
       if (kDebugMode) {
         print('debug: Failed to show shared expense nudge notification: $e');
+      }
+    }
+  }
+
+  Future<void> showSharedExpenseEventNotification({
+    required String eventId,
+    required String title,
+    required String body,
+  }) async {
+    try {
+      final enabled = await NotificationSettingsService.instance
+          .isSharedExpenseNotificationsEnabled();
+      if (!enabled) return;
+      await ensureInitialized();
+
+      await _plugin.show(
+        _sharedExpenseNudgeNotificationId(eventId),
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _sharedExpensesChannelId,
+            'Shared expenses',
+            channelDescription: 'Notifications from shared expenses',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        payload: _sharedExpensesPayload,
+      );
+      await _recordHistory(
+        channel: _sharedExpensesChannelId,
+        title: title,
+        body: body,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show shared expense event notification: $e');
       }
     }
   }
