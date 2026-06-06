@@ -6282,7 +6282,6 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
         ),
         _IosFormSubmit(
           label: _isEditing ? 'Save' : 'Add',
-          icon: Icons.check,
           enabled: canSave,
           onTap: _submit,
         ),
@@ -6621,7 +6620,6 @@ class _GroupSettingsSheetState extends State<_GroupSettingsSheet> {
         ),
         _IosFormSubmit(
           label: 'Save',
-          icon: Icons.check,
           enabled: canSave,
           onTap: () => Navigator.of(context).pop(
             _GroupSettingsSave(

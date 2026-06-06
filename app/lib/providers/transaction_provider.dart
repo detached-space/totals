@@ -229,7 +229,7 @@ class TransactionProvider with ChangeNotifier {
   DateTime get selectedDate => _selectedDate;
 
   bool isSharedExpenseTransaction(Transaction transaction) {
-    return _sharedExpenseLinkedRefs.contains(transaction.reference);
+    return _sharedExpenseLinkedRefs.contains(transaction.reference.trim());
   }
 
   Transaction? transactionByReference(String? reference) {

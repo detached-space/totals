@@ -92,10 +92,13 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   TransactionProvider get _provider => widget.provider;
 
   bool get _isCredit => _tx.type == 'CREDIT';
-  bool get _canSplitWithGroup =>
+  bool get _canShowSplitWithGroup =>
       widget.hostContext.mounted &&
       _tx.reference.trim().isNotEmpty &&
       _tx.type?.toUpperCase() == 'DEBIT';
+  bool get _isAlreadySharedExpense => _provider.isSharedExpenseTransaction(_tx);
+  bool get _canSplitWithGroup =>
+      _canShowSplitWithGroup && !_isAlreadySharedExpense;
   String? get _autoCategorizationCounterparty =>
       _provider.resolvePrimaryCounterparty(_tx);
 
@@ -1160,7 +1163,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
                       const SizedBox(height: 20),
 
-                      if (_canSplitWithGroup) ...[
+                      if (_canShowSplitWithGroup) ...[
                         _buildSplitWithGroupButton(),
                         const SizedBox(height: 10),
                       ],
@@ -1200,12 +1203,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return SizedBox(
       width: double.infinity,
       child: FilledButton.icon(
-        onPressed: _splitWithGroup,
+        onPressed: _canSplitWithGroup ? _splitWithGroup : null,
         icon: const Icon(AppIcons.group_outlined, size: 18),
         label: Text(context.l10nText('Split with group')),
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primaryLight,
           foregroundColor: AppColors.white,
+          disabledBackgroundColor:
+              AppColors.textTertiary(context).withValues(alpha: 0.16),
+          disabledForegroundColor: AppColors.textSecondary(context),
           padding: const EdgeInsets.symmetric(vertical: 13),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
