@@ -276,6 +276,10 @@ class SharedExpenseGroup {
   /// pubkey -> account members prefer to be paid through.
   final Map<String, SharedPaymentAddress> paymentAddresses;
 
+  /// pubkey -> last local/remote update time for that member's display name
+  /// and payment account metadata.
+  final Map<String, int> memberMetaUpdatedAt;
+
   /// This device's preferred account for receiving group payments.
   final SharedPaymentAddress? myPaymentAddress;
 
@@ -311,6 +315,7 @@ class SharedExpenseGroup {
     this.activity = const [],
     this.displayNames = const {},
     this.paymentAddresses = const {},
+    this.memberMetaUpdatedAt = const {},
     this.myPaymentAddress,
     this.pendingApprovals = const [],
     this.backfillNewMembers = false,
@@ -335,11 +340,17 @@ class SharedExpenseGroup {
 
   List<SharedExpenseMember> pendingApprovalMembers(String myPublicKey) {
     if (!hasGroupKey) return const [];
+    final pendingKeys = pendingApprovals
+        .map((approval) => approval.publicKey)
+        .where((publicKey) => publicKey.isNotEmpty)
+        .toSet();
+    if (pendingKeys.isEmpty) return const [];
     return members
         .where(
           (member) =>
               member.devicePublicKey.isNotEmpty &&
               member.devicePublicKey != myPublicKey &&
+              pendingKeys.contains(member.devicePublicKey) &&
               !approvedMemberKeys.contains(member.devicePublicKey),
         )
         .toList(growable: false);
@@ -358,6 +369,7 @@ class SharedExpenseGroup {
     List<SharedActivityEntry>? activity,
     Map<String, String>? displayNames,
     Map<String, SharedPaymentAddress>? paymentAddresses,
+    Map<String, int>? memberMetaUpdatedAt,
     SharedPaymentAddress? myPaymentAddress,
     List<PendingApproval>? pendingApprovals,
     bool? backfillNewMembers,
@@ -378,6 +390,7 @@ class SharedExpenseGroup {
       activity: activity ?? this.activity,
       displayNames: displayNames ?? this.displayNames,
       paymentAddresses: paymentAddresses ?? this.paymentAddresses,
+      memberMetaUpdatedAt: memberMetaUpdatedAt ?? this.memberMetaUpdatedAt,
       myPaymentAddress: myPaymentAddress ?? this.myPaymentAddress,
       pendingApprovals: pendingApprovals ?? this.pendingApprovals,
       backfillNewMembers: backfillNewMembers ?? this.backfillNewMembers,
@@ -391,6 +404,7 @@ class SharedExpenseGroup {
     final rawStatus = json['status'] as String?;
     final rawDisplayNames = json['displayNames'];
     final rawPaymentAddresses = json['paymentAddresses'];
+    final rawMemberMetaUpdatedAt = json['memberMetaUpdatedAt'];
     final rawPendingApprovals = json['pendingApprovals'];
     final rawMyPaymentAddress = json['myPaymentAddress'];
 
@@ -446,6 +460,16 @@ class SharedExpenseGroup {
               (map, entry) => map..[entry.key] = entry.value,
             )
           : const {},
+      memberMetaUpdatedAt: rawMemberMetaUpdatedAt is Map
+          ? {
+              for (final entry in rawMemberMetaUpdatedAt.entries)
+                if (entry.key is String && entry.value is num)
+                  entry.key as String: (entry.value as num).toInt(),
+            }.entries.where((entry) => entry.value > 0).fold<Map<String, int>>(
+              <String, int>{},
+              (map, entry) => map..[entry.key] = entry.value,
+            )
+          : const {},
       myPaymentAddress: rawMyPaymentAddress is Map
           ? SharedPaymentAddress.fromJson(
               Map<String, dynamic>.from(rawMyPaymentAddress),
@@ -485,6 +509,8 @@ class SharedExpenseGroup {
       'paymentAddresses': paymentAddresses.map(
         (key, value) => MapEntry(key, value.toJson()),
       ),
+      if (memberMetaUpdatedAt.isNotEmpty)
+        'memberMetaUpdatedAt': memberMetaUpdatedAt,
       if (myPaymentAddress != null)
         'myPaymentAddress': myPaymentAddress!.toJson(),
       'pendingApprovals': pendingApprovals.map((p) => p.toJson()).toList(),

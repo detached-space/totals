@@ -202,6 +202,7 @@ class SharedExpenseRepository {
     SharedPaymentAddress? paymentAddress,
   }) async {
     final identity = await _cryptoService.getOrCreateIdentity();
+    final now = DateTime.now().millisecondsSinceEpoch;
     _sharedExpenseLog('createGroup start name="$name"');
     try {
       final response = await _engineClient.createGroup();
@@ -224,6 +225,7 @@ class SharedExpenseRepository {
         ],
         approvedMemberKeys: {identity.publicKeyHex},
         displayNames: {identity.publicKeyHex: displayName},
+        memberMetaUpdatedAt: {identity.publicKeyHex: now},
         paymentAddresses: {
           if (paymentAddress != null && paymentAddress.isValid)
             identity.publicKeyHex: paymentAddress,
@@ -234,7 +236,7 @@ class SharedExpenseRepository {
         activity: [
           SharedActivityEntry(
             id: _uuid.v4(),
-            timestamp: DateTime.now().millisecondsSinceEpoch,
+            timestamp: now,
             actor: identity.publicKeyHex,
             kind: 'group_created',
             data: {'name': name},
@@ -261,6 +263,7 @@ class SharedExpenseRepository {
         ],
         approvedMemberKeys: {identity.publicKeyHex},
         displayNames: {identity.publicKeyHex: displayName},
+        memberMetaUpdatedAt: {identity.publicKeyHex: now},
         paymentAddresses: {
           if (paymentAddress != null && paymentAddress.isValid)
             identity.publicKeyHex: paymentAddress,
@@ -299,6 +302,7 @@ class SharedExpenseRepository {
     );
     final existing = await _groupById(groupId);
     final identity = await _cryptoService.getOrCreateIdentity();
+    final now = DateTime.now().millisecondsSinceEpoch;
     final group = SharedExpenseGroup(
       id: groupId,
       name:
@@ -316,6 +320,10 @@ class SharedExpenseRepository {
       displayNames: {
         ...?existing?.displayNames,
         identity.publicKeyHex: displayName,
+      },
+      memberMetaUpdatedAt: {
+        ...?existing?.memberMetaUpdatedAt,
+        identity.publicKeyHex: now,
       },
       paymentAddresses: {
         ...?existing?.paymentAddresses,
@@ -412,15 +420,26 @@ class SharedExpenseRepository {
       return group;
     }
 
-    final updated = group.copyWith(
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final memberMetaChanged = displayChanged || paymentChanged;
+    final metadataChanged =
+        nameChanged || displayChanged || backfillChanged || paymentChanged;
+    var saved = group.copyWith(
       name: nameChanged ? name.trim() : null,
       myDisplayName: displayChanged ? myDisplayName.trim() : null,
       backfillNewMembers: backfillChanged ? backfillNewMembers : null,
       myPaymentAddress: paymentChanged ? nextPaymentAddress : null,
+      pendingMetaBroadcast: metadataChanged ? true : null,
       displayNames: displayChanged
           ? {
               ...group.displayNames,
               identity.publicKeyHex: myDisplayName.trim(),
+            }
+          : null,
+      memberMetaUpdatedAt: memberMetaChanged
+          ? {
+              ...group.memberMetaUpdatedAt,
+              identity.publicKeyHex: now,
             }
           : null,
       paymentAddresses: paymentChanged
@@ -434,7 +453,7 @@ class SharedExpenseRepository {
               ...group.activity,
               SharedActivityEntry(
                 id: _uuid.v4(),
-                timestamp: DateTime.now().millisecondsSinceEpoch,
+                timestamp: now,
                 actor: identity.publicKeyHex,
                 kind: 'group_renamed',
                 data: {'before': group.name, 'after': name.trim()},
@@ -443,15 +462,19 @@ class SharedExpenseRepository {
           : null,
     );
 
-    await _upsertGroup(updated);
+    await _upsertGroup(saved);
 
-    if (nameChanged || backfillChanged) {
-      await _emitGroupMeta(updated);
+    if (metadataChanged && saved.hasGroupKey) {
+      final sent = await _broadcastMetaPayloads(saved);
+      if (sent) {
+        final latest = await _groupById(group.id);
+        if (latest != null) {
+          saved = latest.copyWith(pendingMetaBroadcast: false);
+          await _upsertGroup(saved);
+        }
+      }
     }
-    if (displayChanged || paymentChanged) {
-      await _emitMemberMeta(updated);
-    }
-    return updated;
+    return saved;
   }
 
   // -------------------------------------------------------------------------
@@ -482,6 +505,8 @@ class SharedExpenseRepository {
         _bestKnownDisplayName(group, identity.publicKeyHex);
     final approverPaymentAddress =
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
+    final approverMetaUpdatedAt =
+        _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
 
     // Send the group key encrypted with a 1:1 shared secret.
     final encryptedBlob = await _cryptoService.encryptGroupKeyPayload(
@@ -497,6 +522,8 @@ class SharedExpenseRepository {
           'approverDisplayName': approverDisplayName,
         if (approverPaymentAddress != null && approverPaymentAddress.isValid)
           'approverPaymentAddress': approverPaymentAddress.toJson(),
+        if (approverMetaUpdatedAt > 0)
+          'approverMemberMetaUpdatedAt': approverMetaUpdatedAt,
         'backfillNewMembers': group.backfillNewMembers,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
@@ -586,13 +613,17 @@ class SharedExpenseRepository {
     }
 
     for (final serverGroup in serverGroups) {
-      final local = localById[serverGroup.id];
-      if (local == null) {
+      final cachedLocal = localById[serverGroup.id];
+      if (cachedLocal == null) {
         _sharedExpenseLog(
           'refreshGroups skipped unknown server group=${_logId(serverGroup.id)}',
         );
         continue;
       }
+      // A refresh can overlap with an Edit Group save. Re-read the latest
+      // local record before writing the merged server view so stale refreshes
+      // cannot restore older member metadata.
+      final local = await _groupById(serverGroup.id) ?? cachedLocal;
       final hasKey = await _readGroupKey(serverGroup.id) != null;
       final isReady = hasKey || local.status == SharedExpenseGroupStatus.ready;
 
@@ -617,6 +648,8 @@ class SharedExpenseRepository {
           .where((p) => currentMemberKeys.contains(p.publicKey))
           .toList();
       final myDisplayName = _bestKnownDisplayName(local, identity.publicKeyHex);
+      final myMetaUpdatedAt =
+          _bestKnownMemberMetaUpdatedAt(local, identity.publicKeyHex);
       final displayNames =
           myDisplayName.trim().isEmpty || _isFallbackDisplayName(myDisplayName)
               ? local.displayNames
@@ -624,6 +657,10 @@ class SharedExpenseRepository {
                   local.displayNames,
                   {identity.publicKeyHex: myDisplayName},
                   protectedPublicKey: identity.publicKeyHex,
+                  existingMetaUpdatedAt: local.memberMetaUpdatedAt,
+                  incomingMetaUpdatedAt: myMetaUpdatedAt > 0
+                      ? {identity.publicKeyHex: myMetaUpdatedAt}
+                      : const {},
                 );
       final myPaymentAddress =
           _bestKnownPaymentAddress(local, identity.publicKeyHex);
@@ -633,7 +670,17 @@ class SharedExpenseRepository {
               : _mergePaymentAddresses(
                   local.paymentAddresses,
                   {identity.publicKeyHex: myPaymentAddress},
+                  existingMetaUpdatedAt: local.memberMetaUpdatedAt,
+                  incomingMetaUpdatedAt: myMetaUpdatedAt > 0
+                      ? {identity.publicKeyHex: myMetaUpdatedAt}
+                      : const {},
                 );
+      final memberMetaUpdatedAt = myMetaUpdatedAt > 0
+          ? {
+              ...local.memberMetaUpdatedAt,
+              identity.publicKeyHex: myMetaUpdatedAt,
+            }
+          : local.memberMetaUpdatedAt;
 
       final merged = SharedExpenseGroup(
         id: serverGroup.id,
@@ -650,6 +697,7 @@ class SharedExpenseRepository {
         activity: local.activity,
         displayNames: displayNames,
         paymentAddresses: paymentAddresses,
+        memberMetaUpdatedAt: memberMetaUpdatedAt,
         myPaymentAddress: myPaymentAddress,
         pendingApprovals: pruned,
         backfillNewMembers: local.backfillNewMembers,
@@ -733,6 +781,21 @@ class SharedExpenseRepository {
       return fromDisplayNames;
     }
     return group.myDisplayName;
+  }
+
+  int _bestKnownMemberMetaUpdatedAt(
+    SharedExpenseGroup group,
+    String publicKey,
+  ) {
+    final direct = group.memberMetaUpdatedAt[publicKey];
+    if (direct != null && direct > 0) return direct;
+    if (publicKey.isEmpty) return 0;
+    final hasDisplayName =
+        group.displayNames[publicKey]?.trim().isNotEmpty == true;
+    final hasPaymentAddress =
+        group.paymentAddresses[publicKey]?.isValid == true;
+    if (!hasDisplayName && !hasPaymentAddress) return 0;
+    return group.createdAt.millisecondsSinceEpoch;
   }
 
   SharedPaymentAddress? _bestKnownPaymentAddress(
@@ -851,9 +914,23 @@ class SharedExpenseRepository {
     Map<String, String> existing,
     Map<String, String> incoming, {
     String? protectedPublicKey,
+    Map<String, int> existingMetaUpdatedAt = const {},
+    Map<String, int> incomingMetaUpdatedAt = const {},
+    bool allowLegacyOverwrite = true,
   }) {
     final merged = <String, String>{...existing};
     for (final entry in incoming.entries) {
+      final currentName = merged[entry.key]?.trim() ?? '';
+      final hasCurrentName =
+          currentName.isNotEmpty && !_isFallbackDisplayName(currentName);
+      final currentUpdatedAt = existingMetaUpdatedAt[entry.key] ?? 0;
+      final incomingUpdatedAt = incomingMetaUpdatedAt[entry.key] ?? 0;
+      if (incomingUpdatedAt > 0 && incomingUpdatedAt < currentUpdatedAt) {
+        continue;
+      }
+      if (incomingUpdatedAt <= 0 && !allowLegacyOverwrite && hasCurrentName) {
+        continue;
+      }
       final displayName = _trustedIncomingDisplayName(
         current: merged[entry.key],
         rawName: entry.value,
@@ -876,11 +953,25 @@ class SharedExpenseRepository {
 
   Map<String, SharedPaymentAddress> _mergePaymentAddresses(
     Map<String, SharedPaymentAddress> existing,
-    Map<String, SharedPaymentAddress> incoming,
-  ) {
+    Map<String, SharedPaymentAddress> incoming, {
+    Map<String, int> existingMetaUpdatedAt = const {},
+    Map<String, int> incomingMetaUpdatedAt = const {},
+    bool allowLegacyOverwrite = true,
+  }) {
     final merged = <String, SharedPaymentAddress>{...existing};
     for (final entry in incoming.entries) {
       if (entry.key.isEmpty || !entry.value.isValid) continue;
+      final hasCurrentAddress = merged[entry.key]?.isValid == true;
+      final currentUpdatedAt = existingMetaUpdatedAt[entry.key] ?? 0;
+      final incomingUpdatedAt = incomingMetaUpdatedAt[entry.key] ?? 0;
+      if (incomingUpdatedAt > 0 && incomingUpdatedAt < currentUpdatedAt) {
+        continue;
+      }
+      if (incomingUpdatedAt <= 0 &&
+          !allowLegacyOverwrite &&
+          hasCurrentAddress) {
+        continue;
+      }
       merged[entry.key] = entry.value;
     }
     return merged;
@@ -897,6 +988,52 @@ class SharedExpenseRepository {
       }
     }
     return result;
+  }
+
+  Map<String, int> _memberMetaUpdatedAtMapFromJson(Object? raw) {
+    if (raw is! Map) return const {};
+    final result = <String, int>{};
+    for (final entry in raw.entries) {
+      final key = entry.key;
+      final value = entry.value;
+      if (key is String && key.isNotEmpty && value is num) {
+        final timestamp = value.toInt();
+        if (timestamp > 0) result[key] = timestamp;
+      }
+    }
+    return result;
+  }
+
+  Map<String, int> _mergeMemberMetaUpdatedAt(
+    Map<String, int> existing,
+    Map<String, int> incoming,
+  ) {
+    final merged = <String, int>{...existing};
+    for (final entry in incoming.entries) {
+      final current = merged[entry.key] ?? 0;
+      if (entry.key.isNotEmpty && entry.value > current) {
+        merged[entry.key] = entry.value;
+      }
+    }
+    return merged;
+  }
+
+  int _incomingMemberMetaUpdatedAt(Map<String, dynamic> decoded) {
+    final explicit = decoded['memberMetaUpdatedAt'];
+    if (explicit is num) return explicit.toInt();
+    final fallback = decoded['timestamp'];
+    if (fallback is num) return fallback.toInt();
+    return 0;
+  }
+
+  bool _shouldApplyIncomingMemberMeta({
+    required int incomingUpdatedAt,
+    required int currentUpdatedAt,
+    required bool hasCurrentValue,
+  }) {
+    if (incomingUpdatedAt > 0) return incomingUpdatedAt >= currentUpdatedAt;
+    if (currentUpdatedAt > 0) return false;
+    return !hasCurrentValue;
   }
 
   Map<String, dynamic> _outboundPaymentAddresses(
@@ -934,6 +1071,16 @@ class SharedExpenseRepository {
       names[myPublicKey] = myDisplayName;
     }
     return names;
+  }
+
+  Map<String, int> _outboundMemberMetaUpdatedAt(
+    SharedExpenseGroup group,
+    String myPublicKey,
+  ) {
+    final timestamps = <String, int>{...group.memberMetaUpdatedAt};
+    final myUpdatedAt = _bestKnownMemberMetaUpdatedAt(group, myPublicKey);
+    if (myUpdatedAt > 0) timestamps[myPublicKey] = myUpdatedAt;
+    return timestamps;
   }
 
   bool _isFallbackGroupName(String value) => value.trim() == _fallbackGroupName;
@@ -1651,7 +1798,7 @@ class SharedExpenseRepository {
       // Legacy alias kept so devices still on `group_key` can be approved.
       case 'group_key':
       case 'key_exchange':
-        return _applyKeyExchange(group, senderPk, decoded);
+        return _applyKeyExchange(group, senderPk, decoded, myPublicKey);
 
       case 'group_meta':
         return _applyGroupMeta(group, senderPk, decoded);
@@ -1681,6 +1828,7 @@ class SharedExpenseRepository {
     SharedExpenseGroup group,
     String senderPk,
     Map<String, dynamic> decoded,
+    String myPublicKey,
   ) async {
     final groupKeyHex = decoded['groupKey'] as String?;
     if (groupKeyHex == null || groupKeyHex.length != 64) return false;
@@ -1696,7 +1844,14 @@ class SharedExpenseRepository {
         ? decoded['backfillNewMembers'] as bool
         : null;
     final newDisplayNames = <String, String>{...group.displayNames};
-    if (approvedBy != null && approverName != null) {
+    final approverMetaUpdatedAt =
+        (decoded['approverMemberMetaUpdatedAt'] as num?)?.toInt() ?? 0;
+    final currentApproverMetaUpdatedAt =
+        approvedBy == null ? 0 : group.memberMetaUpdatedAt[approvedBy] ?? 0;
+    final canApplyApproverMeta = approverMetaUpdatedAt > 0
+        ? approverMetaUpdatedAt >= currentApproverMetaUpdatedAt
+        : currentApproverMetaUpdatedAt == 0;
+    if (approvedBy != null && approverName != null && canApplyApproverMeta) {
       newDisplayNames[approvedBy] = approverName;
     }
     final approverPaymentAddress = _trustedIncomingPaymentAddress(
@@ -1705,15 +1860,24 @@ class SharedExpenseRepository {
     final newPaymentAddresses = <String, SharedPaymentAddress>{
       ...group.paymentAddresses
     };
-    if (approvedBy != null && approverPaymentAddress != null) {
+    if (approvedBy != null &&
+        approverPaymentAddress != null &&
+        canApplyApproverMeta) {
       newPaymentAddresses[approvedBy] = approverPaymentAddress;
     }
+    final newMemberMetaUpdatedAt = <String, int>{
+      ...group.memberMetaUpdatedAt,
+      if (approvedBy != null &&
+          approverMetaUpdatedAt > currentApproverMetaUpdatedAt)
+        approvedBy: approverMetaUpdatedAt,
+    };
     // The sender of this key_exchange is, by definition, the approver — they
     // hold the group key (otherwise they couldn't have shared it). Always
     // mark them approved, even when the payload omits the explicit fields
     // (e.g. older iOS clients send only {type, groupKey}).
     final approvedKeysAfter = <String>{
       ...group.approvedMemberKeys,
+      if (myPublicKey.isNotEmpty) myPublicKey,
       if (senderPk.isNotEmpty) senderPk,
       if (approvedBy != null) approvedBy,
       if (approvedPk != null) approvedPk,
@@ -1729,11 +1893,13 @@ class SharedExpenseRepository {
       },
       displayNames: newDisplayNames,
       paymentAddresses: newPaymentAddresses,
+      memberMetaUpdatedAt: newMemberMetaUpdatedAt,
       pendingApprovals: group.pendingApprovals
           .where((p) =>
               p.publicKey != senderPk &&
               p.publicKey != approvedPk &&
-              p.publicKey != approvedBy)
+              p.publicKey != approvedBy &&
+              p.publicKey != myPublicKey)
           .toList(),
     );
     await _upsertGroup(updated);
@@ -1813,9 +1979,32 @@ class SharedExpenseRepository {
     }
     final current = group.displayNames[senderPk];
     final currentPaymentAddress = group.paymentAddresses[senderPk];
+    final currentUpdatedAt = group.memberMetaUpdatedAt[senderPk] ?? 0;
+    final incomingUpdatedAt = _incomingMemberMetaUpdatedAt(decoded);
+    final canApplyDisplayName = displayName != null &&
+        _shouldApplyIncomingMemberMeta(
+          incomingUpdatedAt: incomingUpdatedAt,
+          currentUpdatedAt: currentUpdatedAt,
+          hasCurrentValue: current != null &&
+              current.trim().isNotEmpty &&
+              !_isFallbackDisplayName(current),
+        );
+    final canApplyPaymentAddress = paymentAddress != null &&
+        _shouldApplyIncomingMemberMeta(
+          incomingUpdatedAt: incomingUpdatedAt,
+          currentUpdatedAt: currentUpdatedAt,
+          hasCurrentValue:
+              currentPaymentAddress != null && currentPaymentAddress.isValid,
+        );
     final isFirstSeen = !group.approvedMemberKeys.contains(senderPk);
-    if (current == displayName &&
-        (paymentAddress == null || currentPaymentAddress == paymentAddress) &&
+    final displayChanged = canApplyDisplayName && current != displayName;
+    final paymentChanged =
+        canApplyPaymentAddress && currentPaymentAddress != paymentAddress;
+    final timestampChanged = incomingUpdatedAt > currentUpdatedAt &&
+        (canApplyDisplayName || canApplyPaymentAddress);
+    if (!displayChanged &&
+        !paymentChanged &&
+        !timestampChanged &&
         !isFirstSeen) {
       return false;
     }
@@ -1833,16 +2022,22 @@ class SharedExpenseRepository {
     }
 
     final updated = group.copyWith(
-      displayNames: displayName == null
+      displayNames: !canApplyDisplayName
           ? group.displayNames
           : {...group.displayNames, senderPk: displayName},
-      paymentAddresses: paymentAddress == null
+      paymentAddresses: !canApplyPaymentAddress
           ? group.paymentAddresses
           : {
               ...group.paymentAddresses,
               senderPk: paymentAddress,
             },
-      myPaymentAddress: senderPk == myPublicKey && paymentAddress != null
+      memberMetaUpdatedAt: timestampChanged
+          ? {
+              ...group.memberMetaUpdatedAt,
+              senderPk: incomingUpdatedAt,
+            }
+          : null,
+      myPaymentAddress: senderPk == myPublicKey && canApplyPaymentAddress
           ? paymentAddress
           : null,
       approvedMemberKeys: {...group.approvedMemberKeys, senderPk},
@@ -2001,6 +2196,8 @@ class SharedExpenseRepository {
     final displayNames = _stringMapFromJson(decoded['displayNames']);
     final paymentAddresses =
         _paymentAddressMapFromJson(decoded['paymentAddresses']);
+    final incomingMemberMetaUpdatedAt =
+        _memberMetaUpdatedAtMapFromJson(decoded['memberMetaUpdatedAt']);
     final approvedMemberKeys =
         _stringListFromJson(decoded['approvedMemberKeys']).toSet();
     final groupName = _trustedIncomingGroupName(group, decoded['groupName']);
@@ -2008,6 +2205,25 @@ class SharedExpenseRepository {
         ? decoded['backfillNewMembers'] as bool
         : null;
     final createdAt = _snapshotDate(decoded['createdAt']);
+    final mergedDisplayNames = _mergeDisplayNames(
+      group.displayNames,
+      displayNames,
+      protectedPublicKey: myPublicKey,
+      existingMetaUpdatedAt: group.memberMetaUpdatedAt,
+      incomingMetaUpdatedAt: incomingMemberMetaUpdatedAt,
+      allowLegacyOverwrite: false,
+    );
+    final mergedPaymentAddresses = _mergePaymentAddresses(
+      group.paymentAddresses,
+      paymentAddresses,
+      existingMetaUpdatedAt: group.memberMetaUpdatedAt,
+      incomingMetaUpdatedAt: incomingMemberMetaUpdatedAt,
+      allowLegacyOverwrite: false,
+    );
+    final mergedMemberMetaUpdatedAt = _mergeMemberMetaUpdatedAt(
+      group.memberMetaUpdatedAt,
+      incomingMemberMetaUpdatedAt,
+    );
 
     final updated = group.copyWith(
       name: groupName,
@@ -2024,16 +2240,11 @@ class SharedExpenseRepository {
       },
       expenses: _mergeSnapshotExpenses(group.expenses, incomingExpenses),
       activity: _mergeSnapshotActivity(group.activity, incomingActivity),
-      displayNames: _mergeDisplayNames(
-        group.displayNames,
-        displayNames,
-        protectedPublicKey: myPublicKey,
-      ),
-      paymentAddresses: _mergePaymentAddresses(
-        group.paymentAddresses,
-        paymentAddresses,
-      ),
-      myPaymentAddress: paymentAddresses[myPublicKey] ?? group.myPaymentAddress,
+      displayNames: mergedDisplayNames,
+      paymentAddresses: mergedPaymentAddresses,
+      memberMetaUpdatedAt: mergedMemberMetaUpdatedAt,
+      myPaymentAddress:
+          mergedPaymentAddresses[myPublicKey] ?? group.myPaymentAddress,
     );
 
     if (jsonEncode(updated.toJson()) == before) return false;
@@ -2191,9 +2402,33 @@ class SharedExpenseRepository {
     final paymentAddress = _trustedIncomingPaymentAddress(
       decoded['paymentAddress'],
     );
-    final approvalDisplayName = displayName ?? group.displayNames[pk];
     final ts = (decoded['timestamp'] as num?)?.toInt() ??
         DateTime.now().millisecondsSinceEpoch;
+    final incomingUpdatedAt = _incomingMemberMetaUpdatedAt(decoded);
+    final currentUpdatedAt = group.memberMetaUpdatedAt[pk] ?? 0;
+    final isAlreadyApproved = group.approvedMemberKeys.contains(pk) ||
+        group.keySharedWith.contains(pk);
+    if (isAlreadyApproved) return false;
+
+    final currentDisplayName = group.displayNames[pk];
+    final currentPaymentAddress = group.paymentAddresses[pk];
+    final canApplyDisplayName = displayName != null &&
+        _shouldApplyIncomingMemberMeta(
+          incomingUpdatedAt: incomingUpdatedAt,
+          currentUpdatedAt: currentUpdatedAt,
+          hasCurrentValue: currentDisplayName != null &&
+              currentDisplayName.trim().isNotEmpty &&
+              !_isFallbackDisplayName(currentDisplayName),
+        );
+    final canApplyPaymentAddress = paymentAddress != null &&
+        _shouldApplyIncomingMemberMeta(
+          incomingUpdatedAt: incomingUpdatedAt,
+          currentUpdatedAt: currentUpdatedAt,
+          hasCurrentValue:
+              currentPaymentAddress != null && currentPaymentAddress.isValid,
+        );
+    final approvalDisplayName =
+        canApplyDisplayName ? displayName : group.displayNames[pk];
 
     // Idempotency: if we already have an identical pending entry for this
     // request, do nothing.
@@ -2219,19 +2454,27 @@ class SharedExpenseRepository {
       ),
     ];
     final newDisplayNames = <String, String>{...group.displayNames};
-    if (displayName != null && displayName.isNotEmpty) {
+    if (canApplyDisplayName && displayName.isNotEmpty) {
       newDisplayNames[pk] = displayName;
     }
     final newPaymentAddresses = <String, SharedPaymentAddress>{
       ...group.paymentAddresses
     };
-    if (paymentAddress != null) {
+    if (canApplyPaymentAddress) {
       newPaymentAddresses[pk] = paymentAddress;
     }
+    final newMemberMetaUpdatedAt = incomingUpdatedAt > currentUpdatedAt &&
+            (canApplyDisplayName || canApplyPaymentAddress)
+        ? {
+            ...group.memberMetaUpdatedAt,
+            pk: incomingUpdatedAt,
+          }
+        : group.memberMetaUpdatedAt;
     final updated = group.copyWith(
       pendingApprovals: newPending,
       displayNames: newDisplayNames,
       paymentAddresses: newPaymentAddresses,
+      memberMetaUpdatedAt: newMemberMetaUpdatedAt,
       approvedMemberKeys:
           group.approvedMemberKeys.where((k) => k != pk).toSet(),
       keySharedWith: group.keySharedWith.where((k) => k != pk).toSet(),
@@ -2323,6 +2566,10 @@ class SharedExpenseRepository {
         'members': group.members.map((member) => member.toJson()).toList(),
         'approvedMemberKeys': group.approvedMemberKeys.toList(),
         'displayNames': _outboundDisplayNames(
+          group,
+          identity.publicKeyHex,
+        ),
+        'memberMetaUpdatedAt': _outboundMemberMetaUpdatedAt(
           group,
           identity.publicKeyHex,
         ),
@@ -2432,6 +2679,8 @@ class SharedExpenseRepository {
     final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
     final paymentAddress =
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
+    final memberMetaUpdatedAt =
+        _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
     var allOk = true;
     if (groupName.isNotEmpty && !_isFallbackGroupName(groupName)) {
       try {
@@ -2466,6 +2715,7 @@ class SharedExpenseRepository {
             if (hasDisplayName) 'displayName': displayName,
             if (paymentAddress != null && paymentAddress.isValid)
               'paymentAddress': paymentAddress.toJson(),
+            'memberMetaUpdatedAt': memberMetaUpdatedAt,
             'timestamp': DateTime.now().millisecondsSinceEpoch,
           },
         );
@@ -2482,34 +2732,6 @@ class SharedExpenseRepository {
     return allOk;
   }
 
-  Future<void> _emitGroupMeta(SharedExpenseGroup group) async {
-    final groupKeyHex = await _readGroupKey(group.id);
-    if (groupKeyHex == null) return;
-    final groupName = _bestKnownGroupName(group);
-    try {
-      final encrypted = await _cryptoService.encryptPayloadWithKey(
-        keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
-        payload: {
-          'type': 'group_meta',
-          if (!_isFallbackGroupName(groupName)) 'name': groupName,
-          'backfillNewMembers': group.backfillNewMembers,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        },
-      );
-      await _engineClient.submitPayload(
-        groupId: group.id,
-        encryptedBlob: encrypted,
-        kind: 'group_meta',
-      );
-    } catch (e) {
-      _sharedExpenseLog('_emitGroupMeta failed: $e — flagging for retry');
-      final latest = await _groupById(group.id);
-      if (latest != null) {
-        await _upsertGroup(latest.copyWith(pendingMetaBroadcast: true));
-      }
-    }
-  }
-
   Future<void> _emitMemberMeta(SharedExpenseGroup group) async {
     final groupKeyHex = await _readGroupKey(group.id);
     if (groupKeyHex == null) return;
@@ -2517,6 +2739,8 @@ class SharedExpenseRepository {
     final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
     final paymentAddress =
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
+    final memberMetaUpdatedAt =
+        _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
     if ((displayName.trim().isEmpty || _isFallbackDisplayName(displayName)) &&
         paymentAddress == null) {
       return;
@@ -2529,6 +2753,7 @@ class SharedExpenseRepository {
           if (!_isFallbackDisplayName(displayName)) 'displayName': displayName,
           if (paymentAddress != null && paymentAddress.isValid)
             'paymentAddress': paymentAddress.toJson(),
+          'memberMetaUpdatedAt': memberMetaUpdatedAt,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         },
       );
@@ -2552,12 +2777,15 @@ class SharedExpenseRepository {
     final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
     final paymentAddress =
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
+    final memberMetaUpdatedAt =
+        _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
     final payload = {
       'type': 'join_request',
       'publicKey': identity.publicKeyHex,
       if (!_isFallbackDisplayName(displayName)) 'displayName': displayName,
       if (paymentAddress != null && paymentAddress.isValid)
         'paymentAddress': paymentAddress.toJson(),
+      'memberMetaUpdatedAt': memberMetaUpdatedAt,
       'timestamp': timestamp,
     };
     for (final member in group.members) {
