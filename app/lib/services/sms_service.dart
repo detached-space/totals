@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:another_telephony/telephony.dart';
@@ -126,6 +127,12 @@ class SmsService {
   static const String _lastSmsCatchupPrefPrefix =
       'sms_last_catchup_epoch_ms_profile_';
   static const int _dashenBankId = 4;
+  static const int _canonicalInboxLookupAttempts = 3;
+  static const Duration _canonicalInboxLookupDelay =
+      Duration(milliseconds: 750);
+  static const Duration _canonicalInboxLookupWindow = Duration(minutes: 2);
+  static const Duration _canonicalInboxLookupFutureSlack =
+      Duration(seconds: 15);
 
   // Callback for foreground-only UI updates.
   ValueChanged<Transaction>? onTransactionSaved;
@@ -457,6 +464,185 @@ class SmsService {
       if (text.contains(value)) return true;
     }
     return false;
+  }
+
+  static String _normalizeSmsComparisonText(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+  }
+
+  static Set<String> _smsComparisonTokens(String value) {
+    return _normalizeSmsComparisonText(value)
+        .split(RegExp(r'\s+'))
+        .where((token) => token.length >= 2)
+        .toSet();
+  }
+
+  static bool _bodiesLookRelated(String originalBody, String inboxBody) {
+    final original = _normalizeSmsComparisonText(originalBody);
+    final inbox = _normalizeSmsComparisonText(inboxBody);
+    if (original.isEmpty || inbox.isEmpty) return false;
+    if (original == inbox) return originalBody.trim() != inboxBody.trim();
+    if (inbox.contains(original) || original.contains(inbox)) return true;
+
+    final originalTokens = _smsComparisonTokens(originalBody);
+    final inboxTokens = _smsComparisonTokens(inboxBody);
+    if (originalTokens.isEmpty || inboxTokens.isEmpty) return false;
+
+    var overlap = 0;
+    for (final token in originalTokens) {
+      if (inboxTokens.contains(token)) overlap++;
+    }
+
+    final smallerSetSize = originalTokens.length < inboxTokens.length
+        ? originalTokens.length
+        : inboxTokens.length;
+    return overlap / smallerSetSize >= 0.7;
+  }
+
+  static int _canonicalInboxCandidateScore({
+    required SmsMessage message,
+    required String originalSenderAddress,
+    required String originalBody,
+    required DateTime anchor,
+    required Bank bank,
+    required List<Bank> banks,
+  }) {
+    final body = message.body;
+    final address = message.address;
+    if (body == null || address == null) return -1;
+    if (!_bodiesLookRelated(originalBody, body)) return -1;
+
+    final normalizedOriginalSender =
+        normalizeBankSenderToken(originalSenderAddress);
+    final normalizedCandidateSender = normalizeBankSenderToken(address);
+    final sameSender = normalizedCandidateSender == normalizedOriginalSender;
+    final sameBank = sameSender ||
+        senderAddressMatchesBank(
+          bank,
+          address,
+          allBanks: banks,
+        );
+    if (!sameBank) return -1;
+
+    final messageTime = message.date == null
+        ? anchor
+        : DateTime.fromMillisecondsSinceEpoch(message.date!);
+    final distanceMs = messageTime.difference(anchor).inMilliseconds.abs();
+    if (distanceMs > _canonicalInboxLookupWindow.inMilliseconds) return -1;
+
+    var score = 0;
+    if (sameSender) score += 40;
+    if (_looksLikeTransactionMessage(body)) score += 20;
+    if (body.length > originalBody.length) score += 10;
+    score += 20 -
+        ((distanceMs / _canonicalInboxLookupWindow.inMilliseconds) * 20)
+            .round();
+    return score;
+  }
+
+  static Future<SmsMessage?> _findCanonicalInboxCopy({
+    required String originalBody,
+    required String senderAddress,
+    required DateTime? messageDate,
+    required Bank bank,
+    required List<Bank> banks,
+  }) async {
+    final anchor = messageDate ?? DateTime.now();
+    final lowerBound = anchor
+        .subtract(_canonicalInboxLookupWindow)
+        .millisecondsSinceEpoch
+        .toString();
+    final upperBound = DateTime.now()
+        .add(_canonicalInboxLookupFutureSlack)
+        .millisecondsSinceEpoch
+        .toString();
+    final filter = SmsFilter.where(SmsColumn.DATE)
+        .greaterThanOrEqualTo(lowerBound)
+        .and(SmsColumn.DATE)
+        .lessThanOrEqualTo(upperBound);
+
+    final messages = await Telephony.instance.getInboxSms(
+      columns: const [
+        SmsColumn.ADDRESS,
+        SmsColumn.BODY,
+        SmsColumn.DATE,
+      ],
+      filter: filter,
+      sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
+    );
+
+    SmsMessage? best;
+    var bestScore = -1;
+    for (final message in messages) {
+      final score = _canonicalInboxCandidateScore(
+        message: message,
+        originalSenderAddress: senderAddress,
+        originalBody: originalBody,
+        anchor: anchor,
+        bank: bank,
+        banks: banks,
+      );
+      if (score > bestScore) {
+        best = message;
+        bestScore = score;
+      }
+    }
+
+    return best;
+  }
+
+  static Future<ParseResult?> _retryCanonicalInboxCopy({
+    required String originalBody,
+    required String senderAddress,
+    required DateTime? messageDate,
+    required Bank bank,
+    required bool skipDashenExpenseDuplicates,
+    required bool skipAutoCategorization,
+    required bool allowRemoteBankFetch,
+    required bool allowRemotePatternFetch,
+  }) async {
+    debugPrint(
+      "debug: Looking for canonical inbox copy before failed parse review",
+    );
+    final banks = await _bankConfigService.getBanks(
+      allowRemoteFetch: allowRemoteBankFetch,
+    );
+
+    for (var attempt = 0; attempt < _canonicalInboxLookupAttempts; attempt++) {
+      await Future<void>.delayed(_canonicalInboxLookupDelay);
+      final inboxMessage = await _findCanonicalInboxCopy(
+        originalBody: originalBody,
+        senderAddress: senderAddress,
+        messageDate: messageDate,
+        bank: bank,
+        banks: banks,
+      );
+      if (inboxMessage?.body == null || inboxMessage?.address == null) {
+        continue;
+      }
+
+      debugPrint("debug: Retrying parse with canonical inbox SMS copy");
+      final inboxDate = inboxMessage!.date == null
+          ? messageDate
+          : DateTime.fromMillisecondsSinceEpoch(inboxMessage.date!);
+      final result = await _processMessageInternal(
+        inboxMessage.body!,
+        inboxMessage.address!,
+        messageDate: inboxDate,
+        notifyUser: false,
+        skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
+        skipAutoCategorization: skipAutoCategorization,
+        allowRemoteBankFetch: allowRemoteBankFetch,
+        allowRemotePatternFetch: allowRemotePatternFetch,
+        recordFailure: false,
+      );
+      if (result.status == ParseStatus.success ||
+          result.status == ParseStatus.duplicate) {
+        return result;
+      }
+    }
+
+    return null;
   }
 
   static Bank? _bankById(List<Bank> banks, int bankId) {
@@ -816,6 +1002,32 @@ class SmsService {
 
     if (details == null) {
       print("debug: No matching pattern found for message from $senderAddress");
+      if (notifyUser && recordFailure) {
+        try {
+          final canonicalResult = await _retryCanonicalInboxCopy(
+            originalBody: messageBody,
+            senderAddress: senderAddress,
+            messageDate: messageDate,
+            bank: bank,
+            skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
+            skipAutoCategorization: skipAutoCategorization,
+            allowRemoteBankFetch: allowRemoteBankFetch,
+            allowRemotePatternFetch: allowRemotePatternFetch,
+          );
+          if (canonicalResult != null) {
+            if (canonicalResult.status == ParseStatus.success &&
+                canonicalResult.transaction != null) {
+              await NotificationService.instance.showTransactionNotification(
+                transaction: canonicalResult.transaction!,
+                bankId: canonicalResult.transaction!.bankId,
+              );
+            }
+            return canonicalResult;
+          }
+        } catch (e) {
+          debugPrint("debug: Canonical inbox retry failed: $e");
+        }
+      }
       if (recordFailure && _looksLikeTransactionMessage(messageBody)) {
         if (notifyUser) {
           final reviewEnabled = await NotificationSettingsService.instance
