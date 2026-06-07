@@ -51,6 +51,7 @@ class NotificationService {
   static final Set<String> _knownBankTokens = _buildKnownBankTokens();
 
   bool _initialized = false;
+  bool _permissionRequestInProgress = false;
 
   Future<void> ensureInitialized() async {
     if (_initialized) return;
@@ -396,29 +397,42 @@ class NotificationService {
     }
   }
 
-  Future<void> requestPermissionsIfNeeded() async {
+  Future<bool> requestPermissionsIfNeeded() async {
+    if (_permissionRequestInProgress) {
+      return arePermissionsGranted();
+    }
+
     try {
+      _permissionRequestInProgress = true;
       await ensureInitialized();
 
-      if (kIsWeb) return;
+      if (kIsWeb) return true;
 
       if (defaultTargetPlatform == TargetPlatform.android) {
         final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
-        await androidPlugin?.requestNotificationsPermission();
+        final granted = await androidPlugin?.requestNotificationsPermission();
+        if (granted != null) return granted;
+        final status = await Permission.notification.request();
+        return status.isGranted;
       } else if (defaultTargetPlatform == TargetPlatform.iOS) {
         final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>();
-        await iosPlugin?.requestPermissions(
+        final granted = await iosPlugin?.requestPermissions(
           alert: true,
           badge: true,
           sound: true,
         );
+        return granted == true;
       }
+      return true;
     } catch (e) {
       if (kDebugMode) {
         print('debug: Notification permission request failed: $e');
       }
+      return false;
+    } finally {
+      _permissionRequestInProgress = false;
     }
   }
 

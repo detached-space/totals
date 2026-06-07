@@ -13,26 +13,23 @@ class BankDetectionStartupService {
   static Future<void> runOnAppOpen() async {
     if (_hasRunThisLaunch || _isRunning) return;
 
-    _hasRunThisLaunch = true;
-    _isRunning = true;
-
     try {
+      final permissionStatus = await Permission.sms.status;
+      if (!permissionStatus.isGranted) {
+        if (kDebugMode) {
+          print(
+              "debug: SMS permission not granted, skipping startup detection");
+        }
+        return;
+      }
+
+      _hasRunThisLaunch = true;
+      _isRunning = true;
+
       await SmsConfigService().syncRemoteConfig();
 
       // Ensure bank configuration exists before trying to match sender IDs.
       await BankConfigService().initializeBanks();
-
-      var permissionStatus = await Permission.sms.status;
-      if (!permissionStatus.isGranted) {
-        permissionStatus = await Permission.sms.request();
-      }
-
-      if (!permissionStatus.isGranted) {
-        if (kDebugMode) {
-          print("debug: SMS permission not granted, skipping startup detection");
-        }
-        return;
-      }
 
       await BankDetectionService().detectUnregisteredBanks(
         forceRefresh: true,

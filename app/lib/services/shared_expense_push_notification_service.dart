@@ -43,7 +43,6 @@ class SharedExpensePushNotificationService {
 
     await NotificationService.instance.ensureInitialized();
     await FirebaseMessaging.instance.setAutoInitEnabled(true);
-    await FirebaseMessaging.instance.requestPermission();
     await syncRegistration();
 
     _tokenRefreshSub ??= FirebaseMessaging.instance.onTokenRefresh.listen(

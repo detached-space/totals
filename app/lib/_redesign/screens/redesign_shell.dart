@@ -98,7 +98,6 @@ class RedesignShellState extends State<RedesignShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     BackgroundRefreshSignalService.instance.ensureListening();
-    unawaited(BankDetectionStartupService.runOnAppOpen());
     unawaited(SharedExpenseNotificationCoordinator.instance.start());
     unawaited(SharedExpensePushNotificationService.instance.start());
     unawaited(_loadActiveProfileId());
@@ -180,8 +179,9 @@ class RedesignShellState extends State<RedesignShell>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _initSmsPermissions();
       await _checkNotificationPermissions();
+      await _initSmsPermissions();
+      unawaited(BankDetectionStartupService.runOnAppOpen());
       if (mounted) _authenticateIfAvailable();
     });
   }
@@ -939,7 +939,7 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
               border: Border.all(color: AppColors.borderColor(context)),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.black.withOpacity(0.12),
+                  color: AppColors.black.withValues(alpha: 0.12),
                   blurRadius: 24,
                   offset: const Offset(0, -6),
                 ),
@@ -970,8 +970,8 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                           borderRadius: BorderRadius.circular(14),
                           gradient: LinearGradient(
                             colors: [
-                              AppColors.blue.withOpacity(0.18),
-                              AppColors.primaryLight.withOpacity(0.12),
+                              AppColors.blue.withValues(alpha: 0.18),
+                              AppColors.primaryLight.withValues(alpha: 0.12),
                             ],
                           ),
                         ),

@@ -5409,6 +5409,23 @@ enum _SharedAnalyticsChartMode { bubbles, monthly }
 
 enum _SharedAnalyticsPeriod { sevenDays, thirtyDays, allTime }
 
+enum _SharedAnalyticsBarPeriod { daily, monthly }
+
+class _SharedAnalyticsTimeWindow {
+  final DateTime start;
+  final DateTime endExclusive;
+
+  const _SharedAnalyticsTimeWindow({
+    required this.start,
+    required this.endExclusive,
+  });
+
+  bool includes(int timestamp) {
+    return timestamp >= start.millisecondsSinceEpoch &&
+        timestamp < endExclusive.millisecondsSinceEpoch;
+  }
+}
+
 int? _sharedAnalyticsCutoffFor(_SharedAnalyticsPeriod period) {
   final now = DateTime.now();
   switch (period) {
@@ -5419,6 +5436,20 @@ int? _sharedAnalyticsCutoffFor(_SharedAnalyticsPeriod period) {
     case _SharedAnalyticsPeriod.allTime:
       return null;
   }
+}
+
+DateTime _sharedAnalyticsWeekStartForOffset(int offset) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final currentWeekStart = today.subtract(
+    Duration(days: today.weekday - DateTime.monday),
+  );
+  return currentWeekStart.add(Duration(days: offset * 7));
+}
+
+DateTime _sharedAnalyticsMonthStartForOffset(int offset) {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month + offset, 1);
 }
 
 String _sharedAnalyticsPeriodShortLabel(
@@ -5449,6 +5480,18 @@ String _sharedAnalyticsPeriodLongLabel(
   }
 }
 
+String _sharedAnalyticsChartModeLabel(
+  BuildContext context,
+  _SharedAnalyticsChartMode mode,
+) {
+  switch (mode) {
+    case _SharedAnalyticsChartMode.bubbles:
+      return context.l10nText('Bubble chart');
+    case _SharedAnalyticsChartMode.monthly:
+      return context.l10nText('Bar chart');
+  }
+}
+
 String _sharedAnalyticsMonthLabel(DateTime date) {
   const months = [
     'Jan',
@@ -5465,6 +5508,19 @@ String _sharedAnalyticsMonthLabel(DateTime date) {
     'Dec',
   ];
   return '${months[date.month - 1]} ${date.year}';
+}
+
+String _sharedAnalyticsDateLabel(DateTime date) {
+  final month = _sharedAnalyticsMonthLabel(date).split(' ').first;
+  return '$month ${date.day}';
+}
+
+String _sharedAnalyticsDateRangeLabel(DateTime start, DateTime endInclusive) {
+  if (start.year == endInclusive.year && start.month == endInclusive.month) {
+    final month = _sharedAnalyticsMonthLabel(start).split(' ').first;
+    return '$month ${start.day} - ${endInclusive.day}';
+  }
+  return '${_sharedAnalyticsDateLabel(start)} - ${_sharedAnalyticsDateLabel(endInclusive)}';
 }
 
 String _sharedAnalyticsWeekdayLabel(BuildContext context, int index) {
@@ -5513,13 +5569,82 @@ class _SharedGroupAnalyticsTab extends StatefulWidget {
 class _SharedGroupAnalyticsTabState extends State<_SharedGroupAnalyticsTab> {
   _SharedAnalyticsChartMode _chartMode = _SharedAnalyticsChartMode.bubbles;
   _SharedAnalyticsPeriod _period = _SharedAnalyticsPeriod.thirtyDays;
+  _SharedAnalyticsBarPeriod _barPeriod = _SharedAnalyticsBarPeriod.daily;
+  int _barWeekOffset = 0;
+  int _barMonthOffset = 0;
+
+  _SharedAnalyticsTimeWindow? get _activeBarAnalyticsWindow {
+    if (_chartMode != _SharedAnalyticsChartMode.monthly) return null;
+
+    switch (_barPeriod) {
+      case _SharedAnalyticsBarPeriod.daily:
+        final weekStart = _sharedAnalyticsWeekStartForOffset(_barWeekOffset);
+        return _SharedAnalyticsTimeWindow(
+          start: weekStart,
+          endExclusive: weekStart.add(const Duration(days: 7)),
+        );
+      case _SharedAnalyticsBarPeriod.monthly:
+        final monthStart = _sharedAnalyticsMonthStartForOffset(_barMonthOffset);
+        return _SharedAnalyticsTimeWindow(
+          start: monthStart,
+          endExclusive: DateTime(monthStart.year, monthStart.month + 1, 1),
+        );
+    }
+  }
+
+  String? _activeBarAnalyticsLabel(_SharedAnalyticsTimeWindow? window) {
+    if (window == null) return null;
+
+    switch (_barPeriod) {
+      case _SharedAnalyticsBarPeriod.daily:
+        return _sharedAnalyticsDateRangeLabel(
+          window.start,
+          window.endExclusive.subtract(const Duration(days: 1)),
+        );
+      case _SharedAnalyticsBarPeriod.monthly:
+        return _sharedAnalyticsMonthLabel(window.start);
+    }
+  }
+
+  void _navigateBarPeriod({required bool newer}) {
+    setState(() {
+      switch (_barPeriod) {
+        case _SharedAnalyticsBarPeriod.daily:
+          if (newer) {
+            if (_barWeekOffset < 0) _barWeekOffset++;
+          } else {
+            _barWeekOffset--;
+          }
+          break;
+        case _SharedAnalyticsBarPeriod.monthly:
+          if (newer) {
+            if (_barMonthOffset < 0) _barMonthOffset++;
+          } else {
+            _barMonthOffset--;
+          }
+          break;
+      }
+    });
+  }
+
+  bool get _hasNewerBarPeriod {
+    switch (_barPeriod) {
+      case _SharedAnalyticsBarPeriod.daily:
+        return _barWeekOffset < 0;
+      case _SharedAnalyticsBarPeriod.monthly:
+        return _barMonthOffset < 0;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final barWindow = _activeBarAnalyticsWindow;
     final analytics = _SharedAnalyticsSnapshot.fromGroup(
       widget.group,
       period: _period,
+      timeWindow: barWindow,
     );
+    final analyticsLabel = _activeBarAnalyticsLabel(barWindow);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5532,13 +5657,21 @@ class _SharedGroupAnalyticsTabState extends State<_SharedGroupAnalyticsTab> {
           myPublicKey: widget.myPublicKey,
           mode: _chartMode,
           period: _period,
+          barPeriod: _barPeriod,
+          barWeekOffset: _barWeekOffset,
+          barMonthOffset: _barMonthOffset,
           onModeChanged: (mode) => setState(() => _chartMode = mode),
           onPeriodChanged: (period) => setState(() => _period = period),
+          onBarPeriodChanged: (period) => setState(() => _barPeriod = period),
+          onNavigateToOlderBarPeriod: () => _navigateBarPeriod(newer: false),
+          onNavigateToNewerBarPeriod:
+              _hasNewerBarPeriod ? () => _navigateBarPeriod(newer: true) : null,
         ),
         const SizedBox(height: 12),
         _SharedSpendingByDayPanel(
           analytics: analytics,
           period: _period,
+          periodLabelOverride: analyticsLabel,
         ),
         const SizedBox(height: 12),
         _SharedAnalyticsPanel(
@@ -5641,15 +5774,21 @@ class _SharedAnalyticsSnapshot {
   factory _SharedAnalyticsSnapshot.fromGroup(
     SharedExpenseGroup group, {
     required _SharedAnalyticsPeriod period,
+    _SharedAnalyticsTimeWindow? timeWindow,
   }) {
     final cutoff = _sharedAnalyticsCutoffFor(period);
-    final scopedExpenses = cutoff == null
+    final scopedExpenses = timeWindow != null
         ? group.expenses
-        : group.expenses
-            .where((expense) => expense.timestamp >= cutoff)
-            .toList(growable: false);
-    final scopedGroup =
-        cutoff == null ? group : group.copyWith(expenses: scopedExpenses);
+            .where((expense) => timeWindow.includes(expense.timestamp))
+            .toList(growable: false)
+        : cutoff == null
+            ? group.expenses
+            : group.expenses
+                .where((expense) => expense.timestamp >= cutoff)
+                .toList(growable: false);
+    final scopedGroup = timeWindow == null && cutoff == null
+        ? group
+        : group.copyWith(expenses: scopedExpenses);
     final spentByMember = <String, double>{
       for (final member in group.members) member.devicePublicKey: 0,
     };
@@ -5867,8 +6006,14 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
   final String myPublicKey;
   final _SharedAnalyticsChartMode mode;
   final _SharedAnalyticsPeriod period;
+  final _SharedAnalyticsBarPeriod barPeriod;
+  final int barWeekOffset;
+  final int barMonthOffset;
   final ValueChanged<_SharedAnalyticsChartMode> onModeChanged;
   final ValueChanged<_SharedAnalyticsPeriod> onPeriodChanged;
+  final ValueChanged<_SharedAnalyticsBarPeriod> onBarPeriodChanged;
+  final VoidCallback onNavigateToOlderBarPeriod;
+  final VoidCallback? onNavigateToNewerBarPeriod;
 
   const _SharedAnalyticsChartCard({
     required this.group,
@@ -5876,15 +6021,92 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
     required this.myPublicKey,
     required this.mode,
     required this.period,
+    required this.barPeriod,
+    required this.barWeekOffset,
+    required this.barMonthOffset,
     required this.onModeChanged,
     required this.onPeriodChanged,
+    required this.onBarPeriodChanged,
+    required this.onNavigateToOlderBarPeriod,
+    required this.onNavigateToNewerBarPeriod,
   });
+
+  Future<void> _openChartSelector(BuildContext context) async {
+    final selected = await showModalBottomSheet<_SharedAnalyticsChartMode>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final bottomPadding = MediaQuery.of(sheetContext).padding.bottom;
+        return Container(
+          decoration: BoxDecoration(
+            color: AppColors.background(sheetContext),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + bottomPadding),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.textTertiary(sheetContext)
+                            .withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    sheetContext.l10nText('Select chart'),
+                    style: TextStyle(
+                      color: AppColors.textPrimary(sheetContext),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    sheetContext.l10nText('Choose a chart.'),
+                    style: TextStyle(
+                      color: AppColors.textSecondary(sheetContext),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  for (final option in _SharedAnalyticsChartMode.values)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _SharedAnalyticsChartSheetOption(
+                        title: _sharedAnalyticsChartModeLabel(
+                          sheetContext,
+                          option,
+                        ),
+                        selected: option == mode,
+                        onTap: () => Navigator.of(sheetContext).pop(option),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (!context.mounted || selected == null || selected == mode) {
+      return;
+    }
+    onModeChanged(selected);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final chartTitle = mode == _SharedAnalyticsChartMode.bubbles
-        ? context.l10nText('Balance bubbles')
-        : context.l10nText('Monthly spend');
+    final chartTitle = _sharedAnalyticsChartModeLabel(context, mode);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -5902,10 +6124,9 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _SharedAnalyticsChartDropdown(
-                      mode: mode,
+                    _SharedAnalyticsChartPicker(
                       label: chartTitle,
-                      onChanged: onModeChanged,
+                      onTap: () => _openChartSelector(context),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -5913,7 +6134,11 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
                           ? context.l10nText(
                               'Members who owe more appear larger',
                             )
-                          : context.l10nText('Monthly expenses by payer'),
+                          : context.l10nText(
+                              barPeriod == _SharedAnalyticsBarPeriod.daily
+                                  ? 'Weekly expenses by payer'
+                                  : 'Monthly expenses by payer',
+                            ),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: AppColors.textTertiary(context),
                             fontWeight: FontWeight.w600,
@@ -5922,14 +6147,24 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (mode != _SharedAnalyticsChartMode.bubbles) ...[
+                const SizedBox(width: 12),
+                _SharedBarPeriodToggle(
+                  period: barPeriod,
+                  onChanged: onBarPeriodChanged,
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 10),
-          _SharedAnalyticsPeriodSelector(
-            period: period,
-            onChanged: onPeriodChanged,
-          ),
-          const SizedBox(height: 16),
+          if (mode == _SharedAnalyticsChartMode.bubbles) ...[
+            const SizedBox(height: 10),
+            _SharedAnalyticsPeriodSelector(
+              period: period,
+              onChanged: onPeriodChanged,
+            ),
+            const SizedBox(height: 16),
+          ] else
+            const SizedBox(height: 14),
           if (mode == _SharedAnalyticsChartMode.bubbles)
             _SharedMemberBubbleChart(
               group: group,
@@ -5937,10 +6172,14 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
               analytics: analytics,
             )
           else
-            _SharedMonthlyExpenseBarChart(
+            _SharedWeeklyExpenseBarChart(
               group: group,
               myPublicKey: myPublicKey,
-              analytics: analytics,
+              period: barPeriod,
+              weekOffset: barWeekOffset,
+              monthOffset: barMonthOffset,
+              onNavigateToOlderPeriod: onNavigateToOlderBarPeriod,
+              onNavigateToNewerPeriod: onNavigateToNewerBarPeriod,
             ),
         ],
       ),
@@ -5948,68 +6187,20 @@ class _SharedAnalyticsChartCard extends StatelessWidget {
   }
 }
 
-class _SharedAnalyticsChartDropdown extends StatelessWidget {
-  final _SharedAnalyticsChartMode mode;
+class _SharedAnalyticsChartPicker extends StatelessWidget {
   final String label;
-  final ValueChanged<_SharedAnalyticsChartMode> onChanged;
+  final VoidCallback onTap;
 
-  const _SharedAnalyticsChartDropdown({
-    required this.mode,
+  const _SharedAnalyticsChartPicker({
     required this.label,
-    required this.onChanged,
+    required this.onTap,
   });
-
-  String _labelFor(BuildContext context, _SharedAnalyticsChartMode mode) {
-    switch (mode) {
-      case _SharedAnalyticsChartMode.bubbles:
-        return context.l10nText('Balance bubbles');
-      case _SharedAnalyticsChartMode.monthly:
-        return context.l10nText('Monthly spend');
-    }
-  }
-
-  IconData _iconFor(_SharedAnalyticsChartMode mode) {
-    switch (mode) {
-      case _SharedAnalyticsChartMode.bubbles:
-        return AppIcons.auto_graph_rounded;
-      case _SharedAnalyticsChartMode.monthly:
-        return AppIcons.dashboard_outlined;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<_SharedAnalyticsChartMode>(
-      initialValue: mode,
-      onSelected: onChanged,
-      color: AppColors.cardColor(context),
-      elevation: 10,
-      itemBuilder: (context) => [
-        for (final option in _SharedAnalyticsChartMode.values)
-          PopupMenuItem(
-            value: option,
-            child: Row(
-              children: [
-                Icon(
-                  _iconFor(option),
-                  size: 18,
-                  color: option == mode
-                      ? AppColors.primaryLight
-                      : AppColors.textSecondary(context),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  _labelFor(context, option),
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textPrimary(context),
-                        fontWeight:
-                            option == mode ? FontWeight.w900 : FontWeight.w700,
-                      ),
-                ),
-              ],
-            ),
-          ),
-      ],
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -6027,6 +6218,129 @@ class _SharedAnalyticsChartDropdown extends StatelessWidget {
             color: AppColors.textTertiary(context),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SharedAnalyticsChartSheetOption extends StatelessWidget {
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SharedAnalyticsChartSheetOption({
+    required this.title,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? AppColors.primaryLight.withValues(alpha: 0.12)
+          : AppColors.surfaceColor(context),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (selected)
+                const Icon(
+                  AppIcons.check_rounded,
+                  color: AppColors.primaryLight,
+                  size: 20,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedBarPeriodToggle extends StatelessWidget {
+  final _SharedAnalyticsBarPeriod period;
+  final ValueChanged<_SharedAnalyticsBarPeriod> onChanged;
+
+  const _SharedBarPeriodToggle({
+    required this.period,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final toggleBg = AppColors.mutedFill(context).withValues(alpha: 0.6);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: toggleBg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SharedBarPeriodToggleButton(
+            label: 'D',
+            selected: period == _SharedAnalyticsBarPeriod.daily,
+            onTap: () => onChanged(_SharedAnalyticsBarPeriod.daily),
+          ),
+          _SharedBarPeriodToggleButton(
+            label: 'M',
+            selected: period == _SharedAnalyticsBarPeriod.monthly,
+            onTap: () => onChanged(_SharedAnalyticsBarPeriod.monthly),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SharedBarPeriodToggleButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SharedBarPeriodToggleButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.cardColor(context) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          context.l10nText(label),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: selected
+                ? AppColors.textPrimary(context)
+                : AppColors.textSecondary(context),
+          ),
+        ),
       ),
     );
   }
@@ -6463,153 +6777,373 @@ class _SharedDebtBubble extends StatelessWidget {
   }
 }
 
-class _SharedMonthlyExpenseBarChart extends StatelessWidget {
+class _SharedWeeklyExpenseBarChart extends StatelessWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
-  final _SharedAnalyticsSnapshot analytics;
+  final _SharedAnalyticsBarPeriod period;
+  final int weekOffset;
+  final int monthOffset;
+  final VoidCallback onNavigateToOlderPeriod;
+  final VoidCallback? onNavigateToNewerPeriod;
 
-  const _SharedMonthlyExpenseBarChart({
+  const _SharedWeeklyExpenseBarChart({
     required this.group,
     required this.myPublicKey,
-    required this.analytics,
+    required this.period,
+    required this.weekOffset,
+    required this.monthOffset,
+    required this.onNavigateToOlderPeriod,
+    required this.onNavigateToNewerPeriod,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    if (analytics.monthlyBuckets.isEmpty) {
-      return _SharedAnalyticsEmptyLine(
-        title: context.l10nText('No monthly spending'),
-        subtitle: context.l10nText('Shared expenses will appear here.'),
+  int get _effectiveOffset {
+    switch (period) {
+      case _SharedAnalyticsBarPeriod.daily:
+        return weekOffset;
+      case _SharedAnalyticsBarPeriod.monthly:
+        return monthOffset;
+    }
+  }
+
+  DateTime _weekStartForOffset(int offset) {
+    return _sharedAnalyticsWeekStartForOffset(offset);
+  }
+
+  DateTime _monthStartForOffset(int offset) {
+    return _sharedAnalyticsMonthStartForOffset(offset);
+  }
+
+  _SharedWeeklyExpenseSeries _buildSeries(BuildContext context, int offset) {
+    switch (period) {
+      case _SharedAnalyticsBarPeriod.daily:
+        return _buildDailySeries(context, offset);
+      case _SharedAnalyticsBarPeriod.monthly:
+        return _buildMonthlySeries(offset);
+    }
+  }
+
+  _SharedWeeklyExpenseSeries _buildDailySeries(
+    BuildContext context,
+    int offset,
+  ) {
+    final weekStart = _weekStartForOffset(offset);
+    final weekEndExclusive = weekStart.add(const Duration(days: 7));
+    final memberTotalsByDay = List<Map<String, double>>.generate(
+      7,
+      (_) => <String, double>{},
+    );
+
+    for (final expense in group.expenses) {
+      if (expense.deleted ||
+          expense.kind == 'settlement' ||
+          expense.amount <= 0 ||
+          expense.paidBy.isEmpty) {
+        continue;
+      }
+
+      final paidAt = DateTime.fromMillisecondsSinceEpoch(expense.timestamp);
+      final paidDay = DateTime(paidAt.year, paidAt.month, paidAt.day);
+      if (paidDay.isBefore(weekStart) || !paidDay.isBefore(weekEndExclusive)) {
+        continue;
+      }
+
+      final dayIndex = paidDay.difference(weekStart).inDays.clamp(0, 6).toInt();
+      memberTotalsByDay[dayIndex].update(
+        expense.paidBy,
+        (current) => current + expense.amount,
+        ifAbsent: () => expense.amount,
       );
     }
 
-    final maxValue = analytics.maxMonthSpend;
+    final buckets = <_SharedAnalyticsDayBucket>[];
+    for (var index = 0; index < memberTotalsByDay.length; index++) {
+      final memberTotals = memberTotalsByDay[index];
+      final members = memberTotals.entries
+          .where((entry) => entry.value >= 0.5)
+          .map((entry) => _SharedAnalyticsMemberValue(
+                publicKey: entry.key,
+                value: entry.value,
+              ))
+          .toList(growable: false)
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final total = members.fold<double>(
+        0,
+        (sum, member) => sum + member.value,
+      );
+      buckets.add(
+        _SharedAnalyticsDayBucket(
+          day: weekStart.add(Duration(days: index)),
+          total: total,
+          members: members,
+        ),
+      );
+    }
+
+    final maxSpend = buckets.fold<double>(
+      0,
+      (max, bucket) => bucket.total > max ? bucket.total : max,
+    );
+    return _SharedWeeklyExpenseSeries(
+      periodLabel: _rangeLabel(weekStart),
+      labels: List<String>.generate(
+        7,
+        (index) => _sharedAnalyticsWeekdayLabel(context, index),
+      ),
+      buckets: buckets,
+      maxSpend: maxSpend,
+      legendMembers: _legendMembers(buckets),
+    );
+  }
+
+  _SharedWeeklyExpenseSeries _buildMonthlySeries(int offset) {
+    final monthStart = _monthStartForOffset(offset);
+    final nextMonthStart = DateTime(monthStart.year, monthStart.month + 1, 1);
+    final memberTotalsByWeek = List<Map<String, double>>.generate(
+      5,
+      (_) => <String, double>{},
+    );
+
+    for (final expense in group.expenses) {
+      if (expense.deleted ||
+          expense.kind == 'settlement' ||
+          expense.amount <= 0 ||
+          expense.paidBy.isEmpty) {
+        continue;
+      }
+
+      final paidAt = DateTime.fromMillisecondsSinceEpoch(expense.timestamp);
+      final paidDay = DateTime(paidAt.year, paidAt.month, paidAt.day);
+      if (paidDay.isBefore(monthStart) || !paidDay.isBefore(nextMonthStart)) {
+        continue;
+      }
+
+      final weekIndex = ((paidDay.day - 1) ~/ 7).clamp(0, 4).toInt();
+      memberTotalsByWeek[weekIndex].update(
+        expense.paidBy,
+        (current) => current + expense.amount,
+        ifAbsent: () => expense.amount,
+      );
+    }
+
+    final buckets = <_SharedAnalyticsDayBucket>[];
+    for (var index = 0; index < memberTotalsByWeek.length; index++) {
+      final memberTotals = memberTotalsByWeek[index];
+      final members = memberTotals.entries
+          .where((entry) => entry.value >= 0.5)
+          .map((entry) => _SharedAnalyticsMemberValue(
+                publicKey: entry.key,
+                value: entry.value,
+              ))
+          .toList(growable: false)
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final total = members.fold<double>(
+        0,
+        (sum, member) => sum + member.value,
+      );
+      buckets.add(
+        _SharedAnalyticsDayBucket(
+          day: monthStart.add(Duration(days: index * 7)),
+          total: total,
+          members: members,
+        ),
+      );
+    }
+
+    final maxSpend = buckets.fold<double>(
+      0,
+      (max, bucket) => bucket.total > max ? bucket.total : max,
+    );
+    return _SharedWeeklyExpenseSeries(
+      periodLabel: _sharedAnalyticsMonthLabel(monthStart),
+      labels: const ['W1', 'W2', 'W3', 'W4', 'W5'],
+      buckets: buckets,
+      maxSpend: maxSpend,
+      legendMembers: _legendMembers(buckets),
+    );
+  }
+
+  double _legendHeight(int memberCount) {
+    if (memberCount <= 0) return 0;
+    final rowCount = (memberCount / 2).ceil();
+    return 12 + (rowCount * 22) + ((rowCount - 1) * 8);
+  }
+
+  double _pageHeight(_SharedWeeklyExpenseSeries series) {
+    return 18 + 10 + 220 + _legendHeight(series.legendMembers.length);
+  }
+
+  String _rangeLabel(DateTime weekStart) {
+    final end = weekStart.add(const Duration(days: 6));
+    return _sharedAnalyticsDateRangeLabel(weekStart, end);
+  }
+
+  Widget _buildPage(BuildContext context, _SharedWeeklyExpenseSeries series) {
+    final hasSpending = series.buckets.any((bucket) => bucket.total >= 0.5);
+    final maxValue = series.maxSpend;
     final chartMax = maxValue <= 0 ? 100.0 : math.max(100.0, maxValue * 1.18);
     final interval = math.max(25.0, chartMax / 4);
-    final legendMembers = _legendMembers();
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final chartWidth = math.max(
-          constraints.maxWidth,
-          analytics.monthlyBuckets.length * 66.0,
-        );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 220,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: chartWidth,
-                  child: BarChart(
-                    BarChartData(
-                      alignment: BarChartAlignment.spaceAround,
-                      minY: 0,
-                      maxY: chartMax,
-                      gridData: FlGridData(
-                        show: true,
-                        drawVerticalLine: false,
-                        horizontalInterval: interval,
-                        getDrawingHorizontalLine: (value) => FlLine(
-                          color: AppColors.borderColor(context)
-                              .withValues(alpha: 0.65),
-                          strokeWidth: 0.8,
-                          dashArray: const [4, 4],
-                        ),
-                      ),
-                      borderData: FlBorderData(show: false),
-                      titlesData: FlTitlesData(
-                        topTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        rightTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        leftTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            reservedSize: 32,
-                            getTitlesWidget: (value, meta) {
-                              final index = value.toInt();
-                              if (index < 0 ||
-                                  index >= analytics.monthlyBuckets.length) {
-                                return const SizedBox.shrink();
-                              }
-                              return SideTitleWidget(
-                                axisSide: meta.axisSide,
-                                space: 8,
-                                child: Text(
-                                  _sharedAnalyticsMonthLabel(
-                                    analytics.monthlyBuckets[index].month,
-                                  ).replaceFirst(' ', '\n'),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: AppColors.textSecondary(context),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.05,
-                                  ),
-                                ),
-                              );
-                            },
+    return Column(
+      key: ValueKey<String>('shared-bar-${period.name}-${series.periodLabel}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          series.periodLabel,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textSecondary(context),
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        const SizedBox(height: 10),
+        if (!hasSpending)
+          SizedBox(
+            height: 220,
+            child: Center(
+              child: _SharedAnalyticsEmptyLine(
+                title: context.l10nText(
+                  period == _SharedAnalyticsBarPeriod.daily
+                      ? 'No weekly spending'
+                      : 'No monthly spending',
+                ),
+                subtitle: context.l10nText('Shared expenses will appear here.'),
+              ),
+            ),
+          )
+        else
+          SizedBox(
+            height: 220,
+            child: BarChart(
+              BarChartData(
+                alignment: BarChartAlignment.spaceAround,
+                minY: 0,
+                maxY: chartMax,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: interval,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color:
+                        AppColors.borderColor(context).withValues(alpha: 0.65),
+                    strokeWidth: 0.8,
+                    dashArray: const [4, 4],
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  leftTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 32,
+                      getTitlesWidget: (value, meta) {
+                        final index = value.toInt();
+                        if (index < 0 || index >= series.buckets.length) {
+                          return const SizedBox.shrink();
+                        }
+                        return SideTitleWidget(
+                          axisSide: meta.axisSide,
+                          space: 8,
+                          child: Text(
+                            series.labels[index],
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppColors.textSecondary(context),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ),
-                      barGroups: [
-                        for (var i = 0;
-                            i < analytics.monthlyBuckets.length;
-                            i++)
-                          _barGroupFor(
-                            context,
-                            index: i,
-                            bucket: analytics.monthlyBuckets[i],
-                          ),
-                      ],
-                      barTouchData: BarTouchData(
-                        enabled: true,
-                        touchTooltipData: BarTouchTooltipData(
-                          tooltipRoundedRadius: 12,
-                          tooltipPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          fitInsideHorizontally: true,
-                          fitInsideVertically: true,
-                          getTooltipColor: (group) =>
-                              AppColors.cardColor(context),
-                          getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                            final bucket = analytics.monthlyBuckets[group.x];
-                            return BarTooltipItem(
-                              _formatEtb(bucket.total, context),
-                              TextStyle(
-                                color: AppColors.textPrimary(context),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
+                        );
+                      },
                     ),
+                  ),
+                ),
+                barGroups: [
+                  for (var index = 0; index < series.buckets.length; index++)
+                    _barGroupFor(
+                      context,
+                      index: index,
+                      bucket: series.buckets[index],
+                    ),
+                ],
+                barTouchData: BarTouchData(
+                  enabled: true,
+                  touchTooltipData: BarTouchTooltipData(
+                    tooltipRoundedRadius: 12,
+                    tooltipPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    fitInsideHorizontally: true,
+                    fitInsideVertically: true,
+                    getTooltipColor: (group) => AppColors.cardColor(context),
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      final bucket = series.buckets[group.x];
+                      final label = series.labels[group.x];
+                      return BarTooltipItem(
+                        '$label\n${_formatEtb(bucket.total, context)}',
+                        TextStyle(
+                          color: AppColors.textPrimary(context),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
             ),
-            if (legendMembers.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _SharedMonthlyMemberLegend(
-                group: group,
-                myPublicKey: myPublicKey,
-                members: legendMembers,
-              ),
-            ],
-          ],
-        );
+          ),
+        if (series.legendMembers.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _SharedMonthlyMemberLegend(
+            group: group,
+            myPublicKey: myPublicKey,
+            members: series.legendMembers,
+          ),
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final offset = _effectiveOffset;
+    final currentSeries = _buildSeries(context, offset);
+    final previousSeries = _buildSeries(context, offset - 1);
+    final hasNewerPeriod = offset < 0;
+    final nextSeries =
+        hasNewerPeriod ? _buildSeries(context, offset + 1) : currentSeries;
+    final viewportHeight = math.max(
+      _pageHeight(previousSeries),
+      math.max(_pageHeight(currentSeries), _pageHeight(nextSeries)),
+    );
+
+    return _SharedAnalyticsSwipePager(
+      height: viewportHeight,
+      recenterKey: Object.hash(
+        period,
+        offset,
+        group.expenses.length,
+        group.activity.length,
+      ),
+      onPrevious: onNavigateToOlderPeriod,
+      onNext: hasNewerPeriod ? onNavigateToNewerPeriod : null,
+      itemBuilder: (context, index) {
+        final series = index == 0
+            ? previousSeries
+            : index == 1
+                ? currentSeries
+                : nextSeries;
+        return _buildPage(context, series);
       },
     );
   }
@@ -6617,7 +7151,7 @@ class _SharedMonthlyExpenseBarChart extends StatelessWidget {
   BarChartGroupData _barGroupFor(
     BuildContext context, {
     required int index,
-    required _SharedAnalyticsMonthBucket bucket,
+    required _SharedAnalyticsDayBucket bucket,
   }) {
     var cumulative = 0.0;
     final stackItems = <BarChartRodStackItem>[];
@@ -6638,8 +7172,8 @@ class _SharedMonthlyExpenseBarChart extends StatelessWidget {
       barRods: [
         BarChartRodData(
           toY: bucket.total,
-          width: 34,
-          borderRadius: BorderRadius.circular(8),
+          width: 24,
+          borderRadius: BorderRadius.circular(7),
           color: AppColors.primaryLight.withValues(alpha: 0.18),
           rodStackItems: stackItems,
         ),
@@ -6647,9 +7181,11 @@ class _SharedMonthlyExpenseBarChart extends StatelessWidget {
     );
   }
 
-  List<_SharedAnalyticsMemberValue> _legendMembers() {
+  List<_SharedAnalyticsMemberValue> _legendMembers(
+    List<_SharedAnalyticsDayBucket> buckets,
+  ) {
     final totals = <String, double>{};
-    for (final bucket in analytics.monthlyBuckets) {
+    for (final bucket in buckets) {
       for (final member in bucket.members) {
         totals.update(
           member.publicKey,
@@ -6669,6 +7205,135 @@ class _SharedMonthlyExpenseBarChart extends StatelessWidget {
   }
 }
 
+class _SharedAnalyticsDayBucket {
+  final DateTime day;
+  final double total;
+  final List<_SharedAnalyticsMemberValue> members;
+
+  const _SharedAnalyticsDayBucket({
+    required this.day,
+    required this.total,
+    required this.members,
+  });
+}
+
+class _SharedWeeklyExpenseSeries {
+  final String periodLabel;
+  final List<String> labels;
+  final List<_SharedAnalyticsDayBucket> buckets;
+  final double maxSpend;
+  final List<_SharedAnalyticsMemberValue> legendMembers;
+
+  const _SharedWeeklyExpenseSeries({
+    required this.periodLabel,
+    required this.labels,
+    required this.buckets,
+    required this.maxSpend,
+    required this.legendMembers,
+  });
+}
+
+class _SharedAnalyticsSwipePager extends StatefulWidget {
+  final double height;
+  final Object recenterKey;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+  final IndexedWidgetBuilder itemBuilder;
+
+  const _SharedAnalyticsSwipePager({
+    required this.height,
+    required this.recenterKey,
+    this.onPrevious,
+    this.onNext,
+    required this.itemBuilder,
+  });
+
+  @override
+  State<_SharedAnalyticsSwipePager> createState() =>
+      _SharedAnalyticsSwipePagerState();
+}
+
+class _SharedAnalyticsSwipePagerState
+    extends State<_SharedAnalyticsSwipePager> {
+  late final PageController _pageController;
+  bool _isRecenteringPage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 1);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SharedAnalyticsSwipePager oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.recenterKey != widget.recenterKey &&
+        _pageController.hasClients &&
+        (_pageController.page?.round() ?? 1) != 1) {
+      _pageController.jumpToPage(1);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _commitPageChange(int page) {
+    if (_isRecenteringPage || page == 1) return;
+
+    setState(() => _isRecenteringPage = true);
+    if (_pageController.hasClients) {
+      _pageController.jumpToPage(1);
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _isRecenteringPage = false);
+    });
+
+    if (page == 0) {
+      widget.onPrevious?.call();
+    } else {
+      widget.onNext?.call();
+    }
+  }
+
+  bool _handleScrollNotification(ScrollNotification notification) {
+    if (_isRecenteringPage || notification.depth != 0) return false;
+    if (notification is! ScrollEndNotification) return false;
+
+    final metrics = notification.metrics;
+    if (metrics is! PageMetrics) return false;
+
+    final page = metrics.page?.round() ?? 1;
+    _commitPageChange(page);
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOutCubic,
+      alignment: Alignment.topCenter,
+      child: SizedBox(
+        height: widget.height,
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _handleScrollNotification,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: 3,
+            physics: const PageScrollPhysics(),
+            itemBuilder: widget.itemBuilder,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SharedMonthlyMemberLegend extends StatelessWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
@@ -6682,34 +7347,94 @@ class _SharedMonthlyMemberLegend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      children: [
-        for (final member in members)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: Color(memberColorFor(group, member.publicKey)),
-                  borderRadius: BorderRadius.circular(99),
+    final columns = <Widget>[];
+    for (var index = 0; index < members.length; index += 2) {
+      final top = members[index];
+      final bottom = index + 1 < members.length ? members[index + 1] : null;
+      columns.add(
+        Padding(
+          padding: EdgeInsets.only(right: index + 2 < members.length ? 14 : 0),
+          child: SizedBox(
+            width: 186,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SharedMonthlyMemberLegendItem(
+                  group: group,
+                  myPublicKey: myPublicKey,
+                  member: top,
                 ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                group.displayNameFor(myPublicKey, member.publicKey),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textSecondary(context),
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-            ],
+                if (bottom != null) ...[
+                  const SizedBox(height: 10),
+                  _SharedMonthlyMemberLegendItem(
+                    group: group,
+                    myPublicKey: myPublicKey,
+                    member: bottom,
+                  ),
+                ],
+              ],
+            ),
           ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(right: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: columns,
+      ),
+    );
+  }
+}
+
+class _SharedMonthlyMemberLegendItem extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final _SharedAnalyticsMemberValue member;
+
+  const _SharedMonthlyMemberLegendItem({
+    required this.group,
+    required this.myPublicKey,
+    required this.member,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: Color(memberColorFor(group, member.publicKey)),
+            borderRadius: BorderRadius.circular(99),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            group.displayNameFor(myPublicKey, member.publicKey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary(context),
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          _formatEtb(member.value, context),
+          textAlign: TextAlign.right,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w800,
+              ),
+        ),
       ],
     );
   }
@@ -6718,16 +7443,19 @@ class _SharedMonthlyMemberLegend extends StatelessWidget {
 class _SharedSpendingByDayPanel extends StatelessWidget {
   final _SharedAnalyticsSnapshot analytics;
   final _SharedAnalyticsPeriod period;
+  final String? periodLabelOverride;
 
   const _SharedSpendingByDayPanel({
     required this.analytics,
     required this.period,
+    this.periodLabelOverride,
   });
 
   @override
   Widget build(BuildContext context) {
     final maxValue = analytics.maxWeekdaySpend;
-    final periodLabel = _sharedAnalyticsPeriodLongLabel(context, period);
+    final periodLabel =
+        periodLabelOverride ?? _sharedAnalyticsPeriodLongLabel(context, period);
     final peakLabel = _sharedAnalyticsWeekdayLabel(
       context,
       analytics.peakWeekdayIndex,
