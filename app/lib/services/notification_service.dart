@@ -351,7 +351,6 @@ class NotificationService {
       ).trim();
       return OpenSharedExpensesIntent(
         groupId: groupId.isEmpty ? null : groupId,
-        openActivities: groupId.isNotEmpty,
       );
     }
 

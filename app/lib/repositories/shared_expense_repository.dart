@@ -622,8 +622,17 @@ class SharedExpenseRepository {
       if (local.status == SharedExpenseGroupStatus.localOnly) continue;
       if (serverGroupIds.contains(local.id)) continue;
       _sharedExpenseLog(
-        'refreshGroups kept local group missing from server list '
+        'refreshGroups marked inaccessible local group missing from server list '
         'group=${_logId(local.id)}',
+      );
+      await _upsertGroup(
+        local.copyWith(
+          status: SharedExpenseGroupStatus.pendingApproval,
+          members: const <SharedExpenseMember>[],
+          approvedMemberKeys: const <String>{},
+          pendingApprovals: const <PendingApproval>[],
+          keySharedWith: const <String>{},
+        ),
       );
     }
 

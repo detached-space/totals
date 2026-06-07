@@ -6,6 +6,7 @@ import 'package:totals/models/shared_expense_group.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
+import 'package:totals/services/totals_engine_client.dart';
 import 'package:totals/utils/text_utils.dart';
 
 void _sharedExpenseNotificationLog(String message) {
@@ -29,6 +30,7 @@ class SharedExpenseNotificationCoordinator {
   final Map<String, StreamSubscription<SharedExpenseGroup>>
       _groupSubscriptions = {};
   final Map<String, Timer> _groupReconnectTimers = {};
+  final Set<String> _forbiddenGroupIds = {};
 
   StreamSubscription<void>? _groupListSubscription;
   StreamSubscription<SharedExpenseGroup>? _busSubscription;
@@ -75,6 +77,7 @@ class SharedExpenseNotificationCoordinator {
       timer.cancel();
     }
     _groupReconnectTimers.clear();
+    _forbiddenGroupIds.clear();
     _groupListReconnectTimer?.cancel();
     _groupListReconnectTimer = null;
   }
@@ -194,8 +197,20 @@ class SharedExpenseNotificationCoordinator {
   }
 
   bool _shouldStreamGroup(SharedExpenseGroup group) {
-    return group.id.isNotEmpty &&
-        group.status != SharedExpenseGroupStatus.localOnly;
+    if (group.id.isEmpty || _forbiddenGroupIds.contains(group.id)) {
+      return false;
+    }
+    switch (group.status) {
+      case SharedExpenseGroupStatus.localOnly:
+        return false;
+      case SharedExpenseGroupStatus.ready:
+        return true;
+      case SharedExpenseGroupStatus.pendingApproval:
+        return _myPublicKey.isNotEmpty &&
+            group.members.any(
+              (member) => member.devicePublicKey == _myPublicKey,
+            );
+    }
   }
 
   void _startGroupSubscription(String groupId) {
@@ -207,6 +222,11 @@ class SharedExpenseNotificationCoordinator {
         _sharedExpenseNotificationLog('group stream failed: $error');
         if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
         _groupSubscriptions.remove(groupId);
+        if (error is TotalsEngineException && error.statusCode == 403) {
+          _forbiddenGroupIds.add(groupId);
+          unawaited(_refreshGroupsAndSubscriptions());
+          return;
+        }
         _scheduleGroupReconnect(groupId);
       },
       onDone: () {

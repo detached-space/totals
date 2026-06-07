@@ -21,6 +21,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
+import 'package:totals/services/totals_engine_client.dart';
 
 void _sharedExpensesPageLog(String message) {
   if (kDebugMode) {
@@ -408,9 +409,9 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       'account_share_display_name';
   static const String _sharedExpensePaymentAddressKey =
       'shared_expense_payment_address';
-  static const Duration _pollInterval = Duration(seconds: 12);
+  static const Duration _pollInterval = Duration(minutes: 1);
   static const Duration _realtimeReconnectDelay = Duration(seconds: 3);
-  static const Duration _minBackgroundRefreshGap = Duration(milliseconds: 500);
+  static const Duration _minBackgroundRefreshGap = Duration(seconds: 30);
   static const int _activitiesTabIndex = 1;
 
   List<SharedExpenseGroup> _groups = const [];
@@ -432,6 +433,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   final Map<String, StreamSubscription<SharedExpenseGroup>>
       _realtimeSubscriptions = {};
   final Map<String, Timer> _realtimeReconnectTimers = {};
+  final Set<String> _forbiddenRealtimeGroupIds = {};
 
   @override
   void initState() {
@@ -753,8 +755,20 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 
   bool _shouldStreamGroup(SharedExpenseGroup group) {
-    return group.id.isNotEmpty &&
-        group.status != SharedExpenseGroupStatus.localOnly;
+    if (group.id.isEmpty || _forbiddenRealtimeGroupIds.contains(group.id)) {
+      return false;
+    }
+    switch (group.status) {
+      case SharedExpenseGroupStatus.localOnly:
+        return false;
+      case SharedExpenseGroupStatus.ready:
+        return true;
+      case SharedExpenseGroupStatus.pendingApproval:
+        return _myPublicKey.isNotEmpty &&
+            group.members.any(
+              (member) => member.devicePublicKey == _myPublicKey,
+            );
+    }
   }
 
   void _syncRealtimeSubscriptions(List<SharedExpenseGroup> groups) {
@@ -790,6 +804,11 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         );
         if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
         _realtimeSubscriptions.remove(groupId);
+        if (error is TotalsEngineException && error.statusCode == 403) {
+          _forbiddenRealtimeGroupIds.add(groupId);
+          unawaited(_loadGroups(refreshFromEngine: true, showErrors: false));
+          return;
+        }
         _scheduleRealtimeReconnect(groupId);
       },
       onDone: () {

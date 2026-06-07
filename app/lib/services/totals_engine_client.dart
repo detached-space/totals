@@ -456,9 +456,12 @@ class TotalsEngineClient {
     _engineLog('requesting challenge key=${_logId(identity.publicKeyHex)}');
     final challengeResponse = await _retryTransient(
       label: 'challenge',
-      request: () => _client.post(_uri('/auth/challenge')).timeout(
-            _requestTimeout,
-          ),
+      request: () => _client.post(
+        _uri('/auth/challenge'),
+        headers: {'X-Device-Public-Key': identity.publicKeyHex},
+      ).timeout(
+        _requestTimeout,
+      ),
       shouldRetryResult: (response) {
         final shouldRetry = _isRetryableStatus(response.statusCode);
         if (shouldRetry) {
@@ -585,7 +588,6 @@ class TotalsEngineClient {
 
   bool _isRetryableStatus(int statusCode) {
     return statusCode == 408 ||
-        statusCode == 429 ||
         statusCode == 502 ||
         statusCode == 503 ||
         statusCode == 504;

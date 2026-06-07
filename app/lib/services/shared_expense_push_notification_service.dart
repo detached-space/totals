@@ -125,7 +125,6 @@ class SharedExpensePushNotificationService {
     NotificationIntentBus.instance.emit(
       OpenSharedExpensesIntent(
         groupId: groupId,
-        openActivities: groupId != null,
       ),
     );
   }
