@@ -486,6 +486,7 @@ class RedesignShellState extends State<RedesignShell>
       _lastProfileTabTapAt = null;
     }
 
+    final previousIndex = _currentIndex;
     setState(() {
       _currentIndex = index;
     });
@@ -494,6 +495,9 @@ class RedesignShellState extends State<RedesignShell>
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
     );
+    if (index == _sharedIndex && previousIndex != _sharedIndex) {
+      _sharedExpenseNavigationController.refresh();
+    }
   }
 
   Color _homeToolsOverlayColor(BuildContext context) {
@@ -832,6 +836,9 @@ class RedesignShellState extends State<RedesignShell>
                         setState(() {
                           _currentIndex = index;
                         });
+                        if (index == _sharedIndex) {
+                          _sharedExpenseNavigationController.refresh();
+                        }
                       },
                       children: [
                         RedesignHomePage(

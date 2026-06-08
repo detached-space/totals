@@ -117,6 +117,20 @@ class SharedExpensePushNotificationService {
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
     if (!_isSharedExpenseMessage(message)) return;
     await _showLocalNotificationForMessage(message);
+    // FCM delivery can beat the SSE pending-payload stream. Pull fresh state
+    // so the UI (which listens to SharedExpenseRealtimeBus via refreshGroups
+    // → syncGroup) reflects the change without a manual refresh.
+    unawaited(_refreshAfterPush());
+  }
+
+  Future<void> _refreshAfterPush() async {
+    try {
+      await SharedExpenseRepository().refreshGroups();
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('debug: Shared expense push refresh failed: $error');
+      }
+    }
   }
 
   void _handleNotificationTap(RemoteMessage message) {

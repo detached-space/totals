@@ -21,6 +21,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
+import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/totals_engine_client.dart';
 
 void _sharedExpensesPageLog(String message) {
@@ -373,6 +374,10 @@ class SharedExpenseNavigationController {
     state._openGroupActivitiesFromNotification(trimmed);
   }
 
+  void refresh() {
+    _state?._refreshFromTabSwitch();
+  }
+
   void _attach(_RedesignSharedExpensesPageState state) {
     _state = state;
     final pendingGroupId = _pendingActivitiesGroupId;
@@ -515,7 +520,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       'account_share_display_name';
   static const String _sharedExpensePaymentAddressKey =
       'shared_expense_payment_address';
-  static const Duration _pollInterval = Duration(minutes: 5);
+  static const Duration _pollInterval = Duration(minutes: 30);
   static const Duration _realtimeReconnectDelay = Duration(seconds: 3);
   static const Duration _rateLimitedReconnectDelay = Duration(seconds: 30);
   static const Duration _maxRealtimeReconnectDelay = Duration(minutes: 2);
@@ -542,10 +547,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   StreamSubscription<SharedExpenseGroup>? _pendingRealtimeSubscription;
   Timer? _pendingRealtimeReconnectTimer;
   int _pendingRealtimeReconnectAttempts = 0;
-  final Map<String, StreamSubscription<SharedExpenseGroup>>
-      _realtimeSubscriptions = {};
-  final Map<String, Timer> _realtimeReconnectTimers = {};
-  final Set<String> _forbiddenRealtimeGroupIds = {};
+  StreamSubscription<SharedExpenseGroup>? _realtimeBusSubscription;
 
   @override
   void initState() {
@@ -555,6 +557,12 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _loadGroups(refreshFromEngine: true, showErrors: false);
     _startPolling();
     _startGroupListRealtimeSubscription();
+    _startPendingRealtimeSubscription();
+    // The notification coordinator's per-group stream may consume a payload
+    // before our own stream sees it, leaving _applyJoinRequest with nothing
+    // new to apply. Listen to the bus so we still re-render in that case.
+    _realtimeBusSubscription =
+        SharedExpenseRealtimeBus.instance.stream.listen(_applyRealtimeGroup);
   }
 
   @override
@@ -579,21 +587,32 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     unawaited(_groupListRealtimeSubscription?.cancel());
     _pendingRealtimeReconnectTimer?.cancel();
     unawaited(_pendingRealtimeSubscription?.cancel());
-    for (final timer in _realtimeReconnectTimers.values) {
-      timer.cancel();
-    }
-    for (final subscription in _realtimeSubscriptions.values) {
-      unawaited(subscription.cancel());
-    }
-    _realtimeReconnectTimers.clear();
-    _realtimeSubscriptions.clear();
+    unawaited(_realtimeBusSubscription?.cancel());
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _backgroundRefresh();
+      // Always fetch on resume — the 2-minute cooldown in _backgroundRefresh
+      // is too conservative for "user opened the app from recents and is
+      // looking at the screen right now". _refreshFromTabSwitch is the same
+      // no-spinner path used for tab navigation.
+      _refreshFromTabSwitch();
+      _ensureRealtimeStreamsAlive();
+    }
+  }
+
+  void _ensureRealtimeStreamsAlive() {
+    if (_groupListRealtimeSubscription == null) {
+      _groupListRealtimeReconnectTimer?.cancel();
+      _groupListRealtimeReconnectTimer = null;
+      _startGroupListRealtimeSubscription();
+    }
+    if (_pendingRealtimeSubscription == null) {
+      _pendingRealtimeReconnectTimer?.cancel();
+      _pendingRealtimeReconnectTimer = null;
+      _startPendingRealtimeSubscription();
     }
   }
 
@@ -658,6 +677,22 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       if (!mounted) return;
       _startGroupListRealtimeSubscription();
     });
+  }
+
+  Future<void> _refreshFromTabSwitch() async {
+    if (!mounted || _isRefreshing || _isMutating) return;
+    _sharedExpensesPageLog('refresh from tab switch');
+    try {
+      final groups = await _repository.refreshGroups();
+      if (!mounted) return;
+      setState(() {
+        _groups = groups;
+        _selectedGroup = _updatedSelectedGroup(groups);
+      });
+      _syncRealtimeSubscriptions(groups);
+    } catch (error) {
+      _sharedExpensesPageLog('refresh from tab switch failed: $error');
+    }
   }
 
   Future<void> _refreshFromGroupListRealtime() async {
@@ -877,37 +912,15 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     });
   }
 
-  bool _shouldStreamGroup(SharedExpenseGroup group) {
-    if (group.id.isEmpty || _forbiddenRealtimeGroupIds.contains(group.id)) {
-      return false;
-    }
-    switch (group.status) {
-      case SharedExpenseGroupStatus.localOnly:
-        return false;
-      case SharedExpenseGroupStatus.ready:
-        return true;
-      case SharedExpenseGroupStatus.pendingApproval:
-        return _myPublicKey.isNotEmpty &&
-            group.members.any(
-              (member) => member.devicePublicKey == _myPublicKey,
-            );
-    }
-  }
-
   void _syncRealtimeSubscriptions(List<SharedExpenseGroup> groups) {
-    for (final groupId in _realtimeSubscriptions.keys.toList()) {
-      _stopRealtimeSubscription(groupId);
+    // The pending payload stream is always-on (started in initState and
+    // re-verified on resume). This call serves as a belt-and-suspenders
+    // check: if the subscription died and no reconnect is pending, restart
+    // it now that we're already doing group work.
+    if (_pendingRealtimeSubscription == null &&
+        _pendingRealtimeReconnectTimer == null) {
+      _startPendingRealtimeSubscription();
     }
-    for (final groupId in _realtimeReconnectTimers.keys.toList()) {
-      _realtimeReconnectTimers.remove(groupId)?.cancel();
-    }
-
-    final shouldStream = groups.any(_shouldStreamGroup);
-    if (!shouldStream) {
-      _stopPendingRealtimeSubscription();
-      return;
-    }
-    _startPendingRealtimeSubscription();
   }
 
   void _startPendingRealtimeSubscription() {
@@ -939,15 +952,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _pendingRealtimeSubscription = subscription;
   }
 
-  void _stopPendingRealtimeSubscription() {
-    _pendingRealtimeReconnectTimer?.cancel();
-    _pendingRealtimeReconnectTimer = null;
-    _pendingRealtimeReconnectAttempts = 0;
-    final subscription = _pendingRealtimeSubscription;
-    _pendingRealtimeSubscription = null;
-    if (subscription != null) unawaited(subscription.cancel());
-  }
-
   void _schedulePendingRealtimeReconnect([Object? error]) {
     if (!mounted) return;
     if (_pendingRealtimeReconnectTimer != null) return;
@@ -958,7 +962,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _pendingRealtimeReconnectTimer = Timer(delay, () {
       _pendingRealtimeReconnectTimer = null;
       if (!mounted) return;
-      if (!_groups.any(_shouldStreamGroup)) return;
       _startPendingRealtimeSubscription();
     });
   }
@@ -977,55 +980,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     if (delay < _realtimeReconnectDelay) return _realtimeReconnectDelay;
     if (delay > _maxRealtimeReconnectDelay) return _maxRealtimeReconnectDelay;
     return delay;
-  }
-
-  void _startRealtimeSubscription(String groupId) {
-    if (_realtimeSubscriptions.containsKey(groupId)) return;
-    _sharedExpensesPageLog('realtime subscribe group=${_logId(groupId)}');
-
-    final subscription = _repository.watchGroupRealtime(groupId).listen(
-      _applyRealtimeGroup,
-      onError: (Object error, StackTrace stackTrace) {
-        _sharedExpensesPageLog(
-          'realtime stream failed group=${_logId(groupId)}: $error',
-        );
-        if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
-        _realtimeSubscriptions.remove(groupId);
-        if (error is TotalsEngineException && error.statusCode == 403) {
-          _forbiddenRealtimeGroupIds.add(groupId);
-          unawaited(_loadGroups(refreshFromEngine: true, showErrors: false));
-          return;
-        }
-        _scheduleRealtimeReconnect(groupId);
-      },
-      onDone: () {
-        _sharedExpensesPageLog('realtime stream done group=${_logId(groupId)}');
-        _realtimeSubscriptions.remove(groupId);
-        _scheduleRealtimeReconnect(groupId);
-      },
-    );
-    _realtimeSubscriptions[groupId] = subscription;
-  }
-
-  void _stopRealtimeSubscription(String groupId) {
-    final subscription = _realtimeSubscriptions.remove(groupId);
-    if (subscription != null) {
-      unawaited(subscription.cancel());
-    }
-    _realtimeReconnectTimers.remove(groupId)?.cancel();
-  }
-
-  void _scheduleRealtimeReconnect(String groupId) {
-    if (!mounted) return;
-    if (_realtimeReconnectTimers.containsKey(groupId)) return;
-    _realtimeReconnectTimers[groupId] = Timer(_realtimeReconnectDelay, () {
-      _realtimeReconnectTimers.remove(groupId);
-      if (!mounted) return;
-      final group = _groupInState(groupId);
-      if (group == null || !_shouldStreamGroup(group)) return;
-      if (_realtimeSubscriptions.containsKey(groupId)) return;
-      _startRealtimeSubscription(groupId);
-    });
   }
 
   SharedExpenseGroup? _groupInState(String groupId) {

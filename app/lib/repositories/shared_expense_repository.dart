@@ -358,6 +358,13 @@ class SharedExpenseRepository {
 
   Future<void> leaveGroup(SharedExpenseGroup group) async {
     _sharedExpenseLog('leaveGroup start group=${_logId(group.id)}');
+    // For a pending-approval cancel, the engine's `groups_changed` SSE may
+    // not propagate to existing members quickly enough to drop the stale
+    // approve button. Broadcast an explicit join_cancel so each approver
+    // clears the pendingApproval entry directly.
+    if (group.status == SharedExpenseGroupStatus.pendingApproval) {
+      await _broadcastJoinCancel(group);
+    }
     try {
       await _engineClient.leaveGroup(group.id);
     } catch (error) {
@@ -533,9 +540,13 @@ class SharedExpenseRepository {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
     );
+    // The recipient does not have the group key yet — that key is what this
+    // payload is delivering. Encrypt the notification preview with the
+    // 1:1 shared secret instead, so the recipient's FCM handler can decrypt
+    // it and actually show the "you've been approved" notification.
     final encryptedNotificationPreview =
-        await _cryptoService.encryptPayloadWithKey(
-      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+        await _cryptoService.encryptGroupKeyPayload(
+      recipientPublicKeyHex: member.devicePublicKey,
       payload: SharedExpensePushPreviewService.memberApproved(
         group: group,
         approverName: approverDisplayName,
@@ -1809,6 +1820,7 @@ class SharedExpenseRepository {
       case 'member_meta':
       case 'expense':
       case 'join_request':
+      case 'join_cancel':
       case 'nudge':
       case 'group_snapshot':
         return true;
@@ -1902,6 +1914,9 @@ class SharedExpenseRepository {
 
       case 'join_request':
         return _applyJoinRequest(group, senderPk, decoded, myPublicKey);
+
+      case 'join_cancel':
+        return _applyJoinCancel(group, senderPk, decoded, myPublicKey);
 
       case 'nudge':
         return _applyNudge(group, senderPk, decoded);
@@ -2678,9 +2693,6 @@ class SharedExpenseRepository {
         DateTime.now().millisecondsSinceEpoch;
     final incomingUpdatedAt = _incomingMemberMetaUpdatedAt(decoded);
     final currentUpdatedAt = group.memberMetaUpdatedAt[pk] ?? 0;
-    final isAlreadyApproved = group.approvedMemberKeys.contains(pk) ||
-        group.keySharedWith.contains(pk);
-    if (isAlreadyApproved) return false;
 
     final currentDisplayName = group.displayNames[pk];
     final currentPaymentAddress = group.paymentAddresses[pk];
@@ -2750,6 +2762,24 @@ class SharedExpenseRepository {
       approvedMemberKeys:
           group.approvedMemberKeys.where((k) => k != pk).toSet(),
       keySharedWith: group.keySharedWith.where((k) => k != pk).toSet(),
+    );
+    await _upsertGroup(updated);
+    return true;
+  }
+
+  Future<bool> _applyJoinCancel(
+    SharedExpenseGroup group,
+    String senderPk,
+    Map<String, dynamic> decoded,
+    String myPublicKey,
+  ) async {
+    final pk = decoded['publicKey'] as String? ?? senderPk;
+    if (pk.isEmpty || pk == myPublicKey) return false;
+    final hadPending = group.pendingApprovals.any((p) => p.publicKey == pk);
+    if (!hadPending) return false;
+    final updated = group.copyWith(
+      pendingApprovals:
+          group.pendingApprovals.where((p) => p.publicKey != pk).toList(),
     );
     await _upsertGroup(updated);
     return true;
@@ -3132,6 +3162,35 @@ class SharedExpenseRepository {
       return entry;
     }
     return null;
+  }
+
+  Future<void> _broadcastJoinCancel(SharedExpenseGroup group) async {
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final payload = {
+      'type': 'join_cancel',
+      'publicKey': identity.publicKeyHex,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+    for (final member in group.members) {
+      if (member.devicePublicKey == identity.publicKeyHex) continue;
+      if (member.devicePublicKey.isEmpty) continue;
+      try {
+        final encrypted = await _cryptoService.encryptGroupKeyPayload(
+          recipientPublicKeyHex: member.devicePublicKey,
+          payload: payload,
+        );
+        await _engineClient.submitTargetedPayload(
+          groupId: group.id,
+          encryptedBlob: encrypted,
+          recipientPublicKeys: [member.devicePublicKey],
+          kind: 'join_cancel',
+        );
+      } catch (error) {
+        _sharedExpenseLog(
+          '_broadcastJoinCancel failed recipient=${_logId(member.devicePublicKey)} error=$error',
+        );
+      }
+    }
   }
 
   Future<void> _broadcastJoinRequest(SharedExpenseGroup group) async {
