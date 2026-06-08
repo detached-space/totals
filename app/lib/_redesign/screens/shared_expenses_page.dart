@@ -386,12 +386,118 @@ class SharedExpenseNavigationController {
   }
 }
 
+class SharedExpenseFabController extends ChangeNotifier {
+  SharedExpenseFabConfig? _config;
+  bool _isDisposed = false;
+
+  SharedExpenseFabConfig? get config => _config;
+
+  void show({
+    required VoidCallback onPressed,
+    required bool isBusy,
+    required String? busyLabel,
+  }) {
+    if (_isDisposed) return;
+    _config = SharedExpenseFabConfig(
+      onPressed: onPressed,
+      isBusy: isBusy,
+      busyLabel: busyLabel,
+    );
+    notifyListeners();
+  }
+
+  void clear() {
+    if (_isDisposed) return;
+    if (_config == null) return;
+    _config = null;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
+  }
+}
+
+@immutable
+class SharedExpenseFabConfig {
+  final VoidCallback onPressed;
+  final bool isBusy;
+  final String? busyLabel;
+
+  const SharedExpenseFabConfig({
+    required this.onPressed,
+    required this.isBusy,
+    required this.busyLabel,
+  });
+}
+
+class SharedExpenseFabButton extends StatelessWidget {
+  final SharedExpenseFabConfig config;
+
+  const SharedExpenseFabButton({
+    super.key,
+    required this.config,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = context.l10nText(config.busyLabel ?? 'Sending');
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: config.isBusy
+          ? Semantics(
+              enabled: false,
+              child: IgnorePointer(
+                child: FloatingActionButton.extended(
+                  heroTag: 'shared-expense-fab',
+                  onPressed: () {},
+                  backgroundColor:
+                      AppColors.primaryLight.withValues(alpha: 0.82),
+                  foregroundColor: AppColors.white,
+                  elevation: 8,
+                  icon: const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
+                  ),
+                  label: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            )
+          : SizedBox(
+              width: 52,
+              height: 52,
+              child: FloatingActionButton(
+                heroTag: 'shared-expense-fab',
+                onPressed: config.onPressed,
+                backgroundColor: AppColors.primaryLight,
+                foregroundColor: AppColors.white,
+                elevation: 8,
+                shape: const CircleBorder(),
+                child: const Icon(AppIcons.add, size: 26),
+              ),
+            ),
+    );
+  }
+}
+
 class RedesignSharedExpensesPage extends StatefulWidget {
   final SharedExpenseNavigationController? navigationController;
+  final SharedExpenseFabController? fabController;
 
   const RedesignSharedExpensesPage({
     super.key,
     this.navigationController,
+    this.fabController,
   });
 
   @override
@@ -458,12 +564,16 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       oldWidget.navigationController?._detach(this);
       widget.navigationController?._attach(this);
     }
+    if (oldWidget.fabController != widget.fabController) {
+      oldWidget.fabController?.clear();
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.navigationController?._detach(this);
+    widget.fabController?.clear();
     _pollTimer?.cancel();
     _groupListRealtimeReconnectTimer?.cancel();
     unawaited(_groupListRealtimeSubscription?.cancel());
@@ -991,6 +1101,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
   void _closeGroup() {
     _sharedExpensesPageLog('closeGroup');
+    widget.fabController?.clear();
     setState(() => _selectedGroup = null);
   }
 
@@ -1598,6 +1709,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         onAddExpense: _showAddExpenseComingSoon,
         isMutating: _isMutating,
         mutationLabel: _mutationLabel,
+        fabController: widget.fabController,
         onEditExpense: (e) => _openExpenseSheet(selectedGroup, expense: e),
         onSettleDebt: (debt) => _settleDebt(selectedGroup, debt),
         onSendNudge: () => _sendNudge(selectedGroup),
@@ -2275,6 +2387,7 @@ class _SharedGroupDetailView extends StatefulWidget {
   final VoidCallback onAddExpense;
   final bool isMutating;
   final String? mutationLabel;
+  final SharedExpenseFabController? fabController;
   final ValueChanged<SharedExpense> onEditExpense;
   final ValueChanged<SettlementDebt> onSettleDebt;
   final VoidCallback onSendNudge;
@@ -2291,6 +2404,7 @@ class _SharedGroupDetailView extends StatefulWidget {
     required this.onAddExpense,
     required this.isMutating,
     required this.mutationLabel,
+    this.fabController,
     required this.onEditExpense,
     required this.onSettleDebt,
     required this.onSendNudge,
@@ -2318,6 +2432,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
   void initState() {
     super.initState();
     _selectedTab = _normalizedTabIndex(widget.initialTabIndex);
+    _scheduleFabControllerSync();
   }
 
   @override
@@ -2329,6 +2444,47 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
       _showMembers = false;
       _selectedTab = _normalizedTabIndex(widget.initialTabIndex);
     }
+    if (oldWidget.fabController != widget.fabController) {
+      oldWidget.fabController?.clear();
+    }
+    _scheduleFabControllerSync();
+  }
+
+  @override
+  void dispose() {
+    widget.fabController?.clear();
+    super.dispose();
+  }
+
+  void _scheduleFabControllerSync() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _syncFabController();
+    });
+  }
+
+  void _syncFabController() {
+    final controller = widget.fabController;
+    if (controller == null) return;
+    if (_showMembers) {
+      controller.clear();
+      return;
+    }
+    controller.show(
+      onPressed: widget.onAddExpense,
+      isBusy: widget.isMutating,
+      busyLabel: widget.mutationLabel,
+    );
+  }
+
+  void _setShowTransactions(bool value) {
+    setState(() => _showTransactions = value);
+    _scheduleFabControllerSync();
+  }
+
+  void _setShowMembers(bool value) {
+    setState(() => _showMembers = value);
+    _scheduleFabControllerSync();
   }
 
   int _normalizedTabIndex(int value) {
@@ -2343,10 +2499,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
       return _SharedGroupTransactionsView(
         group: widget.group,
         myPublicKey: widget.myPublicKey,
-        onBack: () => setState(() => _showTransactions = false),
-        onAddExpense: widget.onAddExpense,
-        isMutating: widget.isMutating,
-        mutationLabel: widget.mutationLabel,
+        onBack: () => _setShowTransactions(false),
         onEditExpense: widget.onEditExpense,
       );
     }
@@ -2356,18 +2509,12 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
       return _SharedGroupMembersView(
         group: widget.group,
         members: members,
-        onBack: () => setState(() => _showMembers = false),
+        onBack: () => _setShowMembers(false),
       );
     }
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: _SharedExpenseFab(
-        onPressed: widget.onAddExpense,
-        isBusy: widget.isMutating,
-        busyLabel: widget.mutationLabel,
-      ),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -2382,7 +2529,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                       members: members,
                       onBack: widget.onBack,
                       onOpenSettings: widget.onOpenSettings,
-                      onOpenMembers: () => setState(() => _showMembers = true),
+                      onOpenMembers: () => _setShowMembers(true),
                     ),
                     const SizedBox(height: 18),
                     _SharedBalanceSummaryCard(
@@ -2408,7 +2555,7 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
                 child: switch (_selectedTab) {
                   0 => _SharedGroupHomeTab(
                       members: members,
-                      onSeeAll: () => setState(() => _showTransactions = true),
+                      onSeeAll: () => _setShowTransactions(true),
                       group: widget.group,
                       myPublicKey: widget.myPublicKey,
                       onEditExpense: widget.onEditExpense,
@@ -2504,64 +2651,6 @@ class _SharedMemberView {
     final trimmed = label.trim();
     if (trimmed.isEmpty) return '?';
     return String.fromCharCode(trimmed.runes.first).toUpperCase();
-  }
-}
-
-class _SharedExpenseFab extends StatelessWidget {
-  final VoidCallback onPressed;
-  final bool isBusy;
-  final String? busyLabel;
-
-  const _SharedExpenseFab({
-    required this.onPressed,
-    this.isBusy = false,
-    this.busyLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final label = context.l10nText(busyLabel ?? 'Sending');
-    return SafeArea(
-      minimum: const EdgeInsets.only(right: 4, bottom: 92),
-      child: isBusy
-          ? Semantics(
-              enabled: false,
-              child: IgnorePointer(
-                child: FloatingActionButton.extended(
-                  onPressed: () {},
-                  backgroundColor:
-                      AppColors.primaryLight.withValues(alpha: 0.82),
-                  foregroundColor: AppColors.white,
-                  elevation: 8,
-                  icon: const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.white,
-                    ),
-                  ),
-                  label: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            )
-          : SizedBox(
-              width: 52,
-              height: 52,
-              child: FloatingActionButton(
-                onPressed: onPressed,
-                backgroundColor: AppColors.primaryLight,
-                foregroundColor: AppColors.white,
-                elevation: 8,
-                shape: const CircleBorder(),
-                child: const Icon(AppIcons.add, size: 26),
-              ),
-            ),
-    );
   }
 }
 
@@ -2959,18 +3048,12 @@ class _SharedGroupTransactionsView extends StatefulWidget {
   final SharedExpenseGroup group;
   final String myPublicKey;
   final VoidCallback onBack;
-  final VoidCallback onAddExpense;
-  final bool isMutating;
-  final String? mutationLabel;
   final ValueChanged<SharedExpense> onEditExpense;
 
   const _SharedGroupTransactionsView({
     required this.group,
     required this.myPublicKey,
     required this.onBack,
-    required this.onAddExpense,
-    required this.isMutating,
-    required this.mutationLabel,
     required this.onEditExpense,
   });
 
@@ -3102,12 +3185,6 @@ class _SharedGroupTransactionsViewState
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: _SharedExpenseFab(
-        onPressed: widget.onAddExpense,
-        isBusy: widget.isMutating,
-        busyLabel: widget.mutationLabel,
-      ),
       body: SafeArea(
         child: CustomScrollView(
           slivers: [

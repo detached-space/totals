@@ -70,6 +70,8 @@ class RedesignShellState extends State<RedesignShell>
       GlobalKey<RedesignBudgetPageState>();
   final SharedExpenseNavigationController _sharedExpenseNavigationController =
       SharedExpenseNavigationController();
+  final SharedExpenseFabController _sharedExpenseFabController =
+      SharedExpenseFabController();
   final PageController _pageController =
       PageController(initialPage: _homeIndex);
   DateTime? _lastProfileTabTapAt;
@@ -193,6 +195,7 @@ class RedesignShellState extends State<RedesignShell>
     _notificationIntentSub?.cancel();
     _backgroundRefreshSub?.cancel();
     unawaited(SharedExpenseNotificationCoordinator.instance.stop());
+    _sharedExpenseFabController.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -760,6 +763,7 @@ class RedesignShellState extends State<RedesignShell>
 
     return SafeArea(
       bottom: false,
+      // ignore: deprecated_member_use
       child: WillPopScope(
         onWillPop: () async {
           if (_currentIndex == _budgetIndex) {
@@ -786,11 +790,17 @@ class RedesignShellState extends State<RedesignShell>
               RedesignBudgetPage(key: _budgetPageKey),
               RedesignSharedExpensesPage(
                 navigationController: _sharedExpenseNavigationController,
+                fabController: _sharedExpenseFabController,
               ),
               RedesignSettingsPage(
                 key: ValueKey('settings-${_activeProfileId ?? 'none'}'),
               ),
             ],
+          ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+          floatingActionButton: _SharedExpensesShellFab(
+            controller: _sharedExpenseFabController,
+            visible: _currentIndex == _sharedIndex,
           ),
           bottomNavigationBar: RedesignBottomNav(
             currentIndex: _currentIndex,
@@ -802,6 +812,29 @@ class RedesignShellState extends State<RedesignShell>
           ),
         ),
       ),
+    );
+  }
+}
+
+class _SharedExpensesShellFab extends StatelessWidget {
+  final SharedExpenseFabController controller;
+  final bool visible;
+
+  const _SharedExpensesShellFab({
+    required this.controller,
+    required this.visible,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        final config = controller.config;
+        if (config == null) return const SizedBox.shrink();
+        return SharedExpenseFabButton(config: config);
+      },
     );
   }
 }
