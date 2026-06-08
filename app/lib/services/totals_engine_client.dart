@@ -27,8 +27,9 @@ String _logBody(String body) {
 class TotalsEngineException implements Exception {
   final String message;
   final int? statusCode;
+  final Duration? retryAfter;
 
-  const TotalsEngineException(this.message, {this.statusCode});
+  const TotalsEngineException(this.message, {this.statusCode, this.retryAfter});
 
   @override
   String toString() {
@@ -122,11 +123,23 @@ class _EngineResponse {
   final int statusCode;
   final String bodyText;
   final Map<String, dynamic> decoded;
+  final Map<String, String> headers;
 
   const _EngineResponse({
     required this.statusCode,
     required this.bodyText,
     required this.decoded,
+    required this.headers,
+  });
+}
+
+class _AuthHeaderSet {
+  final Map<String, String> headers;
+  final bool usedSession;
+
+  const _AuthHeaderSet({
+    required this.headers,
+    required this.usedSession,
   });
 }
 
@@ -151,6 +164,9 @@ class TotalsEngineClient {
   final SharedExpenseCryptoService _cryptoService;
   final http.Client _client;
   final String baseUrl;
+  String? _sessionToken;
+  DateTime? _sessionExpiresAt;
+  Future<void>? _sessionRefreshFuture;
 
   TotalsEngineClient({
     SharedExpenseCryptoService? cryptoService,
@@ -313,12 +329,13 @@ class TotalsEngineClient {
   }
 
   Stream<EnginePendingPayload> streamPending(String groupId) async* {
-    final headers = await _authHeaders();
     final uri = _uri('/groups/$groupId/pending/stream');
     _engineLog('streamPending group=${_logId(groupId)} -> $uri');
 
-    final request = http.Request('GET', uri)..headers.addAll(headers);
-    final response = await _client.send(request).timeout(_requestTimeout);
+    final response = await _sendAuthenticatedStream(
+      '/groups/$groupId/pending/stream',
+      label: 'streamPending',
+    );
     _engineLog(
       'streamPending group=${_logId(groupId)} <- ${response.statusCode}',
     );
@@ -330,6 +347,44 @@ class TotalsEngineClient {
       throw TotalsEngineException(
         _errorMessage(decoded) ?? 'Totals Engine stream failed.',
         statusCode: response.statusCode,
+        retryAfter: _retryAfter(response.headers),
+      );
+    }
+
+    await for (final event in _decodeSseEvents(response.stream)) {
+      if (event.event == 'payload') {
+        final decoded = jsonDecode(event.data);
+        if (decoded is! Map) continue;
+        final payload = EnginePendingPayload.fromJson(
+          Map<String, dynamic>.from(decoded),
+        );
+        if (payload.id.isNotEmpty) yield payload;
+      } else if (event.event == 'error') {
+        throw TotalsEngineException(
+          event.data.isEmpty ? 'Totals Engine stream failed.' : event.data,
+        );
+      }
+    }
+  }
+
+  Stream<EnginePendingPayload> streamAllPending() async* {
+    final uri = _uri('/groups/pending/stream');
+    _engineLog('streamAllPending -> $uri');
+
+    final response = await _sendAuthenticatedStream(
+      '/groups/pending/stream',
+      label: 'streamAllPending',
+    );
+    _engineLog('streamAllPending <- ${response.statusCode}');
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      final decoded = _decodeBody(bodyText);
+      _engineLog('streamAllPending errorBody=${_logBody(bodyText)}');
+      throw TotalsEngineException(
+        _errorMessage(decoded) ?? 'Totals Engine stream failed.',
+        statusCode: response.statusCode,
+        retryAfter: _retryAfter(response.headers),
       );
     }
 
@@ -350,12 +405,13 @@ class TotalsEngineClient {
   }
 
   Stream<void> streamGroupListChanges() async* {
-    final headers = await _authHeaders();
     final uri = _uri('/groups/stream');
     _engineLog('streamGroupListChanges -> $uri');
 
-    final request = http.Request('GET', uri)..headers.addAll(headers);
-    final response = await _client.send(request).timeout(_requestTimeout);
+    final response = await _sendAuthenticatedStream(
+      '/groups/stream',
+      label: 'streamGroupListChanges',
+    );
     _engineLog('streamGroupListChanges <- ${response.statusCode}');
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -365,6 +421,7 @@ class TotalsEngineClient {
       throw TotalsEngineException(
         _errorMessage(decoded) ?? 'Totals Engine group stream failed.',
         statusCode: response.statusCode,
+        retryAfter: _retryAfter(response.headers),
       );
     }
 
@@ -384,6 +441,21 @@ class TotalsEngineClient {
   Future<void> acknowledgePayload(String payloadId) async {
     _engineLog('acknowledgePayload payload=${_logId(payloadId)}');
     await _authenticatedRequest('POST', '/payloads/$payloadId/ack');
+  }
+
+  Future<void> acknowledgePayloads(List<String> payloadIds) async {
+    final ids = payloadIds.where((id) => id.trim().isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return;
+    if (ids.length == 1) {
+      await acknowledgePayload(ids.single);
+      return;
+    }
+    _engineLog('acknowledgePayloads count=${ids.length}');
+    await _authenticatedRequest(
+      'POST',
+      '/payloads/ack',
+      body: {'payloadIds': ids},
+    );
   }
 
   Future<bool> isReachable() async {
@@ -418,41 +490,92 @@ class TotalsEngineClient {
     String path, {
     Map<String, dynamic>? body,
   }) async {
-    final headers = await _authHeaders();
     final uri = _uri(path);
-    _engineLog(
-      '$method $path -> $uri bodyKeys=${body?.keys.join(',') ?? '-'}',
-    );
-    final response = method == 'GET'
-        ? await _retryTransient(
-            label: '$method $path',
-            request: () =>
-                _sendAuthenticatedRequest(method, uri, headers, body),
-            shouldRetryResult: (response) {
-              final shouldRetry = _isRetryableStatus(response.statusCode);
-              if (shouldRetry) {
-                _engineLog(
-                  '$method $path retryable status=${response.statusCode} '
-                  'body=${_logBody(response.bodyText)}',
-                );
-              }
-              return shouldRetry;
-            },
-          )
-        : await _sendAuthenticatedRequest(method, uri, headers, body);
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      _engineLog('$method $path errorBody=${_logBody(response.bodyText)}');
-      throw TotalsEngineException(
-        _errorMessage(response.decoded) ?? 'Totals Engine request failed.',
-        statusCode: response.statusCode,
+    for (var authAttempt = 0; authAttempt < 2; authAttempt++) {
+      final auth = await _authHeaders(forceChallenge: authAttempt > 0);
+      _engineLog(
+        '$method $path -> $uri bodyKeys=${body?.keys.join(',') ?? '-'}',
       );
+      final response = method == 'GET'
+          ? await _retryTransient(
+              label: '$method $path',
+              request: () =>
+                  _sendAuthenticatedRequest(method, uri, auth.headers, body),
+              shouldRetryResult: (response) {
+                final shouldRetry = _isRetryableStatus(response.statusCode);
+                if (shouldRetry) {
+                  _engineLog(
+                    '$method $path retryable status=${response.statusCode} '
+                    'body=${_logBody(response.bodyText)}',
+                  );
+                }
+                return shouldRetry;
+              },
+            )
+          : await _sendAuthenticatedRequest(method, uri, auth.headers, body);
+
+      _captureSessionHeaders(response.headers);
+      if (response.statusCode == 401 && auth.usedSession && authAttempt == 0) {
+        _clearSession();
+        continue;
+      }
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        _engineLog('$method $path errorBody=${_logBody(response.bodyText)}');
+        throw TotalsEngineException(
+          _errorMessage(response.decoded) ?? 'Totals Engine request failed.',
+          statusCode: response.statusCode,
+          retryAfter: _retryAfter(response.headers),
+        );
+      }
+      return response.decoded;
     }
-    return response.decoded;
+
+    throw const TotalsEngineException('Totals Engine authentication failed.');
   }
 
-  Future<Map<String, String>> _authHeaders() async {
+  Future<_AuthHeaderSet> _authHeaders({bool forceChallenge = false}) async {
     final identity = await _cryptoService.getOrCreateIdentity();
+    final token = _sessionToken;
+    final expiresAt = _sessionExpiresAt;
+    final now = DateTime.now();
+    if (!forceChallenge &&
+        token != null &&
+        expiresAt != null &&
+        expiresAt.isAfter(now.add(const Duration(seconds: 15)))) {
+      return _AuthHeaderSet(
+        usedSession: true,
+        headers: {
+          'X-Device-Public-Key': identity.publicKeyHex,
+          'X-Device-Session': token,
+          'Content-Type': 'application/json',
+        },
+      );
+    }
+    if (!forceChallenge) {
+      try {
+        await _ensureSession(identity.publicKeyHex);
+        final refreshedToken = _sessionToken;
+        final refreshedExpiresAt = _sessionExpiresAt;
+        if (refreshedToken != null &&
+            refreshedExpiresAt != null &&
+            refreshedExpiresAt
+                .isAfter(DateTime.now().add(const Duration(seconds: 15)))) {
+          return _AuthHeaderSet(
+            usedSession: true,
+            headers: {
+              'X-Device-Public-Key': identity.publicKeyHex,
+              'X-Device-Session': refreshedToken,
+              'Content-Type': 'application/json',
+            },
+          );
+        }
+      } on TotalsEngineException catch (error) {
+        if (error.statusCode != 404) rethrow;
+        _engineLog('session endpoint unavailable; falling back to challenge');
+      }
+    }
+
     _engineLog('requesting challenge key=${_logId(identity.publicKeyHex)}');
     final challengeResponse = await _retryTransient(
       label: 'challenge',
@@ -496,12 +619,15 @@ class TotalsEngineClient {
       'challenge signed key=${_logId(identity.publicKeyHex)} '
       'challengeBytes=${challenge.length ~/ 2}',
     );
-    return {
-      'X-Device-Public-Key': identity.publicKeyHex,
-      'X-Challenge': challenge,
-      'X-Signature': signature,
-      'Content-Type': 'application/json',
-    };
+    return _AuthHeaderSet(
+      usedSession: false,
+      headers: {
+        'X-Device-Public-Key': identity.publicKeyHex,
+        'X-Challenge': challenge,
+        'X-Signature': signature,
+        'Content-Type': 'application/json',
+      },
+    );
   }
 
   Future<_EngineResponse> _sendAuthenticatedRequest(
@@ -527,6 +653,7 @@ class TotalsEngineClient {
         statusCode: response.statusCode,
         bodyText: bodyText,
         decoded: decoded,
+        headers: response.headers,
       );
     } catch (error, stackTrace) {
       _engineLog('$method ${uri.path} network failed: $error');
@@ -535,6 +662,128 @@ class TotalsEngineClient {
       }
       rethrow;
     }
+  }
+
+  Future<http.StreamedResponse> _sendAuthenticatedStream(
+    String path, {
+    required String label,
+  }) async {
+    final uri = _uri(path);
+    for (var authAttempt = 0; authAttempt < 2; authAttempt++) {
+      final auth = await _authHeaders(forceChallenge: authAttempt > 0);
+      final request = http.Request('GET', uri)..headers.addAll(auth.headers);
+      final response = await _client.send(request).timeout(_requestTimeout);
+      _captureSessionHeaders(response.headers);
+      if (response.statusCode == 401 && auth.usedSession && authAttempt == 0) {
+        _clearSession();
+        await response.stream.drain<void>();
+        continue;
+      }
+      return response;
+    }
+    throw TotalsEngineException('$label authentication failed.');
+  }
+
+  void _captureSessionHeaders(Map<String, String> headers) {
+    final token = headers['x-device-session'];
+    final expiresAtRaw = headers['x-device-session-expires-at'];
+    if (token == null || token.isEmpty || expiresAtRaw == null) return;
+    final expiresAt = DateTime.tryParse(expiresAtRaw);
+    if (expiresAt == null) return;
+    _sessionToken = token;
+    _sessionExpiresAt = expiresAt;
+  }
+
+  void _clearSession() {
+    _sessionToken = null;
+    _sessionExpiresAt = null;
+  }
+
+  Future<void> _ensureSession(String publicKeyHex) async {
+    final existing = _sessionRefreshFuture;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+
+    final refresh = _refreshSession(publicKeyHex);
+    _sessionRefreshFuture = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (identical(_sessionRefreshFuture, refresh)) {
+        _sessionRefreshFuture = null;
+      }
+    }
+  }
+
+  Future<void> _refreshSession(String publicKeyHex) async {
+    _clearSession();
+    _engineLog('requesting session key=${_logId(publicKeyHex)}');
+    final challengeResponse = await _retryTransient(
+      label: 'session challenge',
+      request: () => _client.post(
+        _uri('/auth/challenge'),
+        headers: {'X-Device-Public-Key': publicKeyHex},
+      ).timeout(_requestTimeout),
+      shouldRetryResult: (response) {
+        final shouldRetry = _isRetryableStatus(response.statusCode);
+        if (shouldRetry) {
+          _engineLog(
+            'session challenge retryable status=${response.statusCode} '
+            'body=${_logBody(response.body)}',
+          );
+        }
+        return shouldRetry;
+      },
+    );
+    final challengeDecoded = _decodeBody(challengeResponse.body);
+    if (challengeResponse.statusCode < 200 ||
+        challengeResponse.statusCode >= 300) {
+      throw TotalsEngineException(
+        _errorMessage(challengeDecoded) ??
+            'Could not request engine challenge.',
+        statusCode: challengeResponse.statusCode,
+        retryAfter: _retryAfter(challengeResponse.headers),
+      );
+    }
+
+    final challenge = challengeDecoded['challenge'] as String?;
+    if (challenge == null || challenge.isEmpty) {
+      throw const TotalsEngineException('Engine returned an empty challenge.');
+    }
+    final signature = await _cryptoService.signHexChallenge(challenge);
+    final sessionResponse = await _client
+        .post(
+          _uri('/auth/session'),
+          headers: {
+            'X-Device-Public-Key': publicKeyHex,
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'challenge': challenge,
+            'signature': signature,
+          }),
+        )
+        .timeout(_requestTimeout);
+    final sessionDecoded = _decodeBody(sessionResponse.body);
+    if (sessionResponse.statusCode < 200 || sessionResponse.statusCode >= 300) {
+      throw TotalsEngineException(
+        _errorMessage(sessionDecoded) ?? 'Could not create engine session.',
+        statusCode: sessionResponse.statusCode,
+        retryAfter: _retryAfter(sessionResponse.headers),
+      );
+    }
+
+    final token = sessionDecoded['token'] as String?;
+    final expiresAt = DateTime.tryParse(
+      sessionDecoded['expiresAt'] as String? ?? '',
+    );
+    if (token == null || token.isEmpty || expiresAt == null) {
+      throw const TotalsEngineException('Engine returned an invalid session.');
+    }
+    _sessionToken = token;
+    _sessionExpiresAt = expiresAt;
   }
 
   Future<T> _retryTransient<T>({
@@ -591,6 +840,17 @@ class TotalsEngineClient {
         statusCode == 502 ||
         statusCode == 503 ||
         statusCode == 504;
+  }
+
+  Duration? _retryAfter(Map<String, String> headers) {
+    final raw = headers['retry-after'];
+    if (raw == null || raw.trim().isEmpty) return null;
+    final seconds = int.tryParse(raw.trim());
+    if (seconds != null && seconds > 0) return Duration(seconds: seconds);
+    final date = DateTime.tryParse(raw.trim());
+    if (date == null) return null;
+    final delay = date.difference(DateTime.now());
+    return delay.isNegative ? null : delay;
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');

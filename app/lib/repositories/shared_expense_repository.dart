@@ -1133,19 +1133,24 @@ class SharedExpenseRepository {
       if (payloads.isEmpty) break;
 
       var completedAny = false;
+      final acknowledgePayloadIds = <String>[];
       for (final payload in payloads) {
         final result = await _processPendingPayload(
           groupId: groupId,
           myPublicKey: identity.publicKeyHex,
           payload: payload,
+          acknowledge: false,
         );
         if (result == _PendingPayloadProcessResult.changed) {
           changed = true;
           completedAny = true;
+          acknowledgePayloadIds.add(payload.id);
         } else if (result == _PendingPayloadProcessResult.acknowledged) {
           completedAny = true;
+          acknowledgePayloadIds.add(payload.id);
         }
       }
+      await _acknowledgePayloads(acknowledgePayloadIds);
 
       if (!completedAny) {
         _sharedExpenseLog(
@@ -1260,6 +1265,24 @@ class SharedExpenseRepository {
         payload: payload,
       );
       final latest = await _stampRealtimeSync(groupId);
+      if (result == _PendingPayloadProcessResult.changed && latest != null) {
+        SharedExpenseRealtimeBus.instance.publish(latest);
+        yield latest;
+      }
+    }
+  }
+
+  Stream<SharedExpenseGroup> watchAllGroupsRealtime() async* {
+    final identity = await _cryptoService.getOrCreateIdentity();
+    _sharedExpenseLog('watchAllGroupsRealtime start');
+
+    await for (final payload in _engineClient.streamAllPending()) {
+      final result = await _processPendingPayload(
+        groupId: payload.groupId,
+        myPublicKey: identity.publicKeyHex,
+        payload: payload,
+      );
+      final latest = await _stampRealtimeSync(payload.groupId);
       if (result == _PendingPayloadProcessResult.changed && latest != null) {
         SharedExpenseRealtimeBus.instance.publish(latest);
         yield latest;
@@ -1708,6 +1731,7 @@ class SharedExpenseRepository {
     required String groupId,
     required String myPublicKey,
     required EnginePendingPayload payload,
+    bool acknowledge = true,
   }) async {
     if (!_processingPayloadIds.add(payload.id)) {
       _sharedExpenseLog(
@@ -1766,7 +1790,9 @@ class SharedExpenseRepository {
         decoded: decoded,
         myPublicKey: myPublicKey,
       );
-      await _acknowledgePayload(payload.id);
+      if (acknowledge) {
+        await _acknowledgePayload(payload.id);
+      }
       return applied
           ? _PendingPayloadProcessResult.changed
           : _PendingPayloadProcessResult.acknowledged;
@@ -1799,6 +1825,26 @@ class SharedExpenseRepository {
         _sharedExpenseLog(
           '_acknowledgePayload ignored missing payload=${_logId(payloadId)}',
         );
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _acknowledgePayloads(List<String> payloadIds) async {
+    final ids = payloadIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return;
+    if (ids.length == 1) {
+      await _acknowledgePayload(ids.single);
+      return;
+    }
+    try {
+      await _engineClient.acknowledgePayloads(ids);
+    } on TotalsEngineException catch (error) {
+      if (error.statusCode == 404) {
+        for (final id in ids) {
+          await _acknowledgePayload(id);
+        }
         return;
       }
       rethrow;

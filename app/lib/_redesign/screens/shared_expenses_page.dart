@@ -409,9 +409,11 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       'account_share_display_name';
   static const String _sharedExpensePaymentAddressKey =
       'shared_expense_payment_address';
-  static const Duration _pollInterval = Duration(minutes: 1);
+  static const Duration _pollInterval = Duration(minutes: 5);
   static const Duration _realtimeReconnectDelay = Duration(seconds: 3);
-  static const Duration _minBackgroundRefreshGap = Duration(seconds: 30);
+  static const Duration _rateLimitedReconnectDelay = Duration(seconds: 30);
+  static const Duration _maxRealtimeReconnectDelay = Duration(minutes: 2);
+  static const Duration _minBackgroundRefreshGap = Duration(minutes: 2);
   static const int _activitiesTabIndex = 1;
 
   List<SharedExpenseGroup> _groups = const [];
@@ -430,6 +432,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   DateTime? _lastBackgroundRefresh;
   StreamSubscription<void>? _groupListRealtimeSubscription;
   Timer? _groupListRealtimeReconnectTimer;
+  int _groupListRealtimeReconnectAttempts = 0;
+  StreamSubscription<SharedExpenseGroup>? _pendingRealtimeSubscription;
+  Timer? _pendingRealtimeReconnectTimer;
+  int _pendingRealtimeReconnectAttempts = 0;
   final Map<String, StreamSubscription<SharedExpenseGroup>>
       _realtimeSubscriptions = {};
   final Map<String, Timer> _realtimeReconnectTimers = {};
@@ -461,6 +467,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _pollTimer?.cancel();
     _groupListRealtimeReconnectTimer?.cancel();
     unawaited(_groupListRealtimeSubscription?.cancel());
+    _pendingRealtimeReconnectTimer?.cancel();
+    unawaited(_pendingRealtimeSubscription?.cancel());
     for (final timer in _realtimeReconnectTimers.values) {
       timer.cancel();
     }
@@ -518,7 +526,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         _sharedExpensesPageLog('group list realtime failed: $error');
         if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
         _groupListRealtimeSubscription = null;
-        _scheduleGroupListRealtimeReconnect();
+        _scheduleGroupListRealtimeReconnect(error);
       },
       onDone: () {
         _sharedExpensesPageLog('group list realtime done');
@@ -528,10 +536,14 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     );
   }
 
-  void _scheduleGroupListRealtimeReconnect() {
+  void _scheduleGroupListRealtimeReconnect([Object? error]) {
     if (!mounted) return;
     if (_groupListRealtimeReconnectTimer != null) return;
-    _groupListRealtimeReconnectTimer = Timer(_realtimeReconnectDelay, () {
+    final delay = _realtimeReconnectDelayFor(
+      error,
+      attempt: _groupListRealtimeReconnectAttempts++,
+    );
+    _groupListRealtimeReconnectTimer = Timer(delay, () {
       _groupListRealtimeReconnectTimer = null;
       if (!mounted) return;
       _startGroupListRealtimeSubscription();
@@ -541,6 +553,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   Future<void> _refreshFromGroupListRealtime() async {
     if (!mounted || _isRefreshing || _isMutating) return;
     _sharedExpensesPageLog('group list realtime refresh');
+    _groupListRealtimeReconnectAttempts = 0;
     setState(() => _isRefreshing = true);
     try {
       final groups = await _repository.refreshGroups();
@@ -772,24 +785,88 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 
   void _syncRealtimeSubscriptions(List<SharedExpenseGroup> groups) {
-    final desiredGroupIds =
-        groups.where(_shouldStreamGroup).map((group) => group.id).toSet();
-
     for (final groupId in _realtimeSubscriptions.keys.toList()) {
-      if (!desiredGroupIds.contains(groupId)) {
-        _stopRealtimeSubscription(groupId);
-      }
+      _stopRealtimeSubscription(groupId);
     }
     for (final groupId in _realtimeReconnectTimers.keys.toList()) {
-      if (!desiredGroupIds.contains(groupId)) {
-        _realtimeReconnectTimers.remove(groupId)?.cancel();
-      }
+      _realtimeReconnectTimers.remove(groupId)?.cancel();
     }
-    for (final groupId in desiredGroupIds) {
-      if (_realtimeSubscriptions.containsKey(groupId)) continue;
-      if (_realtimeReconnectTimers.containsKey(groupId)) continue;
-      _startRealtimeSubscription(groupId);
+
+    final shouldStream = groups.any(_shouldStreamGroup);
+    if (!shouldStream) {
+      _stopPendingRealtimeSubscription();
+      return;
     }
+    _startPendingRealtimeSubscription();
+  }
+
+  void _startPendingRealtimeSubscription() {
+    if (_pendingRealtimeSubscription != null) return;
+    if (_pendingRealtimeReconnectTimer != null) return;
+    _sharedExpensesPageLog('pending realtime subscribe');
+
+    final subscription = _repository.watchAllGroupsRealtime().listen(
+      (group) {
+        _pendingRealtimeReconnectAttempts = 0;
+        _applyRealtimeGroup(group);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        _sharedExpensesPageLog('pending realtime failed: $error');
+        if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+        _pendingRealtimeSubscription = null;
+        if (error is TotalsEngineException && error.statusCode == 403) {
+          unawaited(_loadGroups(refreshFromEngine: true, showErrors: false));
+          return;
+        }
+        _schedulePendingRealtimeReconnect(error);
+      },
+      onDone: () {
+        _sharedExpensesPageLog('pending realtime done');
+        _pendingRealtimeSubscription = null;
+        _schedulePendingRealtimeReconnect();
+      },
+    );
+    _pendingRealtimeSubscription = subscription;
+  }
+
+  void _stopPendingRealtimeSubscription() {
+    _pendingRealtimeReconnectTimer?.cancel();
+    _pendingRealtimeReconnectTimer = null;
+    _pendingRealtimeReconnectAttempts = 0;
+    final subscription = _pendingRealtimeSubscription;
+    _pendingRealtimeSubscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+  }
+
+  void _schedulePendingRealtimeReconnect([Object? error]) {
+    if (!mounted) return;
+    if (_pendingRealtimeReconnectTimer != null) return;
+    final delay = _realtimeReconnectDelayFor(
+      error,
+      attempt: _pendingRealtimeReconnectAttempts++,
+    );
+    _pendingRealtimeReconnectTimer = Timer(delay, () {
+      _pendingRealtimeReconnectTimer = null;
+      if (!mounted) return;
+      if (!_groups.any(_shouldStreamGroup)) return;
+      _startPendingRealtimeSubscription();
+    });
+  }
+
+  Duration _realtimeReconnectDelayFor(Object? error, {required int attempt}) {
+    if (error is TotalsEngineException && error.statusCode == 429) {
+      final retryAfter = error.retryAfter;
+      if (retryAfter != null) return _clampRealtimeDelay(retryAfter);
+      final multiplier = math.pow(2, math.min(attempt, 2)).toInt();
+      return _clampRealtimeDelay(_rateLimitedReconnectDelay * multiplier);
+    }
+    return _realtimeReconnectDelay;
+  }
+
+  Duration _clampRealtimeDelay(Duration delay) {
+    if (delay < _realtimeReconnectDelay) return _realtimeReconnectDelay;
+    if (delay > _maxRealtimeReconnectDelay) return _maxRealtimeReconnectDelay;
+    return delay;
   }
 
   void _startRealtimeSubscription(String groupId) {
