@@ -232,12 +232,14 @@ class _RedesignHomePageState extends State<RedesignHomePage>
         final trendSeries = _chartRange == _ChartRange.week
             ? provider.weekTrendSeries
             : provider.monthTrendSeries;
+        final homeFabBottomPadding =
+            86.0 + MediaQuery.of(context).viewPadding.bottom;
 
         return Scaffold(
           backgroundColor: AppColors.background(context),
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
           floatingActionButton: Padding(
-            padding: const EdgeInsets.only(bottom: 86),
+            padding: EdgeInsets.only(bottom: homeFabBottomPadding),
             child: _HomeToolsFabMenu(
               isOpen: _isToolsMenuOpen,
               onOpenChanged: _setToolsMenuOpen,
