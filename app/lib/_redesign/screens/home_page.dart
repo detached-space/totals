@@ -13,6 +13,10 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
+import 'package:totals/screens/accounts_page.dart';
+import 'package:totals/screens/failed_parses_page.dart';
+import 'package:totals/screens/verify_payments_page.dart';
+import 'package:totals/screens/web_page.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/utils/app_date_format.dart';
@@ -189,6 +193,17 @@ class _RedesignHomePageState extends State<RedesignHomePage>
 
         return Scaffold(
           backgroundColor: AppColors.background(context),
+          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: 86),
+            child: _HomeToolsFabMenu(
+              onWebDashboardTap: _openWebDashboard,
+              onQuickAccountsTap: _openQuickAccountsPage,
+              onVerifyPaymentsTap: _openVerifyPayments,
+              onFailedParsingsTap: _openFailedParsings,
+              onLoansTap: _openLoansPlaceholder,
+            ),
+          ),
           body: SafeArea(
             child: RefreshIndicator(
               color: AppColors.primaryLight,
@@ -377,6 +392,51 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   void _openAccountsPage() {
     final shellState = context.findAncestorStateOfType<RedesignShellState>();
     shellState?.openMoneyAccountsPage();
+  }
+
+  void _openQuickAccountsPage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const AccountsPage(),
+      ),
+    );
+  }
+
+  void _openWebDashboard() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const WebPage(),
+      ),
+    );
+  }
+
+  void _openVerifyPayments() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const VerifyPaymentsPage(),
+      ),
+    );
+  }
+
+  void _openFailedParsings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const FailedParsesPage(),
+      ),
+    );
+  }
+
+  void _openLoansPlaceholder() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const _LoansPlaceholderPage(),
+      ),
+    );
   }
 
   Future<void> _importBackup(TransactionProvider provider) async {
@@ -951,6 +1011,310 @@ class _BalanceDelta extends StatelessWidget {
 String _formatDelta(double value) {
   final formatted = formatNumberAbbreviated(value).replaceAll('k', 'K');
   return formatted;
+}
+
+class _HomeToolsFabMenu extends StatefulWidget {
+  final VoidCallback onWebDashboardTap;
+  final VoidCallback onQuickAccountsTap;
+  final VoidCallback onVerifyPaymentsTap;
+  final VoidCallback onFailedParsingsTap;
+  final VoidCallback onLoansTap;
+
+  const _HomeToolsFabMenu({
+    required this.onWebDashboardTap,
+    required this.onQuickAccountsTap,
+    required this.onVerifyPaymentsTap,
+    required this.onFailedParsingsTap,
+    required this.onLoansTap,
+  });
+
+  @override
+  State<_HomeToolsFabMenu> createState() => _HomeToolsFabMenuState();
+}
+
+class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
+  bool _isOpen = false;
+
+  void _toggleMenu() {
+    setState(() => _isOpen = !_isOpen);
+  }
+
+  void _runAction(VoidCallback? onTap) {
+    if (onTap == null) return;
+    setState(() => _isOpen = false);
+    onTap();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const menuWidth = 280.0;
+    const fabSize = 56.0;
+    const itemHeight = 48.0;
+    const itemGap = 8.0;
+    const menuGap = 8.0;
+    final actions = <_HomeToolsFabAction>[
+      _HomeToolsFabAction(
+        icon: AppIcons.debts,
+        color: AppColors.slate500,
+        label: context.l10nText('Loans'),
+        onTap: widget.onLoansTap,
+      ),
+      _HomeToolsFabAction(
+        icon: AppIcons.dashboard_outlined,
+        color: AppColors.primaryLight,
+        label: context.l10nText('Web Dashboard'),
+        onTap: widget.onWebDashboardTap,
+      ),
+      _HomeToolsFabAction(
+        icon: AppIcons.account_balance_outlined,
+        color: AppColors.blue,
+        label: context.l10nText('Quick Accounts'),
+        onTap: widget.onQuickAccountsTap,
+      ),
+      _HomeToolsFabAction(
+        icon: AppIcons.qr_code_scanner_rounded,
+        color: AppColors.incomeSuccess,
+        label: context.l10nText('Verify Payments'),
+        onTap: widget.onVerifyPaymentsTap,
+      ),
+      _HomeToolsFabAction(
+        icon: AppIcons.sms_outlined,
+        color: AppColors.amber,
+        label: context.l10nText('Failed Parsings'),
+        onTap: widget.onFailedParsingsTap,
+      ),
+    ];
+    final openHeight = fabSize +
+        menuGap +
+        actions.length * itemHeight +
+        (actions.length - 1) * itemGap;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: menuWidth,
+      height: _isOpen ? openHeight : fabSize,
+      child: Stack(
+        alignment: Alignment.bottomRight,
+        children: [
+          for (var index = 0; index < actions.length; index++)
+            Positioned(
+              right: 0,
+              bottom: fabSize +
+                  menuGap +
+                  (actions.length - index - 1) * (itemHeight + itemGap),
+              child: IgnorePointer(
+                ignoring: !_isOpen,
+                child: AnimatedOpacity(
+                  opacity: _isOpen ? 1 : 0,
+                  duration: const Duration(milliseconds: 150),
+                  child: AnimatedScale(
+                    scale: _isOpen ? 1 : 0.92,
+                    alignment: Alignment.bottomRight,
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    child: _HomeToolsFabMenuItem(
+                      action: actions[index],
+                      onTap: () => _runAction(actions[index].onTap),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Tooltip(
+              message: context.l10nText('Tools'),
+              child: FloatingActionButton(
+                heroTag: 'home-tools-fab',
+                onPressed: _toggleMenu,
+                backgroundColor: AppColors.primaryLight,
+                foregroundColor: AppColors.white,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  transitionBuilder: (child, animation) {
+                    return ScaleTransition(scale: animation, child: child);
+                  },
+                  child: Icon(
+                    _isOpen ? Icons.remove : AppIcons.grid_view_outlined,
+                    key: ValueKey(_isOpen ? 'tools-minus' : 'tools-grid'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeToolsFabAction {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final VoidCallback? onTap;
+
+  const _HomeToolsFabAction({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.onTap,
+  });
+}
+
+class _HomeToolsFabMenuItem extends StatelessWidget {
+  final _HomeToolsFabAction action;
+  final VoidCallback onTap;
+
+  const _HomeToolsFabMenuItem({
+    required this.action,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = action.onTap != null;
+    final iconColor =
+        isEnabled ? action.color : AppColors.textTertiary(context);
+    final textColor = isEnabled
+        ? AppColors.textPrimary(context)
+        : AppColors.textTertiary(context);
+
+    return Tooltip(
+      message: action.label,
+      child: Opacity(
+        opacity: isEnabled ? 1 : 0.56,
+        child: Material(
+          color: AppColors.cardColor(context),
+          elevation: 8,
+          shadowColor: AppColors.black.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: isEnabled ? onTap : null,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              width: 280,
+              height: 48,
+              padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.borderColor(context)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 190),
+                    child: Text(
+                      action.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: iconColor.withValues(
+                        alpha: AppColors.isDark(context) ? 0.18 : 0.1,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        action.icon,
+                        color: iconColor,
+                        size: 19,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoansPlaceholderPage extends StatelessWidget {
+  const _LoansPlaceholderPage();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      backgroundColor: AppColors.background(context),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.cardColor(context),
+                    foregroundColor: AppColors.textPrimary(context),
+                    side: BorderSide(color: AppColors.borderColor(context)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  icon: const Icon(AppIcons.arrow_back_rounded, size: 20),
+                ),
+              ),
+              const SizedBox(height: 28),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.slate500.withValues(
+                    alpha: AppColors.isDark(context) ? 0.2 : 0.12,
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Icon(
+                  AppIcons.debts,
+                  color: AppColors.slate500,
+                  size: 30,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                context.l10nText('Loans'),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                context.l10nText('This tool is coming soon.'),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textSecondary(context),
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 String _localizedHomeInsight(BuildContext context, String message) {
