@@ -72,6 +72,8 @@ class RedesignShellState extends State<RedesignShell>
       SharedExpenseNavigationController();
   final SharedExpenseFabController _sharedExpenseFabController =
       SharedExpenseFabController();
+  final ValueNotifier<bool> _homeToolsMenuOpenNotifier =
+      ValueNotifier<bool>(false);
   final PageController _pageController =
       PageController(initialPage: _homeIndex);
   DateTime? _lastProfileTabTapAt;
@@ -195,6 +197,7 @@ class RedesignShellState extends State<RedesignShell>
     _notificationIntentSub?.cancel();
     _backgroundRefreshSub?.cancel();
     unawaited(SharedExpenseNotificationCoordinator.instance.stop());
+    _homeToolsMenuOpenNotifier.dispose();
     _sharedExpenseFabController.dispose();
     _pageController.dispose();
     super.dispose();
@@ -427,6 +430,7 @@ class RedesignShellState extends State<RedesignShell>
   }
 
   void lockApp() {
+    _homeToolsMenuOpenNotifier.value = false;
     setState(() {
       _isAuthenticated = false;
       _currentIndex = _homeIndex;
@@ -465,6 +469,8 @@ class RedesignShellState extends State<RedesignShell>
   }
 
   void _onTabSelected(int index) {
+    _homeToolsMenuOpenNotifier.value = false;
+
     if (index == _settingsIndex) {
       final now = DateTime.now();
       final isDoubleTap = _lastProfileTabTapAt != null &&
@@ -487,6 +493,32 @@ class RedesignShellState extends State<RedesignShell>
       index,
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
+    );
+  }
+
+  Color _homeToolsOverlayColor(BuildContext context) {
+    return AppColors.black.withValues(
+      alpha: AppColors.isDark(context) ? 0.5 : 0.28,
+    );
+  }
+
+  SystemUiOverlayStyle _systemOverlayStyleForToolsMenu({
+    required BuildContext context,
+    required bool showOverlay,
+  }) {
+    final isDark = AppColors.isDark(context);
+    final backgroundColor = AppColors.background(context);
+    final systemBarColor = showOverlay
+        ? Color.alphaBlend(_homeToolsOverlayColor(context), backgroundColor)
+        : backgroundColor;
+
+    return SystemUiOverlayStyle(
+      statusBarColor: systemBarColor,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      systemNavigationBarColor: systemBarColor,
+      systemNavigationBarIconBrightness:
+          isDark ? Brightness.light : Brightness.dark,
     );
   }
 
@@ -761,57 +793,118 @@ class RedesignShellState extends State<RedesignShell>
       return RedesignLockScreen(onUnlock: _authenticateIfAvailable);
     }
 
-    return SafeArea(
-      bottom: false,
-      // ignore: deprecated_member_use
-      child: WillPopScope(
-        onWillPop: () async {
-          if (_currentIndex == _budgetIndex) {
-            final handled =
-                _budgetPageKey.currentState?.handleSystemBack() ?? false;
-            if (handled) return false;
-          }
-          return true;
-        },
-        child: Scaffold(
-          extendBody: true,
-          body: PageView(
-            controller: _pageController,
-            physics: const PageScrollPhysics(),
-            onPageChanged: (index) {
-              if (_currentIndex == index || !mounted) return;
-              setState(() {
-                _currentIndex = index;
-              });
-            },
+    return ValueListenableBuilder<bool>(
+      valueListenable: _homeToolsMenuOpenNotifier,
+      builder: (context, isHomeToolsMenuOpen, child) {
+        final showHomeToolsOverlay =
+            _currentIndex == _homeIndex && isHomeToolsMenuOpen;
+        final overlayColor = _homeToolsOverlayColor(context);
+        final topSafeHeight = MediaQuery.paddingOf(context).top;
+
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: _systemOverlayStyleForToolsMenu(
+            context: context,
+            showOverlay: showHomeToolsOverlay,
+          ),
+          child: Stack(
             children: [
-              const RedesignHomePage(),
-              RedesignMoneyPage(key: _moneyPageKey),
-              RedesignBudgetPage(key: _budgetPageKey),
-              RedesignSharedExpensesPage(
-                navigationController: _sharedExpenseNavigationController,
-                fabController: _sharedExpenseFabController,
+              SafeArea(
+                bottom: false,
+                // ignore: deprecated_member_use
+                child: WillPopScope(
+                  onWillPop: () async {
+                    if (_currentIndex == _budgetIndex) {
+                      final handled =
+                          _budgetPageKey.currentState?.handleSystemBack() ??
+                              false;
+                      if (handled) return false;
+                    }
+                    return true;
+                  },
+                  child: Scaffold(
+                    extendBody: true,
+                    body: PageView(
+                      controller: _pageController,
+                      physics: const PageScrollPhysics(),
+                      onPageChanged: (index) {
+                        _homeToolsMenuOpenNotifier.value = false;
+                        if (_currentIndex == index || !mounted) return;
+                        setState(() {
+                          _currentIndex = index;
+                        });
+                      },
+                      children: [
+                        RedesignHomePage(
+                          toolsMenuOpenNotifier: _homeToolsMenuOpenNotifier,
+                        ),
+                        RedesignMoneyPage(key: _moneyPageKey),
+                        RedesignBudgetPage(key: _budgetPageKey),
+                        RedesignSharedExpensesPage(
+                          navigationController:
+                              _sharedExpenseNavigationController,
+                          fabController: _sharedExpenseFabController,
+                        ),
+                        RedesignSettingsPage(
+                          key: ValueKey(
+                            'settings-${_activeProfileId ?? 'none'}',
+                          ),
+                        ),
+                      ],
+                    ),
+                    floatingActionButtonLocation:
+                        FloatingActionButtonLocation.endFloat,
+                    floatingActionButton: _SharedExpensesShellFab(
+                      controller: _sharedExpenseFabController,
+                      visible: _currentIndex == _sharedIndex,
+                    ),
+                    bottomNavigationBar: Stack(
+                      children: [
+                        RedesignBottomNav(
+                          currentIndex: _currentIndex,
+                          pageController: _pageController,
+                          onTap: _onTabSelected,
+                          onMoneyLongPress: _showQuickCashSheet,
+                          onSharedLongPress: _showQuickAccessAccountsSheet,
+                          onProfileLongPressAt: _onProfileLongPressAt,
+                        ),
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            ignoring: !showHomeToolsOverlay,
+                            child: AnimatedOpacity(
+                              opacity: showHomeToolsOverlay ? 1 : 0,
+                              duration: const Duration(milliseconds: 160),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  _homeToolsMenuOpenNotifier.value = false;
+                                },
+                                child: ColoredBox(color: overlayColor),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-              RedesignSettingsPage(
-                key: ValueKey('settings-${_activeProfileId ?? 'none'}'),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: topSafeHeight,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: showHomeToolsOverlay ? 1 : 0,
+                    duration: const Duration(milliseconds: 160),
+                    child: ColoredBox(color: overlayColor),
+                  ),
+                ),
               ),
             ],
           ),
-          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-          floatingActionButton: _SharedExpensesShellFab(
-            controller: _sharedExpenseFabController,
-            visible: _currentIndex == _sharedIndex,
-          ),
-          bottomNavigationBar: RedesignBottomNav(
-            currentIndex: _currentIndex,
-            pageController: _pageController,
-            onTap: _onTabSelected,
-            onMoneyLongPress: _showQuickCashSheet,
-            onSharedLongPress: _showQuickAccessAccountsSheet,
-            onProfileLongPressAt: _onProfileLongPressAt,
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

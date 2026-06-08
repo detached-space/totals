@@ -30,7 +30,12 @@ import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 class RedesignHomePage extends StatefulWidget {
-  const RedesignHomePage({super.key});
+  final ValueNotifier<bool>? toolsMenuOpenNotifier;
+
+  const RedesignHomePage({
+    super.key,
+    this.toolsMenuOpenNotifier,
+  });
 
   @override
   State<RedesignHomePage> createState() => _RedesignHomePageState();
@@ -55,6 +60,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   bool _isRefreshingTodaySms = false;
   bool _isBootstrapping = true;
   bool _isImportingBackup = false;
+  bool _isToolsMenuOpen = false;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
 
@@ -69,6 +75,22 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   }
 
   void _clearSelection() => setState(() => _selectedRefs.clear());
+
+  void _setToolsMenuOpen(bool isOpen) {
+    final notifier = widget.toolsMenuOpenNotifier;
+    if (_isToolsMenuOpen != isOpen) {
+      setState(() => _isToolsMenuOpen = isOpen);
+    }
+    if (notifier != null && notifier.value != isOpen) {
+      notifier.value = isOpen;
+    }
+  }
+
+  void _handleToolsMenuNotifierChanged() {
+    final notifier = widget.toolsMenuOpenNotifier;
+    if (notifier == null || notifier.value == _isToolsMenuOpen) return;
+    setState(() => _isToolsMenuOpen = notifier.value);
+  }
 
   Future<void> _refreshTodaySms(TransactionProvider provider) async {
     if (_isRefreshingTodaySms) return;
@@ -152,6 +174,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   @override
   void initState() {
     super.initState();
+    widget.toolsMenuOpenNotifier?.addListener(_handleToolsMenuNotifierChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = Provider.of<TransactionProvider>(context, listen: false);
       if (provider.dataVersion == 0) {
@@ -161,6 +184,25 @@ class _RedesignHomePageState extends State<RedesignHomePage>
         setState(() => _isBootstrapping = false);
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant RedesignHomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.toolsMenuOpenNotifier == widget.toolsMenuOpenNotifier) {
+      return;
+    }
+    oldWidget.toolsMenuOpenNotifier
+        ?.removeListener(_handleToolsMenuNotifierChanged);
+    widget.toolsMenuOpenNotifier?.addListener(_handleToolsMenuNotifierChanged);
+    _handleToolsMenuNotifierChanged();
+  }
+
+  @override
+  void dispose() {
+    widget.toolsMenuOpenNotifier
+        ?.removeListener(_handleToolsMenuNotifierChanged);
+    super.dispose();
   }
 
   @override
@@ -197,6 +239,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
           floatingActionButton: Padding(
             padding: const EdgeInsets.only(bottom: 86),
             child: _HomeToolsFabMenu(
+              isOpen: _isToolsMenuOpen,
+              onOpenChanged: _setToolsMenuOpen,
               onWebDashboardTap: _openWebDashboard,
               onQuickAccountsTap: _openQuickAccountsPage,
               onVerifyPaymentsTap: _openVerifyPayments,
@@ -205,174 +249,205 @@ class _RedesignHomePageState extends State<RedesignHomePage>
             ),
           ),
           body: SafeArea(
-            child: RefreshIndicator(
-              color: AppColors.primaryLight,
-              onRefresh: provider.loadData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                child: showInitialSkeleton
-                    ? const _HomeLoadingSkeleton()
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _TotalBalanceCard(
-                            totalBalance: totalBalance,
-                            todayIncome: todayTotals.income,
-                            todayExpense: todayTotals.expense,
-                            weekIncome: weekTotals.income,
-                            weekExpense: weekTotals.expense,
-                            showBalance: _showBalance,
-                            onToggleBalance: () {
-                              setState(() {
-                                _showBalance = !_showBalance;
-                              });
-                            },
-                            hasAddedBankAccounts: hasAddedBankAccounts,
-                            onCardTap: _openAccountsPage,
-                            onBreakdownTap: () => _openBalanceBreakdown(
-                              totalBalance: totalBalance,
-                              monthTransactions: monthTransactionsCount,
-                              selfTransferCount: selfTransferCount,
-                              monthTotals: monthTotals,
-                              thirtyDayTotals: thirtyDayTotals,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _InsightCard(
-                            message: insightMessage,
-                            showImportBackupPrompt: !hasAddedBankAccounts,
-                            isImportingBackup: _isImportingBackup,
-                            onImportBackupTap: () => _importBackup(provider),
-                          ),
-                          const SizedBox(height: 16),
-                          _QuickCashActions(
-                            onExpenseTap: _showCashExpenseSheet,
-                            onIncomeTap: _showCashIncomeSheet,
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Stack(
+              children: [
+                RefreshIndicator(
+                  color: AppColors.primaryLight,
+                  onRefresh: provider.loadData,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                    child: showInitialSkeleton
+                        ? const _HomeLoadingSkeleton()
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '${context.l10nText('Today')} ($todayCount)',
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary(context),
+                              _TotalBalanceCard(
+                                totalBalance: totalBalance,
+                                todayIncome: todayTotals.income,
+                                todayExpense: todayTotals.expense,
+                                weekIncome: weekTotals.income,
+                                weekExpense: weekTotals.expense,
+                                showBalance: _showBalance,
+                                onToggleBalance: () {
+                                  setState(() {
+                                    _showBalance = !_showBalance;
+                                  });
+                                },
+                                hasAddedBankAccounts: hasAddedBankAccounts,
+                                onCardTap: _openAccountsPage,
+                                onBreakdownTap: () => _openBalanceBreakdown(
+                                  totalBalance: totalBalance,
+                                  monthTransactions: monthTransactionsCount,
+                                  selfTransferCount: selfTransferCount,
+                                  monthTotals: monthTotals,
+                                  thirtyDayTotals: thirtyDayTotals,
                                 ),
                               ),
+                              const SizedBox(height: 12),
+                              _InsightCard(
+                                message: insightMessage,
+                                showImportBackupPrompt: !hasAddedBankAccounts,
+                                isImportingBackup: _isImportingBackup,
+                                onImportBackupTap: () =>
+                                    _importBackup(provider),
+                              ),
+                              const SizedBox(height: 16),
+                              _QuickCashActions(
+                                onExpenseTap: _showCashExpenseSheet,
+                                onIncomeTap: _showCashIncomeSheet,
+                              ),
+                              const SizedBox(height: 20),
                               Row(
-                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  TextButton(
-                                    onPressed: _openAllTodayTransactions,
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      foregroundColor: AppColors.primaryLight,
+                                  Text(
+                                    '${context.l10nText('Today')} ($todayCount)',
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textPrimary(context),
                                     ),
-                                    child: Text(context.l10nText('See all')),
                                   ),
-                                  const SizedBox(width: 4),
-                                  _RefreshButton(
-                                    isLoading: _isRefreshingTodaySms,
-                                    onTap: () => _refreshTodaySms(provider),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      TextButton(
+                                        onPressed: _openAllTodayTransactions,
+                                        style: TextButton.styleFrom(
+                                          padding: EdgeInsets.zero,
+                                          foregroundColor:
+                                              AppColors.primaryLight,
+                                        ),
+                                        child:
+                                            Text(context.l10nText('See all')),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      _RefreshButton(
+                                        isLoading: _isRefreshingTodaySms,
+                                        onTap: () => _refreshTodaySms(provider),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
+                              if (_isSelecting) ...[
+                                const SizedBox(height: 8),
+                                _SelectionBar(
+                                  count: _selectedRefs.length,
+                                  onDelete: () => _deleteSelected(provider),
+                                  onClear: _clearSelection,
+                                ),
+                              ],
+                              const SizedBox(height: 8),
+                              // Keep the empty/loaded state stable during background
+                              // reloads so returning to Home does not flicker.
+                              if (todayList.isEmpty)
+                                const _EmptyTransactions()
+                              else
+                                ...todayList.map((transaction) {
+                                  final bankLabel = context.l10nText(
+                                    provider
+                                        .getBankShortName(transaction.bankId),
+                                  );
+                                  final category = provider
+                                      .getCategoryById(transaction.categoryId);
+                                  final isSelfTransfer =
+                                      provider.isSelfTransfer(transaction);
+                                  final isMisc =
+                                      category?.uncategorized == true;
+                                  final categoryLabel = isSelfTransfer
+                                      ? 'Self'
+                                      : provider.categoryLabelForTransaction(
+                                          transaction,
+                                          uncategorizedLabel: 'Categorize',
+                                        );
+                                  final isCategorize = isSelfTransfer ||
+                                      transaction
+                                          .selectedCategoryIds.isNotEmpty;
+                                  final isCredit = transaction.type == 'CREDIT';
+                                  final amountLabel = _amountLabel(
+                                    transaction.amount,
+                                    isCredit: isCredit,
+                                    currencyLabel: context.l10nText('ETB'),
+                                  );
+                                  final selected = _selectedRefs
+                                      .contains(transaction.reference);
+                                  return TransactionTile(
+                                    bank: bankLabel,
+                                    category: categoryLabel,
+                                    categoryModel: category,
+                                    isCategorized: isCategorize,
+                                    isDebit: !isCredit,
+                                    isSelfTransfer: isSelfTransfer,
+                                    isMisc: isMisc,
+                                    isSharing: provider
+                                        .isSharingSharedExpenseTransaction(
+                                            transaction),
+                                    isShared:
+                                        provider.isSharedExpenseTransaction(
+                                            transaction),
+                                    amount: amountLabel,
+                                    amountColor: isCredit
+                                        ? AppColors.incomeSuccess
+                                        : AppColors.red,
+                                    name: _transactionCounterparty(transaction,
+                                        isSelfTransfer: isSelfTransfer),
+                                    timestamp: _transactionTimeLabel(
+                                        transaction, context),
+                                    selected: selected,
+                                    onTap: _isSelecting
+                                        ? () => _toggleSelection(transaction)
+                                        : () => _openTransactionDetailsSheet(
+                                              provider: provider,
+                                              transaction: transaction,
+                                            ),
+                                    onCategoryTap: _isSelecting
+                                        ? () => _toggleSelection(transaction)
+                                        : () => _openTransactionCategorySheet(
+                                              provider: provider,
+                                              transaction: transaction,
+                                            ),
+                                    onLongPress: () =>
+                                        _toggleSelection(transaction),
+                                  );
+                                }),
+                              const SizedBox(height: 16),
+                              _IncomeExpenseCard(
+                                trendSeries: trendSeries,
+                                selectedRange: _chartRange,
+                                onRangeChanged: (value) {
+                                  if (_chartRange == value) return;
+                                  setState(() {
+                                    _chartRange = value;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 24),
                             ],
                           ),
-                          if (_isSelecting) ...[
-                            const SizedBox(height: 8),
-                            _SelectionBar(
-                              count: _selectedRefs.length,
-                              onDelete: () => _deleteSelected(provider),
-                              onClear: _clearSelection,
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          // Keep the empty/loaded state stable during background
-                          // reloads so returning to Home does not flicker.
-                          if (todayList.isEmpty)
-                            const _EmptyTransactions()
-                          else
-                            ...todayList.map((transaction) {
-                              final bankLabel = context.l10nText(
-                                provider.getBankShortName(transaction.bankId),
-                              );
-                              final category = provider
-                                  .getCategoryById(transaction.categoryId);
-                              final isSelfTransfer =
-                                  provider.isSelfTransfer(transaction);
-                              final isMisc = category?.uncategorized == true;
-                              final categoryLabel = isSelfTransfer
-                                  ? 'Self'
-                                  : provider.categoryLabelForTransaction(
-                                      transaction,
-                                      uncategorizedLabel: 'Categorize',
-                                    );
-                              final isCategorize = isSelfTransfer ||
-                                  transaction.selectedCategoryIds.isNotEmpty;
-                              final isCredit = transaction.type == 'CREDIT';
-                              final amountLabel = _amountLabel(
-                                transaction.amount,
-                                isCredit: isCredit,
-                                currencyLabel: context.l10nText('ETB'),
-                              );
-                              final selected =
-                                  _selectedRefs.contains(transaction.reference);
-                              return TransactionTile(
-                                bank: bankLabel,
-                                category: categoryLabel,
-                                categoryModel: category,
-                                isCategorized: isCategorize,
-                                isDebit: !isCredit,
-                                isSelfTransfer: isSelfTransfer,
-                                isMisc: isMisc,
-                                isSharing:
-                                    provider.isSharingSharedExpenseTransaction(
-                                        transaction),
-                                isShared: provider
-                                    .isSharedExpenseTransaction(transaction),
-                                amount: amountLabel,
-                                amountColor: isCredit
-                                    ? AppColors.incomeSuccess
-                                    : AppColors.red,
-                                name: _transactionCounterparty(transaction,
-                                    isSelfTransfer: isSelfTransfer),
-                                timestamp:
-                                    _transactionTimeLabel(transaction, context),
-                                selected: selected,
-                                onTap: _isSelecting
-                                    ? () => _toggleSelection(transaction)
-                                    : () => _openTransactionDetailsSheet(
-                                          provider: provider,
-                                          transaction: transaction,
-                                        ),
-                                onCategoryTap: _isSelecting
-                                    ? () => _toggleSelection(transaction)
-                                    : () => _openTransactionCategorySheet(
-                                          provider: provider,
-                                          transaction: transaction,
-                                        ),
-                                onLongPress: () =>
-                                    _toggleSelection(transaction),
-                              );
-                            }),
-                          const SizedBox(height: 16),
-                          _IncomeExpenseCard(
-                            trendSeries: trendSeries,
-                            selectedRange: _chartRange,
-                            onRangeChanged: (value) {
-                              if (_chartRange == value) return;
-                              setState(() {
-                                _chartRange = value;
-                              });
-                            },
+                  ),
+                ),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    ignoring: !_isToolsMenuOpen,
+                    child: AnimatedOpacity(
+                      opacity: _isToolsMenuOpen ? 1 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _setToolsMenuOpen(false),
+                        child: Container(
+                          color: AppColors.black.withValues(
+                            alpha: AppColors.isDark(context) ? 0.5 : 0.28,
                           ),
-                          const SizedBox(height: 24),
-                        ],
+                        ),
                       ),
-              ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         );
@@ -1014,6 +1089,8 @@ String _formatDelta(double value) {
 }
 
 class _HomeToolsFabMenu extends StatefulWidget {
+  final bool isOpen;
+  final ValueChanged<bool> onOpenChanged;
   final VoidCallback onWebDashboardTap;
   final VoidCallback onQuickAccountsTap;
   final VoidCallback onVerifyPaymentsTap;
@@ -1021,6 +1098,8 @@ class _HomeToolsFabMenu extends StatefulWidget {
   final VoidCallback onLoansTap;
 
   const _HomeToolsFabMenu({
+    required this.isOpen,
+    required this.onOpenChanged,
     required this.onWebDashboardTap,
     required this.onQuickAccountsTap,
     required this.onVerifyPaymentsTap,
@@ -1033,15 +1112,13 @@ class _HomeToolsFabMenu extends StatefulWidget {
 }
 
 class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
-  bool _isOpen = false;
-
   void _toggleMenu() {
-    setState(() => _isOpen = !_isOpen);
+    widget.onOpenChanged(!widget.isOpen);
   }
 
   void _runAction(VoidCallback? onTap) {
     if (onTap == null) return;
-    setState(() => _isOpen = false);
+    widget.onOpenChanged(false);
     onTap();
   }
 
@@ -1092,7 +1169,7 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       width: menuWidth,
-      height: _isOpen ? openHeight : fabSize,
+      height: widget.isOpen ? openHeight : fabSize,
       child: Stack(
         alignment: Alignment.bottomRight,
         children: [
@@ -1103,12 +1180,12 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
                   menuGap +
                   (actions.length - index - 1) * (itemHeight + itemGap),
               child: IgnorePointer(
-                ignoring: !_isOpen,
+                ignoring: !widget.isOpen,
                 child: AnimatedOpacity(
-                  opacity: _isOpen ? 1 : 0,
+                  opacity: widget.isOpen ? 1 : 0,
                   duration: const Duration(milliseconds: 150),
                   child: AnimatedScale(
-                    scale: _isOpen ? 1 : 0.92,
+                    scale: widget.isOpen ? 1 : 0.92,
                     alignment: Alignment.bottomRight,
                     duration: const Duration(milliseconds: 180),
                     curve: Curves.easeOutCubic,
@@ -1136,8 +1213,10 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
                     return ScaleTransition(scale: animation, child: child);
                   },
                   child: Icon(
-                    _isOpen ? Icons.remove : AppIcons.grid_view_outlined,
-                    key: ValueKey(_isOpen ? 'tools-minus' : 'tools-grid'),
+                    widget.isOpen ? Icons.remove : AppIcons.grid_view_outlined,
+                    key: ValueKey(
+                      widget.isOpen ? 'tools-minus' : 'tools-grid',
+                    ),
                   ),
                 ),
               ),
