@@ -1550,7 +1550,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                     children: [
                       Text(
                         context.l10n('nav.shared', 'Shared'),
-                        style: theme.textTheme.headlineSmall?.copyWith(
+                        style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary(context),
                         ),
@@ -1558,11 +1558,11 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                       const SizedBox(height: 4),
                       Text(
                         context.l10nText('Split expenses with friends'),
-                        style: theme.textTheme.bodyMedium?.copyWith(
+                        style: theme.textTheme.bodySmall?.copyWith(
                           color: AppColors.textSecondary(context),
                         ),
                       ),
-                      const SizedBox(height: 22),
+                      const SizedBox(height: 20),
                       _ActionBar(
                         isBusy: _isMutating,
                         busyLabel: _mutationLabel,
@@ -9425,7 +9425,7 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_startsFromLinkedTransaction) {
-        _focusReasonField();
+        _focusReasonField(selectAll: true);
       } else {
         _amountFocusNode.requestFocus();
       }
@@ -9442,10 +9442,12 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
     super.dispose();
   }
 
-  void _focusReasonField() {
+  void _focusReasonField({bool selectAll = false}) {
     _reasonFocusNode.requestFocus();
     final text = _reasonCtrl.text;
-    _reasonCtrl.selection = TextSelection.collapsed(offset: text.length);
+    _reasonCtrl.selection = selectAll
+        ? TextSelection(baseOffset: 0, extentOffset: text.length)
+        : TextSelection.collapsed(offset: text.length);
   }
 
   Future<void> _submitResult(

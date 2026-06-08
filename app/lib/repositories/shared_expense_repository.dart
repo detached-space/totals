@@ -3123,9 +3123,10 @@ class SharedExpenseRepository {
             eventId: joinRequestEventId,
           ).toJson(),
         );
-        await _engineClient.submitPayload(
+        await _engineClient.submitTargetedPayload(
           groupId: group.id,
           encryptedBlob: encrypted,
+          recipientPublicKeys: [member.devicePublicKey],
           kind: 'join_request',
           encryptedNotificationPreview: encryptedNotificationPreview,
         );
