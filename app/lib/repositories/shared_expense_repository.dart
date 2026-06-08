@@ -1949,14 +1949,19 @@ class SharedExpenseRepository {
     );
     await _upsertGroup(updated);
     // We now have the key — announce our display name to the approver.
+    final joinedAt = _memberJoinedAtMs(updated, myPublicKey);
     await _emitMemberMeta(
       updated,
       previewEntry: SharedActivityEntry(
-        id: _uuid.v4(),
+        id: _memberJoinedActivityId(updated, myPublicKey),
         timestamp: DateTime.now().millisecondsSinceEpoch,
         actor: myPublicKey,
         kind: 'member_joined',
-        data: {'displayName': updated.myDisplayName},
+        data: {
+          'memberPk': myPublicKey,
+          'displayName': updated.myDisplayName,
+          if (joinedAt != null) 'joinedAt': joinedAt,
+        },
       ),
     );
     return true;
@@ -1992,13 +1997,25 @@ class SharedExpenseRepository {
       ));
     }
     if (isFirstSeen) {
-      activity.add(SharedActivityEntry(
-        id: _activityIdOrNew(incomingActivity, 'member_joined'),
+      final joinedAt = _memberJoinedAtMs(group, senderPk);
+      final joinedEntry = SharedActivityEntry(
+        id: _memberJoinedActivityId(group, senderPk),
         timestamp: timestamp,
         actor: senderPk,
         kind: 'member_joined',
-        data: {},
-      ));
+        data: {
+          'memberPk': senderPk,
+          if (joinedAt != null) 'joinedAt': joinedAt,
+        },
+      );
+      if (!_hasMemberJoinedActivity(
+        activity,
+        memberPk: senderPk,
+        joinedAt: joinedAt,
+        activityId: joinedEntry.id,
+      )) {
+        activity.add(joinedEntry);
+      }
     }
 
     final updated = group.copyWith(
@@ -2064,17 +2081,30 @@ class SharedExpenseRepository {
       return false;
     }
 
-    final incomingActivity = _activityFromPayload(decoded);
     final activity = [...group.activity];
     if (isFirstSeen) {
-      activity.add(SharedActivityEntry(
-        id: _activityIdOrNew(incomingActivity, 'member_joined'),
-        timestamp: (decoded['timestamp'] as num?)?.toInt() ??
-            DateTime.now().millisecondsSinceEpoch,
+      final joinedAt = _memberJoinedAtMs(group, senderPk);
+      final timestamp = (decoded['timestamp'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch;
+      final joinedEntry = SharedActivityEntry(
+        id: _memberJoinedActivityId(group, senderPk),
+        timestamp: timestamp,
         actor: senderPk,
         kind: 'member_joined',
-        data: {'displayName': displayName},
-      ));
+        data: {
+          'memberPk': senderPk,
+          if (displayName != null) 'displayName': displayName,
+          if (joinedAt != null) 'joinedAt': joinedAt,
+        },
+      );
+      if (!_hasMemberJoinedActivity(
+        activity,
+        memberPk: senderPk,
+        joinedAt: joinedAt,
+        activityId: joinedEntry.id,
+      )) {
+        activity.add(joinedEntry);
+      }
     }
 
     final updated = group.copyWith(
@@ -2311,6 +2341,39 @@ class SharedExpenseRepository {
       return entry.id;
     }
     return _uuid.v4();
+  }
+
+  int? _memberJoinedAtMs(SharedExpenseGroup group, String memberPk) {
+    for (final member in group.members) {
+      if (member.devicePublicKey == memberPk) {
+        return member.joinedAt?.millisecondsSinceEpoch;
+      }
+    }
+    return null;
+  }
+
+  String _memberJoinedActivityId(SharedExpenseGroup group, String memberPk) {
+    final joinedAt = _memberJoinedAtMs(group, memberPk);
+    final suffix = joinedAt == null ? '' : ':$joinedAt';
+    return 'member_joined:${group.id}:$memberPk$suffix';
+  }
+
+  bool _hasMemberJoinedActivity(
+    List<SharedActivityEntry> activity, {
+    required String memberPk,
+    required int? joinedAt,
+    required String activityId,
+  }) {
+    for (final entry in activity) {
+      if (entry.kind != 'member_joined') continue;
+      if (entry.id == activityId) return true;
+      if (entry.actor != memberPk) continue;
+
+      final entryJoinedAt = (entry.data['joinedAt'] as num?)?.toInt();
+      if (entryJoinedAt == null || joinedAt == null) return true;
+      if (entryJoinedAt == joinedAt) return true;
+    }
+    return false;
   }
 
   List<SharedActivityEntry> _activityEntriesForExpensePayload(

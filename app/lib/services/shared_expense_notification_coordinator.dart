@@ -125,10 +125,12 @@ class SharedExpenseNotificationCoordinator {
   Future<void> _seedExistingActivity(List<SharedExpenseGroup> groups) async {
     final prefs = await SharedPreferences.getInstance();
     for (final group in groups) {
-      final ids = group.activity
-          .map((entry) => entry.id)
-          .where((id) => id.isNotEmpty)
-          .toList(growable: false);
+      final ids = <String>[];
+      for (final entry in group.activity) {
+        if (entry.id.isNotEmpty) ids.add(entry.id);
+        final semanticKey = _semanticSeenKeyForEntry(group, entry);
+        if (semanticKey != null) ids.add(semanticKey);
+      }
       if (ids.isEmpty) continue;
       await _markSeen(
         prefs: prefs,
@@ -260,13 +262,29 @@ class SharedExpenseNotificationCoordinator {
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
     if (unseenEntries.isEmpty) return;
+    final entriesToNotify = <SharedActivityEntry>[];
+    final seenKeysToMark = <String>[];
+    final semanticSeenThisBatch = <String>{};
+    for (final entry in unseenEntries) {
+      seenKeysToMark.add(entry.id);
+      final semanticKey = _semanticSeenKeyForEntry(group, entry);
+      if (semanticKey != null) {
+        seenKeysToMark.add(semanticKey);
+        if (seen.contains(semanticKey) ||
+            !semanticSeenThisBatch.add(semanticKey)) {
+          continue;
+        }
+      }
+      entriesToNotify.add(entry);
+    }
+
     await _markSeen(
       prefs: prefs,
       group: group,
-      entryIds: unseenEntries.map((entry) => entry.id),
+      entryIds: seenKeysToMark,
     );
 
-    for (final entry in unseenEntries) {
+    for (final entry in entriesToNotify) {
       if (!_isFreshEnough(entry)) continue;
       await _showNotificationIfNeeded(group, entry);
     }
@@ -300,6 +318,29 @@ class SharedExpenseNotificationCoordinator {
   }
 
   String _seenKey(String groupId) => '$_seenPrefix$groupId';
+
+  String? _semanticSeenKeyForEntry(
+    SharedExpenseGroup group,
+    SharedActivityEntry entry,
+  ) {
+    if (entry.kind != 'member_joined') return null;
+    final actorPk = entry.actor.trim();
+    if (actorPk.isEmpty) return null;
+
+    final joinedAt = (entry.data['joinedAt'] as num?)?.toInt() ??
+        _memberJoinedAtMs(group, actorPk);
+    final joinedAtSuffix = joinedAt == null ? '' : ':$joinedAt';
+    return 'semantic:member_joined:$actorPk$joinedAtSuffix';
+  }
+
+  int? _memberJoinedAtMs(SharedExpenseGroup group, String memberPk) {
+    for (final member in group.members) {
+      if (member.devicePublicKey == memberPk) {
+        return member.joinedAt?.millisecondsSinceEpoch;
+      }
+    }
+    return null;
+  }
 
   Future<void> _showNotificationIfNeeded(
     SharedExpenseGroup group,
