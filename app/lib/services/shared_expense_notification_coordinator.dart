@@ -44,16 +44,37 @@ class SharedExpenseNotificationCoordinator {
     if (_started) return;
     _started = true;
     _startedAtMs = DateTime.now().millisecondsSinceEpoch;
+    _sharedExpenseNotificationLog('start invoked');
 
     try {
       _myPublicKey = await _repository.myPublicKey();
+      _sharedExpenseNotificationLog(
+        'start loaded myPublicKey=${_myPublicKey.isEmpty ? "EMPTY" : "set"}',
+      );
       final groups = await _repository.getGroups();
+      _sharedExpenseNotificationLog(
+        'start loaded ${groups.length} groups',
+      );
       await _seedExistingActivity(groups);
       _syncGroupSubscriptions(groups);
       _startGroupListSubscription();
 
       _busSubscription =
           SharedExpenseRealtimeBus.instance.stream.listen(_handleGroupUpdated);
+      _sharedExpenseNotificationLog(
+        'start bus subscribed bus=${identityHashCode(SharedExpenseRealtimeBus.instance)}',
+      );
+
+      // Catch up on any entries that landed DURING startup. Between the
+      // `await myPublicKey()` yield at the top and this line, the SSE / FCM
+      // consumers may have applied a payload and published to the bus while
+      // _busSubscription didn't exist yet. Those entries are unseen (we kept
+      // them out of the seed pass via _isFreshEnough), so trigger a one-shot
+      // notify pass now to render them.
+      for (final group in groups) {
+        unawaited(notifyForUnseenActivities(group));
+      }
+
       unawaited(_refreshGroupsAndSubscriptions());
     } catch (error, stackTrace) {
       _sharedExpenseNotificationLog('start failed: $error');
@@ -127,9 +148,17 @@ class SharedExpenseNotificationCoordinator {
     for (final group in groups) {
       final ids = <String>[];
       for (final entry in group.activity) {
-        if (entry.id.isNotEmpty) ids.add(entry.id);
-        final semanticKey = _semanticSeenKeyForEntry(group, entry);
-        if (semanticKey != null) ids.add(semanticKey);
+        // Skip entries inside the startup grace window. If a payload landed
+        // during the awaits in start() (e.g., SSE delivered a key_exchange
+        // before we could subscribe to the bus), its activity entry would be
+        // here. Marking it seen at this point would silently swallow its
+        // notification. The catch-up call at the end of start() relies on
+        // these entries being absent from the seen set.
+        if (!_isFreshEnough(entry)) {
+          if (entry.id.isNotEmpty) ids.add(entry.id);
+          final semanticKey = _semanticSeenKeyForEntry(group, entry);
+          if (semanticKey != null) ids.add(semanticKey);
+        }
       }
       if (ids.isEmpty) continue;
       await _markSeen(
@@ -252,14 +281,50 @@ class SharedExpenseNotificationCoordinator {
   }
 
   Future<void> _handleGroupUpdated(SharedExpenseGroup group) async {
+    _sharedExpenseNotificationLog(
+      '_handleGroupUpdated group=${group.id} '
+      'started=$_started myPublicKey=${_myPublicKey.isEmpty ? "EMPTY" : "set"} '
+      'activity=${group.activity.length}',
+    );
     if (!_started || group.id.isEmpty || _myPublicKey.isEmpty) return;
+    await _processGroupForNotifications(group, respectStartupGrace: true);
+  }
 
+  /// One-shot notification render pass for a freshly-synced group, callable
+  /// from the FCM background isolate where the coordinator's `start()` was
+  /// never run. Reads/writes the same `seen` set in SharedPreferences so a
+  /// later foreground render won't duplicate.
+  Future<void> notifyForUnseenActivities(SharedExpenseGroup group) async {
+    if (group.id.isEmpty) return;
+    if (_myPublicKey.isEmpty) {
+      try {
+        _myPublicKey = await _repository.myPublicKey();
+      } catch (error) {
+        _sharedExpenseNotificationLog(
+            'notifyForUnseenActivities pubkey load failed: $error');
+        return;
+      }
+    }
+    if (_myPublicKey.isEmpty) return;
+    await _processGroupForNotifications(group, respectStartupGrace: false);
+  }
+
+  Future<void> _processGroupForNotifications(
+    SharedExpenseGroup group, {
+    required bool respectStartupGrace,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final seen = prefs.getStringList(_seenKey(group.id))?.toSet() ?? <String>{};
     final unseenEntries = group.activity
         .where((entry) => entry.id.isNotEmpty && !seen.contains(entry.id))
         .toList(growable: false)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    _sharedExpenseNotificationLog(
+      'process group=${group.id} activity=${group.activity.length} '
+      'seenSize=${seen.length} unseen=${unseenEntries.length} '
+      'kinds=${unseenEntries.map((e) => e.kind).join(",")} '
+      'respectStartupGrace=$respectStartupGrace',
+    );
 
     if (unseenEntries.isEmpty) return;
     final entriesToNotify = <SharedActivityEntry>[];
@@ -278,6 +343,10 @@ class SharedExpenseNotificationCoordinator {
       entriesToNotify.add(entry);
     }
 
+    // Persist the seen set BEFORE we start showing notifications. If we did it
+    // after, a concurrent firing (per-group SSE + bus + background push all
+    // landing within the same tick) could each observe the entries as unseen
+    // and notify twice.
     await _markSeen(
       prefs: prefs,
       group: group,
@@ -285,7 +354,16 @@ class SharedExpenseNotificationCoordinator {
     );
 
     for (final entry in entriesToNotify) {
-      if (!_isFreshEnough(entry)) continue;
+      if (respectStartupGrace && !_isFreshEnough(entry)) {
+        _sharedExpenseNotificationLog(
+          'skip stale entry id=${entry.id} kind=${entry.kind} '
+          'ts=${entry.timestamp} oldestNotifiable=${_startedAtMs - _startupGrace.inMilliseconds}',
+        );
+        continue;
+      }
+      _sharedExpenseNotificationLog(
+        'notify entry id=${entry.id} kind=${entry.kind} actor=${entry.actor}',
+      );
       await _showNotificationIfNeeded(group, entry);
     }
   }
@@ -347,7 +425,13 @@ class SharedExpenseNotificationCoordinator {
     SharedActivityEntry entry,
   ) async {
     final actorPk = entry.actor;
-    if (actorPk.isEmpty || actorPk == _myPublicKey) return;
+    if (actorPk.isEmpty || actorPk == _myPublicKey) {
+      _sharedExpenseNotificationLog(
+        'skip self-actor or empty entry=${entry.id} kind=${entry.kind} '
+        'actor=$actorPk myPublicKey=$_myPublicKey',
+      );
+      return;
+    }
 
     switch (entry.kind) {
       case 'nudge_sent':
@@ -383,10 +467,51 @@ class SharedExpenseNotificationCoordinator {
       case 'member_joined':
         await _showMemberJoinedNotification(group, entry);
         return;
+      case 'member_left':
+        await _showMemberLeftNotification(group, entry);
+        return;
       case 'group_renamed':
         await _showGroupRenamedNotification(group, entry);
         return;
+      case 'join_requested':
+        await _showJoinRequestedNotification(group, entry);
+        return;
+      case 'i_was_approved':
+        await _showIWasApprovedNotification(group, entry);
+        return;
     }
+  }
+
+  Future<void> _showJoinRequestedNotification(
+    SharedExpenseGroup group,
+    SharedActivityEntry entry,
+  ) async {
+    final rawName = _stringValue(entry.data['requesterDisplayName']).trim();
+    final requesterName = rawName.isEmpty
+        ? group.displayNameFor(_myPublicKey, entry.actor)
+        : rawName;
+    final cleanName = requesterName.trim().isEmpty ? 'Someone' : requesterName;
+    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
+    await NotificationService.instance.showSharedExpenseEventNotification(
+      eventId: entry.id,
+      groupId: group.id,
+      title: 'Join request',
+      body: '$cleanName wants to join $groupName.',
+    );
+  }
+
+  Future<void> _showIWasApprovedNotification(
+    SharedExpenseGroup group,
+    SharedActivityEntry entry,
+  ) async {
+    final approverName = group.displayNameFor(_myPublicKey, entry.actor);
+    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
+    await NotificationService.instance.showSharedExpenseEventNotification(
+      eventId: entry.id,
+      groupId: group.id,
+      title: 'Join request approved',
+      body: '$approverName approved your request to join $groupName.',
+    );
   }
 
   Future<void> _showNudgeNotification(
@@ -600,6 +725,24 @@ class SharedExpenseNotificationCoordinator {
       groupId: group.id,
       title: 'New group member',
       body: '$actorName joined ${group.name}.',
+    );
+  }
+
+  Future<void> _showMemberLeftNotification(
+    SharedExpenseGroup group,
+    SharedActivityEntry entry,
+  ) async {
+    final fallbackName =
+        _stringValue(entry.data['displayName']).trim();
+    final actorName = fallbackName.isNotEmpty
+        ? fallbackName
+        : group.displayNameFor(_myPublicKey, entry.actor);
+    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
+    await NotificationService.instance.showSharedExpenseEventNotification(
+      eventId: entry.id,
+      groupId: group.id,
+      title: 'Group member left',
+      body: '$actorName left $groupName.',
     );
   }
 

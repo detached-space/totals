@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:totals/models/shared_expense_group.dart';
 
 class SharedExpenseRealtimeBus {
@@ -15,6 +16,15 @@ class SharedExpenseRealtimeBus {
 
   void publish(SharedExpenseGroup group) {
     if (_controller.isClosed) return;
+    if (kDebugMode) {
+      final hash = identityHashCode(this);
+      debugPrint(
+        'debug: SharedExpenseRealtimeBus publish bus=$hash group=${group.id} '
+        'hasListener=${_controller.hasListener} '
+        'pendingApprovals=${group.pendingApprovals.length} '
+        'activity=${group.activity.length}',
+      );
+    }
     _controller.add(group);
   }
 }

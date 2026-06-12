@@ -156,6 +156,10 @@ class _SseEvent {
 class TotalsEngineClient {
   static const _defaultBaseUrl = 'https://engine-staging.totals.detached.space';
   static const _requestTimeout = Duration(seconds: 12);
+  // SSE connect headroom — much longer than a regular request because some
+  // proxies/engines flush response headers lazily. Once headers arrive, the
+  // body stream is unconstrained.
+  static const _streamConnectTimeout = Duration(minutes: 5);
   static const _retryDelays = [
     Duration(milliseconds: 450),
     Duration(milliseconds: 1200),
@@ -245,11 +249,15 @@ class TotalsEngineClient {
     return parsed;
   }
 
+  // The client no longer sends `encryptedNotificationPreview` — notification
+  // text is composed locally by the recipient after pulling and decrypting the
+  // payload (doorbell model). Do NOT reintroduce the field without revisiting
+  // shared_expense_push_notification_service.dart.
+
   Future<void> submitPayload({
     required String groupId,
     required String encryptedBlob,
     String kind = 'group',
-    String? encryptedNotificationPreview,
   }) async {
     _engineLog(
       'submitPayload group=${_logId(groupId)} kind=$kind encryptedBytes=${encryptedBlob.length ~/ 2}',
@@ -260,8 +268,6 @@ class TotalsEngineClient {
       body: {
         'encryptedBlob': encryptedBlob,
         'kind': kind,
-        if (encryptedNotificationPreview != null)
-          'encryptedNotificationPreview': encryptedNotificationPreview,
       },
     );
   }
@@ -271,7 +277,6 @@ class TotalsEngineClient {
     required String encryptedBlob,
     required List<String> recipientPublicKeys,
     String kind = 'group',
-    String? encryptedNotificationPreview,
   }) async {
     _engineLog(
       'submitTargetedPayload group=${_logId(groupId)} kind=$kind recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
@@ -283,8 +288,6 @@ class TotalsEngineClient {
         'encryptedBlob': encryptedBlob,
         'recipientPublicKeys': recipientPublicKeys,
         'kind': kind,
-        if (encryptedNotificationPreview != null)
-          'encryptedNotificationPreview': encryptedNotificationPreview,
       },
     );
   }
@@ -293,7 +296,6 @@ class TotalsEngineClient {
     required String groupId,
     required String encryptedBlob,
     required List<String> recipientPublicKeys,
-    String? encryptedNotificationPreview,
   }) async {
     _engineLog(
       'submitNudge group=${_logId(groupId)} recipients=${recipientPublicKeys.length} encryptedBytes=${encryptedBlob.length ~/ 2}',
@@ -305,8 +307,6 @@ class TotalsEngineClient {
         'encryptedBlob': encryptedBlob,
         'recipientPublicKeys': recipientPublicKeys,
         'kind': 'nudge',
-        if (encryptedNotificationPreview != null)
-          'encryptedNotificationPreview': encryptedNotificationPreview,
       },
     );
   }
@@ -672,7 +672,14 @@ class TotalsEngineClient {
     for (var authAttempt = 0; authAttempt < 2; authAttempt++) {
       final auth = await _authHeaders(forceChallenge: authAttempt > 0);
       final request = http.Request('GET', uri)..headers.addAll(auth.headers);
-      final response = await _client.send(request).timeout(_requestTimeout);
+      // Only time-out the initial response headers. The body stream is
+      // long-lived SSE — applying _requestTimeout to the whole
+      // `_client.send(request)` future kills every stream at exactly 12s,
+      // because that future doesn't complete until the response is fully
+      // received in older http client builds (or because some engines flush
+      // headers lazily). Use a generous header-only deadline instead.
+      final response =
+          await _client.send(request).timeout(_streamConnectTimeout);
       _captureSessionHeaders(response.headers);
       if (response.statusCode == 401 && auth.usedSession && authAttempt == 0) {
         _clearSession();

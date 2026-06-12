@@ -9,7 +9,6 @@ import 'package:totals/models/shared_expense_group.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
-import 'package:totals/services/shared_expense_push_preview_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 import 'package:uuid/uuid.dart';
 
@@ -87,6 +86,10 @@ class SharedExpenseRepository {
   Future<String> myPublicKey() async {
     final identity = await _cryptoService.getOrCreateIdentity();
     return identity.publicKeyHex;
+  }
+
+  Future<SharedExpenseGroup?> getGroupById(String groupId) {
+    return _groupById(groupId);
   }
 
   Future<List<SharedExpenseGroup>> getGroups() async {
@@ -358,12 +361,15 @@ class SharedExpenseRepository {
 
   Future<void> leaveGroup(SharedExpenseGroup group) async {
     _sharedExpenseLog('leaveGroup start group=${_logId(group.id)}');
-    // For a pending-approval cancel, the engine's `groups_changed` SSE may
-    // not propagate to existing members quickly enough to drop the stale
-    // approve button. Broadcast an explicit join_cancel so each approver
-    // clears the pendingApproval entry directly.
+    // Pending-approval cancel uses join_cancel (1:1 encrypted because the
+    // requester doesn't have the group key yet). Approved members leaving
+    // use member_left (group-key encrypted) so peers can render a proper
+    // "X left the group" entry instead of just seeing the membership shrink
+    // silently on the next refresh.
     if (group.status == SharedExpenseGroupStatus.pendingApproval) {
       await _broadcastJoinCancel(group);
+    } else if (group.hasGroupKey) {
+      await _broadcastMemberLeft(group);
     }
     try {
       await _engineClient.leaveGroup(group.id);
@@ -540,26 +546,14 @@ class SharedExpenseRepository {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       },
     );
-    // The recipient does not have the group key yet — that key is what this
-    // payload is delivering. Encrypt the notification preview with the
-    // 1:1 shared secret instead, so the recipient's FCM handler can decrypt
-    // it and actually show the "you've been approved" notification.
-    final encryptedNotificationPreview =
-        await _cryptoService.encryptGroupKeyPayload(
-      recipientPublicKeyHex: member.devicePublicKey,
-      payload: SharedExpensePushPreviewService.memberApproved(
-        group: group,
-        approverName: approverDisplayName,
-        eventId: approvalEventId,
-      ).toJson(),
-    );
-
+    // The notification preview is composed locally on the recipient after they
+    // pull and decrypt the payload (doorbell model — see
+    // shared_expense_push_notification_service.dart).
     await _engineClient.submitTargetedPayload(
       groupId: group.id,
       encryptedBlob: encryptedBlob,
       recipientPublicKeys: [member.devicePublicKey],
       kind: 'key_exchange',
-      encryptedNotificationPreview: encryptedNotificationPreview,
     );
 
     final updated = group.copyWith(
@@ -604,10 +598,14 @@ class SharedExpenseRepository {
     required SharedExpenseGroup group,
     required String publicKey,
   }) async {
+    // Drop both the pending entry AND the stub member that _applyJoinRequest
+    // inserted; otherwise the requester stays as a ghost in `members`.
     final updated = group.copyWith(
       pendingApprovals: group.pendingApprovals
           .where((p) => p.publicKey != publicKey)
           .toList(),
+      members:
+          group.members.where((m) => m.devicePublicKey != publicKey).toList(),
     );
     await _upsertGroup(updated);
     return updated;
@@ -1821,6 +1819,7 @@ class SharedExpenseRepository {
       case 'expense':
       case 'join_request':
       case 'join_cancel':
+      case 'member_left':
       case 'nudge':
       case 'group_snapshot':
         return true;
@@ -1918,6 +1917,9 @@ class SharedExpenseRepository {
       case 'join_cancel':
         return _applyJoinCancel(group, senderPk, decoded, myPublicKey);
 
+      case 'member_left':
+        return _applyMemberLeft(group, senderPk, decoded, myPublicKey);
+
       case 'nudge':
         return _applyNudge(group, senderPk, decoded);
 
@@ -1988,6 +1990,45 @@ class SharedExpenseRepository {
       if (approvedBy != null) approvedBy,
       if (approvedPk != null) approvedPk,
     };
+    // Surface "you've been approved" as an activity entry so the coordinator
+    // composes the notification. Idempotent via the deterministic id — replays
+    // of the same key_exchange land on the same id and the duplicate-entry
+    // check below short-circuits them. We can NOT gate this on
+    // `!group.hasGroupKey` because that's status-based, not key-presence
+    // based — a refreshGroups merge can flip the group to `ready` before the
+    // key_exchange payload is applied (e.g., leftover key in secure storage
+    // from a prior session) and then we'd silently swallow the notification.
+    final iWasApprovedActivityId = 'i_was_approved:${group.id}:$myPublicKey';
+    final hasExistingApproval = group.activity
+        .any((entry) => entry.id == iWasApprovedActivityId);
+    final activity = [...group.activity];
+    final approverActor =
+        approvedBy ?? (senderPk.isNotEmpty ? senderPk : null);
+    _sharedExpenseLog(
+      '_applyKeyExchange approve-entry check '
+      'incomingActivityLen=${group.activity.length} '
+      'hasExistingApproval=$hasExistingApproval '
+      'myPublicKey=${myPublicKey.isEmpty ? "EMPTY" : "set"} '
+      'approverActor=${approverActor == null ? "NULL" : _logId(approverActor)}',
+    );
+    if (!hasExistingApproval &&
+        myPublicKey.isNotEmpty &&
+        approverActor != null) {
+      activity.add(SharedActivityEntry(
+        id: iWasApprovedActivityId,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        actor: approverActor,
+        kind: 'i_was_approved',
+        data: {
+          'approverPk': approverActor,
+        },
+      ));
+      _sharedExpenseLog(
+        '_applyKeyExchange ADDED i_was_approved entry, '
+        'activity now ${activity.length}',
+      );
+    }
+
     final updated = group.copyWith(
       name: groupName,
       status: SharedExpenseGroupStatus.ready,
@@ -2007,6 +2048,7 @@ class SharedExpenseRepository {
               p.publicKey != approvedBy &&
               p.publicKey != myPublicKey)
           .toList(),
+      activity: activity,
     );
     await _upsertGroup(updated);
     // We now have the key — announce our display name to the approver.
@@ -2714,6 +2756,19 @@ class SharedExpenseRepository {
     final approvalDisplayName =
         canApplyDisplayName ? displayName : group.displayNames[pk];
 
+    // Strong idempotency: once we've processed this exact (pk, ts) join
+    // request and stamped its activity entry into the log, ignore replays.
+    // Without this check, a re-delivered payload (SSE reconnect race,
+    // concurrent pullPending + stream) would re-strip approvedMemberKeys and
+    // resurrect the pendingApproval entry even AFTER the user approved.
+    // Replay is normal — the doorbell pull and the SSE stream can both see a
+    // payload between the apply and the ack — so this needs to be cheap and
+    // safe to run many times.
+    final joinRequestedActivityId = 'join_requested:${group.id}:$pk:$ts';
+    final hasExistingActivity = group.activity
+        .any((entry) => entry.id == joinRequestedActivityId);
+    if (hasExistingActivity) return false;
+
     // Idempotency: if we already have an identical pending entry for this
     // request, do nothing.
     final existing =
@@ -2754,7 +2809,47 @@ class SharedExpenseRepository {
             pk: incomingUpdatedAt,
           }
         : group.memberMetaUpdatedAt;
+
+    // Surface as a notifiable activity entry so the local notification
+    // coordinator (which composes everything from the activity log under the
+    // doorbell model) can show "X wants to join Group". Reaching this point
+    // means the short-circuit above let us through — there's no entry for
+    // this (pk, ts) yet, so append unconditionally.
+    final activity = [
+      ...group.activity,
+      SharedActivityEntry(
+        id: joinRequestedActivityId,
+        timestamp: ts,
+        actor: pk,
+        kind: 'join_requested',
+        data: {
+          'requesterPk': pk,
+          if (approvalDisplayName != null && approvalDisplayName.isNotEmpty)
+            'requesterDisplayName': approvalDisplayName,
+        },
+      ),
+    ];
+
+    // The card UI's pending-approval list is rendered from the intersection
+    // of `members` and `pendingApprovals`. The requester won't appear in our
+    // server-side `members` list until the next refreshGroups call, so insert
+    // a stub member here so the bus-driven UI update can render the pending
+    // card immediately instead of waiting for a manual refresh. When the real
+    // member arrives via the next refreshGroups, the stub is overwritten.
+    final hasMember =
+        group.members.any((member) => member.devicePublicKey == pk);
+    final newMembers = hasMember
+        ? group.members
+        : [
+            ...group.members,
+            SharedExpenseMember(
+              devicePublicKey: pk,
+              joinedAt: DateTime.fromMillisecondsSinceEpoch(ts),
+            ),
+          ];
+
     final updated = group.copyWith(
+      members: newMembers,
       pendingApprovals: newPending,
       displayNames: newDisplayNames,
       paymentAddresses: newPaymentAddresses,
@@ -2762,6 +2857,62 @@ class SharedExpenseRepository {
       approvedMemberKeys:
           group.approvedMemberKeys.where((k) => k != pk).toSet(),
       keySharedWith: group.keySharedWith.where((k) => k != pk).toSet(),
+      activity: activity,
+    );
+    await _upsertGroup(updated);
+    return true;
+  }
+
+  Future<bool> _applyMemberLeft(
+    SharedExpenseGroup group,
+    String senderPk,
+    Map<String, dynamic> decoded,
+    String myPublicKey,
+  ) async {
+    final pk = decoded['publicKey'] as String? ?? senderPk;
+    if (pk.isEmpty || pk == myPublicKey) return false;
+
+    final incomingActivity = _activityFromPayload(decoded);
+    final leftAt = (decoded['leftAt'] as num?)?.toInt() ??
+        DateTime.now().millisecondsSinceEpoch;
+    final activityId =
+        incomingActivity?.id.isNotEmpty == true && incomingActivity!.kind == 'member_left'
+            ? incomingActivity.id
+            : 'member_left:${group.id}:$pk:$leftAt';
+
+    // Replay safety: if the activity entry is already present, this is the
+    // same payload re-delivered (SSE reconnect, concurrent pullPending). Don't
+    // re-drop the member or re-fire the notification.
+    if (group.activity.any((entry) => entry.id == activityId)) return false;
+
+    final hadMember =
+        group.members.any((member) => member.devicePublicKey == pk);
+    final hadKeyShared = group.keySharedWith.contains(pk);
+    final hadApproval = group.approvedMemberKeys.contains(pk);
+    if (!hadMember && !hadKeyShared && !hadApproval) return false;
+
+    final displayName = decoded['displayName'] as String?;
+    final activityEntry = SharedActivityEntry(
+      id: activityId,
+      timestamp: leftAt,
+      actor: pk,
+      kind: 'member_left',
+      data: {
+        'memberPk': pk,
+        if (displayName != null && displayName.trim().isNotEmpty)
+          'displayName': displayName,
+      },
+    );
+
+    final updated = group.copyWith(
+      members:
+          group.members.where((m) => m.devicePublicKey != pk).toList(),
+      approvedMemberKeys:
+          group.approvedMemberKeys.where((k) => k != pk).toSet(),
+      keySharedWith: group.keySharedWith.where((k) => k != pk).toSet(),
+      pendingApprovals:
+          group.pendingApprovals.where((p) => p.publicKey != pk).toList(),
+      activity: [...group.activity, activityEntry],
     );
     await _upsertGroup(updated);
     return true;
@@ -2776,10 +2927,18 @@ class SharedExpenseRepository {
     final pk = decoded['publicKey'] as String? ?? senderPk;
     if (pk.isEmpty || pk == myPublicKey) return false;
     final hadPending = group.pendingApprovals.any((p) => p.publicKey == pk);
-    if (!hadPending) return false;
+    final hadMember =
+        group.members.any((member) => member.devicePublicKey == pk);
+    if (!hadPending && !hadMember) return false;
+    // Also drop the requester from `members` so the stub we inserted in
+    // _applyJoinRequest doesn't linger as a ghost. Kidist's DELETE /members/me
+    // removes her server-side too, so the next refreshGroups won't put her
+    // back.
     final updated = group.copyWith(
       pendingApprovals:
           group.pendingApprovals.where((p) => p.publicKey != pk).toList(),
+      members:
+          group.members.where((m) => m.devicePublicKey != pk).toList(),
     );
     await _upsertGroup(updated);
     return true;
@@ -2817,17 +2976,10 @@ class SharedExpenseRepository {
       keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
       payload: payload,
     );
-    final encryptedNotificationPreview = await _encryptedNotificationPreview(
-      group: group,
-      groupKeyHex: groupKeyHex,
-      entry: previewEntry,
-      expense: expense,
-    );
     await _engineClient.submitPayload(
       groupId: group.id,
       encryptedBlob: encrypted,
       kind: 'expense',
-      encryptedNotificationPreview: encryptedNotificationPreview,
     );
   }
 
@@ -2852,41 +3004,15 @@ class SharedExpenseRepository {
         'amountByDebtorPk': entry.data['amountByDebtorPk'],
       },
     );
-    final encryptedNotificationPreview = await _encryptedNotificationPreview(
-      group: group,
-      groupKeyHex: groupKeyHex,
-      entry: entry,
-    );
     await _engineClient.submitNudge(
       groupId: group.id,
       encryptedBlob: encrypted,
       recipientPublicKeys: recipientPublicKeys,
-      encryptedNotificationPreview: encryptedNotificationPreview,
     );
   }
 
   Future<String?> notificationGroupKey(String groupId) {
     return _readGroupKey(groupId);
-  }
-
-  Future<String?> _encryptedNotificationPreview({
-    required SharedExpenseGroup group,
-    required String groupKeyHex,
-    required SharedActivityEntry? entry,
-    SharedExpense? expense,
-  }) {
-    final preview = entry == null
-        ? null
-        : SharedExpensePushPreviewService.buildForActivity(
-            group: group,
-            entry: entry,
-            expense: expense,
-          );
-    return SharedExpensePushPreviewService.encrypt(
-      cryptoService: _cryptoService,
-      groupKeyHex: groupKeyHex,
-      preview: preview,
-    );
   }
 
   Future<void> _emitGroupSnapshotPayload({
@@ -3062,11 +3188,6 @@ class SharedExpenseRepository {
           groupId: group.id,
           encryptedBlob: encrypted,
           kind: 'group_meta',
-          encryptedNotificationPreview: await _encryptedNotificationPreview(
-            group: group,
-            groupKeyHex: groupKeyHex,
-            entry: groupRenamePreviewEntry,
-          ),
         );
       } catch (e) {
         _sharedExpenseLog('group_meta send failed: $e');
@@ -3135,11 +3256,6 @@ class SharedExpenseRepository {
         groupId: group.id,
         encryptedBlob: encrypted,
         kind: 'member_meta',
-        encryptedNotificationPreview: await _encryptedNotificationPreview(
-          group: group,
-          groupKeyHex: groupKeyHex,
-          entry: previewEntry,
-        ),
       );
     } catch (e) {
       _sharedExpenseLog('_emitMemberMeta failed: $e — flagging for retry');
@@ -3162,6 +3278,45 @@ class SharedExpenseRepository {
       return entry;
     }
     return null;
+  }
+
+  Future<void> _broadcastMemberLeft(SharedExpenseGroup group) async {
+    final groupKeyHex = await _readGroupKey(group.id);
+    if (groupKeyHex == null) return;
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final leftAt = DateTime.now().millisecondsSinceEpoch;
+    final displayName = _bestKnownDisplayName(group, identity.publicKeyHex);
+    final activityId =
+        'member_left:${group.id}:${identity.publicKeyHex}:$leftAt';
+    final activityEntry = SharedActivityEntry(
+      id: activityId,
+      timestamp: leftAt,
+      actor: identity.publicKeyHex,
+      kind: 'member_left',
+      data: {
+        'memberPk': identity.publicKeyHex,
+        if (!_isFallbackDisplayName(displayName)) 'displayName': displayName,
+      },
+    );
+    final payload = {
+      'type': 'member_left',
+      'publicKey': identity.publicKeyHex,
+      'leftAt': leftAt,
+      'activity': activityEntry.toJson(),
+    };
+    try {
+      final encrypted = await _cryptoService.encryptPayloadWithKey(
+        keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+        payload: payload,
+      );
+      await _engineClient.submitPayload(
+        groupId: group.id,
+        encryptedBlob: encrypted,
+        kind: 'member_left',
+      );
+    } catch (error) {
+      _sharedExpenseLog('_broadcastMemberLeft failed error=$error');
+    }
   }
 
   Future<void> _broadcastJoinCancel(SharedExpenseGroup group) async {
@@ -3201,7 +3356,6 @@ class SharedExpenseRepository {
         _bestKnownPaymentAddress(group, identity.publicKeyHex);
     final memberMetaUpdatedAt =
         _bestKnownMemberMetaUpdatedAt(group, identity.publicKeyHex);
-    final joinRequestEventId = _uuid.v4();
     final payload = {
       'type': 'join_request',
       'publicKey': identity.publicKeyHex,
@@ -3219,21 +3373,11 @@ class SharedExpenseRepository {
           recipientPublicKeyHex: member.devicePublicKey,
           payload: payload,
         );
-        final encryptedNotificationPreview =
-            await _cryptoService.encryptGroupKeyPayload(
-          recipientPublicKeyHex: member.devicePublicKey,
-          payload: SharedExpensePushPreviewService.joinRequest(
-            group: group,
-            requesterName: displayName,
-            eventId: joinRequestEventId,
-          ).toJson(),
-        );
         await _engineClient.submitTargetedPayload(
           groupId: group.id,
           encryptedBlob: encrypted,
           recipientPublicKeys: [member.devicePublicKey],
           kind: 'join_request',
-          encryptedNotificationPreview: encryptedNotificationPreview,
         );
       } catch (error) {
         _sharedExpenseLog(

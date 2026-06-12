@@ -35,6 +35,13 @@ class SharedExpenseCryptoService {
   final Sha512 _sha512;
   final Random _random;
 
+  // In-memory cache for the seed + public key so repeated decryption calls
+  // within a wake don't re-hit Keystore. Keystore reads dominate cold-start
+  // latency in the background push handler (200–400ms). Cleared on identity
+  // rotation only.
+  static String? _cachedPrivateKeyHex;
+  static String? _cachedPublicKeyHex;
+
   SharedExpenseCryptoService({
     FlutterSecureStorage? storage,
     Ed25519? ed25519,
@@ -50,6 +57,11 @@ class SharedExpenseCryptoService {
         _random = random ?? Random.secure();
 
   Future<SharedExpenseIdentity> getOrCreateIdentity() async {
+    final cachedPublic = _cachedPublicKeyHex;
+    if (cachedPublic != null && cachedPublic.isNotEmpty) {
+      return SharedExpenseIdentity(publicKeyHex: cachedPublic);
+    }
+
     final existingPrivateHex = await _safeRead(_privateKeyKey);
     final existingPublicHex = await _safeRead(_publicKeyKey);
     if (existingPrivateHex != null &&
@@ -57,6 +69,8 @@ class SharedExpenseCryptoService {
         existingPublicHex != null &&
         existingPublicHex.isNotEmpty) {
       _cryptoLog('using existing identity key=${_logKey(existingPublicHex)}');
+      _cachedPrivateKeyHex = existingPrivateHex;
+      _cachedPublicKeyHex = existingPublicHex;
       return SharedExpenseIdentity(publicKeyHex: existingPublicHex);
     }
 
@@ -68,6 +82,8 @@ class SharedExpenseCryptoService {
       final publicKey = await keyPair.extractPublicKey();
       final publicKeyHex = toHex(publicKey.bytes);
       await _storage.write(key: _publicKeyKey, value: publicKeyHex);
+      _cachedPrivateKeyHex = existingPrivateHex;
+      _cachedPublicKeyHex = publicKeyHex;
       return SharedExpenseIdentity(publicKeyHex: publicKeyHex);
     }
 
@@ -80,9 +96,12 @@ class SharedExpenseCryptoService {
     final keyPair = await _ed25519.newKeyPairFromSeed(seed);
     final publicKey = await keyPair.extractPublicKey();
     final publicKeyHex = toHex(publicKey.bytes);
+    final seedHex = toHex(seed);
 
-    await _storage.write(key: _privateKeyKey, value: toHex(seed));
+    await _storage.write(key: _privateKeyKey, value: seedHex);
     await _storage.write(key: _publicKeyKey, value: publicKeyHex);
+    _cachedPrivateKeyHex = seedHex;
+    _cachedPublicKeyHex = publicKeyHex;
 
     _cryptoLog('created identity key=${_logKey(publicKeyHex)}');
     return SharedExpenseIdentity(publicKeyHex: publicKeyHex);
@@ -100,16 +119,7 @@ class SharedExpenseCryptoService {
   }
 
   Future<String> signHexChallenge(String challengeHex) async {
-    final privateKeyHex = await _safeRead(_privateKeyKey);
-    if (privateKeyHex == null || privateKeyHex.isEmpty) {
-      await getOrCreateIdentity();
-    }
-
-    final seedHex = await _safeRead(_privateKeyKey);
-    if (seedHex == null || seedHex.isEmpty) {
-      throw StateError('Shared expense identity is not available.');
-    }
-
+    final seedHex = await _readPrivateKey();
     final keyPair = await _ed25519.newKeyPairFromSeed(fromHex(seedHex));
     _cryptoLog('signing challenge bytes=${challengeHex.length ~/ 2}');
     final signature = await _ed25519.sign(
@@ -117,6 +127,20 @@ class SharedExpenseCryptoService {
       keyPair: keyPair,
     );
     return toHex(signature.bytes);
+  }
+
+  Future<String> _readPrivateKey() async {
+    final cached = _cachedPrivateKeyHex;
+    if (cached != null && cached.isNotEmpty) return cached;
+    final seedHex = await _safeRead(_privateKeyKey);
+    if (seedHex == null || seedHex.isEmpty) {
+      await getOrCreateIdentity();
+      final fresh = _cachedPrivateKeyHex;
+      if (fresh != null && fresh.isNotEmpty) return fresh;
+      throw StateError('Shared expense identity is not available.');
+    }
+    _cachedPrivateKeyHex = seedHex;
+    return seedHex;
   }
 
   Future<String> encryptGroupKeyPayload({
@@ -206,10 +230,7 @@ class SharedExpenseCryptoService {
   }
 
   Future<SecretKey> _sharedSecretFor(String otherEd25519PublicKeyHex) async {
-    final privateKeyHex = await _safeRead(_privateKeyKey);
-    if (privateKeyHex == null || privateKeyHex.isEmpty) {
-      throw StateError('Shared expense identity is not available.');
-    }
+    final privateKeyHex = await _readPrivateKey();
 
     _cryptoLog(
         'deriving shared secret remote=${_logKey(otherEd25519PublicKeyHex)}');

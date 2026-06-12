@@ -1,5 +1,4 @@
 import 'package:totals/models/shared_expense_group.dart';
-import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/utils/text_utils.dart';
 
 class SharedExpensePushPreview {
@@ -14,56 +13,15 @@ class SharedExpensePushPreview {
     required this.groupId,
     required this.eventId,
   });
-
-  factory SharedExpensePushPreview.fromJson(Map<String, dynamic> json) {
-    return SharedExpensePushPreview(
-      title: json['title'] as String? ?? '',
-      body: json['body'] as String? ?? '',
-      groupId: json['groupId'] as String? ?? '',
-      eventId: json['eventId'] as String? ?? '',
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'type': 'shared_expense_push_preview_v1',
-        'title': title,
-        'body': body,
-        'groupId': groupId,
-        'eventId': eventId,
-      };
 }
 
+/// Builds the notification text for a shared-expense activity entry.
+///
+/// Composition happens entirely on the recipient device after it has pulled
+/// and decrypted the payload (the doorbell model — see
+/// shared_expense_push_notification_service.dart and CLAUDE.md). Nothing here
+/// is ever sent over the FCM wire.
 class SharedExpensePushPreviewService {
-  static SharedExpensePushPreview joinRequest({
-    required SharedExpenseGroup group,
-    required String requesterName,
-    required String eventId,
-  }) {
-    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
-    final name = requesterName.trim().isEmpty ? 'Someone' : requesterName;
-    return SharedExpensePushPreview(
-      title: 'Join request',
-      body: '$name wants to join $groupName.',
-      groupId: group.id,
-      eventId: eventId,
-    );
-  }
-
-  static SharedExpensePushPreview memberApproved({
-    required SharedExpenseGroup group,
-    required String approverName,
-    required String eventId,
-  }) {
-    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
-    final name = approverName.trim().isEmpty ? 'A member' : approverName;
-    return SharedExpensePushPreview(
-      title: 'Join request approved',
-      body: '$name approved your request to join $groupName.',
-      groupId: group.id,
-      eventId: eventId,
-    );
-  }
-
   static SharedExpensePushPreview? buildForActivity({
     required SharedExpenseGroup group,
     required SharedActivityEntry entry,
@@ -174,6 +132,13 @@ class SharedExpensePushPreviewService {
           groupId: group.id,
           eventId: entry.id,
         );
+      case 'member_left':
+        return SharedExpensePushPreview(
+          title: 'Group member left',
+          body: '$actorName left $groupName.',
+          groupId: group.id,
+          eventId: entry.id,
+        );
       case 'group_renamed':
         final nextName = _stringValue(entry.data['after']).trim();
         return SharedExpensePushPreview(
@@ -184,41 +149,26 @@ class SharedExpensePushPreviewService {
           groupId: group.id,
           eventId: entry.id,
         );
+      case 'join_requested':
+        final requesterName = _stringValue(entry.data['requesterDisplayName'])
+            .trim();
+        final name = requesterName.isEmpty ? 'Someone' : requesterName;
+        return SharedExpensePushPreview(
+          title: 'Join request',
+          body: '$name wants to join $groupName.',
+          groupId: group.id,
+          eventId: entry.id,
+        );
+      case 'i_was_approved':
+        return SharedExpensePushPreview(
+          title: 'Join request approved',
+          body: '$actorName approved your request to join $groupName.',
+          groupId: group.id,
+          eventId: entry.id,
+        );
     }
 
     return null;
-  }
-
-  static Future<String?> encrypt({
-    required SharedExpenseCryptoService cryptoService,
-    required String groupKeyHex,
-    required SharedExpensePushPreview? preview,
-  }) async {
-    if (preview == null) return null;
-    return cryptoService.encryptPayloadWithKey(
-      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
-      payload: preview.toJson(),
-    );
-  }
-
-  static Future<SharedExpensePushPreview?> decrypt({
-    required SharedExpenseCryptoService cryptoService,
-    required String groupKeyHex,
-    required String encryptedBlob,
-  }) async {
-    final decoded = await cryptoService.decryptPayloadWithKey(
-      keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
-      encryptedBlob: encryptedBlob,
-    );
-    if (decoded == null ||
-        decoded['type'] != 'shared_expense_push_preview_v1') {
-      return null;
-    }
-    final preview = SharedExpensePushPreview.fromJson(decoded);
-    if (preview.title.trim().isEmpty || preview.body.trim().isEmpty) {
-      return null;
-    }
-    return preview;
   }
 
   static String _entryReason(
