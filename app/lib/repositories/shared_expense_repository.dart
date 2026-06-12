@@ -11,6 +11,7 @@ import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
+import 'package:totals/services/shared_expense_vault_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
 import 'package:uuid/uuid.dart';
 
@@ -255,6 +256,7 @@ class SharedExpenseRepository {
         'createGroup engine success group=${_logId(group.id)}',
       );
       await SharedExpensePushNotificationService.instance.syncRegistration();
+      unawaited(SharedExpenseVaultService.instance.syncIfUnlocked());
       return group;
     } catch (error, stackTrace) {
       _sharedExpenseLog('createGroup engine failed, using local group: $error');
@@ -369,6 +371,7 @@ class SharedExpenseRepository {
       'syncApplied=$changed',
     );
     await SharedExpensePushNotificationService.instance.syncRegistration();
+    unawaited(SharedExpenseVaultService.instance.syncIfUnlocked());
     return result;
   }
 
@@ -391,6 +394,7 @@ class SharedExpenseRepository {
     }
     await _deleteLocalGroup(group.id);
     _sharedExpenseLog('leaveGroup done group=${_logId(group.id)}');
+    unawaited(SharedExpenseVaultService.instance.syncIfUnlocked());
   }
 
   Future<void> _deleteLocalGroup(String groupId) async {
@@ -1847,6 +1851,7 @@ class SharedExpenseRepository {
       case 'member_left':
       case 'nudge':
       case 'group_snapshot':
+      case 'snapshot_request':
         return true;
       default:
         return false;
@@ -1935,7 +1940,11 @@ class SharedExpenseRepository {
     // Approve.
     final pendingPks =
         group.pendingApprovals.map((p) => p.publicKey).toSet();
-    const allowedFromPending = {'join_request', 'join_cancel', 'member_left'};
+    const allowedFromPending = {
+      'join_request',
+      'join_cancel',
+      'member_left',
+    };
     if (senderPk.isNotEmpty &&
         pendingPks.contains(senderPk) &&
         !allowedFromPending.contains(type)) {
@@ -1969,6 +1978,9 @@ class SharedExpenseRepository {
 
       case 'member_left':
         return _applyMemberLeft(group, senderPk, decoded, myPublicKey);
+
+      case 'snapshot_request':
+        return _applySnapshotRequest(group, senderPk, decoded);
 
       case 'nudge':
         return _applyNudge(group, senderPk, decoded);
@@ -2085,6 +2097,9 @@ class SharedExpenseRepository {
         ),
       );
     }
+    // Push the freshly-received group key into the vault so a future
+    // restore brings it back. No-op if the user hasn't unlocked.
+    unawaited(SharedExpenseVaultService.instance.syncIfUnlocked());
     // We now have the key — announce our display name to the approver.
     final joinedAt = _memberJoinedAtMs(updated, myPublicKey);
     await _emitMemberMeta(
@@ -2978,6 +2993,161 @@ class SharedExpenseRepository {
     return true;
   }
 
+  /// Honor a peer's request to re-share the entire group state. Sent by a
+  /// device that restored from a vault — it has the seed and group key but
+  /// no expenses or activity. We respond by emitting a fresh group_snapshot
+  /// targeted at the requester AND record a `member_restored` activity
+  /// entry locally so peers see a notification: someone with this person's
+  /// identity just restored a device, which is both informational ("Khalid
+  /// got a new phone") and a security signal ("if Khalid didn't do this,
+  /// someone has his recovery code and PIN").
+  Future<bool> _applySnapshotRequest(
+    SharedExpenseGroup group,
+    String senderPk,
+    Map<String, dynamic> decoded,
+  ) async {
+    if (senderPk.isEmpty) return false;
+    // Only respond if the sender is someone we recognize as an approved
+    // member. Restored devices reuse the same pubkey they had before, so
+    // approvedMemberKeys still contains them. This blocks random callers.
+    if (!group.approvedMemberKeys.contains(senderPk)) {
+      _sharedExpenseLog(
+        '_applySnapshotRequest ignored: sender not approved '
+        'sender=${_logId(senderPk)} group=${_logId(group.id)}',
+      );
+      return false;
+    }
+    final groupKeyHex = await _readGroupKey(group.id);
+    if (groupKeyHex == null) return false;
+
+    final ts = (decoded['timestamp'] as num?)?.toInt() ??
+        DateTime.now().millisecondsSinceEpoch;
+    final activityId = 'member_restored:${group.id}:$senderPk:$ts';
+    final hasExistingEntry =
+        group.activity.any((entry) => entry.id == activityId);
+    if (!hasExistingEntry) {
+      final updated = group.copyWith(
+        activity: [
+          ...group.activity,
+          SharedActivityEntry(
+            id: activityId,
+            timestamp: ts,
+            actor: senderPk,
+            kind: 'member_restored',
+            data: {'memberPk': senderPk},
+          ),
+        ],
+      );
+      await _upsertGroup(updated);
+    }
+
+    _sharedExpenseLog(
+      '_applySnapshotRequest emit snapshot to ${_logId(senderPk)} '
+      'group=${_logId(group.id)} '
+      'activityAdded=${!hasExistingEntry}',
+    );
+    await _emitGroupSnapshotPayload(
+      group: group,
+      recipientPublicKey: senderPk,
+      groupKeyHex: groupKeyHex,
+      includeHistory: true,
+    );
+    return !hasExistingEntry;
+  }
+
+  /// After a vault restore we need to create local rows for the groups whose
+  /// keys we just wrote into secure storage — `refreshGroups()` won't do that
+  /// on its own (it intentionally skips server groups it doesn't already
+  /// know about as a safety check). For each `groupId` in [vaultGroupIds]
+  /// where (a) the server still lists us as a member AND (b) we have the
+  /// group key locally, insert a minimal local row. The next
+  /// `refreshGroups()` and subsequent `group_snapshot` arrivals will fill in
+  /// the actual name, display names, expenses, etc.
+  Future<void> bootstrapGroupsForRestore(List<String> vaultGroupIds) async {
+    if (vaultGroupIds.isEmpty) return;
+    _sharedExpenseLog(
+      'bootstrapGroupsForRestore ${vaultGroupIds.length} candidate groups',
+    );
+    final serverGroups = await _engineClient.listGroups();
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final candidateIds = vaultGroupIds.toSet();
+    for (final serverGroup in serverGroups) {
+      if (!candidateIds.contains(serverGroup.id)) continue;
+      final hasKey = await _readGroupKey(serverGroup.id) != null;
+      if (!hasKey) {
+        _sharedExpenseLog(
+          'bootstrapGroupsForRestore skipping no-key group=${_logId(serverGroup.id)}',
+        );
+        continue;
+      }
+      final existing = await _groupById(serverGroup.id);
+      if (existing != null) continue;
+      final group = SharedExpenseGroup(
+        id: serverGroup.id,
+        name: _fallbackGroupName,
+        myDisplayName: '',
+        createdAt: serverGroup.createdAt,
+        expiresAt: serverGroup.expiresAt,
+        status: SharedExpenseGroupStatus.ready,
+        members: serverGroup.members,
+        approvedMemberKeys: {identity.publicKeyHex},
+      );
+      await _upsertGroup(group);
+      _sharedExpenseLog(
+        'bootstrapGroupsForRestore created group=${_logId(serverGroup.id)}',
+      );
+    }
+  }
+
+  /// After a vault restore, ask every other current member to re-share the
+  /// group snapshot. Each responder runs [_applySnapshotRequest] above and
+  /// targets us with a fresh group_snapshot payload, which our existing
+  /// _applyGroupSnapshot merges into our (now-non-empty) local state.
+  ///
+  /// Public so [SharedExpenseVaultService.restore]'s caller can fire this
+  /// after rehydrating the local DB rows via refreshGroups().
+  Future<void> requestSnapshotsForAllGroups() async {
+    final groups = await getGroups();
+    for (final group in groups) {
+      if (!group.hasGroupKey) continue;
+      if (group.members.isEmpty) continue;
+      await _broadcastSnapshotRequest(group);
+    }
+  }
+
+  Future<void> _broadcastSnapshotRequest(SharedExpenseGroup group) async {
+    final groupKeyHex = await _readGroupKey(group.id);
+    if (groupKeyHex == null) return;
+    final keyBytes = SharedExpenseCryptoService.fromHex(groupKeyHex);
+    final identity = await _cryptoService.getOrCreateIdentity();
+    final payload = {
+      'type': 'snapshot_request',
+      'publicKey': identity.publicKeyHex,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+    for (final member in group.members) {
+      if (member.devicePublicKey == identity.publicKeyHex) continue;
+      if (member.devicePublicKey.isEmpty) continue;
+      try {
+        final encrypted = await _cryptoService.encryptPayloadWithKey(
+          keyBytes: keyBytes,
+          payload: payload,
+        );
+        await _engineClient.submitTargetedPayload(
+          groupId: group.id,
+          encryptedBlob: encrypted,
+          recipientPublicKeys: [member.devicePublicKey],
+          kind: 'snapshot_request',
+        );
+      } catch (error) {
+        _sharedExpenseLog(
+          '_broadcastSnapshotRequest failed recipient='
+          '${_logId(member.devicePublicKey)} error=$error',
+        );
+      }
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Outbound payload emitters
   // -------------------------------------------------------------------------
@@ -3047,6 +3217,22 @@ class SharedExpenseRepository {
 
   Future<String?> notificationGroupKey(String groupId) {
     return _readGroupKey(groupId);
+  }
+
+  /// For vault backup: read the current group key for a group, or null when
+  /// we don't have it (e.g. still in pendingApproval status).
+  Future<String?> exportGroupKey(String groupId) {
+    return _readGroupKey(groupId);
+  }
+
+  /// For vault restore: write a group key back into secure storage from a
+  /// just-unsealed vault. Caller is responsible for upserting a matching
+  /// SharedExpenseGroup row.
+  Future<void> restoreGroupKey({
+    required String groupId,
+    required String groupKeyHex,
+  }) {
+    return _writeGroupKey(groupId, groupKeyHex);
   }
 
   static const _approvalNotifiedPrefsPrefix =

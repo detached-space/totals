@@ -118,6 +118,40 @@ class SharedExpenseCryptoService {
     }
   }
 
+  /// Read the current device seed for vault backup. Returns null if no
+  /// identity has been created yet. Caller is responsible for keeping the
+  /// returned hex string in scope only as long as needed.
+  Future<String?> exportSeedHex() async {
+    final cached = _cachedPrivateKeyHex;
+    if (cached != null && cached.isNotEmpty) return cached;
+    return _safeRead(_privateKeyKey);
+  }
+
+  /// Replace the device identity with the supplied seed (e.g. from a
+  /// successful vault unseal during restore). The corresponding public key
+  /// is recomputed and persisted. The in-memory cache is updated so the
+  /// next operation uses the restored identity immediately.
+  Future<SharedExpenseIdentity> restoreFromSeedHex(String seedHex) async {
+    final normalized = seedHex.trim().toLowerCase();
+    if (normalized.length != 64) {
+      throw ArgumentError(
+        'restoreFromSeedHex expects a 64-char hex seed, got ${normalized.length}',
+      );
+    }
+    final seedBytes = fromHex(normalized);
+    final keyPair = await _ed25519.newKeyPairFromSeed(seedBytes);
+    final publicKey = await keyPair.extractPublicKey();
+    final publicKeyHex = toHex(publicKey.bytes);
+
+    await _storage.write(key: _privateKeyKey, value: normalized);
+    await _storage.write(key: _publicKeyKey, value: publicKeyHex);
+    _cachedPrivateKeyHex = normalized;
+    _cachedPublicKeyHex = publicKeyHex;
+
+    _cryptoLog('restored identity key=${_logKey(publicKeyHex)}');
+    return SharedExpenseIdentity(publicKeyHex: publicKeyHex);
+  }
+
   Future<String> signHexChallenge(String challengeHex) async {
     final seedHex = await _readPrivateKey();
     final keyPair = await _ed25519.newKeyPairFromSeed(fromHex(seedHex));

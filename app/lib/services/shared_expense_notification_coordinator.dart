@@ -434,6 +434,9 @@ class SharedExpenseNotificationCoordinator {
       case 'member_left':
         await _showMemberLeftNotification(group, entry);
         return;
+      case 'member_restored':
+        await _showMemberRestoredNotification(group, entry);
+        return;
       case 'group_renamed':
         await _showGroupRenamedNotification(group, entry);
         return;
@@ -697,6 +700,21 @@ class SharedExpenseNotificationCoordinator {
       groupId: group.id,
       title: 'Group member left',
       body: '$actorName left $groupName.',
+    );
+  }
+
+  Future<void> _showMemberRestoredNotification(
+    SharedExpenseGroup group,
+    SharedActivityEntry entry,
+  ) async {
+    final actorName = group.displayNameFor(_myPublicKey, entry.actor);
+    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
+    await NotificationService.instance.showSharedExpenseEventNotification(
+      eventId: entry.id,
+      groupId: group.id,
+      title: 'Device restored',
+      body: '$actorName restored their backup on a new device — $groupName. '
+          'If this wasn\'t them, the recovery code + PIN may be compromised.',
     );
   }
 

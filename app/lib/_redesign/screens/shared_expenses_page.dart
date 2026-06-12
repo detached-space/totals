@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/_redesign/screens/shared_expense_vault_sheets.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
@@ -1721,6 +1722,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         onJoin: _joinGroup,
                         onRefresh: () => _loadGroups(refreshFromEngine: true),
                       ),
+                      SharedExpenseVaultBanner(hasGroups: _groups.isNotEmpty),
+                      const SharedExpenseVaultDebugRow(),
                       if (!_engineReachable) ...[
                         const SizedBox(height: 12),
                         _EngineStatusBanner(
@@ -2220,6 +2223,8 @@ class _EmptySharedState extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 14),
+          const SharedExpenseVaultRestoreLink(),
         ],
       ),
     );

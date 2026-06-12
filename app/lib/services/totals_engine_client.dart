@@ -28,8 +28,16 @@ class TotalsEngineException implements Exception {
   final String message;
   final int? statusCode;
   final Duration? retryAfter;
+  /// Decoded body for non-2xx responses where the caller needs structured
+  /// fields (e.g. a 429 with a `lockedUntil` timestamp).
+  final Map<String, dynamic>? body;
 
-  const TotalsEngineException(this.message, {this.statusCode, this.retryAfter});
+  const TotalsEngineException(
+    this.message, {
+    this.statusCode,
+    this.retryAfter,
+    this.body,
+  });
 
   @override
   String toString() {
@@ -230,6 +238,80 @@ class TotalsEngineClient {
   Future<void> leaveGroup(String groupId) async {
     _engineLog('leaveGroup group=${_logId(groupId)}');
     await _authenticatedRequest('DELETE', '/groups/$groupId/members/me');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Identity vault — encrypted recovery blob keyed by a recovery code. PUT is
+  // authenticated (the current device is who decides to back itself up). Fetch
+  // and failure reporting are unauthenticated by design: at restore time the
+  // user has no device keypair to sign with — that's the whole reason they're
+  // restoring.
+
+  Future<void> putIdentityVault({
+    required String recoveryCode,
+    required Map<String, dynamic> sealedVault,
+  }) async {
+    _engineLog('putIdentityVault code=${_logId(recoveryCode)}');
+    await _authenticatedRequest(
+      'PUT',
+      '/identity/vault',
+      body: {
+        'recoveryCode': recoveryCode,
+        ...sealedVault,
+      },
+    );
+  }
+
+  /// Returns the sealed vault map on success, null when no vault exists for
+  /// the supplied recovery code (404). Throws [TotalsEngineException] with
+  /// `statusCode == 429` when the vault is currently locked — caller should
+  /// extract `lockedUntil` from the body.
+  ///
+  /// Body fields on a 200: `{ salt, kdfParams, encryptedBlob, version }`.
+  /// Body fields on a 429: `{ error: "locked", lockedUntil: <ISO8601> }`.
+  Future<Map<String, dynamic>?> fetchIdentityVault(String recoveryCode) async {
+    _engineLog('fetchIdentityVault code=${_logId(recoveryCode)}');
+    final response = await _sendAuthenticatedRequest(
+      'POST',
+      _uri('/identity/vault/fetch'),
+      const {'Content-Type': 'application/json'},
+      {'recoveryCode': recoveryCode},
+    );
+    if (response.statusCode == 404) return null;
+    if (response.statusCode == 429) {
+      throw TotalsEngineException(
+        'Vault temporarily locked.',
+        statusCode: 429,
+        retryAfter: _retryAfter(response.headers),
+        body: response.decoded,
+      );
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw TotalsEngineException(
+        _errorMessage(response.decoded) ?? 'Vault fetch failed.',
+        statusCode: response.statusCode,
+        retryAfter: _retryAfter(response.headers),
+      );
+    }
+    return response.decoded;
+  }
+
+  /// Tell the backend the user just attempted a PIN unlock and the MAC
+  /// failed (wrong PIN). Backend advances the per-vault failure counter and
+  /// locks the row after N consecutive failures. Best-effort: a failure here
+  /// is logged but not surfaced.
+  Future<void> reportIdentityVaultFailure(String recoveryCode) async {
+    _engineLog('reportIdentityVaultFailure code=${_logId(recoveryCode)}');
+    try {
+      await _sendAuthenticatedRequest(
+        'POST',
+        _uri('/identity/vault/report-failure'),
+        const {'Content-Type': 'application/json'},
+        {'recoveryCode': recoveryCode},
+      );
+    } catch (error) {
+      _engineLog('reportIdentityVaultFailure swallowed error=$error');
+    }
   }
 
   Future<List<SharedExpenseMember>> listMembers(String groupId) async {

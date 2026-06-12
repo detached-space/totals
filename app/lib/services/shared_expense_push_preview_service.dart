@@ -139,6 +139,14 @@ class SharedExpensePushPreviewService {
           groupId: group.id,
           eventId: entry.id,
         );
+      case 'member_restored':
+        return SharedExpensePushPreview(
+          title: 'Device restored',
+          body: '$actorName restored their backup on a new device — '
+              '$groupName.',
+          groupId: group.id,
+          eventId: entry.id,
+        );
       case 'group_renamed':
         final nextName = _stringValue(entry.data['after']).trim();
         return SharedExpensePushPreview(
