@@ -50,7 +50,8 @@ class RedesignShell extends StatefulWidget {
 }
 
 class RedesignShellState extends State<RedesignShell>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  static const int _tabCount = 5;
   // Temporary kill switch for the automatic battery optimization prompt.
   // Users can still request the exemption manually from notification settings.
   static const bool _autoShowBatteryOptimizationPrompt = false;
@@ -62,8 +63,7 @@ class RedesignShellState extends State<RedesignShell>
       GlobalKey<RedesignMoneyPageState>();
   final GlobalKey<RedesignBudgetPageState> _budgetPageKey =
       GlobalKey<RedesignBudgetPageState>();
-  final PageController _pageController =
-      PageController(initialPage: _homeIndex);
+  late final TabController _tabController;
   DateTime? _lastProfileTabTapAt;
   int _currentIndex = _homeIndex;
   int? _activeProfileId;
@@ -88,6 +88,12 @@ class RedesignShellState extends State<RedesignShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _tabController = TabController(
+      length: _tabCount,
+      vsync: this,
+      initialIndex: _homeIndex,
+    );
+    _tabController.addListener(_handleTabControllerChanged);
     BackgroundRefreshSignalService.instance.ensureListening();
     unawaited(BankDetectionStartupService.runOnAppOpen());
     unawaited(_loadActiveProfileId());
@@ -179,7 +185,8 @@ class RedesignShellState extends State<RedesignShell>
     _widgetLaunchIntentSub?.cancel();
     _notificationIntentSub?.cancel();
     _backgroundRefreshSub?.cancel();
-    _pageController.dispose();
+    _tabController.removeListener(_handleTabControllerChanged);
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -398,7 +405,16 @@ class RedesignShellState extends State<RedesignShell>
     }
   }
 
+  void _handleTabControllerChanged() {
+    if (!mounted) return;
+    final index = _tabController.index;
+    if (_currentIndex != index) {
+      setState(() => _currentIndex = index);
+    }
+  }
+
   void lockApp() {
+    _tabController.index = _homeIndex;
     setState(() {
       _isAuthenticated = false;
       _currentIndex = _homeIndex;
@@ -455,7 +471,7 @@ class RedesignShellState extends State<RedesignShell>
     setState(() {
       _currentIndex = index;
     });
-    _pageController.animateToPage(
+    _tabController.animateTo(
       index,
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
@@ -721,15 +737,9 @@ class RedesignShellState extends State<RedesignShell>
         },
         child: Scaffold(
           extendBody: true,
-          body: PageView(
-            controller: _pageController,
+          body: TabBarView(
+            controller: _tabController,
             physics: const PageScrollPhysics(),
-            onPageChanged: (index) {
-              if (_currentIndex == index || !mounted) return;
-              setState(() {
-                _currentIndex = index;
-              });
-            },
             children: [
               const RedesignHomePage(),
               RedesignMoneyPage(key: _moneyPageKey),
@@ -742,7 +752,7 @@ class RedesignShellState extends State<RedesignShell>
           ),
           bottomNavigationBar: RedesignBottomNav(
             currentIndex: _currentIndex,
-            pageController: _pageController,
+            tabController: _tabController,
             onTap: _onTabSelected,
             onMoneyLongPress: _showQuickCashSheet,
             onToolsLongPress: _showQuickAccessAccountsSheet,
