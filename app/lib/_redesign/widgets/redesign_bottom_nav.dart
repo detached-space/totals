@@ -8,7 +8,7 @@ class RedesignBottomNav extends StatelessWidget {
   static const int _tabCount = 5;
 
   final int currentIndex;
-  final PageController pageController;
+  final TabController tabController;
   final ValueChanged<int> onTap;
   final VoidCallback? onMoneyLongPress;
   final VoidCallback? onToolsLongPress;
@@ -17,7 +17,7 @@ class RedesignBottomNav extends StatelessWidget {
   const RedesignBottomNav({
     super.key,
     required this.currentIndex,
-    required this.pageController,
+    required this.tabController,
     required this.onTap,
     this.onMoneyLongPress,
     this.onToolsLongPress,
@@ -25,10 +25,11 @@ class RedesignBottomNav extends StatelessWidget {
   });
 
   double _resolvePage() {
-    if (!pageController.hasClients) return currentIndex.toDouble();
-    final page = pageController.page;
-    if (page == null || !page.isFinite) return currentIndex.toDouble();
-    return page.clamp(0.0, (_tabCount - 1).toDouble()).toDouble();
+    final animation = tabController.animation;
+    if (animation == null || !animation.value.isFinite) {
+      return currentIndex.toDouble();
+    }
+    return animation.value.clamp(0.0, (_tabCount - 1).toDouble()).toDouble();
   }
 
   double _selectionProgress(double page, int index) {
@@ -77,7 +78,7 @@ class RedesignBottomNav extends StatelessWidget {
     ];
 
     return AnimatedBuilder(
-      animation: pageController,
+      animation: tabController.animation ?? tabController,
       builder: (context, child) {
         final page = _resolvePage();
 
