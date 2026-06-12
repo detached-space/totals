@@ -159,13 +159,9 @@ class SharedExpensePushPreviewService {
           groupId: group.id,
           eventId: entry.id,
         );
-      case 'i_was_approved':
-        return SharedExpensePushPreview(
-          title: 'Join request approved',
-          body: '$actorName approved your request to join $groupName.',
-          groupId: group.id,
-          eventId: entry.id,
-        );
+      // i_was_approved is fired directly from
+      // SharedExpenseRepository._applyKeyExchange (not via this preview
+      // builder) — see _showApprovedNotificationOnce.
     }
 
     return null;

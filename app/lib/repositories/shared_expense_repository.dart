@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/shared_expense_group.dart';
+import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_crypto_service.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
@@ -301,6 +303,17 @@ class SharedExpenseRepository {
     }
 
     _sharedExpenseLog('joinGroup start group=${_logId(groupId)}');
+    // Defensive: if a prior leave didn't clean the flag (e.g., app killed
+    // mid-leave), wipe it now so the upcoming approval fires its
+    // notification.
+    final prefs = await SharedPreferences.getInstance();
+    final stalePrefsKeys = prefs
+        .getKeys()
+        .where((k) => k.startsWith('$_approvalNotifiedPrefsPrefix$groupId:'))
+        .toList(growable: false);
+    for (final k in stalePrefsKeys) {
+      await prefs.remove(k);
+    }
     await _engineClient.joinGroup(groupId);
     final members = await _engineClient.listMembers(groupId);
     _sharedExpenseLog(
@@ -398,6 +411,18 @@ class SharedExpenseRepository {
           await prefs.setString(_groupsKey, jsonEncode(filtered));
         }
       } catch (_) {/* ignore */}
+    }
+    // Clear all approval-notified flags for this group so that a future
+    // rejoin to the same group fires the "you were approved" notification
+    // again. Without this, the one-shot flag persists across leave→rejoin
+    // cycles and the joiner silently gets no notification on the second
+    // (and every subsequent) approval.
+    final approvalKeys = prefs
+        .getKeys()
+        .where((k) => k.startsWith('$_approvalNotifiedPrefsPrefix$groupId:'))
+        .toList(growable: false);
+    for (final k in approvalKeys) {
+      await prefs.remove(k);
     }
   }
 
@@ -1896,6 +1921,31 @@ class SharedExpenseRepository {
     final group = await _groupById(groupId);
     if (group == null) return false;
 
+    // If the sender is currently in our pendingApprovals list, the only
+    // payload types they can drive through us are join_request (to re-state
+    // their request), join_cancel (to withdraw it), and member_left (to
+    // leave the group). Everything else — member_meta, group_meta,
+    // group_snapshot, expense, nudge, key_exchange — gets dropped. Without
+    // this gate the joiner could accidentally auto-clear their own pending
+    // state on the approver's side by, for example, applying a stale
+    // key_exchange in the background and then emitting a member_meta that
+    // the approver's _applyMemberMeta would treat as "this person is now an
+    // approved member" and add them to approvedMemberKeys, silently making
+    // the pending-approval card vanish without the approver ever tapping
+    // Approve.
+    final pendingPks =
+        group.pendingApprovals.map((p) => p.publicKey).toSet();
+    const allowedFromPending = {'join_request', 'join_cancel', 'member_left'};
+    if (senderPk.isNotEmpty &&
+        pendingPks.contains(senderPk) &&
+        !allowedFromPending.contains(type)) {
+      _sharedExpenseLog(
+        '_applyPayload dropped type=$type from pending member '
+        'sender=${_logId(senderPk)} group=${_logId(groupId)}',
+      );
+      return false;
+    }
+
     switch (type) {
       // Legacy alias kept so devices still on `group_key` can be approved.
       case 'group_key':
@@ -1990,44 +2040,8 @@ class SharedExpenseRepository {
       if (approvedBy != null) approvedBy,
       if (approvedPk != null) approvedPk,
     };
-    // Surface "you've been approved" as an activity entry so the coordinator
-    // composes the notification. Idempotent via the deterministic id — replays
-    // of the same key_exchange land on the same id and the duplicate-entry
-    // check below short-circuits them. We can NOT gate this on
-    // `!group.hasGroupKey` because that's status-based, not key-presence
-    // based — a refreshGroups merge can flip the group to `ready` before the
-    // key_exchange payload is applied (e.g., leftover key in secure storage
-    // from a prior session) and then we'd silently swallow the notification.
-    final iWasApprovedActivityId = 'i_was_approved:${group.id}:$myPublicKey';
-    final hasExistingApproval = group.activity
-        .any((entry) => entry.id == iWasApprovedActivityId);
-    final activity = [...group.activity];
     final approverActor =
         approvedBy ?? (senderPk.isNotEmpty ? senderPk : null);
-    _sharedExpenseLog(
-      '_applyKeyExchange approve-entry check '
-      'incomingActivityLen=${group.activity.length} '
-      'hasExistingApproval=$hasExistingApproval '
-      'myPublicKey=${myPublicKey.isEmpty ? "EMPTY" : "set"} '
-      'approverActor=${approverActor == null ? "NULL" : _logId(approverActor)}',
-    );
-    if (!hasExistingApproval &&
-        myPublicKey.isNotEmpty &&
-        approverActor != null) {
-      activity.add(SharedActivityEntry(
-        id: iWasApprovedActivityId,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        actor: approverActor,
-        kind: 'i_was_approved',
-        data: {
-          'approverPk': approverActor,
-        },
-      ));
-      _sharedExpenseLog(
-        '_applyKeyExchange ADDED i_was_approved entry, '
-        'activity now ${activity.length}',
-      );
-    }
 
     final updated = group.copyWith(
       name: groupName,
@@ -2048,9 +2062,29 @@ class SharedExpenseRepository {
               p.publicKey != approvedBy &&
               p.publicKey != myPublicKey)
           .toList(),
-      activity: activity,
     );
     await _upsertGroup(updated);
+
+    // Fire the "you've been approved" notification DIRECTLY here, not via the
+    // coordinator+bus pipeline. The bus path was unreliable for this specific
+    // event because the joiner's app is in its app-lifetime startup window
+    // when the approval arrives, and any of these race conditions could
+    // silently swallow the notification: (1) coordinator.start() hasn't yet
+    // subscribed to the bus when this publish fires, (2) coordinator's seed
+    // pass marks the entry seen before the bus listener fires, (3) freshness
+    // window filters the entry out, (4) the seen-set + catch-up race fires
+    // duplicates or nothing depending on event ordering. The notification
+    // here is one-shot per (group, device) — a SharedPreferences flag
+    // guards against replay across app restarts and SSE redelivery.
+    if (myPublicKey.isNotEmpty && approverActor != null) {
+      unawaited(
+        _showApprovedNotificationOnce(
+          group: updated,
+          approverActor: approverActor,
+          myPublicKey: myPublicKey,
+        ),
+      );
+    }
     // We now have the key — announce our display name to the approver.
     final joinedAt = _memberJoinedAtMs(updated, myPublicKey);
     await _emitMemberMeta(
@@ -3013,6 +3047,40 @@ class SharedExpenseRepository {
 
   Future<String?> notificationGroupKey(String groupId) {
     return _readGroupKey(groupId);
+  }
+
+  static const _approvalNotifiedPrefsPrefix =
+      'shared_expense_approval_notified_';
+
+  Future<void> _showApprovedNotificationOnce({
+    required SharedExpenseGroup group,
+    required String approverActor,
+    required String myPublicKey,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_approvalNotifiedPrefsPrefix${group.id}:$myPublicKey';
+    if (prefs.getBool(key) == true) {
+      _sharedExpenseLog(
+        'approve-notify skip: already notified group=${_logId(group.id)}',
+      );
+      return;
+    }
+    await prefs.setBool(key, true);
+
+    final approverName =
+        group.displayNameFor(myPublicKey, approverActor);
+    final groupName =
+        group.name.trim().isEmpty ? 'your group' : group.name;
+    _sharedExpenseLog(
+      'approve-notify fire group=${_logId(group.id)} '
+      'approver=${_logId(approverActor)}',
+    );
+    await NotificationService.instance.showSharedExpenseEventNotification(
+      eventId: 'i_was_approved:${group.id}:$myPublicKey',
+      groupId: group.id,
+      title: 'Join request approved',
+      body: '$approverName approved your request to join $groupName.',
+    );
   }
 
   Future<void> _emitGroupSnapshotPayload({

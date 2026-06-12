@@ -44,26 +44,16 @@ class SharedExpenseNotificationCoordinator {
     if (_started) return;
     _started = true;
     _startedAtMs = DateTime.now().millisecondsSinceEpoch;
-    _sharedExpenseNotificationLog('start invoked');
 
     try {
       _myPublicKey = await _repository.myPublicKey();
-      _sharedExpenseNotificationLog(
-        'start loaded myPublicKey=${_myPublicKey.isEmpty ? "EMPTY" : "set"}',
-      );
       final groups = await _repository.getGroups();
-      _sharedExpenseNotificationLog(
-        'start loaded ${groups.length} groups',
-      );
       await _seedExistingActivity(groups);
       _syncGroupSubscriptions(groups);
       _startGroupListSubscription();
 
       _busSubscription =
           SharedExpenseRealtimeBus.instance.stream.listen(_handleGroupUpdated);
-      _sharedExpenseNotificationLog(
-        'start bus subscribed bus=${identityHashCode(SharedExpenseRealtimeBus.instance)}',
-      );
 
       // Catch up on any entries that landed DURING startup. Between the
       // `await myPublicKey()` yield at the top and this line, the SSE / FCM
@@ -281,11 +271,6 @@ class SharedExpenseNotificationCoordinator {
   }
 
   Future<void> _handleGroupUpdated(SharedExpenseGroup group) async {
-    _sharedExpenseNotificationLog(
-      '_handleGroupUpdated group=${group.id} '
-      'started=$_started myPublicKey=${_myPublicKey.isEmpty ? "EMPTY" : "set"} '
-      'activity=${group.activity.length}',
-    );
     if (!_started || group.id.isEmpty || _myPublicKey.isEmpty) return;
     await _processGroupForNotifications(group, respectStartupGrace: true);
   }
@@ -319,12 +304,6 @@ class SharedExpenseNotificationCoordinator {
         .where((entry) => entry.id.isNotEmpty && !seen.contains(entry.id))
         .toList(growable: false)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    _sharedExpenseNotificationLog(
-      'process group=${group.id} activity=${group.activity.length} '
-      'seenSize=${seen.length} unseen=${unseenEntries.length} '
-      'kinds=${unseenEntries.map((e) => e.kind).join(",")} '
-      'respectStartupGrace=$respectStartupGrace',
-    );
 
     if (unseenEntries.isEmpty) return;
     final entriesToNotify = <SharedActivityEntry>[];
@@ -354,16 +333,7 @@ class SharedExpenseNotificationCoordinator {
     );
 
     for (final entry in entriesToNotify) {
-      if (respectStartupGrace && !_isFreshEnough(entry)) {
-        _sharedExpenseNotificationLog(
-          'skip stale entry id=${entry.id} kind=${entry.kind} '
-          'ts=${entry.timestamp} oldestNotifiable=${_startedAtMs - _startupGrace.inMilliseconds}',
-        );
-        continue;
-      }
-      _sharedExpenseNotificationLog(
-        'notify entry id=${entry.id} kind=${entry.kind} actor=${entry.actor}',
-      );
+      if (respectStartupGrace && !_isFreshEnough(entry)) continue;
       await _showNotificationIfNeeded(group, entry);
     }
   }
@@ -425,13 +395,7 @@ class SharedExpenseNotificationCoordinator {
     SharedActivityEntry entry,
   ) async {
     final actorPk = entry.actor;
-    if (actorPk.isEmpty || actorPk == _myPublicKey) {
-      _sharedExpenseNotificationLog(
-        'skip self-actor or empty entry=${entry.id} kind=${entry.kind} '
-        'actor=$actorPk myPublicKey=$_myPublicKey',
-      );
-      return;
-    }
+    if (actorPk.isEmpty || actorPk == _myPublicKey) return;
 
     switch (entry.kind) {
       case 'nudge_sent':
@@ -476,9 +440,6 @@ class SharedExpenseNotificationCoordinator {
       case 'join_requested':
         await _showJoinRequestedNotification(group, entry);
         return;
-      case 'i_was_approved':
-        await _showIWasApprovedNotification(group, entry);
-        return;
     }
   }
 
@@ -500,19 +461,12 @@ class SharedExpenseNotificationCoordinator {
     );
   }
 
-  Future<void> _showIWasApprovedNotification(
-    SharedExpenseGroup group,
-    SharedActivityEntry entry,
-  ) async {
-    final approverName = group.displayNameFor(_myPublicKey, entry.actor);
-    final groupName = group.name.trim().isEmpty ? 'your group' : group.name;
-    await NotificationService.instance.showSharedExpenseEventNotification(
-      eventId: entry.id,
-      groupId: group.id,
-      title: 'Join request approved',
-      body: '$approverName approved your request to join $groupName.',
-    );
-  }
+  // The "you were approved" notification is fired directly from
+  // SharedExpenseRepository._applyKeyExchange via a SharedPreferences-flagged
+  // one-shot call — see _showApprovedNotificationOnce in the repository. We
+  // do NOT surface it via this coordinator because the joiner's app is in its
+  // startup window when the approval arrives and the bus / seed-set race
+  // conditions made the notification unreliable.
 
   Future<void> _showNudgeNotification(
     SharedExpenseGroup group,

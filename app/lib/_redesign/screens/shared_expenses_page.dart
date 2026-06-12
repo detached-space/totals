@@ -563,14 +563,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     // new to apply. Listen to the bus so we still re-render in that case.
     _realtimeBusSubscription =
         SharedExpenseRealtimeBus.instance.stream.listen(_applyRealtimeGroup);
-    if (kDebugMode) {
-      final stateHash = identityHashCode(this);
-      final busHash = identityHashCode(SharedExpenseRealtimeBus.instance);
-      debugPrint(
-        'debug: SharedExpensesPage initState subscribed state=$stateHash '
-        'bus=$busHash',
-      );
-    }
   }
 
   @override
@@ -998,16 +990,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 
   void _applyRealtimeGroup(SharedExpenseGroup updatedGroup) {
-    if (kDebugMode) {
-      final stateHash = identityHashCode(this);
-      final busHash = identityHashCode(SharedExpenseRealtimeBus.instance);
-      debugPrint(
-        'debug: SharedExpensesPage applyRealtimeGroup state=$stateHash '
-        'bus=$busHash mounted=$mounted group=${updatedGroup.id} '
-        'pendingApprovals=${updatedGroup.pendingApprovals.length} '
-        'activity=${updatedGroup.activity.length}',
-      );
-    }
     if (!mounted) return;
     setState(() {
       var replaced = false;
