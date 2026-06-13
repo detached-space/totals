@@ -232,24 +232,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
         final trendSeries = _chartRange == _ChartRange.week
             ? provider.weekTrendSeries
             : provider.monthTrendSeries;
-        final homeFabBottomPadding =
-            86.0 + MediaQuery.of(context).viewPadding.bottom;
-
         return Scaffold(
           backgroundColor: AppColors.background(context),
-          floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-          floatingActionButton: Padding(
-            padding: EdgeInsets.only(bottom: homeFabBottomPadding),
-            child: _HomeToolsFabMenu(
-              isOpen: _isToolsMenuOpen,
-              onOpenChanged: _setToolsMenuOpen,
-              onWebDashboardTap: _openWebDashboard,
-              onQuickAccountsTap: _openQuickAccountsPage,
-              onVerifyPaymentsTap: _openVerifyPayments,
-              onFailedParsingsTap: _openFailedParsings,
-              onLoansTap: _openLoansPlaceholder,
-            ),
-          ),
           body: SafeArea(
             child: Stack(
               children: [
@@ -447,6 +431,19 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                         ),
                       ),
                     ),
+                  ),
+                ),
+                Positioned(
+                  right: 20,
+                  bottom: 8,
+                  child: _HomeToolsFabMenu(
+                    isOpen: _isToolsMenuOpen,
+                    onOpenChanged: _setToolsMenuOpen,
+                    onWebDashboardTap: _openWebDashboard,
+                    onQuickAccountsTap: _openQuickAccountsPage,
+                    onVerifyPaymentsTap: _openVerifyPayments,
+                    onFailedParsingsTap: _openFailedParsings,
+                    onLoansTap: _openLoansPlaceholder,
                   ),
                 ),
               ],
