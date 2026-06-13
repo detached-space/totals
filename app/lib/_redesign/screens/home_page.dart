@@ -1144,7 +1144,7 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
       ),
       _HomeToolsFabAction(
         icon: AppIcons.debts,
-        color: AppColors.slate500,
+        color: AppColors.red,
         label: context.l10nText('Loans'),
         onTap: widget.onLoansTap,
       ),

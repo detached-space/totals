@@ -826,6 +826,10 @@ class _PersonBalanceTile extends StatelessWidget {
     final label = isOwedToYou
         ? context.l10nText('They owe you')
         : context.l10nText('You owe');
+    final transactionCountLabel = _formatTransactionCount(
+      context,
+      person.transactionCount,
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -876,7 +880,7 @@ class _PersonBalanceTile extends StatelessWidget {
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            '${person.transactionCount} tx',
+                            transactionCountLabel,
                             style: theme.textTheme.labelMedium?.copyWith(
                               color: AppColors.textSecondary(context),
                               fontWeight: FontWeight.w700,
@@ -1096,8 +1100,8 @@ class _LoanDebtBaseTile extends StatelessWidget {
     );
     final details = [
       bankName,
-      item.dateLabel,
-      item.timeLabel,
+      item.dateLabel(context),
+      item.timeLabel(context),
     ].where((value) => value.trim().isNotEmpty).join(' · ');
 
     return Container(
@@ -1402,7 +1406,11 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
             const SizedBox(height: 18),
             _TransactionsHeader(
               title: context.l10nText('Transactions'),
-              subtitle: '${filteredItems.length}/${items.length} tx',
+              subtitle: _formatFilteredTransactionCount(
+                context,
+                filteredItems.length,
+                items.length,
+              ),
               filterLabel: _transactionFilterLabel(
                 context,
                 _transactionFilter,
@@ -1873,18 +1881,18 @@ class _LoanDebtItem {
     return parsed?.toLocal();
   }
 
-  String get dateLabel {
+  String dateLabel(BuildContext context) {
     final parsed = parsedLocalTime;
-    if (parsed == null) return 'Unknown date';
+    if (parsed == null) return context.l10nText('Unknown date');
     return AppDateFormat.monthDayMaybeYear(parsed);
   }
 
-  String get timeLabel {
+  String timeLabel(BuildContext context) {
     final parsed = parsedLocalTime;
     if (parsed == null) return '';
     final hour = parsed.hour;
     final minute = parsed.minute.toString().padLeft(2, '0');
-    final period = hour >= 12 ? 'PM' : 'AM';
+    final period = context.l10nText(hour >= 12 ? 'PM' : 'AM');
     final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
     return '$hour12:$minute $period';
   }
@@ -1943,6 +1951,22 @@ String _formatEtbCompact(double amount, BuildContext context) {
           .replaceAll(' M', 'M')
       : formatNumberWithComma(amount).replaceFirst('.00', '');
   return '$currency $formatted';
+}
+
+String _formatTransactionCount(BuildContext context, int count) {
+  final label = context.l10nText(
+    count == 1 ? 'transaction' : 'transactions',
+  );
+  return '$count $label';
+}
+
+String _formatFilteredTransactionCount(
+  BuildContext context,
+  int filteredCount,
+  int totalCount,
+) {
+  final label = context.l10nText('transactions');
+  return '$filteredCount/$totalCount $label';
 }
 
 String _transactionFilterLabel(
