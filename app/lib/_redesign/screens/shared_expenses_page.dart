@@ -1804,21 +1804,31 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        context.l10n('nav.shared', 'Shared'),
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textPrimary(context),
+                      if (_groups.isNotEmpty) ...[
+                        _SharedHeroCard(
+                          summary: _SharedHeroSummary.fromGroups(
+                            _groups,
+                            _myPublicKey,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        context.l10nText('Split expenses with friends'),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: AppColors.textSecondary(context),
+                        const SizedBox(height: 18),
+                      ] else ...[
+                        Text(
+                          context.l10n('nav.shared', 'Shared'),
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary(context),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 20),
+                        const SizedBox(height: 4),
+                        Text(
+                          context.l10nText('Split expenses with friends'),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppColors.textSecondary(context),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
                       _ActionBar(
                         isBusy: _isMutating,
                         busyLabel: _mutationLabel,
@@ -1917,34 +1927,38 @@ class _ActionBar extends StatelessWidget {
           onPressed: isBusy ? null : onCreate,
           icon: isCreatingGroup
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
+                  width: 14,
+                  height: 14,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
                     color: AppColors.white,
                   ),
                 )
-              : const Icon(AppIcons.add, size: 18, color: AppColors.white),
+              : const Icon(AppIcons.add, size: 15, color: AppColors.white),
           label: Text(
             context.l10nText(isCreatingGroup ? 'Creating group' : 'New'),
           ),
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.primaryLight,
             foregroundColor: AppColors.white,
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            minimumSize: const Size(0, 34),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(17),
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: isBusy ? null : onJoin,
           icon: isSendingRequest
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
+                  width: 14,
+                  height: 14,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
                     color: AppColors.primaryLight,
@@ -1952,7 +1966,7 @@ class _ActionBar extends StatelessWidget {
                 )
               : Icon(
                   AppIcons.lock_outline_rounded,
-                  size: 18,
+                  size: 14,
                   color: AppColors.textPrimary(context),
                 ),
           label: Text(
@@ -1960,11 +1974,15 @@ class _ActionBar extends StatelessWidget {
           ),
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.textPrimary(context),
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            minimumSize: const Size(0, 34),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
             side: BorderSide(color: AppColors.borderColor(context)),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(17),
             ),
           ),
         ),
@@ -1973,8 +1991,8 @@ class _ActionBar extends StatelessWidget {
           onPressed: isRefreshing ? null : onRefresh,
           icon: isRefreshing
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
+                  width: 14,
+                  height: 14,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
                     color: AppColors.primaryLight,
@@ -1982,18 +2000,473 @@ class _ActionBar extends StatelessWidget {
                 )
               : Icon(
                   AppIcons.refresh,
+                  size: 16,
                   color: AppColors.textSecondary(context),
                 ),
           style: IconButton.styleFrom(
             backgroundColor: AppColors.cardColor(context),
             side: BorderSide(color: AppColors.borderColor(context)),
-            minimumSize: const Size(48, 48),
+            minimumSize: const Size(34, 34),
+            fixedSize: const Size(34, 34),
+            padding: EdgeInsets.zero,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(17),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================================
+// Hero summary card — shows total net across all groups + top counterparties.
+// ============================================================================
+
+class _SharedHeroSummary {
+  final double netBalance;
+  final int groupCount;
+  final int peopleCount;
+  final List<_HeroPerson> topPeople;
+  final List<_HeroGroupBalance> breakdown;
+
+  const _SharedHeroSummary({
+    required this.netBalance,
+    required this.groupCount,
+    required this.peopleCount,
+    required this.topPeople,
+    required this.breakdown,
+  });
+
+  factory _SharedHeroSummary.fromGroups(
+    List<SharedExpenseGroup> groups,
+    String myPublicKey,
+  ) {
+    var net = 0.0;
+    final knownPeople = <String, _HeroPerson>{};
+    final debtByPerson = <String, double>{};
+    final breakdown = <_HeroGroupBalance>[];
+
+    for (final group in groups) {
+      if (group.status == SharedExpenseGroupStatus.pendingApproval) continue;
+      for (final member in group.members) {
+        final pk = member.devicePublicKey;
+        if (pk.isEmpty || pk == myPublicKey) continue;
+        final displayName = group.displayNameFor(myPublicKey, pk);
+        final nameKey = displayName.trim().toLowerCase();
+        if (nameKey.isEmpty) continue;
+        knownPeople.putIfAbsent(
+          nameKey,
+          () => _HeroPerson(
+            publicKey: pk,
+            name: displayName,
+            color: Color(memberColorFor(group, pk)),
+          ),
+        );
+      }
+      if (myPublicKey.isEmpty) continue;
+      final balances = computeBalancesFor(group);
+      final myBalance = balances[myPublicKey] ?? 0;
+      net += myBalance;
+      if (myBalance.abs() >= 0.5) {
+        breakdown.add(_HeroGroupBalance(
+          groupId: group.id,
+          name: group.name,
+          balance: myBalance,
+        ));
+      }
+      final plan = settlementPlanFor(group);
+      for (final d in plan.debts) {
+        if (d.from != myPublicKey && d.to != myPublicKey) continue;
+        final other = d.from == myPublicKey ? d.to : d.from;
+        final otherName =
+            group.displayNameFor(myPublicKey, other).trim().toLowerCase();
+        if (otherName.isEmpty) continue;
+        debtByPerson.update(
+          otherName,
+          (v) => v + d.amount,
+          ifAbsent: () => d.amount,
+        );
+      }
+    }
+
+    final sorted = knownPeople.values.toList()
+      ..sort((a, b) {
+        final da = debtByPerson[a.name.trim().toLowerCase()] ?? 0;
+        final db = debtByPerson[b.name.trim().toLowerCase()] ?? 0;
+        if (da != db) return db.compareTo(da);
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+    breakdown.sort((a, b) => b.balance.abs().compareTo(a.balance.abs()));
+
+    return _SharedHeroSummary(
+      netBalance: net,
+      groupCount: groups.length,
+      peopleCount: knownPeople.length,
+      topPeople: sorted,
+      breakdown: breakdown,
+    );
+  }
+}
+
+class _HeroGroupBalance {
+  final String groupId;
+  final String name;
+  final double balance;
+  const _HeroGroupBalance({
+    required this.groupId,
+    required this.name,
+    required this.balance,
+  });
+}
+
+class _HeroPerson {
+  final String publicKey;
+  final String name;
+  final Color color;
+  const _HeroPerson({
+    required this.publicKey,
+    required this.name,
+    required this.color,
+  });
+
+  String get initial {
+    final t = name.trim();
+    if (t.isEmpty) return '?';
+    return String.fromCharCode(t.runes.first).toUpperCase();
+  }
+}
+
+class _SharedHeroCard extends StatelessWidget {
+  final _SharedHeroSummary summary;
+  const _SharedHeroCard({required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    final base = AppColors.cardColor(context);
+    final tint = AppColors.primaryLight.withValues(alpha: 0.05);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderColor(context)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [base, Color.alphaBlend(tint, base)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  context.l10nText('SHARED'),
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 20,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              if (summary.topPeople.isNotEmpty)
+                _StackedAvatars(people: summary.topPeople),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _HeroTotalLine(net: summary.netBalance),
+          if (summary.breakdown.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _HeroBreakdown(items: summary.breakdown),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            _heroSummarySubtitle(context, summary),
+            style: TextStyle(
+              color: AppColors.textTertiary(context),
+              fontWeight: FontWeight.w800,
+              fontSize: 10.5,
+              letterSpacing: 1.1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroTotalLine extends StatelessWidget {
+  final double net;
+  const _HeroTotalLine({required this.net});
+
+  @override
+  Widget build(BuildContext context) {
+    final settled = net.abs() < 0.5;
+    if (settled) {
+      return Text(
+        context.l10nText("You're all settled"),
+        style: const TextStyle(
+          color: AppColors.incomeSuccess,
+          fontWeight: FontWeight.w800,
+          fontSize: 15,
+        ),
+      );
+    }
+    final owesOthers = net < 0;
+    final color = owesOthers ? AppColors.red : AppColors.incomeSuccess;
+    final label = owesOthers
+        ? context.l10nText('You owe')
+        : context.l10nText("You're owed");
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '$label  ',
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontWeight: FontWeight.w700,
+              fontSize: 13.5,
+            ),
+          ),
+          TextSpan(
+            text: _formatEtb(net.abs(), context),
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w900,
+              fontSize: 17,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroBreakdown extends StatelessWidget {
+  final List<_HeroGroupBalance> items;
+  const _HeroBreakdown({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final owes = items.where((e) => e.balance < -0.5).toList()
+      ..sort((a, b) => a.balance.compareTo(b.balance));
+    final owed = items.where((e) => e.balance > 0.5).toList()
+      ..sort((a, b) => b.balance.compareTo(a.balance));
+    final visibleRows = items.take(3).toList();
+    final extra = items.length - visibleRows.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _TugOfWarBar(owesItems: owes, owedItems: owed),
+        const SizedBox(height: 10),
+        for (final item in visibleRows)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: _HeroBreakdownRow(item: item),
+          ),
+        if (extra > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '+$extra ${context.l10nText(extra == 1 ? 'more group' : 'more groups')}',
+              style: TextStyle(
+                color: AppColors.textTertiary(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _TugOfWarBar extends StatelessWidget {
+  final List<_HeroGroupBalance> owesItems;
+  final List<_HeroGroupBalance> owedItems;
+  const _TugOfWarBar({required this.owesItems, required this.owedItems});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasOwes = owesItems.isNotEmpty;
+    final hasOwed = owedItems.isNotEmpty;
+    if (!hasOwes && !hasOwed) return const SizedBox.shrink();
+    return SizedBox(
+      height: 8,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Row(
+          children: [
+            for (var i = 0; i < owesItems.length; i++)
+              Expanded(
+                flex: (owesItems[i].balance.abs() * 1000)
+                    .round()
+                    .clamp(1, 1 << 30),
+                child: Container(
+                  color: AppColors.red,
+                  margin: EdgeInsets.only(
+                    right: i < owesItems.length - 1 ? 1 : 0,
+                  ),
+                ),
+              ),
+            for (var i = 0; i < owedItems.length; i++)
+              Expanded(
+                flex: (owedItems[i].balance.abs() * 1000)
+                    .round()
+                    .clamp(1, 1 << 30),
+                child: Container(
+                  color: AppColors.incomeSuccess,
+                  margin: EdgeInsets.only(
+                    left: i == 0 && hasOwes ? 1 : 0,
+                    right: i < owedItems.length - 1 ? 1 : 0,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroBreakdownRow extends StatelessWidget {
+  final _HeroGroupBalance item;
+  const _HeroBreakdownRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final owesOthers = item.balance < 0;
+    final color = owesOthers ? AppColors.red : AppColors.incomeSuccess;
+    final amount = _formatEtb(item.balance.abs(), context);
+    return Row(
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            item.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppColors.textPrimary(context),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          owesOthers ? '-$amount' : '+$amount',
+          style: TextStyle(
+            color: color,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _heroSummarySubtitle(BuildContext context, _SharedHeroSummary s) {
+  final g =
+      '${s.groupCount} ${context.l10nText(s.groupCount == 1 ? 'GROUP' : 'GROUPS')}';
+  final p =
+      '${s.peopleCount} ${context.l10nText(s.peopleCount == 1 ? 'PERSON' : 'PEOPLE')}';
+  return '$g · $p';
+}
+
+class _StackedAvatars extends StatelessWidget {
+  final List<_HeroPerson> people;
+  const _StackedAvatars({required this.people});
+
+  static const int _maxVisible = 4;
+
+  @override
+  Widget build(BuildContext context) {
+    if (people.isEmpty) return const SizedBox.shrink();
+    final overflow = people.length - _maxVisible;
+    final visible = overflow > 0
+        ? people.take(_maxVisible).toList()
+        : people.toList();
+    const avatarSize = 28.0;
+    const overlap = 10.0;
+    final slotCount = visible.length + (overflow > 0 ? 1 : 0);
+    final width = avatarSize + (slotCount - 1) * (avatarSize - overlap);
+    final borderColor = AppColors.cardColor(context);
+    return SizedBox(
+      width: width,
+      height: avatarSize,
+      child: Stack(
+        children: [
+          for (var i = 0; i < visible.length; i++)
+            Positioned(
+              left: i * (avatarSize - overlap),
+              child: _AvatarCircle(
+                size: avatarSize,
+                color: visible[i].color,
+                text: visible[i].initial,
+                borderColor: borderColor,
+              ),
+            ),
+          if (overflow > 0)
+            Positioned(
+              left: visible.length * (avatarSize - overlap),
+              child: _AvatarCircle(
+                size: avatarSize,
+                color: AppColors.textTertiary(context),
+                text: '+$overflow',
+                borderColor: borderColor,
+                fontSize: 10,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AvatarCircle extends StatelessWidget {
+  final double size;
+  final Color color;
+  final String text;
+  final Color borderColor;
+  final double fontSize;
+  const _AvatarCircle({
+    required this.size,
+    required this.color,
+    required this.text,
+    required this.borderColor,
+    this.fontSize = 12.5,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: borderColor, width: 2),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: AppColors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: fontSize,
+        ),
+      ),
     );
   }
 }

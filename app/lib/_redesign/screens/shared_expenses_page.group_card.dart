@@ -66,190 +66,75 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isReadyRefreshing =
-        isRefreshing && group.status == SharedExpenseGroupStatus.ready;
-    final statusLabel = isReadyRefreshing
-        ? context.l10nText('Refreshing')
-        : switch (group.status) {
-            SharedExpenseGroupStatus.ready => context.l10nText('Synced'),
-            SharedExpenseGroupStatus.pendingApproval =>
-              context.l10nText('Pending approval'),
-            SharedExpenseGroupStatus.localOnly =>
-              context.l10nText('Local only'),
-          };
-    final statusColor = isReadyRefreshing
-        ? AppColors.blue
-        : switch (group.status) {
-            SharedExpenseGroupStatus.ready => AppColors.incomeSuccess,
-            SharedExpenseGroupStatus.pendingApproval => AppColors.amber,
-            SharedExpenseGroupStatus.localOnly =>
-              AppColors.textTertiary(context),
-          };
+    final isPending =
+        group.status == SharedExpenseGroupStatus.pendingApproval;
+    final isLocalOnly =
+        group.status == SharedExpenseGroupStatus.localOnly;
+    final isJustYou = group.memberCount <= 1;
+    final canCopyInvite = !isPending && !isLocalOnly;
 
     return Material(
       color: AppColors.cardColor(context),
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(18),
+        onTap: isPending ? _onCancelTap : onOpen,
+        borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.borderColor(context)),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.black.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          group.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: AppColors.textPrimary(context),
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          group.memberCount == 1
-                              ? context.l10nText('1 member')
-                              : '${group.memberCount} ${context.l10nText('members')}',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: AppColors.textSecondary(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed:
-                            group.status == SharedExpenseGroupStatus.localOnly
-                                ? null
-                                : onCopyInvite,
-                        icon: const Icon(AppIcons.copy, size: 17),
-                        tooltip: context.l10nText('Copy code'),
-                        style: IconButton.styleFrom(
-                          backgroundColor: AppColors.cardColor(context),
-                          foregroundColor: AppColors.textSecondary(context),
-                          disabledForegroundColor:
-                              AppColors.textTertiary(context),
-                          side: BorderSide(
-                            color: AppColors.borderColor(context),
-                          ),
-                          minimumSize: const Size(36, 36),
-                          fixedSize: const Size(36, 36),
-                          padding: EdgeInsets.zero,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _StatusChip(label: statusLabel, color: statusColor),
-                    ],
-                  ),
-                ],
-              ),
-              if (group.status == SharedExpenseGroupStatus.ready) ...[
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: _GroupCardBalanceLine(
-                        group: group,
-                        myPublicKey: myPublicKey,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      context
-                          .l10n('shared.updatedTime', 'Updated {time}')
-                          .replaceFirst(
-                            '{time}',
-                            _localizedShortRelative(
-                              context,
-                              _lastGroupEventTimestamp(group),
-                            ),
-                          ),
+                    child: Text(
+                      group.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.textTertiary(context),
-                        fontWeight: FontWeight.w600,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
                       ),
                     ),
-                  ],
-                ),
-              ],
-              if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _onCancelTap,
-                      icon: Icon(
-                        AppIcons.close,
-                        size: 17,
-                        color: _cancelArmed
-                            ? Colors.white
-                            : const Color(0xFFBE123C),
-                      ),
-                      label: Text(
-                        _cancelArmed
-                            ? context.l10nText('Tap again to cancel')
-                            : context.l10nText('Cancel request'),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _cancelArmed
-                            ? Colors.white
-                            : const Color(0xFFBE123C),
-                        backgroundColor:
-                            _cancelArmed ? const Color(0xFFBE123C) : null,
-                        minimumSize: const Size(0, 42),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        side: BorderSide(
-                          color: _cancelArmed
-                              ? const Color(0xFFBE123C)
-                              : const Color(0xFFBE123C).withValues(alpha: 0.5),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
+                  ),
+                  const SizedBox(width: 10),
+                  if (isPending)
+                    _StatusChip(
+                      label: context.l10nText('WAITING FOR KEY'),
+                      color: AppColors.amber,
+                    )
+                  else if (!isJustYou && group.memberCount > 3)
+                    _GroupCardMemberAvatars(
+                      group: group,
+                      myPublicKey: myPublicKey,
+                    )
+                  else
+                    _MembersChevron(
+                      label: isJustYou
+                          ? context.l10nText('just you')
+                          : group.memberCount == 1
+                              ? context.l10nText('1 member')
+                              : '${group.memberCount} ${context.l10nText('members')}',
                     ),
-                  ],
-                ),
-              ],
-              if (group.status == SharedExpenseGroupStatus.pendingApproval) ...[
-                const SizedBox(height: 16),
-                _InlineNote(
-                  icon: AppIcons.lock_outline_rounded,
-                  text: context.l10nText('Waiting for approval'),
-                  color: AppColors.amber,
-                ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              _GroupCardBody(
+                group: group,
+                myPublicKey: myPublicKey,
+                isPending: isPending,
+                isJustYou: isJustYou,
+                cancelArmed: _cancelArmed,
+              ),
+              if (canCopyInvite) ...[
+                const SizedBox(height: 10),
+                _CopyInviteButton(onTap: onCopyInvite),
               ],
               if (pendingMembers.isNotEmpty) ...[
                 const SizedBox(height: 18),
@@ -283,6 +168,314 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
   }
 }
 
+class _MembersChevron extends StatelessWidget {
+  final String label;
+  const _MembersChevron({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: AppColors.textTertiary(context),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Icon(
+          AppIcons.chevron_right,
+          size: 14,
+          color: AppColors.textTertiary(context),
+        ),
+      ],
+    );
+  }
+}
+
+class _GroupCardMemberAvatars extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  const _GroupCardMemberAvatars({
+    required this.group,
+    required this.myPublicKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = group.members
+        .where((m) => m.devicePublicKey.isNotEmpty)
+        .toList()
+      ..sort((a, b) {
+        if (a.devicePublicKey == myPublicKey) return -1;
+        if (b.devicePublicKey == myPublicKey) return 1;
+        final an = group
+            .displayNameFor(myPublicKey, a.devicePublicKey)
+            .toLowerCase();
+        final bn = group
+            .displayNameFor(myPublicKey, b.devicePublicKey)
+            .toLowerCase();
+        return an.compareTo(bn);
+      });
+    const maxVisible = 2;
+    final visible = entries.take(maxVisible).toList();
+    final overflow = entries.length - visible.length;
+    const avatarSize = 22.0;
+    const overlap = 8.0;
+    final slotCount = visible.length + (overflow > 0 ? 1 : 0);
+    final stackWidth =
+        avatarSize + (slotCount - 1) * (avatarSize - overlap);
+    final borderColor = AppColors.cardColor(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: stackWidth,
+          height: avatarSize,
+          child: Stack(
+            children: [
+              for (var i = 0; i < visible.length; i++)
+                Positioned(
+                  left: i * (avatarSize - overlap),
+                  child: _AvatarCircle(
+                    size: avatarSize,
+                    color: Color(
+                      memberColorFor(group, visible[i].devicePublicKey),
+                    ),
+                    text: _initialFor(
+                      group.displayNameFor(
+                        myPublicKey,
+                        visible[i].devicePublicKey,
+                      ),
+                    ),
+                    borderColor: borderColor,
+                    fontSize: 10,
+                  ),
+                ),
+              if (overflow > 0)
+                Positioned(
+                  left: visible.length * (avatarSize - overlap),
+                  child: _AvatarCircle(
+                    size: avatarSize,
+                    color: AppColors.textTertiary(context),
+                    text: '+$overflow',
+                    borderColor: borderColor,
+                    fontSize: 9,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Icon(
+          AppIcons.chevron_right,
+          size: 14,
+          color: AppColors.textTertiary(context),
+        ),
+      ],
+    );
+  }
+
+  static String _initialFor(String name) {
+    final t = name.trim();
+    if (t.isEmpty) return '?';
+    return String.fromCharCode(t.runes.first).toUpperCase();
+  }
+}
+
+class _GroupCardBody extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final bool isPending;
+  final bool isJustYou;
+  final bool cancelArmed;
+
+  const _GroupCardBody({
+    required this.group,
+    required this.myPublicKey,
+    required this.isPending,
+    required this.isJustYou,
+    required this.cancelArmed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isPending) {
+      return Text(
+        cancelArmed
+            ? context.l10nText('Tap again to cancel join request')
+            : context.l10nText('Waiting for someone to send the key…'),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: cancelArmed
+              ? const Color(0xFFBE123C)
+              : AppColors.textSecondary(context),
+          fontSize: 12.5,
+          fontWeight: cancelArmed ? FontWeight.w700 : FontWeight.w500,
+        ),
+      );
+    }
+
+    if (isJustYou) {
+      return Text(
+        context.l10nText('No expenses yet'),
+        style: TextStyle(
+          color: AppColors.textTertiary(context),
+          fontSize: 12.5,
+          fontWeight: FontWeight.w500,
+        ),
+      );
+    }
+
+    final balances = computeBalancesFor(group);
+    final myBalance = balances[myPublicKey] ?? 0;
+    if (myBalance.abs() < 0.5) {
+      return Text(
+        context.l10nText('All settled'),
+        style: TextStyle(
+          color: AppColors.textTertiary(context),
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+
+    return _GroupCardBalanceBlock(
+      group: group,
+      myPublicKey: myPublicKey,
+      myBalance: myBalance,
+    );
+  }
+}
+
+class _GroupCardBalanceBlock extends StatelessWidget {
+  final SharedExpenseGroup group;
+  final String myPublicKey;
+  final double myBalance;
+  const _GroupCardBalanceBlock({
+    required this.group,
+    required this.myPublicKey,
+    required this.myBalance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isOwed = myBalance > 0;
+    final amount = _formatEtb(myBalance.abs(), context);
+    final balanceText = isOwed
+        ? context.l10nText("you're owed $amount")
+        : context.l10nText('you owe $amount');
+    final balanceColor = isOwed ? AppColors.incomeSuccess : AppColors.red;
+    final plan = settlementPlanFor(group);
+    SettlementDebt? topDebt;
+    for (final d in plan.debts) {
+      if (d.from != myPublicKey && d.to != myPublicKey) continue;
+      if (topDebt == null || d.amount > topDebt.amount) topDebt = d;
+    }
+    final counterpartyPk = topDebt == null
+        ? null
+        : topDebt.from == myPublicKey
+            ? topDebt.to
+            : topDebt.from;
+    final iAmDebtor = topDebt != null && topDebt.from == myPublicKey;
+    final counterpartyName = counterpartyPk == null
+        ? null
+        : group.displayNameFor(myPublicKey, counterpartyPk);
+    final counterpartyColor = counterpartyPk == null
+        ? AppColors.textSecondary(context)
+        : Color(memberColorFor(group, counterpartyPk));
+    final relative = _localizedShortRelative(
+      context,
+      _lastGroupEventTimestamp(group),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          balanceText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: balanceColor,
+            fontSize: 13.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (counterpartyName != null) ...[
+          const SizedBox(height: 2),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: iAmDebtor
+                      ? context.l10nText('to ')
+                      : context.l10nText('from '),
+                  style: TextStyle(
+                    color: AppColors.textTertiary(context),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                TextSpan(
+                  text: counterpartyName,
+                  style: TextStyle(
+                    color: counterpartyColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                TextSpan(
+                  text: ' · $relative',
+                  style: TextStyle(
+                    color: AppColors.textTertiary(context),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11.5),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _CopyInviteButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CopyInviteButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: const Icon(AppIcons.copy, size: 12),
+        label: Text(context.l10nText('Copy invite')),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.textSecondary(context),
+          side: BorderSide(color: AppColors.borderColor(context)),
+          minimumSize: const Size(0, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          textStyle: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _StatusChip extends StatelessWidget {
   final String label;
   final Color color;
@@ -305,37 +498,6 @@ class _StatusChip extends StatelessWidget {
               letterSpacing: 0,
             ),
       ),
-    );
-  }
-}
-
-class _InlineNote extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  const _InlineNote({
-    required this.icon,
-    required this.text,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 17, color: color),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.textSecondary(context),
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -382,17 +382,21 @@ class SharedExpenseRepository {
     // requester doesn't have the group key yet). Approved members leaving
     // use member_left (group-key encrypted) so peers can render a proper
     // "X left the group" entry instead of just seeing the membership shrink
-    // silently on the next refresh.
+    // silently on the next refresh. Both are courtesy broadcasts — fire
+    // them and the engine unregister off so the user isn't blocked by
+    // outbound network on the way out (pending-approval cancel can be
+    // O(peers) calls × 12s timeout when the engine is unreachable, which
+    // is why the leave spinner used to get stuck for tens of seconds).
     if (group.status == SharedExpenseGroupStatus.pendingApproval) {
-      await _broadcastJoinCancel(group);
+      unawaited(_broadcastJoinCancel(group));
     } else if (group.hasGroupKey) {
-      await _broadcastMemberLeft(group);
+      unawaited(_broadcastMemberLeft(group));
     }
-    try {
-      await _engineClient.leaveGroup(group.id);
-    } catch (error) {
-      _sharedExpenseLog('leaveGroup engine failed (continuing local): $error');
-    }
+    unawaited(
+      _engineClient.leaveGroup(group.id).catchError((error) {
+        _sharedExpenseLog('leaveGroup engine failed: $error');
+      }),
+    );
     await _deleteLocalGroup(group.id);
     _sharedExpenseLog('leaveGroup done group=${_logId(group.id)}');
     unawaited(SharedExpenseVaultService.instance.syncIfUnlocked());
@@ -586,6 +590,7 @@ class SharedExpenseRepository {
       kind: 'key_exchange',
     );
 
+    final approvedAt = DateTime.now().millisecondsSinceEpoch;
     final updated = group.copyWith(
       approvedMemberKeys: {
         ...group.approvedMemberKeys,
@@ -603,7 +608,7 @@ class SharedExpenseRepository {
         ...group.activity,
         SharedActivityEntry(
           id: approvalEventId,
-          timestamp: DateTime.now().millisecondsSinceEpoch,
+          timestamp: approvedAt,
           actor: identity.publicKeyHex,
           kind: 'member_approved',
           data: {'memberPk': member.devicePublicKey},
@@ -616,6 +621,14 @@ class SharedExpenseRepository {
       groupKeyHex: groupKeyHex,
       includeHistory: updated.backfillNewMembers,
     );
+    unawaited(_broadcastMemberApproved(
+      group: updated,
+      approverPublicKey: identity.publicKeyHex,
+      approvedPublicKey: member.devicePublicKey,
+      groupKeyHex: groupKeyHex,
+      approvedAt: approvedAt,
+      activityId: approvalEventId,
+    ));
     await _upsertGroup(updated);
     _sharedExpenseLog(
       'approveMember done group=${_logId(group.id)} '
@@ -1850,6 +1863,7 @@ class SharedExpenseRepository {
       case 'join_request':
       case 'join_cancel':
       case 'member_left':
+      case 'member_approved':
       case 'nudge':
       case 'group_snapshot':
       case 'snapshot_request':
@@ -1979,6 +1993,9 @@ class SharedExpenseRepository {
 
       case 'member_left':
         return _applyMemberLeft(group, senderPk, decoded, myPublicKey);
+
+      case 'member_approved':
+        return _applyMemberApproved(group, senderPk, decoded, myPublicKey);
 
       case 'snapshot_request':
         return _applySnapshotRequest(group, senderPk, decoded);
@@ -2968,6 +2985,56 @@ class SharedExpenseRepository {
     return true;
   }
 
+  /// Mirror of [approveMember]'s local state change for the OTHER approvers.
+  /// When one approver taps Approve, they update their own state and send
+  /// key_exchange to the new member — without this broadcast handler the
+  /// other approvers' pending list never clears and the Approve button
+  /// lingers there indefinitely.
+  Future<bool> _applyMemberApproved(
+    SharedExpenseGroup group,
+    String senderPk,
+    Map<String, dynamic> decoded,
+    String myPublicKey,
+  ) async {
+    final approvedPk = decoded['approvedPublicKey'] as String? ?? '';
+    if (approvedPk.isEmpty || approvedPk == myPublicKey) return false;
+
+    final incomingActivity = _activityFromPayload(decoded);
+    final approvedAt = (decoded['timestamp'] as num?)?.toInt() ??
+        DateTime.now().millisecondsSinceEpoch;
+    final activityId = incomingActivity?.id.isNotEmpty == true &&
+            incomingActivity!.kind == 'member_approved'
+        ? incomingActivity.id
+        : 'member_approved:${group.id}:$approvedPk:$approvedAt';
+
+    if (group.activity.any((entry) => entry.id == activityId)) return false;
+
+    final alreadyApproved =
+        group.approvedMemberKeys.contains(approvedPk);
+    final hadPending =
+        group.pendingApprovals.any((p) => p.publicKey == approvedPk);
+    if (alreadyApproved && !hadPending) return false;
+
+    final approverPk = decoded['approvedBy'] as String? ?? senderPk;
+    final activityEntry = SharedActivityEntry(
+      id: activityId,
+      timestamp: approvedAt,
+      actor: approverPk,
+      kind: 'member_approved',
+      data: {'memberPk': approvedPk},
+    );
+
+    final updated = group.copyWith(
+      approvedMemberKeys: {...group.approvedMemberKeys, approvedPk},
+      pendingApprovals: group.pendingApprovals
+          .where((p) => p.publicKey != approvedPk)
+          .toList(),
+      activity: [...group.activity, activityEntry],
+    );
+    await _upsertGroup(updated);
+    return true;
+  }
+
   Future<bool> _applyJoinCancel(
     SharedExpenseGroup group,
     String senderPk,
@@ -3533,6 +3600,47 @@ class SharedExpenseRepository {
       return entry;
     }
     return null;
+  }
+
+  /// Tell every other approver the request has been handled so the
+  /// pending-approval card clears across devices, not just on the approver's.
+  /// Group-key encrypted (single broadcast hits every approved member's SSE
+  /// stream); the newly-approved member and the approver themselves skip
+  /// in [_applyMemberApproved].
+  Future<void> _broadcastMemberApproved({
+    required SharedExpenseGroup group,
+    required String approverPublicKey,
+    required String approvedPublicKey,
+    required String groupKeyHex,
+    required int approvedAt,
+    required String activityId,
+  }) async {
+    final payload = {
+      'type': 'member_approved',
+      'approvedPublicKey': approvedPublicKey,
+      'approvedBy': approverPublicKey,
+      'timestamp': approvedAt,
+      'activity': SharedActivityEntry(
+        id: activityId,
+        timestamp: approvedAt,
+        actor: approverPublicKey,
+        kind: 'member_approved',
+        data: {'memberPk': approvedPublicKey},
+      ).toJson(),
+    };
+    try {
+      final encrypted = await _cryptoService.encryptPayloadWithKey(
+        keyBytes: SharedExpenseCryptoService.fromHex(groupKeyHex),
+        payload: payload,
+      );
+      await _engineClient.submitPayload(
+        groupId: group.id,
+        encryptedBlob: encrypted,
+        kind: 'member_approved',
+      );
+    } catch (error) {
+      _sharedExpenseLog('_broadcastMemberApproved failed error=$error');
+    }
   }
 
   Future<void> _broadcastMemberLeft(SharedExpenseGroup group) async {

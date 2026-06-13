@@ -1258,49 +1258,6 @@ class _LinkedTransactionOption extends StatelessWidget {
   }
 }
 
-class _GroupCardBalanceLine extends StatelessWidget {
-  final SharedExpenseGroup group;
-  final String myPublicKey;
-  const _GroupCardBalanceLine({
-    required this.group,
-    required this.myPublicKey,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final balances = computeBalancesFor(group);
-    final myBalance = balances[myPublicKey] ?? 0.0;
-    if (myBalance.abs() < 0.5) {
-      return Text(
-        context.l10nText('All settled'),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: AppColors.textTertiary(context),
-              fontWeight: FontWeight.w600,
-            ),
-      );
-    }
-    final isOwed = myBalance > 0;
-    final text = isOwed
-        ? context
-            .l10n('shared.youAreOwedAmount', "You're owed {amount}")
-            .replaceFirst('{amount}', _formatEtb(myBalance, context))
-        : context
-            .l10n('shared.youOweAmount', 'You owe {amount}')
-            .replaceFirst('{amount}', _formatEtb(myBalance.abs(), context));
-    return Text(
-      text,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: isOwed ? AppColors.incomeSuccess : AppColors.red,
-            fontWeight: FontWeight.w700,
-          ),
-    );
-  }
-}
-
 // ============================================================================
 // Group settings sheet — edit name + your display name, copy invite, leave.
 // ============================================================================
