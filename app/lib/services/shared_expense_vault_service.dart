@@ -76,6 +76,16 @@ class SharedExpenseVaultService extends ChangeNotifier {
   String? _cachedSaltBase64;
   SharedExpenseVaultKdfParams? _cachedKdfParams;
   bool _initialized = false;
+  final StreamController<void> _restoreEventsController =
+      StreamController<void>.broadcast();
+
+  /// Fires once per successful [restore] call. The shared-expenses page
+  /// listens to this so it can tear down its long-lived SSE subscriptions
+  /// (which authenticated against the pre-restore identity) and reconnect
+  /// with the restored one. Without this, snapshot replies from peers
+  /// sit in the engine's queue for the wrong pubkey and the page looks
+  /// empty until the user manually refreshes.
+  Stream<void> get onRestore => _restoreEventsController.stream;
 
   Future<void> ensureInitialized() async {
     if (_initialized) return;
@@ -212,6 +222,13 @@ class SharedExpenseVaultService extends ChangeNotifier {
       'restore ok seed-set groupKeys=${content.groupKeys.length}',
     );
     notifyListeners();
+    // Tell any listening UI (the shared expenses page) that the identity
+    // just changed. The page restarts its SSE subscriptions on this event
+    // so it picks up snapshot replies addressed to the restored pubkey
+    // instead of the pre-restore one.
+    if (!_restoreEventsController.isClosed) {
+      _restoreEventsController.add(null);
+    }
     // Rehydrate group rows from server-side membership and ask peers to
     // re-share history. Fire-and-forget — restore returns as soon as the
     // identity is in place; the history streams in as other members

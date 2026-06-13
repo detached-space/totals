@@ -23,7 +23,9 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
+import 'package:totals/services/shared_expense_vault_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
+import 'package:totals/utils/text_utils.dart' show formatAmountCompact;
 
 part 'shared_expenses_page.analytics.dart';
 part 'shared_expenses_page.ios_widgets.dart';
@@ -44,17 +46,26 @@ String _logId(String value) {
 }
 
 String _formatEtb(num amount, [BuildContext? context]) {
-  final value = amount.round();
-  final sign = value < 0 ? '-' : '';
-  final digits = value.abs().toString();
-  final buffer = StringBuffer();
-  for (var i = 0; i < digits.length; i++) {
-    final remaining = digits.length - i;
-    buffer.write(digits[i]);
-    if (remaining > 1 && remaining % 3 == 1) buffer.write(',');
-  }
   final currency = context?.l10nText('ETB') ?? 'ETB';
-  return currency == 'ብር' ? '$sign$buffer $currency' : '$sign$currency $buffer';
+  // Above 100k, fall back to compact (125K, 1.2M) so big balances don't
+  // overflow the card. Below that, keep the comma-separated form so users
+  // see the exact figure.
+  final value = amount.round();
+  final String formatted;
+  if (value.abs() >= 100000) {
+    formatted = formatAmountCompact(amount.toDouble());
+  } else {
+    final sign = value < 0 ? '-' : '';
+    final digits = value.abs().toString();
+    final buffer = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      final remaining = digits.length - i;
+      buffer.write(digits[i]);
+      if (remaining > 1 && remaining % 3 == 1) buffer.write(',');
+    }
+    formatted = '$sign$buffer';
+  }
+  return currency == 'ብር' ? '$formatted $currency' : '$currency $formatted';
 }
 
 String _formatExpenseAmountInput(double? amount) {
@@ -548,6 +559,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   int _selectedGroupOpenRequestId = 0;
   _CreatingGroupDraft? _creatingGroup;
   Timer? _pollTimer;
+  Timer? _restorePeerWaitTimer;
   DateTime? _lastBackgroundRefresh;
   StreamSubscription<void>? _groupListRealtimeSubscription;
   Timer? _groupListRealtimeReconnectTimer;
@@ -556,6 +568,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   Timer? _pendingRealtimeReconnectTimer;
   int _pendingRealtimeReconnectAttempts = 0;
   StreamSubscription<SharedExpenseGroup>? _realtimeBusSubscription;
+  StreamSubscription<void>? _vaultRestoreSubscription;
 
   @override
   void initState() {
@@ -566,6 +579,10 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _startPolling();
     _startGroupListRealtimeSubscription();
     _startPendingRealtimeSubscription();
+    _vaultRestoreSubscription =
+        SharedExpenseVaultService.instance.onRestore.listen(
+      (_) => _onVaultIdentityRestored(),
+    );
     // The notification coordinator's per-group stream may consume a payload
     // before our own stream sees it, leaving _applyJoinRequest with nothing
     // new to apply. Listen to the bus so we still re-render in that case.
@@ -596,6 +613,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _pendingRealtimeReconnectTimer?.cancel();
     unawaited(_pendingRealtimeSubscription?.cancel());
     unawaited(_realtimeBusSubscription?.cancel());
+    unawaited(_vaultRestoreSubscription?.cancel());
+    _restorePeerWaitTimer?.cancel();
     super.dispose();
   }
 
@@ -622,6 +641,78 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       _pendingRealtimeReconnectTimer = null;
       _startPendingRealtimeSubscription();
     }
+  }
+
+  /// Tear down both SSE subscriptions and let them re-establish under the
+  /// restored identity. The existing streams were authenticated against
+  /// whatever pubkey the device had at app launch (a randomly-generated one
+  /// if this was a fresh install) — peers' snapshot replies sit in the
+  /// engine queue for the restored pubkey, so without a reconnect the page
+  /// would only pick them up after the next user-triggered refresh.
+  void _onVaultIdentityRestored() {
+    if (!mounted) return;
+    _sharedExpensesPageLog(
+      'vault identity restored — restarting SSE and arming offline-peers timer',
+    );
+    _groupListRealtimeReconnectTimer?.cancel();
+    _groupListRealtimeReconnectTimer = null;
+    unawaited(_groupListRealtimeSubscription?.cancel());
+    _groupListRealtimeSubscription = null;
+    _pendingRealtimeReconnectTimer?.cancel();
+    _pendingRealtimeReconnectTimer = null;
+    unawaited(_pendingRealtimeSubscription?.cancel());
+    _pendingRealtimeSubscription = null;
+    _startGroupListRealtimeSubscription();
+    _startPendingRealtimeSubscription();
+    // Refresh from engine so myPublicKey + groups reflect the new identity
+    // even before snapshots arrive.
+    unawaited(_loadGroups(refreshFromEngine: true, showErrors: false));
+    // After a brief sync window, check whether any restored group is still
+    // sitting in its bootstrap-only shape (no other members' display names
+    // resolved). That's the signal nobody has responded to our
+    // snapshot_request yet — usually because all the other members are
+    // offline.
+    _restorePeerWaitTimer?.cancel();
+    _restorePeerWaitTimer =
+        Timer(const Duration(seconds: 8), _surfaceOfflinePeersHint);
+  }
+
+  bool _groupAwaitingSnapshot(SharedExpenseGroup g) {
+    // Three orthogonal signals; any one of them suggests the group is
+    // sitting in its bootstrap-only shape and no peer has responded to
+    // our snapshot_request yet.
+    final stillPlaceholderName =
+        g.name == SharedExpenseRepository.fallbackGroupName;
+    final noContent = g.expenses.isEmpty && g.activity.isEmpty;
+    final noPeerNames = g.displayNames.entries
+        .where((e) => e.key != _myPublicKey && e.value.trim().isNotEmpty)
+        .isEmpty;
+    return stillPlaceholderName || (noContent && noPeerNames);
+  }
+
+  void _surfaceOfflinePeersHint() {
+    if (!mounted) return;
+    final pending = _groups.where(_groupAwaitingSnapshot).toList();
+    _sharedExpensesPageLog(
+      'offline-peers check: pending=${pending.length} '
+      'totalGroups=${_groups.length} '
+      'myPublicKey=${_myPublicKey.isEmpty ? "EMPTY" : "set"}',
+    );
+    if (pending.isEmpty) return;
+    final single = pending.length == 1;
+    final message = single
+        ? 'All other members are offline. ${pending.first.name} will sync '
+            'when one of them opens the app.'
+        : '${pending.length} groups are waiting for other members to come '
+            'online. History will sync when one of them opens the app.';
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 8),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _startPolling() {
@@ -849,6 +940,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     TransactionProvider provider,
   ) async {
     final accounts = _selectablePaymentAccounts(provider);
+    final hasNonCash =
+        accounts.any((a) => a.bankId != CashConstants.bankId);
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_sharedExpensePaymentAddressKey);
@@ -858,7 +951,13 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
           final saved = SharedPaymentAddress.fromJson(
             Map<String, dynamic>.from(decoded),
           );
-          if (saved.isValid) {
+          // Honor a saved preference UNLESS it's Cash and the user has a
+          // real account available. Old saves from when Cash was the auto-
+          // default would otherwise keep coming back even after the user
+          // linked a bank account. Cash-as-default only sticks if it's the
+          // only option.
+          if (saved.isValid &&
+              !(saved.bankId == CashConstants.bankId && hasNonCash)) {
             for (final account in accounts) {
               if (account.bankId == saved.bankId &&
                   account.accountNumber == saved.accountNumber) {
@@ -872,7 +971,13 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       _sharedExpensesPageLog('defaultPaymentAddress failed: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
     }
-    return _addressFromAccount(accounts.first);
+    // Prefer the first real (non-cash) account. Cash stays selectable in
+    // the picker, just not the auto-selected option.
+    final firstNonCash = accounts.firstWhere(
+      (a) => a.bankId != CashConstants.bankId,
+      orElse: () => accounts.first,
+    );
+    return _addressFromAccount(firstNonCash);
   }
 
   Future<void> _saveDefaultPaymentAddress(

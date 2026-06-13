@@ -61,6 +61,7 @@ class SharedExpenseRepository {
   static const _snapshotPlaintextBudget = 45000;
   static const _maxPendingPullPages = 8;
   static const _fallbackGroupName = 'Shared group';
+  static const String fallbackGroupName = _fallbackGroupName;
   static const _fallbackDisplayName = 'Me';
 
   final TotalsEngineClient _engineClient;

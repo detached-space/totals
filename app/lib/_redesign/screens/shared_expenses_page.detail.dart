@@ -207,13 +207,23 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
   }
 
   List<_SharedMemberView> _memberViews(BuildContext context) {
+    // Me first, then everyone else alphabetical by resolved display name
+    // (case-insensitive). Members with no display name yet sort by their
+    // short pubkey so ordering stays stable across rebuilds.
+    String resolvedKey(SharedExpenseMember m) {
+      final name = widget.group
+          .displayNameFor(widget.myPublicKey, m.devicePublicKey)
+          .trim();
+      return (name.isNotEmpty ? name : m.devicePublicKey).toLowerCase();
+    }
+
     final rawMembers = widget.group.members
         .where((member) => member.devicePublicKey.isNotEmpty)
         .toList(growable: true)
       ..sort((a, b) {
         if (a.devicePublicKey == widget.myPublicKey) return -1;
         if (b.devicePublicKey == widget.myPublicKey) return 1;
-        return 0;
+        return resolvedKey(a).compareTo(resolvedKey(b));
       });
     final members = rawMembers.isEmpty
         ? [
@@ -483,6 +493,10 @@ class _SharedPaymentAccountRow extends StatelessWidget {
     final bank = _sharedExpenseBankFor(address.bankId);
     final bankName = _sharedPaymentBankLabel(context, address.bankId);
     final accountNumber = _paymentAccountNumber(address);
+    // Cash accounts have no real account number to copy — suppress the
+    // copy affordance even when the caller asked for it.
+    final effectiveCopyable =
+        copyable && address.bankId != CashConstants.bankId;
     final content = Container(
       constraints: const BoxConstraints(minHeight: 56),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -524,7 +538,7 @@ class _SharedPaymentAccountRow extends StatelessWidget {
               ],
             ),
           ),
-          if (copyable) ...[
+          if (effectiveCopyable) ...[
             const SizedBox(width: 10),
             Icon(
               AppIcons.copy,
@@ -536,7 +550,7 @@ class _SharedPaymentAccountRow extends StatelessWidget {
       ),
     );
 
-    if (!copyable) return content;
+    if (!effectiveCopyable) return content;
     return Material(
       color: Colors.transparent,
       child: InkWell(

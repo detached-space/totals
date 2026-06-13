@@ -113,46 +113,57 @@ class _SheetShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final viewInsets = MediaQuery.of(context).viewInsets;
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + viewInsets.bottom),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 38,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.borderColor(context),
-                    borderRadius: BorderRadius.circular(2),
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    // Lift the entire sheet above the keyboard, with a little extra
+    // breathing room so the primary action isn't kissing the keyboard.
+    // Mirrors the expense-add sheet's approach so the two flows feel
+    // consistent.
+    final keyboardLift = keyboardInset > 0 ? keyboardInset + 24 : 0.0;
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: keyboardLift),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.borderColor(context),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: AppColors.textPrimary(context),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              if (subtitle != null) ...[
-                const SizedBox(height: 6),
+                const SizedBox(height: 16),
                 Text(
-                  subtitle!,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondary(context),
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle!,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary(context),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                child,
               ],
-              const SizedBox(height: 20),
-              child,
-            ],
+            ),
           ),
         ),
       ),
@@ -162,12 +173,14 @@ class _SheetShell extends StatelessWidget {
 
 class _PinField extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final String hint;
   final bool autofocus;
   final void Function(String)? onSubmitted;
   const _PinField({
     required this.controller,
     required this.hint,
+    this.focusNode,
     this.autofocus = false,
     this.onSubmitted,
   });
@@ -176,6 +189,7 @@ class _PinField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       autofocus: autofocus,
       obscureText: true,
       keyboardType: TextInputType.number,
@@ -541,6 +555,7 @@ enum _SetupStep { pin, confirm, success }
 class _VaultSetupSheetState extends State<_VaultSetupSheet> {
   final _firstPinController = TextEditingController();
   final _secondPinController = TextEditingController();
+  final _secondPinFocus = FocusNode();
 
   _SetupStep _step = _SetupStep.pin;
   bool _busy = false;
@@ -552,6 +567,7 @@ class _VaultSetupSheetState extends State<_VaultSetupSheet> {
   void dispose() {
     _firstPinController.dispose();
     _secondPinController.dispose();
+    _secondPinFocus.dispose();
     super.dispose();
   }
 
@@ -567,6 +583,14 @@ class _VaultSetupSheetState extends State<_VaultSetupSheet> {
       _pinBuffer = pin;
       _error = null;
       _step = _SetupStep.confirm;
+    });
+    // Autofocus on a freshly-rendered field is unreliable when the parent
+    // rebuilds with a different child — Flutter sometimes reuses the
+    // element and skips the autofocus. Request focus after the next
+    // frame to avoid that race.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _secondPinFocus.requestFocus();
     });
   }
 
@@ -638,6 +662,7 @@ class _VaultSetupSheetState extends State<_VaultSetupSheet> {
             children: [
               _PinField(
                 controller: _secondPinController,
+                focusNode: _secondPinFocus,
                 hint: context.l10nText('Confirm PIN'),
                 autofocus: true,
                 onSubmitted: (_) => _confirmAndUpload(),

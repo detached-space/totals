@@ -854,11 +854,15 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   }
 
   Future<void> _pickPaidAt() async {
+    final now = DateTime.now();
+    // Expenses can't be in the future — you can't have paid for something
+    // tomorrow. Cap the picker to today.
+    final initial = _paidAt.isAfter(now) ? now : _paidAt;
     final selected = await showDatePicker(
       context: context,
-      initialDate: _paidAt,
+      initialDate: initial,
       firstDate: DateTime(2000),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      lastDate: now,
     );
     if (selected == null || !mounted) return;
     setState(() {
@@ -944,10 +948,25 @@ class _ExpenseDraftSheetState extends State<_ExpenseDraftSheet> {
   Widget build(BuildContext context) {
     final transactionProvider = context.watch<TransactionProvider>();
     final linkedTransaction = _linkedTransaction(transactionProvider);
+    // Me first, then everyone else alphabetical by resolved display name
+    // (case-insensitive). Same ordering used in the members tab so the
+    // expense sheet feels consistent.
+    String orderKey(String pk) {
+      final name = widget.group
+          .displayNameFor(widget.myPublicKey, pk)
+          .trim();
+      return (name.isNotEmpty ? name : pk).toLowerCase();
+    }
+
     final keys = widget.group.members
         .map((m) => m.devicePublicKey)
         .where((k) => k.isNotEmpty)
-        .toList();
+        .toList()
+      ..sort((a, b) {
+        if (a == widget.myPublicKey) return -1;
+        if (b == widget.myPublicKey) return 1;
+        return orderKey(a).compareTo(orderKey(b));
+      });
 
     final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
     final reason = _reasonCtrl.text.trim();
