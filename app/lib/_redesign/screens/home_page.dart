@@ -1131,18 +1131,6 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
     const menuGap = 8.0;
     final actions = <_HomeToolsFabAction>[
       _HomeToolsFabAction(
-        icon: AppIcons.debts,
-        color: AppColors.slate500,
-        label: context.l10nText('Loans'),
-        onTap: widget.onLoansTap,
-      ),
-      _HomeToolsFabAction(
-        icon: AppIcons.dashboard_outlined,
-        color: AppColors.primaryLight,
-        label: context.l10nText('Web Dashboard'),
-        onTap: widget.onWebDashboardTap,
-      ),
-      _HomeToolsFabAction(
         icon: AppIcons.account_balance_outlined,
         color: AppColors.blue,
         label: context.l10nText('Quick Accounts'),
@@ -1155,10 +1143,22 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
         onTap: widget.onVerifyPaymentsTap,
       ),
       _HomeToolsFabAction(
+        icon: AppIcons.debts,
+        color: AppColors.slate500,
+        label: context.l10nText('Loans'),
+        onTap: widget.onLoansTap,
+      ),
+      _HomeToolsFabAction(
         icon: AppIcons.sms_outlined,
         color: AppColors.amber,
         label: context.l10nText('Failed Parsings'),
         onTap: widget.onFailedParsingsTap,
+      ),
+      _HomeToolsFabAction(
+        icon: AppIcons.dashboard_outlined,
+        color: AppColors.primaryLight,
+        label: context.l10nText('Web Dashboard'),
+        onTap: widget.onWebDashboardTap,
       ),
     ];
     final openHeight = fabSize +
