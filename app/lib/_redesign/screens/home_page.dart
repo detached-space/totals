@@ -13,6 +13,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
+import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
@@ -508,7 +509,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => const _LoansPlaceholderPage(),
+        builder: (_) => const LoansPage(),
       ),
     );
   }
@@ -1317,77 +1318,6 @@ class _HomeToolsFabMenuItem extends StatelessWidget {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LoansPlaceholderPage extends StatelessWidget {
-  const _LoansPlaceholderPage();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      backgroundColor: AppColors.background(context),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppColors.cardColor(context),
-                    foregroundColor: AppColors.textPrimary(context),
-                    side: BorderSide(color: AppColors.borderColor(context)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  icon: const Icon(AppIcons.arrow_back_rounded, size: 20),
-                ),
-              ),
-              const SizedBox(height: 28),
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: AppColors.slate500.withValues(
-                    alpha: AppColors.isDark(context) ? 0.2 : 0.12,
-                  ),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: const Icon(
-                  AppIcons.debts,
-                  color: AppColors.slate500,
-                  size: 30,
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                context.l10nText('Loans'),
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  color: AppColors.textPrimary(context),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                context.l10nText('This tool is coming soon.'),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textSecondary(context),
-                  height: 1.4,
-                ),
-              ),
-            ],
           ),
         ),
       ),

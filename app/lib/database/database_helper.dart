@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 23,
+      version: 24,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -41,6 +41,7 @@ class DatabaseHelper {
     await _ensureTransactionNotesSchema(db);
     await _ensureTransactionCategoryIdsSchema(db);
     await _ensureAutoCategorizationSchema(db);
+    await _ensureLoanDebtSchema(db);
     await _migrateLegacyReceiverMappingsToAutoRules(db);
 
     return db;
@@ -267,6 +268,8 @@ class DatabaseHelper {
         'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)');
     await db.execute(
         'CREATE INDEX idx_user_accounts_accountNumber ON user_accounts(accountNumber)');
+
+    await _ensureLoanDebtSchema(db);
 
     await _seedBuiltInCategories(db);
   }
@@ -756,6 +759,10 @@ class DatabaseHelper {
         );
       } catch (_) {}
     }
+
+    if (oldVersion < 24) {
+      await _ensureLoanDebtSchema(db);
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -1220,6 +1227,25 @@ class DatabaseHelper {
     ''');
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_auto_category_prompt_dismissals_flow ON auto_category_prompt_dismissals(flow)",
+    );
+  }
+
+  Future<void> _ensureLoanDebtSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS loan_debt_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transactionReference TEXT NOT NULL UNIQUE,
+        personName TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      "CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_personName ON loan_debt_entries(personName COLLATE NOCASE)",
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_direction ON loan_debt_entries(direction)',
     );
   }
 

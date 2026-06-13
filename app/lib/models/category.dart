@@ -255,6 +255,16 @@ class BuiltInCategories {
       builtInKey: 'income_gifts_received',
     ),
     Category(
+      name: 'Debt',
+      essential: false,
+      iconKey: 'request_quote',
+      description: 'Money you borrowed from someone',
+      flow: 'income',
+      recurring: false,
+      builtIn: true,
+      builtInKey: 'income_debt',
+    ),
+    Category(
       name: 'Misc',
       essential: false,
       uncategorized: true,

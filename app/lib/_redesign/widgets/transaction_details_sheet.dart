@@ -10,11 +10,13 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/theme_provider.dart';
+import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/screens/shared_expenses_page.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/l10n/app_localizations.dart';
@@ -499,11 +501,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return _isSelfCategory(category);
   }
 
-  Future<void> _applyCategorySelection({
+  Future<Transaction?> _applyCategorySelection({
     required List<int> categoryIds,
     int? primaryCategoryId,
   }) async {
-    if (_isApplyingCategory) return;
+    if (_isApplyingCategory) return null;
     final messenger = ScaffoldMessenger.maybeOf(context);
     final shouldAutoCategorize = _autoCategorizeFutureTransactions;
     final previousTransaction = _tx;
@@ -528,7 +530,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       );
       final shouldPersistAutoCategorization =
           shouldAutoCategorize && nextAutoCategoryIds.isNotEmpty;
-      if (!mounted) return;
+      if (!mounted) return updated;
       setState(() {
         _transaction = updated;
         _autoCategorizeFutureTransactions = shouldPersistAutoCategorization;
@@ -548,12 +550,14 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
           ),
         );
       }
+      return updated;
     } catch (_) {
       messenger?.showSnackBar(
         SnackBar(
           content: Text(revertedMessage),
         ),
       );
+      return null;
     } finally {
       if (mounted) {
         setState(() => _isApplyingCategory = false);
@@ -590,10 +594,13 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
 
     nextIds.insert(0, categoryId);
-    await _applyCategorySelection(
+    final updated = await _applyCategorySelection(
       categoryIds: nextIds,
       primaryCategoryId: categoryId,
     );
+    if (updated != null && isLoanDebtCategory(category)) {
+      await _openLoanDebtPersonPrompt(updated);
+    }
   }
 
   Future<void> _clearCategory() async {
@@ -971,6 +978,21 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       transaction: transaction,
     );
     if (didSplit) {
+      unawaited(_provider.loadData());
+    }
+  }
+
+  Future<void> _openLoanDebtPersonPrompt(Transaction transaction) async {
+    final hostContext = widget.hostContext;
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    final saved = await showLoanDebtPersonSheet(
+      context: hostContext,
+      transaction: transaction,
+    );
+    if (saved) {
       unawaited(_provider.loadData());
     }
   }

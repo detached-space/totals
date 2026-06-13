@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showTransactionCategorySheet({
@@ -14,11 +16,13 @@ Future<void> showTransactionCategorySheet({
   bool allowAutoCategorizationRuleUpdates = true,
 }) async {
   FocusManager.instance.primaryFocus?.unfocus();
+  final hostContext = context;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (context) => _TransactionCategorySheet(
+      hostContext: hostContext,
       transaction: transaction,
       provider: provider,
       allowAutoCategorizationRuleUpdates: allowAutoCategorizationRuleUpdates,
@@ -27,11 +31,13 @@ Future<void> showTransactionCategorySheet({
 }
 
 class _TransactionCategorySheet extends StatefulWidget {
+  final BuildContext hostContext;
   final Transaction transaction;
   final TransactionProvider provider;
   final bool allowAutoCategorizationRuleUpdates;
 
   const _TransactionCategorySheet({
+    required this.hostContext,
     required this.transaction,
     required this.provider,
     this.allowAutoCategorizationRuleUpdates = true,
@@ -308,11 +314,11 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     return _isSelfCategory(category);
   }
 
-  Future<void> _applyCategorySelection({
+  Future<Transaction?> _applyCategorySelection({
     required List<int> categoryIds,
     int? primaryCategoryId,
   }) async {
-    if (_isApplyingCategory) return;
+    if (_isApplyingCategory) return null;
     final messenger = ScaffoldMessenger.maybeOf(context);
     final shouldAutoCategorize = _autoCategorizeFutureTransactions;
     final previousTransaction = _tx;
@@ -335,7 +341,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       final shouldPersistAutoCategorization =
           shouldAutoCategorize && nextAutoCategoryIds.isNotEmpty;
 
-      if (!mounted) return;
+      if (!mounted) return updated;
       setState(() {
         _transaction = updated;
         _autoCategorizeFutureTransactions = shouldPersistAutoCategorization;
@@ -355,6 +361,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
           ),
         );
       }
+      return updated;
     } catch (_) {
       messenger?.showSnackBar(
         SnackBar(
@@ -365,6 +372,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
           ),
         ),
       );
+      return null;
     } finally {
       if (mounted) {
         setState(() => _isApplyingCategory = false);
@@ -401,14 +409,31 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     }
 
     nextIds.insert(0, categoryId);
-    await _applyCategorySelection(
+    final updated = await _applyCategorySelection(
       categoryIds: nextIds,
       primaryCategoryId: categoryId,
     );
+    if (updated != null && isLoanDebtCategory(category)) {
+      await _openLoanDebtPersonPrompt(updated);
+    }
   }
 
   Future<void> _clearCategory() async {
     await _applyCategorySelection(categoryIds: const <int>[]);
+  }
+
+  Future<void> _openLoanDebtPersonPrompt(Transaction transaction) async {
+    final hostContext = widget.hostContext;
+    _dismissComposerState(clearDraft: true);
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    await showLoanDebtPersonSheet(
+      context: hostContext,
+      transaction: transaction,
+    );
   }
 
   void _toggleNewCategoryForm() {
