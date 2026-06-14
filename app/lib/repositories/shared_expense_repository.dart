@@ -103,11 +103,32 @@ class SharedExpenseRepository {
         _groupsTable,
         orderBy: 'createdAt DESC',
       );
-      final groups = rows
+      final loaded = rows
           .map(_groupFromDbRow)
           .whereType<SharedExpenseGroup>()
           .where((group) => group.id.isNotEmpty)
           .toList(growable: false);
+
+      // One-shot cleanup: delete any local-only ghost groups left behind by
+      // the old createGroup fallback (engine failure → fake localOnly group
+      // with a random id that the server never knew about). They can never
+      // sync, can never be invited to, and just clutter the list.
+      final ghosts = loaded
+          .where((g) => g.status == SharedExpenseGroupStatus.localOnly)
+          .toList(growable: false);
+      for (final ghost in ghosts) {
+        _sharedExpenseLog(
+          'getGroups pruning ghost localOnly group=${_logId(ghost.id)}',
+        );
+        await _deleteLocalGroup(ghost.id);
+      }
+      final groups = ghosts.isEmpty
+          ? loaded
+          : loaded
+              .where(
+                  (g) => g.status != SharedExpenseGroupStatus.localOnly)
+              .toList(growable: false);
+
       if (groups.isNotEmpty) {
         final repaired = await _repairCachedGroups(groups);
         _sharedExpenseLog('getGroups loaded ${repaired.length} db groups');
@@ -260,36 +281,14 @@ class SharedExpenseRepository {
       unawaited(SharedExpenseVaultService.instance.syncIfUnlocked());
       return group;
     } catch (error, stackTrace) {
-      _sharedExpenseLog('createGroup engine failed, using local group: $error');
+      // No local-only fallback. We used to build a localOnly ghost group
+      // here when the engine call failed, but those groups can never sync
+      // to the server, never get a Copy invite, never reconcile via
+      // refreshGroups — they just clutter the list as orphans. Better to
+      // surface the error and let the user retry with connectivity.
+      _sharedExpenseLog('createGroup engine failed: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
-      final localId = _uuid.v4();
-      final group = SharedExpenseGroup(
-        id: localId,
-        name: name,
-        myDisplayName: displayName,
-        createdAt: DateTime.now(),
-        status: SharedExpenseGroupStatus.localOnly,
-        members: [
-          SharedExpenseMember(devicePublicKey: identity.publicKeyHex),
-        ],
-        approvedMemberKeys: {identity.publicKeyHex},
-        displayNames: {identity.publicKeyHex: displayName},
-        memberMetaUpdatedAt: {identity.publicKeyHex: now},
-        paymentAddresses: {
-          if (paymentAddress != null && paymentAddress.isValid)
-            identity.publicKeyHex: paymentAddress,
-        },
-        myPaymentAddress: paymentAddress != null && paymentAddress.isValid
-            ? paymentAddress
-            : null,
-      );
-      await _writeGroupKey(
-        localId,
-        SharedExpenseCryptoService.toHex(_cryptoService.randomBytes(32)),
-      );
-      await _upsertGroup(group);
-      _sharedExpenseLog('createGroup local fallback group=${_logId(group.id)}');
-      return group;
+      rethrow;
     }
   }
 

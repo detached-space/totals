@@ -1647,7 +1647,9 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     } catch (error, stackTrace) {
       _sharedExpensesPageLog('createGroup failed: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
-      _showSnack(error.toString());
+      if (!_maybeShowGroupLimitSheet(error)) {
+        _showSnack(error.toString());
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -1702,10 +1704,34 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     } catch (error, stackTrace) {
       _sharedExpensesPageLog('joinGroup failed: $error');
       if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
-      _showSnack(error.toString());
+      if (!_maybeShowGroupLimitSheet(error)) {
+        _showSnack(error.toString());
+      }
     } finally {
       _endMutation();
     }
+  }
+
+  /// Backend returns `403 { error: 'group_limit_reached', limit: N }` from
+  /// POST /groups and POST /groups/:id/join. The `limit` is dynamic
+  /// (configurable via MAX_GROUPS_PER_DEVICE env var) so we read it from
+  /// the body rather than hardcoding. Returns true if the sheet was shown
+  /// so the caller can skip the generic error snack.
+  bool _maybeShowGroupLimitSheet(Object error) {
+    if (error is! TotalsEngineException) return false;
+    if (error.statusCode != 403) return false;
+    final body = error.body;
+    if (body == null) return false;
+    if (body['error'] != 'group_limit_reached') return false;
+    final limit = (body['limit'] as num?)?.toInt() ?? 6;
+    if (!mounted) return true;
+    unawaited(showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (sheetContext) => _GroupLimitReachedSheet(limit: limit),
+    ));
+    return true;
   }
 
   Future<void> _approveMember(
@@ -2493,6 +2519,74 @@ class _AvatarCircle extends StatelessWidget {
           fontSize: fontSize,
         ),
       ),
+    );
+  }
+}
+
+/// Surfaced when POST /groups or POST /groups/:id/join returns
+/// `403 { error: 'group_limit_reached', limit: N }`. The N is dynamic
+/// (backend `MAX_GROUPS_PER_DEVICE` env var), so we render whatever the
+/// server tells us rather than hardcoding "6".
+class _GroupLimitReachedSheet extends StatelessWidget {
+  final int limit;
+  const _GroupLimitReachedSheet({required this.limit});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _IosModalShell(
+      title: context.l10nText('Group limit reached'),
+      footer: [
+        _IosFormSubmit(
+          label: context.l10nText('Got it'),
+          enabled: true,
+          onTap: () => Navigator.of(context).pop(),
+          topPadding: 0,
+        ),
+      ],
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.amber.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Icon(
+              AppIcons.group_outlined,
+              size: 30,
+              color: AppColors.amber,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            context
+                .l10n('shared.groupLimitBody',
+                    'You can be a member of at most {limit} active groups at a time.')
+                .replaceFirst('{limit}', '$limit'),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: AppColors.textPrimary(context),
+              height: 1.4,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            context.l10nText(
+              'Leave one from the list below to free up a slot, then try again.',
+            ),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.textSecondary(context),
+              height: 1.4,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

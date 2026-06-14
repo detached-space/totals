@@ -574,27 +574,41 @@ class TotalsEngineClient {
   }) async {
     final uri = _uri(path);
     for (var authAttempt = 0; authAttempt < 2; authAttempt++) {
-      final auth = await _authHeaders(forceChallenge: authAttempt > 0);
-      _engineLog(
-        '$method $path -> $uri bodyKeys=${body?.keys.join(',') ?? '-'}',
-      );
-      final response = method == 'GET'
-          ? await _retryTransient(
-              label: '$method $path',
-              request: () =>
-                  _sendAuthenticatedRequest(method, uri, auth.headers, body),
-              shouldRetryResult: (response) {
-                final shouldRetry = _isRetryableStatus(response.statusCode);
-                if (shouldRetry) {
-                  _engineLog(
-                    '$method $path retryable status=${response.statusCode} '
-                    'body=${_logBody(response.bodyText)}',
-                  );
-                }
-                return shouldRetry;
-              },
-            )
-          : await _sendAuthenticatedRequest(method, uri, auth.headers, body);
+      final _AuthHeaderSet auth;
+      final _EngineResponse response;
+      try {
+        auth = await _authHeaders(forceChallenge: authAttempt > 0);
+        _engineLog(
+          '$method $path -> $uri bodyKeys=${body?.keys.join(',') ?? '-'}',
+        );
+        response = method == 'GET'
+            ? await _retryTransient(
+                label: '$method $path',
+                request: () =>
+                    _sendAuthenticatedRequest(method, uri, auth.headers, body),
+                shouldRetryResult: (response) {
+                  final shouldRetry = _isRetryableStatus(response.statusCode);
+                  if (shouldRetry) {
+                    _engineLog(
+                      '$method $path retryable status=${response.statusCode} '
+                      'body=${_logBody(response.bodyText)}',
+                    );
+                  }
+                  return shouldRetry;
+                },
+              )
+            : await _sendAuthenticatedRequest(method, uri, auth.headers, body);
+      } on TimeoutException catch (error) {
+        throw TotalsEngineException(
+          'Totals Engine took too long to respond. Check your connection and try again.',
+          body: {'cause': error.toString()},
+        );
+      } on http.ClientException catch (error) {
+        throw TotalsEngineException(
+          'Can\'t reach Totals Engine. Check your internet and try again.',
+          body: {'cause': error.message},
+        );
+      }
 
       _captureSessionHeaders(response.headers);
       if (response.statusCode == 401 && auth.usedSession && authAttempt == 0) {
@@ -608,6 +622,7 @@ class TotalsEngineClient {
           _errorMessage(response.decoded) ?? 'Totals Engine request failed.',
           statusCode: response.statusCode,
           retryAfter: _retryAfter(response.headers),
+          body: response.decoded,
         );
       }
       return response.decoded;
