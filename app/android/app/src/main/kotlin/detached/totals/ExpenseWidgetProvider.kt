@@ -176,6 +176,9 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
             val sumTop = rawAmounts.sum()
             var base = if (totalRaw > 0.0) totalRaw else sumTop
             if (base < sumTop) base = sumTop
+            val percentLabels = Array(3) { index ->
+                formatPercent(rawAmounts[index], base)
+            }
 
             createCategoryBarBitmap(
                 context = context,
@@ -205,7 +208,10 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
                 views.setViewVisibility(categoryRowIds[i], View.VISIBLE)
                 views.setTextViewText(categoryNameIds[i], names[i])
 
-                views.setTextViewText(categoryAmountIds[i], labels[i])
+                views.setTextViewText(
+                    categoryAmountIds[i],
+                    if (isHidden) percentLabels[i] else labels[i]
+                )
                 views.setTextColor(categoryAmountIds[i], rankColors[i])
             }
 
@@ -444,5 +450,11 @@ class ExpenseWidgetProvider : HomeWidgetProvider() {
         }
         val numeric = normalized.trimEnd('k', 'm').replace(",", "").trim()
         return numeric.toDoubleOrNull()?.times(multiplier) ?: 0.0
+    }
+
+    private fun formatPercent(value: Double, base: Double): String {
+        if (value <= 0.0 || base <= 0.0) return "0%"
+        val percent = (value / base * 100.0).roundToInt().coerceIn(1, 100)
+        return "$percent%"
     }
 }
