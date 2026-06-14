@@ -1121,6 +1121,8 @@ class AppLocalizations {
     "You owe": "እርስዎ ያለብዎት",
     "You lent": "ያበደሩት",
     "You borrowed": "የተበደሩት",
+    "You forgave": "ይቅር ያሉት",
+    "Were forgiven": "ይቅር የተባሉት",
     "Change the filter to see this person's other transactions.":
         "የዚህን ሰው ሌሎች ትራንዛክሽኖች ለማየት ማጣሪያውን ይቀይሩ።",
     "Filter transactions": "ትራንዛክሽኖችን አጣራ",

@@ -240,7 +240,7 @@ class _LoansPageState extends State<LoansPage> {
   }
 
   Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
-    final result = await showModalBottomSheet<_LoanDebtDetailsResult>(
+    await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -251,7 +251,7 @@ class _LoansPageState extends State<LoansPage> {
       ),
     );
     if (!mounted) return;
-    if (result != null) _refreshEntries();
+    _refreshEntries();
   }
 
   @override
@@ -503,7 +503,11 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final mediaQuery = MediaQuery.of(context);
+    final bottomInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = bottomInset > 0 ? 28.0 : 0.0;
+    final sheetBottomPadding = bottomSafeArea + (bottomInset > 0 ? 12.0 : 20.0);
     final title = _isBorrowed
         ? context.l10nText('Who lent you this?')
         : context.l10nText('Who did you lend to?');
@@ -518,8 +522,9 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
     return AnimatedPadding(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: bottomInset),
+      padding: EdgeInsets.only(bottom: bottomInset + keyboardLiftBuffer),
       child: Container(
+        constraints: BoxConstraints(maxHeight: mediaQuery.size.height * 0.9),
         decoration: BoxDecoration(
           color: AppColors.cardColor(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -528,7 +533,8 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
         child: SafeArea(
           top: false,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.fromLTRB(20, 10, 20, sheetBottomPadding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -1408,9 +1414,6 @@ class _LoanDebtDetailsResult {
     this.unlinked = false,
   });
 
-  const _LoanDebtDetailsResult.savedPerson(String transactionReference)
-      : this._(transactionReference: transactionReference);
-
   const _LoanDebtDetailsResult.unlinked(String transactionReference)
       : this._(transactionReference: transactionReference, unlinked: true);
 
@@ -1432,8 +1435,9 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
   String? _armedAction;
   String? _pendingAction;
   String? _selectedName;
+  late _LoanDebtItem _currentItem;
 
-  _LoanDebtItem get _item => widget.item;
+  _LoanDebtItem get _item => _currentItem;
   Transaction get _transaction => _item.transaction;
   bool get _needsPerson => !_item.hasPerson;
   bool get _isBorrowed => _item.direction == LoanDebtDirection.borrowed;
@@ -1444,6 +1448,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
   @override
   void initState() {
     super.initState();
+    _currentItem = widget.item;
     if (_needsPerson) {
       _loadKnownPeople();
     } else {
@@ -1482,10 +1487,24 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
         direction: _item.direction,
       );
       if (!mounted) return;
-      Navigator.pop(
-        context,
-        _LoanDebtDetailsResult.savedPerson(_transaction.reference),
-      );
+      final now = DateTime.now();
+      FocusManager.instance.primaryFocus?.unfocus();
+      setState(() {
+        _currentItem = _item.copyWith(
+          entry: LoanDebtEntry(
+            id: _item.entry?.id,
+            transactionReference: _transaction.reference.trim(),
+            personName: personName,
+            direction: _item.direction,
+            status: LoanDebtStatus.active,
+            createdAt: _item.entry?.createdAt ?? now,
+            updatedAt: now,
+          ),
+        );
+        _selectedName = personName;
+        _isSavingPerson = false;
+        _isLoadingPeople = false;
+      });
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -2082,13 +2101,18 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
   @override
   Widget build(BuildContext context) {
     final provider = context.read<TransactionProvider>();
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final mediaQuery = MediaQuery.of(context);
+    final bottomInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = bottomInset > 0 ? 28.0 : 0.0;
+    final sheetBottomPadding = bottomSafeArea + (bottomInset > 0 ? 12.0 : 20.0);
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: bottomInset),
+      padding: EdgeInsets.only(bottom: bottomInset + keyboardLiftBuffer),
       child: Container(
+        constraints: BoxConstraints(maxHeight: mediaQuery.size.height * 0.9),
         decoration: BoxDecoration(
           color: AppColors.cardColor(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -2097,7 +2121,8 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
         child: SafeArea(
           top: false,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.fromLTRB(20, 10, 20, sheetBottomPadding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -2518,6 +2543,22 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
         : (isOwedToYou
             ? context.l10nText('They owe you')
             : context.l10nText('You owe'));
+    final youForgaveCount = items
+        .where(
+          (item) =>
+              item.status == LoanDebtStatus.forgiven &&
+              item.direction == LoanDebtDirection.lent,
+        )
+        .length;
+    final settledCount =
+        items.where((item) => item.status == LoanDebtStatus.settled).length;
+    final wereForgivenCount = items
+        .where(
+          (item) =>
+              item.status == LoanDebtStatus.forgiven &&
+              item.direction == LoanDebtDirection.borrowed,
+        )
+        .length;
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -2609,6 +2650,37 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _PersonCountMetric(
+                    title: context.l10nText('You forgave'),
+                    value: youForgaveCount.toString(),
+                    color: AppColors.amber,
+                    icon: AppIcons.favorite_rounded,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _PersonCountMetric(
+                    title: context.l10nText('Settled'),
+                    value: settledCount.toString(),
+                    color: AppColors.blue,
+                    icon: AppIcons.check_circle_rounded,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _PersonCountMetric(
+                    title: context.l10nText('Were forgiven'),
+                    value: wereForgivenCount.toString(),
+                    color: AppColors.incomeSuccess,
+                    icon: AppIcons.favorite_rounded,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 18),
             _TransactionsHeader(
               title: context.l10nText('Transactions'),
@@ -2696,6 +2768,70 @@ class _PersonDetailMetric extends StatelessWidget {
                 color: color,
                 fontWeight: FontWeight.w900,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PersonCountMetric extends StatelessWidget {
+  final String title;
+  final String value;
+  final Color color;
+  final IconData icon;
+
+  const _PersonCountMetric({
+    required this.title,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, size: 16, color: color),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: AppColors.textSecondary(context),
+              fontWeight: FontWeight.w800,
+              height: 1.15,
             ),
           ),
         ],

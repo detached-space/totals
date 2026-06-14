@@ -1207,6 +1207,11 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
                 onPressed: _toggleMenu,
                 backgroundColor: AppColors.primaryLight,
                 foregroundColor: AppColors.white,
+                elevation: 0,
+                focusElevation: 0,
+                hoverElevation: 0,
+                highlightElevation: 0,
+                disabledElevation: 0,
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 180),
                   transitionBuilder: (child, animation) {
