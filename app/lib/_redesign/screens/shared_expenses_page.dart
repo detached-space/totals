@@ -65,7 +65,7 @@ String _formatEtb(num amount, [BuildContext? context]) {
     }
     formatted = '$sign$buffer';
   }
-  return currency == 'ብር' ? '$formatted $currency' : '$currency $formatted';
+  return '$formatted $currency';
 }
 
 String _formatExpenseAmountInput(double? amount) {
@@ -1838,7 +1838,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       );
     }
 
-    final theme = Theme.of(context);
     const contentPadding = EdgeInsets.fromLTRB(20, 16, 20, 24);
     final groupCardCount = _groups.length + (_creatingGroup == null ? 0 : 1);
 
@@ -1857,6 +1856,13 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _SharedPageHeader(
+                        isBusy: _isMutating,
+                        busyLabel: _mutationLabel,
+                        onCreate: _createGroup,
+                        onJoin: _joinGroup,
+                      ),
+                      const SizedBox(height: 16),
                       if (_groups.isNotEmpty) ...[
                         _SharedHeroCard(
                           summary: _SharedHeroSummary.fromGroups(
@@ -1864,32 +1870,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                             _myPublicKey,
                           ),
                         ),
-                        const SizedBox(height: 18),
-                      ] else ...[
-                        Text(
-                          context.l10n('nav.shared', 'Shared'),
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary(context),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          context.l10nText('Split expenses with friends'),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.textSecondary(context),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 16),
                       ],
-                      _ActionBar(
-                        isBusy: _isMutating,
-                        busyLabel: _mutationLabel,
-                        isRefreshing: _isRefreshing,
-                        onCreate: _createGroup,
-                        onJoin: _joinGroup,
-                        onRefresh: () => _loadGroups(refreshFromEngine: true),
-                      ),
                       SharedExpenseVaultBanner(hasGroups: _groups.isNotEmpty),
                       const SharedExpenseVaultDebugRow(),
                       if (!_engineReachable) ...[
@@ -1898,6 +1880,14 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                           label: context.l10nText(
                             'Totals Engine is not reachable',
                           ),
+                        ),
+                      ],
+                      if (_groups.isNotEmpty || _creatingGroup != null) ...[
+                        const SizedBox(height: 8),
+                        _SharedGroupsSectionHeader(
+                          isRefreshing: _isRefreshing,
+                          onRefresh: () =>
+                              _loadGroups(refreshFromEngine: true),
                         ),
                       ],
                     ],
@@ -1916,7 +1906,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                 )
               else
                 SliverPadding(
-                  padding: contentPadding.copyWith(top: 26),
+                  padding: contentPadding.copyWith(top: 12),
                   sliver: SliverList.separated(
                     itemCount: groupCardCount,
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -1953,121 +1943,215 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 }
 
-class _ActionBar extends StatelessWidget {
+
+// ============================================================================
+// Page top header — title + subtitle stacked on the left, compact Join + New
+// buttons on the right. Replaces the old full-width _ActionBar so the
+// primary actions sit alongside the title at the top of the page.
+// ============================================================================
+
+class _SharedPageHeader extends StatelessWidget {
   final bool isBusy;
   final String? busyLabel;
-  final bool isRefreshing;
   final VoidCallback onCreate;
   final VoidCallback onJoin;
-  final VoidCallback onRefresh;
-
-  const _ActionBar({
+  const _SharedPageHeader({
     required this.isBusy,
     required this.busyLabel,
-    required this.isRefreshing,
     required this.onCreate,
     required this.onJoin,
-    required this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
     final isCreatingGroup = isBusy && busyLabel == 'Creating group';
     final isSendingRequest = isBusy && busyLabel == 'Sending request';
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        FilledButton.icon(
-          onPressed: isBusy ? null : onCreate,
-          icon: isCreatingGroup
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.white,
-                  ),
-                )
-              : const Icon(AppIcons.add, size: 15, color: AppColors.white),
-          label: Text(
-            context.l10nText(isCreatingGroup ? 'Creating group' : 'New'),
-          ),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.primaryLight,
-            foregroundColor: AppColors.white,
-            minimumSize: const Size(0, 34),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(17),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        OutlinedButton.icon(
-          onPressed: isBusy ? null : onJoin,
-          icon: isSendingRequest
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.primaryLight,
-                  ),
-                )
-              : Icon(
-                  AppIcons.lock_outline_rounded,
-                  size: 14,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                context.l10nText('SHARED'),
+                style: TextStyle(
                   color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 26,
+                  letterSpacing: 0.5,
                 ),
-          label: Text(
-            context.l10nText(isSendingRequest ? 'Sending request' : 'Join'),
-          ),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.textPrimary(context),
-            minimumSize: const Size(0, 34),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            textStyle: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
+              ),
             ),
-            side: BorderSide(color: AppColors.borderColor(context)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(17),
+            const SizedBox(width: 8),
+            _HeaderJoinButton(
+              isBusy: isSendingRequest,
+              disabled: isBusy,
+              onTap: onJoin,
             ),
-          ),
+            const SizedBox(width: 8),
+            _HeaderCreateButton(
+              isBusy: isCreatingGroup,
+              disabled: isBusy,
+              onTap: onCreate,
+            ),
+          ],
         ),
-        const Spacer(),
-        IconButton(
-          onPressed: isRefreshing ? null : onRefresh,
-          icon: isRefreshing
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.primaryLight,
-                  ),
-                )
-              : Icon(
-                  AppIcons.refresh,
-                  size: 16,
-                  color: AppColors.textSecondary(context),
-                ),
-          style: IconButton.styleFrom(
-            backgroundColor: AppColors.cardColor(context),
-            side: BorderSide(color: AppColors.borderColor(context)),
-            minimumSize: const Size(34, 34),
-            fixedSize: const Size(34, 34),
-            padding: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(17),
-            ),
+        const SizedBox(height: 4),
+        Text(
+          context.l10nText('Group expenses and balances'),
+          style: TextStyle(
+            color: AppColors.textTertiary(context),
+            fontSize: 12.5,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ],
+    );
+  }
+}
+
+class _HeaderJoinButton extends StatelessWidget {
+  final bool isBusy;
+  final bool disabled;
+  final VoidCallback onTap;
+  const _HeaderJoinButton({
+    required this.isBusy,
+    required this.disabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: disabled ? null : onTap,
+      icon: isBusy
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.primaryLight,
+              ),
+            )
+          : Icon(
+              AppIcons.lock_outline_rounded,
+              size: 14,
+              color: AppColors.textPrimary(context),
+            ),
+      label: Text(context.l10nText(isBusy ? 'Sending' : 'Join')),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.textPrimary(context),
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 13),
+        side: BorderSide(color: AppColors.borderColor(context)),
+        textStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderCreateButton extends StatelessWidget {
+  final bool isBusy;
+  final bool disabled;
+  final VoidCallback onTap;
+  const _HeaderCreateButton({
+    required this.isBusy,
+    required this.disabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: disabled ? null : onTap,
+      icon: isBusy
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.white,
+              ),
+            )
+          : const Icon(AppIcons.add, size: 16, color: AppColors.white),
+      label: Text(context.l10nText(isBusy ? 'Creating' : 'New')),
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.primaryLight,
+        foregroundColor: AppColors.white,
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 13),
+        textStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+      ),
+    );
+  }
+}
+
+class _SharedGroupsSectionHeader extends StatelessWidget {
+  final bool isRefreshing;
+  final VoidCallback onRefresh;
+  const _SharedGroupsSectionHeader({
+    required this.isRefreshing,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              context.l10nText('SHARED GROUPS'),
+              style: TextStyle(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: isRefreshing ? null : onRefresh,
+            icon: isRefreshing
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primaryLight,
+                    ),
+                  )
+                : Icon(
+                    AppIcons.refresh,
+                    size: 16,
+                    color: AppColors.textSecondary(context),
+                  ),
+            style: IconButton.styleFrom(
+              backgroundColor: AppColors.cardColor(context),
+              side: BorderSide(color: AppColors.borderColor(context)),
+              minimumSize: const Size(32, 32),
+              fixedSize: const Size(32, 32),
+              padding: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2080,14 +2164,12 @@ class _SharedHeroSummary {
   final double netBalance;
   final int groupCount;
   final int peopleCount;
-  final List<_HeroPerson> topPeople;
   final List<_HeroGroupBalance> breakdown;
 
   const _SharedHeroSummary({
     required this.netBalance,
     required this.groupCount,
     required this.peopleCount,
-    required this.topPeople,
     required this.breakdown,
   });
 
@@ -2096,8 +2178,7 @@ class _SharedHeroSummary {
     String myPublicKey,
   ) {
     var net = 0.0;
-    final knownPeople = <String, _HeroPerson>{};
-    final debtByPerson = <String, double>{};
+    final knownPeople = <String>{};
     final breakdown = <_HeroGroupBalance>[];
 
     for (final group in groups) {
@@ -2105,17 +2186,10 @@ class _SharedHeroSummary {
       for (final member in group.members) {
         final pk = member.devicePublicKey;
         if (pk.isEmpty || pk == myPublicKey) continue;
-        final displayName = group.displayNameFor(myPublicKey, pk);
-        final nameKey = displayName.trim().toLowerCase();
+        final nameKey =
+            group.displayNameFor(myPublicKey, pk).trim().toLowerCase();
         if (nameKey.isEmpty) continue;
-        knownPeople.putIfAbsent(
-          nameKey,
-          () => _HeroPerson(
-            publicKey: pk,
-            name: displayName,
-            color: Color(memberColorFor(group, pk)),
-          ),
-        );
+        knownPeople.add(nameKey);
       }
       if (myPublicKey.isEmpty) continue;
       final balances = computeBalancesFor(group);
@@ -2126,38 +2200,27 @@ class _SharedHeroSummary {
           groupId: group.id,
           name: group.name,
           balance: myBalance,
+          colorIndex: breakdown.length,
         ));
-      }
-      final plan = settlementPlanFor(group);
-      for (final d in plan.debts) {
-        if (d.from != myPublicKey && d.to != myPublicKey) continue;
-        final other = d.from == myPublicKey ? d.to : d.from;
-        final otherName =
-            group.displayNameFor(myPublicKey, other).trim().toLowerCase();
-        if (otherName.isEmpty) continue;
-        debtByPerson.update(
-          otherName,
-          (v) => v + d.amount,
-          ifAbsent: () => d.amount,
-        );
       }
     }
 
-    final sorted = knownPeople.values.toList()
-      ..sort((a, b) {
-        final da = debtByPerson[a.name.trim().toLowerCase()] ?? 0;
-        final db = debtByPerson[b.name.trim().toLowerCase()] ?? 0;
-        if (da != db) return db.compareTo(da);
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
     breakdown.sort((a, b) => b.balance.abs().compareTo(a.balance.abs()));
+    final reindexed = [
+      for (var i = 0; i < breakdown.length; i++)
+        _HeroGroupBalance(
+          groupId: breakdown[i].groupId,
+          name: breakdown[i].name,
+          balance: breakdown[i].balance,
+          colorIndex: i,
+        ),
+    ];
 
     return _SharedHeroSummary(
       netBalance: net,
       groupCount: groups.length,
       peopleCount: knownPeople.length,
-      topPeople: sorted,
-      breakdown: breakdown,
+      breakdown: reindexed,
     );
   }
 }
@@ -2166,29 +2229,26 @@ class _HeroGroupBalance {
   final String groupId;
   final String name;
   final double balance;
+  final int colorIndex;
   const _HeroGroupBalance({
     required this.groupId,
     required this.name,
     required this.balance,
-  });
-}
-
-class _HeroPerson {
-  final String publicKey;
-  final String name;
-  final Color color;
-  const _HeroPerson({
-    required this.publicKey,
-    required this.name,
-    required this.color,
+    required this.colorIndex,
   });
 
-  String get initial {
-    final t = name.trim();
-    if (t.isEmpty) return '?';
-    return String.fromCharCode(t.runes.first).toUpperCase();
-  }
+  Color colorOf(BuildContext context) =>
+      _kHeroGroupPalette[colorIndex % _kHeroGroupPalette.length];
 }
+
+const List<Color> _kHeroGroupPalette = [
+  Color(0xFFE6A23C), // amber/yellow
+  Color(0xFF67C5A6), // teal
+  Color(0xFF8E7CC3), // purple
+  Color(0xFFE57373), // red
+  Color(0xFF5DA8E8), // blue
+  Color(0xFFF59E55), // orange
+];
 
 class _SharedHeroCard extends StatelessWidget {
   final _SharedHeroSummary summary;
@@ -2197,7 +2257,7 @@ class _SharedHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = AppColors.cardColor(context);
-    final tint = AppColors.primaryLight.withValues(alpha: 0.05);
+    final tint = AppColors.primaryLight.withValues(alpha: 0.04);
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
       decoration: BoxDecoration(
@@ -2213,27 +2273,41 @@ class _SharedHeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  context.l10nText('SHARED'),
-                  style: TextStyle(
-                    color: AppColors.textPrimary(context),
-                    fontWeight: FontWeight.w900,
-                    fontSize: 20,
-                    letterSpacing: 0.5,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10nText('OVERVIEW'),
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        letterSpacing: 0.7,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      context.l10nText('Your standings across shared groups'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textTertiary(context),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              if (summary.topPeople.isNotEmpty)
-                _StackedAvatars(people: summary.topPeople),
+              const SizedBox(width: 12),
+              _HeroTotalAside(net: summary.netBalance),
             ],
           ),
-          const SizedBox(height: 12),
-          _HeroTotalLine(net: summary.netBalance),
           if (summary.breakdown.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             _HeroBreakdown(items: summary.breakdown),
           ],
           const SizedBox(height: 12),
@@ -2252,21 +2326,35 @@ class _SharedHeroCard extends StatelessWidget {
   }
 }
 
-class _HeroTotalLine extends StatelessWidget {
+class _HeroTotalAside extends StatelessWidget {
   final double net;
-  const _HeroTotalLine({required this.net});
+  const _HeroTotalAside({required this.net});
 
   @override
   Widget build(BuildContext context) {
     final settled = net.abs() < 0.5;
     if (settled) {
-      return Text(
-        context.l10nText("You're all settled"),
-        style: const TextStyle(
-          color: AppColors.incomeSuccess,
-          fontWeight: FontWeight.w800,
-          fontSize: 15,
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            context.l10nText('All settled'),
+            style: TextStyle(
+              color: AppColors.textTertiary(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            context.l10nText("You're square"),
+            style: const TextStyle(
+              color: AppColors.incomeSuccess,
+              fontWeight: FontWeight.w900,
+              fontSize: 17,
+            ),
+          ),
+        ],
       );
     }
     final owesOthers = net < 0;
@@ -2274,27 +2362,27 @@ class _HeroTotalLine extends StatelessWidget {
     final label = owesOthers
         ? context.l10nText('You owe')
         : context.l10nText("You're owed");
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(
-            text: '$label  ',
-            style: TextStyle(
-              color: AppColors.textSecondary(context),
-              fontWeight: FontWeight.w700,
-              fontSize: 13.5,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: AppColors.textTertiary(context),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
           ),
-          TextSpan(
-            text: _formatEtb(net.abs(), context),
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w900,
-              fontSize: 17,
-            ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          _formatEtb(net.abs(), context),
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w900,
+            fontSize: 19,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -2305,16 +2393,12 @@ class _HeroBreakdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final owes = items.where((e) => e.balance < -0.5).toList()
-      ..sort((a, b) => a.balance.compareTo(b.balance));
-    final owed = items.where((e) => e.balance > 0.5).toList()
-      ..sort((a, b) => b.balance.compareTo(a.balance));
     final visibleRows = items.take(3).toList();
     final extra = items.length - visibleRows.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _TugOfWarBar(owesItems: owes, owedItems: owed),
+        _GroupSegmentBar(items: items),
         const SizedBox(height: 10),
         for (final item in visibleRows)
           Padding(
@@ -2338,44 +2422,31 @@ class _HeroBreakdown extends StatelessWidget {
   }
 }
 
-class _TugOfWarBar extends StatelessWidget {
-  final List<_HeroGroupBalance> owesItems;
-  final List<_HeroGroupBalance> owedItems;
-  const _TugOfWarBar({required this.owesItems, required this.owedItems});
+/// Stacked-bar visualization of each group's contribution to the overall
+/// balance. Segments are sized by |balance| and coloured by per-group
+/// palette so they line up with the dot colour in the breakdown row below.
+class _GroupSegmentBar extends StatelessWidget {
+  final List<_HeroGroupBalance> items;
+  const _GroupSegmentBar({required this.items});
 
   @override
   Widget build(BuildContext context) {
-    final hasOwes = owesItems.isNotEmpty;
-    final hasOwed = owedItems.isNotEmpty;
-    if (!hasOwes && !hasOwed) return const SizedBox.shrink();
+    if (items.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 8,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: Row(
           children: [
-            for (var i = 0; i < owesItems.length; i++)
+            for (var i = 0; i < items.length; i++)
               Expanded(
-                flex: (owesItems[i].balance.abs() * 1000)
+                flex: (items[i].balance.abs() * 1000)
                     .round()
                     .clamp(1, 1 << 30),
                 child: Container(
-                  color: AppColors.red,
+                  color: items[i].colorOf(context),
                   margin: EdgeInsets.only(
-                    right: i < owesItems.length - 1 ? 1 : 0,
-                  ),
-                ),
-              ),
-            for (var i = 0; i < owedItems.length; i++)
-              Expanded(
-                flex: (owedItems[i].balance.abs() * 1000)
-                    .round()
-                    .clamp(1, 1 << 30),
-                child: Container(
-                  color: AppColors.incomeSuccess,
-                  margin: EdgeInsets.only(
-                    left: i == 0 && hasOwes ? 1 : 0,
-                    right: i < owedItems.length - 1 ? 1 : 0,
+                    right: i < items.length - 1 ? 1 : 0,
                   ),
                 ),
               ),
@@ -2393,14 +2464,17 @@ class _HeroBreakdownRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final owesOthers = item.balance < 0;
-    final color = owesOthers ? AppColors.red : AppColors.incomeSuccess;
+    final amountColor = owesOthers ? AppColors.red : AppColors.incomeSuccess;
     final amount = _formatEtb(item.balance.abs(), context);
     return Row(
       children: [
         Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            color: item.colorOf(context),
+            shape: BoxShape.circle,
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -2410,8 +2484,8 @@ class _HeroBreakdownRow extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: AppColors.textPrimary(context),
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -2419,7 +2493,7 @@ class _HeroBreakdownRow extends StatelessWidget {
         Text(
           owesOthers ? '-$amount' : '+$amount',
           style: TextStyle(
-            color: color,
+            color: amountColor,
             fontSize: 12.5,
             fontWeight: FontWeight.w800,
           ),
@@ -2437,54 +2511,6 @@ String _heroSummarySubtitle(BuildContext context, _SharedHeroSummary s) {
   return '$g · $p';
 }
 
-class _StackedAvatars extends StatelessWidget {
-  final List<_HeroPerson> people;
-  const _StackedAvatars({required this.people});
-
-  static const int _maxVisible = 4;
-
-  @override
-  Widget build(BuildContext context) {
-    if (people.isEmpty) return const SizedBox.shrink();
-    final overflow = people.length - _maxVisible;
-    final visible =
-        overflow > 0 ? people.take(_maxVisible).toList() : people.toList();
-    const avatarSize = 28.0;
-    const overlap = 10.0;
-    final slotCount = visible.length + (overflow > 0 ? 1 : 0);
-    final width = avatarSize + (slotCount - 1) * (avatarSize - overlap);
-    final borderColor = AppColors.cardColor(context);
-    return SizedBox(
-      width: width,
-      height: avatarSize,
-      child: Stack(
-        children: [
-          for (var i = 0; i < visible.length; i++)
-            Positioned(
-              left: i * (avatarSize - overlap),
-              child: _AvatarCircle(
-                size: avatarSize,
-                color: visible[i].color,
-                text: visible[i].initial,
-                borderColor: borderColor,
-              ),
-            ),
-          if (overflow > 0)
-            Positioned(
-              left: visible.length * (avatarSize - overlap),
-              child: _AvatarCircle(
-                size: avatarSize,
-                color: AppColors.textTertiary(context),
-                text: '+$overflow',
-                borderColor: borderColor,
-                fontSize: 10,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 class _AvatarCircle extends StatelessWidget {
   final double size;

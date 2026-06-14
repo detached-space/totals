@@ -72,6 +72,11 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
         group.status == SharedExpenseGroupStatus.localOnly;
     final isJustYou = group.memberCount <= 1;
     final canCopyInvite = !isPending && !isLocalOnly;
+    final theTitleStyle = theme.textTheme.titleSmall?.copyWith(
+      color: AppColors.textPrimary(context),
+      fontWeight: FontWeight.w800,
+      fontSize: 15,
+    );
 
     return Material(
       color: AppColors.cardColor(context),
@@ -80,7 +85,7 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
         onTap: isPending ? null : onOpen,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.borderColor(context)),
@@ -88,60 +93,104 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ───── Title row ─────
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: Text(
-                      group.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: AppColors.textPrimary(context),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          group.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theTitleStyle,
+                        ),
+                        if (isPending) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            isJustYou
+                                ? context.l10nText('just you')
+                                : group.memberCount == 1
+                                    ? context.l10nText('1 member')
+                                    : '${group.memberCount} ${context.l10nText('members')}',
+                            style: TextStyle(
+                              color: AppColors.textSecondary(context),
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  if (isPending)
+                  const SizedBox(width: 8),
+                  if (isPending) ...[
+                    _CopyInvitePillButton(onTap: onCopyInvite),
+                    const SizedBox(width: 8),
                     _StatusChip(
-                      label: context.l10nText('WAITING FOR KEY'),
+                      label: context.l10nText('Pending approval'),
                       color: AppColors.amber,
-                    )
-                  else if (!isJustYou && group.memberCount > 3)
-                    _GroupCardMemberAvatars(
-                      group: group,
-                      myPublicKey: myPublicKey,
-                    )
-                  else
-                    _MembersChevron(
-                      label: isJustYou
-                          ? context.l10nText('just you')
-                          : group.memberCount == 1
-                              ? context.l10nText('1 member')
-                              : '${group.memberCount} ${context.l10nText('members')}',
                     ),
+                  ] else ...[
+                    _StatusChip(
+                      label: context.l10nText('Synced'),
+                      color: AppColors.incomeSuccess,
+                    ),
+                    if (canCopyInvite) ...[
+                      const SizedBox(width: 2),
+                      _GroupCardKebabMenu(onCopyInvite: onCopyInvite),
+                    ],
+                  ],
                 ],
               ),
-              const SizedBox(height: 6),
-              _GroupCardBody(
-                group: group,
-                myPublicKey: myPublicKey,
-                isPending: isPending,
-                isJustYou: isJustYou,
-              ),
-              if (canCopyInvite) ...[
+              // ───── Avatars below title (synced only, multi-member) ─────
+              if (!isPending && !isJustYou) ...[
                 const SizedBox(height: 10),
-                _CopyInviteButton(onTap: onCopyInvite),
+                _GroupCardMemberAvatars(
+                  group: group,
+                  myPublicKey: myPublicKey,
+                ),
               ],
-              if (isPending) ...[
+              // ───── Body: balance + counterparty + bottom-right chevron ─
+              if (!isPending) ...[
                 const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: _GroupCardBody(
+                        group: group,
+                        myPublicKey: myPublicKey,
+                        isPending: false,
+                        isJustYou: isJustYou,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: Center(
+                        child: Icon(
+                          AppIcons.chevron_right,
+                          size: 14,
+                          color: AppColors.textTertiary(context),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              // ───── Cancel request (pending, full width danger) ─────
+              if (isPending) ...[
+                const SizedBox(height: 14),
                 _CancelRequestButton(
                   armed: _cancelArmed,
                   onTap: _onCancelTap,
                 ),
               ],
+              // ───── Pending approvals from others ─────
               if (pendingMembers.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 Divider(color: AppColors.borderColor(context), height: 1),
@@ -174,30 +223,36 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
   }
 }
 
-class _MembersChevron extends StatelessWidget {
-  final String label;
-  const _MembersChevron({required this.label});
+/// Inline pill-style Copy invite shown next to the Pending approval chip
+/// in the pending card title row. The standalone bottom button kept its
+/// outline for the synced card; this is a tighter sibling for the right
+/// shoulder of the pending card.
+class _CopyInvitePillButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CopyInvitePillButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: AppColors.textTertiary(context),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+    return SizedBox(
+      height: 26,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: const Icon(AppIcons.copy, size: 11),
+        label: Text(context.l10nText('Copy invite')),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.textSecondary(context),
+          side: BorderSide(color: AppColors.borderColor(context)),
+          minimumSize: const Size(0, 26),
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          textStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
           ),
         ),
-        const SizedBox(width: 8),
-        Icon(
-          AppIcons.chevron_right,
-          size: 14,
-          color: AppColors.textTertiary(context),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -235,53 +290,42 @@ class _GroupCardMemberAvatars extends StatelessWidget {
     final stackWidth =
         avatarSize + (slotCount - 1) * (avatarSize - overlap);
     final borderColor = AppColors.cardColor(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: stackWidth,
-          height: avatarSize,
-          child: Stack(
-            children: [
-              for (var i = 0; i < visible.length; i++)
-                Positioned(
-                  left: i * (avatarSize - overlap),
-                  child: _AvatarCircle(
-                    size: avatarSize,
-                    color: Color(
-                      memberColorFor(group, visible[i].devicePublicKey),
-                    ),
-                    text: _initialFor(
-                      group.displayNameFor(
-                        myPublicKey,
-                        visible[i].devicePublicKey,
-                      ),
-                    ),
-                    borderColor: borderColor,
-                    fontSize: 10,
+    return SizedBox(
+      width: stackWidth,
+      height: avatarSize,
+      child: Stack(
+        children: [
+          for (var i = 0; i < visible.length; i++)
+            Positioned(
+              left: i * (avatarSize - overlap),
+              child: _AvatarCircle(
+                size: avatarSize,
+                color: Color(
+                  memberColorFor(group, visible[i].devicePublicKey),
+                ),
+                text: _initialFor(
+                  group.displayNameFor(
+                    myPublicKey,
+                    visible[i].devicePublicKey,
                   ),
                 ),
-              if (overflow > 0)
-                Positioned(
-                  left: visible.length * (avatarSize - overlap),
-                  child: _AvatarCircle(
-                    size: avatarSize,
-                    color: AppColors.textTertiary(context),
-                    text: '+$overflow',
-                    borderColor: borderColor,
-                    fontSize: 9,
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        Icon(
-          AppIcons.chevron_right,
-          size: 14,
-          color: AppColors.textTertiary(context),
-        ),
-      ],
+                borderColor: borderColor,
+                fontSize: 10,
+              ),
+            ),
+          if (overflow > 0)
+            Positioned(
+              left: visible.length * (avatarSize - overlap),
+              child: _AvatarCircle(
+                size: avatarSize,
+                color: AppColors.textTertiary(context),
+                text: '+$overflow',
+                borderColor: borderColor,
+                fontSize: 9,
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -456,61 +500,97 @@ class _CancelRequestButton extends StatelessWidget {
     const danger = Color(0xFFBE123C);
     final fg = armed ? AppColors.white : danger;
     final bg = armed ? danger : Colors.transparent;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: OutlinedButton.icon(
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
         onPressed: onTap,
-        icon: Icon(AppIcons.close, size: 12, color: fg),
-        label: Text(
-          armed
-              ? context.l10nText('Tap again to confirm')
-              : context.l10nText('Cancel request'),
-        ),
         style: OutlinedButton.styleFrom(
           foregroundColor: fg,
           backgroundColor: bg,
           side: BorderSide(
-            color: armed ? danger : danger.withValues(alpha: 0.5),
+            color: armed ? danger : danger.withValues(alpha: 0.55),
           ),
-          minimumSize: const Size(0, 28),
-          padding: const EdgeInsets.symmetric(horizontal: 9),
+          minimumSize: const Size.fromHeight(40),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
           textStyle: const TextStyle(
-            fontSize: 11.5,
+            fontSize: 13.5,
             fontWeight: FontWeight.w700,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
           ),
+        ),
+        child: Text(
+          armed
+              ? context.l10nText('Tap again to confirm')
+              : context.l10nText('Cancel request'),
         ),
       ),
     );
   }
 }
 
-class _CopyInviteButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CopyInviteButton({required this.onTap});
+/// Three-dot kebab on the right shoulder of synced cards. Houses
+/// Copy invite (previously a bottom-of-card button) so the card has
+/// fewer visible affordances and the tap target lives next to the
+/// status pill where the user expects per-card actions.
+///
+/// PopupMenuButton wraps an IconButton internally, whose default
+/// MaterialTapTargetSize.padded inflates the touch area to 48x48 even
+/// when the icon is small. We override that via a Theme so the button
+/// shrinks to ~26 px and lines up with the Synced chip next to it.
+/// PopupMenuButton handles its own gesture arena, beating the parent
+/// card's InkWell — no manual showMenu plumbing needed.
+class _GroupCardKebabMenu extends StatelessWidget {
+  final VoidCallback onCopyInvite;
+  const _GroupCardKebabMenu({required this.onCopyInvite});
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: OutlinedButton.icon(
-        onPressed: onTap,
-        icon: const Icon(AppIcons.copy, size: 12),
-        label: Text(context.l10nText('Copy invite')),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.textSecondary(context),
-          side: BorderSide(color: AppColors.borderColor(context)),
-          minimumSize: const Size(0, 28),
-          padding: const EdgeInsets.symmetric(horizontal: 9),
-          textStyle: const TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700,
+    return SizedBox(
+      width: 26,
+      height: 26,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: PopupMenuButton<String>(
+          tooltip: context.l10nText('More options'),
+          icon: Icon(
+            AppIcons.more_vert,
+            size: 16,
+            color: AppColors.textTertiary(context),
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          iconSize: 16,
+          padding: EdgeInsets.zero,
+          splashRadius: 16,
+          offset: const Offset(0, 28),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          constraints: const BoxConstraints(minWidth: 160),
+          onSelected: (value) {
+            if (value == 'copy_invite') onCopyInvite();
+          },
+          itemBuilder: (menuContext) => [
+            PopupMenuItem<String>(
+              value: 'copy_invite',
+              height: 40,
+              child: Row(
+                children: [
+                  Icon(
+                    AppIcons.copy,
+                    size: 16,
+                    color: AppColors.textSecondary(menuContext),
+                  ),
+                  const SizedBox(width: 10),
+                  // itemBuilder fires from a tap handler (showButtonMenu →
+                  // handleTap), NOT during a build pass. l10nText uses
+                  // context.watch under the hood, which throws outside build.
+                  // Use the read-only variant here.
+                  Text(menuContext.l10nTextRead('Copy invite')),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -526,7 +606,9 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      height: 26,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),

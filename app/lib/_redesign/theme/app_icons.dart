@@ -60,6 +60,7 @@ class AppIcons {
   static const IconData lightbulb_outline = PhosphorIconsRegular.lightbulb;
   static const IconData lock_outline_rounded = PhosphorIconsRegular.lock;
   static const IconData more_horiz = PhosphorIconsRegular.dotsThree;
+  static const IconData more_vert = PhosphorIconsRegular.dotsThreeVertical;
   static const IconData notifications_outlined = PhosphorIconsRegular.bell;
   static const IconData palette_outlined = PhosphorIconsRegular.paintBrush;
   static const IconData palette_rounded = PhosphorIconsRegular.palette;
