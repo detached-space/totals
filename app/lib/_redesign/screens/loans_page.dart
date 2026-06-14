@@ -2019,6 +2019,12 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     final forgiveArmed = _armedAction == LoanDebtStatus.forgiven.storageValue;
     final undoArmed = _armedAction == LoanDebtStatus.active.storageValue;
     final unlinkArmed = _armedAction == 'unlink';
+    final settledColor =
+        _loanDebtStatusColor(LoanDebtStatus.settled, _directionColor);
+    final forgivenColor =
+        _loanDebtStatusColor(LoanDebtStatus.forgiven, _directionColor);
+    final currentStatusColor =
+        _loanDebtStatusColor(_item.status, _directionColor);
     final buttons = <Widget>[
       if (_item.isActive) ...[
         _LoanDebtActionButton(
@@ -2026,7 +2032,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
           label: settleArmed
               ? context.l10nText('Tap again')
               : context.l10nText('Settled'),
-          color: AppColors.incomeSuccess,
+          color: settledColor,
           isLoading: _pendingAction == LoanDebtStatus.settled.storageValue,
           enabled: !_isActionBusy,
           armed: settleArmed,
@@ -2039,7 +2045,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
               : (_isBorrowed
                   ? context.l10nText('Forgiven')
                   : context.l10nText('Forgive')),
-          color: AppColors.red,
+          color: forgivenColor,
           isLoading: _pendingAction == LoanDebtStatus.forgiven.storageValue,
           enabled: !_isActionBusy,
           armed: forgiveArmed,
@@ -2055,7 +2061,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                       ? 'Unforgive'
                       : 'Unsettle',
                 ),
-          color: AppColors.blue,
+          color: currentStatusColor,
           isLoading: _pendingAction == LoanDebtStatus.active.storageValue,
           enabled: !_isActionBusy,
           armed: undoArmed,
