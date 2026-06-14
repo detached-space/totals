@@ -1801,11 +1801,13 @@ class SharedExpenseRepository {
           : SharedExpenseCryptoService.fromHex(groupKeyHex);
 
       Map<String, dynamic>? decoded;
+      var decodedViaGroupKey = false;
       if (groupKeyBytes != null) {
         decoded = await _cryptoService.decryptPayloadWithKey(
           keyBytes: groupKeyBytes,
           encryptedBlob: payload.encryptedBlob,
         );
+        if (decoded != null) decodedViaGroupKey = true;
       }
       decoded ??= await _cryptoService.decryptGroupKeyPayload(
         senderPublicKeyHex: payload.senderPublicKey,
@@ -1841,6 +1843,7 @@ class SharedExpenseRepository {
         senderPk: payload.senderPublicKey,
         decoded: decoded,
         myPublicKey: myPublicKey,
+        decodedViaGroupKey: decodedViaGroupKey,
       );
       if (acknowledge) {
         await _acknowledgePayload(payload.id);
@@ -1936,10 +1939,26 @@ class SharedExpenseRepository {
     required String senderPk,
     required Map<String, dynamic> decoded,
     required String myPublicKey,
+    bool decodedViaGroupKey = false,
   }) async {
     final type = decoded['type'] as String?;
-    final group = await _groupById(groupId);
+    var group = await _groupById(groupId);
     if (group == null) return false;
+
+    // Frontend-driven approval check. If the sender is currently in our
+    // pendingApprovals but the payload was decryptable with the group key,
+    // they must have been approved by someone — the group key only leaves
+    // an approver's device via an explicit key_exchange in approveMember.
+    // Auto-promote them locally so the Approve button clears even when the
+    // explicit member_approved broadcast was missed (engine routing,
+    // dropped SSE frame, app backgrounded during delivery, …).
+    final pendingPksBefore =
+        group.pendingApprovals.map((p) => p.publicKey).toSet();
+    if (decodedViaGroupKey &&
+        senderPk.isNotEmpty &&
+        pendingPksBefore.contains(senderPk)) {
+      group = await _autoPromotePendingMember(group, senderPk);
+    }
 
     // If the sender is currently in our pendingApprovals list, the only
     // payload types they can drive through us are join_request (to re-state
@@ -2983,6 +3002,44 @@ class SharedExpenseRepository {
     );
     await _upsertGroup(updated);
     return true;
+  }
+
+  /// Frontend safety net: someone other than this device approved the
+  /// sender, but we never saw the explicit broadcast. Mirror the same
+  /// state change the broadcast handler would produce, and return the
+  /// updated group so the caller can continue processing on fresh state.
+  /// Triggered when a group-key-encrypted payload arrives from a member
+  /// who's still in our local pendingApprovals.
+  Future<SharedExpenseGroup> _autoPromotePendingMember(
+    SharedExpenseGroup group,
+    String senderPk,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final activityId = 'member_approved:${group.id}:$senderPk:auto:$now';
+    if (group.activity.any((entry) => entry.id == activityId)) {
+      return group;
+    }
+    _sharedExpenseLog(
+      '_autoPromotePendingMember sender=${_logId(senderPk)} group=${_logId(group.id)}',
+    );
+    final updated = group.copyWith(
+      approvedMemberKeys: {...group.approvedMemberKeys, senderPk},
+      pendingApprovals: group.pendingApprovals
+          .where((p) => p.publicKey != senderPk)
+          .toList(),
+      activity: [
+        ...group.activity,
+        SharedActivityEntry(
+          id: activityId,
+          timestamp: now,
+          actor: senderPk,
+          kind: 'member_approved',
+          data: {'memberPk': senderPk, 'auto': true},
+        ),
+      ],
+    );
+    await _upsertGroup(updated);
+    return updated;
   }
 
   /// Mirror of [approveMember]'s local state change for the OTHER approvers.

@@ -77,7 +77,7 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
       color: AppColors.cardColor(context),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        onTap: isPending ? _onCancelTap : onOpen,
+        onTap: isPending ? null : onOpen,
         borderRadius: BorderRadius.circular(14),
         child: Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -130,11 +130,17 @@ class _SharedGroupCardState extends State<_SharedGroupCard> {
                 myPublicKey: myPublicKey,
                 isPending: isPending,
                 isJustYou: isJustYou,
-                cancelArmed: _cancelArmed,
               ),
               if (canCopyInvite) ...[
                 const SizedBox(height: 10),
                 _CopyInviteButton(onTap: onCopyInvite),
+              ],
+              if (isPending) ...[
+                const SizedBox(height: 10),
+                _CancelRequestButton(
+                  armed: _cancelArmed,
+                  onTap: _onCancelTap,
+                ),
               ],
               if (pendingMembers.isNotEmpty) ...[
                 const SizedBox(height: 18),
@@ -291,31 +297,25 @@ class _GroupCardBody extends StatelessWidget {
   final String myPublicKey;
   final bool isPending;
   final bool isJustYou;
-  final bool cancelArmed;
 
   const _GroupCardBody({
     required this.group,
     required this.myPublicKey,
     required this.isPending,
     required this.isJustYou,
-    required this.cancelArmed,
   });
 
   @override
   Widget build(BuildContext context) {
     if (isPending) {
       return Text(
-        cancelArmed
-            ? context.l10nText('Tap again to cancel join request')
-            : context.l10nText('Waiting for someone to send the key…'),
+        context.l10nText('Waiting for someone to send the key…'),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: cancelArmed
-              ? const Color(0xFFBE123C)
-              : AppColors.textSecondary(context),
+          color: AppColors.textSecondary(context),
           fontSize: 12.5,
-          fontWeight: cancelArmed ? FontWeight.w700 : FontWeight.w500,
+          fontWeight: FontWeight.w500,
         ),
       );
     }
@@ -442,6 +442,47 @@ class _GroupCardBalanceBlock extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _CancelRequestButton extends StatelessWidget {
+  final bool armed;
+  final VoidCallback onTap;
+  const _CancelRequestButton({required this.armed, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    const danger = Color(0xFFBE123C);
+    final fg = armed ? AppColors.white : danger;
+    final bg = armed ? danger : Colors.transparent;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(AppIcons.close, size: 12, color: fg),
+        label: Text(
+          armed
+              ? context.l10nText('Tap again to confirm')
+              : context.l10nText('Cancel request'),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: fg,
+          backgroundColor: bg,
+          side: BorderSide(
+            color: armed ? danger : danger.withValues(alpha: 0.5),
+          ),
+          minimumSize: const Size(0, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          textStyle: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      ),
     );
   }
 }

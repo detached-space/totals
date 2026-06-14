@@ -1200,23 +1200,32 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     }
 
     if (result is _GroupSettingsLeave) {
-      _beginMutation('Leaving group');
-      try {
-        await _repository.leaveGroup(group);
-        if (!mounted) return;
-        final groups = await _repository.getGroups();
-        if (!mounted) return;
-        setState(() {
-          _groups = groups;
-          _selectedGroup = null;
-        });
-        _syncRealtimeSubscriptions(groups);
-        _showSnack(context.l10nTextRead('You left the group'));
-      } catch (error) {
-        _showSnack(error.toString().replaceFirst('Exception: ', ''));
-      } finally {
-        _endMutation();
-      }
+      _sharedExpensesPageLog('leaveGroup ui group=${_logId(group.id)}');
+      // Optimistic: dismiss the detail view and remove the group from the
+      // list immediately, run the repository leave in the background. The
+      // user doesn't need to wait on local sqlite/secure-storage/prefs
+      // teardown (or any leftover network), and the FAB never gets a chance
+      // to get stuck on a "Leaving group" spinner. The repository already
+      // fires courtesy broadcasts unawaited, so the worst case here is a
+      // background log line.
+      widget.fabController?.clear();
+      setState(() {
+        _groups = _groups.where((g) => g.id != group.id).toList();
+        _selectedGroup = null;
+      });
+      _showSnack(context.l10nTextRead('You left the group'));
+      unawaited(() async {
+        try {
+          await _repository.leaveGroup(group);
+          if (!mounted) return;
+          final fresh = await _repository.getGroups();
+          if (!mounted) return;
+          setState(() => _groups = fresh);
+          _syncRealtimeSubscriptions(fresh);
+        } catch (error) {
+          _sharedExpensesPageLog('leaveGroup background failed: $error');
+        }
+      }());
       return;
     }
 
