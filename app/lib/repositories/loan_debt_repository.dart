@@ -61,10 +61,33 @@ class LoanDebtRepository {
         'transactionReference': normalizedReference,
         'personName': normalizedName,
         'direction': direction.storageValue,
+        'status': LoanDebtStatus.active.storageValue,
+        'resolvedAt': null,
         'createdAt': now,
         'updatedAt': now,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> updateEntryStatus({
+    required String transactionReference,
+    required LoanDebtStatus status,
+  }) async {
+    final normalizedReference = transactionReference.trim();
+    if (normalizedReference.isEmpty) return;
+
+    final db = await DatabaseHelper.instance.database;
+    final now = DateTime.now().toIso8601String();
+    await db.update(
+      'loan_debt_entries',
+      {
+        'status': status.storageValue,
+        'resolvedAt': status == LoanDebtStatus.active ? null : now,
+        'updatedAt': now,
+      },
+      where: 'transactionReference = ?',
+      whereArgs: [normalizedReference],
     );
   }
 

@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 24,
+      version: 25,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -763,6 +763,10 @@ class DatabaseHelper {
     if (oldVersion < 24) {
       await _ensureLoanDebtSchema(db);
     }
+
+    if (oldVersion < 25) {
+      await _ensureLoanDebtSchema(db);
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -1237,15 +1241,37 @@ class DatabaseHelper {
         transactionReference TEXT NOT NULL UNIQUE,
         personName TEXT NOT NULL,
         direction TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        resolvedAt TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
       )
     ''');
+    final columns = await db.rawQuery('PRAGMA table_info(loan_debt_entries)');
+    final names = columns.map((column) => column['name'] as String?).toSet();
+    Future<void> addColumn(String sql) async {
+      try {
+        await db.execute(sql);
+      } catch (_) {}
+    }
+
+    if (!names.contains('status')) {
+      await addColumn(
+        "ALTER TABLE loan_debt_entries ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+      );
+    }
+    if (!names.contains('resolvedAt')) {
+      await addColumn(
+          'ALTER TABLE loan_debt_entries ADD COLUMN resolvedAt TEXT');
+    }
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_personName ON loan_debt_entries(personName COLLATE NOCASE)",
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_direction ON loan_debt_entries(direction)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_status ON loan_debt_entries(status)',
     );
   }
 

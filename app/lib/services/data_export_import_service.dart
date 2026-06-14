@@ -8,6 +8,7 @@ import 'package:totals/models/budget.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/failed_parse.dart';
+import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/sms_pattern.dart';
 import 'package:totals/models/user_account.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -23,7 +24,7 @@ import 'package:totals/utils/transaction_duplicate_detector.dart';
 const int _dashenBankId = 4;
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 6;
+  static const int currentSchemaVersion = 7;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -51,6 +52,7 @@ class DataExportImportService {
           await _autoCategorizationService.getDismissals();
       final smsPatterns =
           await _smsConfigService.getPatterns(allowRemoteFetch: false);
+      final loanDebtEntries = await _getLoanDebtEntriesFromDb();
 
       final exportData = {
         'schemaVersion': currentSchemaVersion,
@@ -69,6 +71,7 @@ class DataExportImportService {
             .map((dismissal) => dismissal.toJson())
             .toList(),
         'smsPatterns': smsPatterns.map((p) => p.toJson()).toList(),
+        'loanDebtEntries': loanDebtEntries.map((e) => e.toJson()).toList(),
       };
 
       return jsonEncode(exportData);
@@ -416,6 +419,28 @@ class DataExportImportService {
         }
       }
 
+      // Import loan/debt state after transactions/categories exist. Row IDs are
+      // intentionally ignored; transactionReference is the stable identity.
+      final loanDebtRaw = _asMapList(data['loanDebtEntries']);
+      if (loanDebtRaw.isNotEmpty) {
+        final batch = db.batch();
+        for (final rawEntry in loanDebtRaw) {
+          final entry = LoanDebtEntry.fromJson(rawEntry);
+          final reference = entry.transactionReference.trim();
+          final personName = entry.personName.trim();
+          if (reference.isEmpty || personName.isEmpty) continue;
+          final entryData = entry.toDb()..remove('id');
+          entryData['transactionReference'] = reference;
+          entryData['personName'] = personName;
+          batch.insert(
+            'loan_debt_entries',
+            entryData,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+        await batch.commit(noResult: true);
+      }
+
       // Import explicit auto-category rules.
       final autoCategoryRulesRaw = _asMapList(data['autoCategoryRules']);
       if (autoCategoryRulesRaw.isNotEmpty) {
@@ -605,6 +630,11 @@ class DataExportImportService {
         'autoCategoryPromptDismissals',
         aliases: const ['auto_category_prompt_dismissals'],
       ),
+      'loanDebtEntries': _readList(
+        raw,
+        'loanDebtEntries',
+        aliases: const ['loan_debt_entries'],
+      ),
       'smsPatterns': _readList(
         raw,
         'smsPatterns',
@@ -754,6 +784,15 @@ class DataExportImportService {
         'colors': colors,
       });
     }).toList();
+  }
+
+  Future<List<LoanDebtEntry>> _getLoanDebtEntriesFromDb() async {
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'loan_debt_entries',
+      orderBy: 'updatedAt DESC, id DESC',
+    );
+    return rows.map(LoanDebtEntry.fromDb).toList(growable: false);
   }
 
   Future<void> _removeImportedDashenDuplicates() async {

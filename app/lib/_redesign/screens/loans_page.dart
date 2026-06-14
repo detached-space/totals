@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -41,8 +43,11 @@ class LoansPage extends StatefulWidget {
 
 enum _LoanDebtTransactionFilter { all, lent, borrowed }
 
+enum _LoanDebtStatusFilter { all, active, settled, forgiven }
+
 class _LoanDebtFilterSelection {
   final _LoanDebtTransactionFilter transactionFilter;
+  final _LoanDebtStatusFilter statusFilter;
   final String? personName;
   final int? bankId;
   final double? minAmount;
@@ -52,6 +57,7 @@ class _LoanDebtFilterSelection {
 
   const _LoanDebtFilterSelection({
     required this.transactionFilter,
+    this.statusFilter = _LoanDebtStatusFilter.all,
     required this.personName,
     this.bankId,
     this.minAmount,
@@ -63,6 +69,7 @@ class _LoanDebtFilterSelection {
   int get activeCount {
     var count = 0;
     if (transactionFilter != _LoanDebtTransactionFilter.all) count++;
+    if (statusFilter != _LoanDebtStatusFilter.all) count++;
     if (personName?.trim().isNotEmpty == true) count++;
     if (bankId != null) count++;
     if (minAmount != null || maxAmount != null) count++;
@@ -77,6 +84,7 @@ class _LoansPageState extends State<LoansPage> {
   String? _selectedPerson;
   _LoanDebtTransactionFilter _transactionFilter =
       _LoanDebtTransactionFilter.all;
+  _LoanDebtStatusFilter _statusFilter = _LoanDebtStatusFilter.all;
   int? _selectedBankId;
   double? _minAmount;
   double? _maxAmount;
@@ -106,6 +114,7 @@ class _LoansPageState extends State<LoansPage> {
     return _filteredLoanDebtItems(
       items,
       _transactionFilter,
+      statusFilter: _statusFilter,
       bankId: _selectedBankId,
       minAmount: _minAmount,
       maxAmount: _maxAmount,
@@ -117,6 +126,7 @@ class _LoansPageState extends State<LoansPage> {
   _LoanDebtFilterSelection get _assignedFilterSelection =>
       _LoanDebtFilterSelection(
         transactionFilter: _transactionFilter,
+        statusFilter: _statusFilter,
         personName: _selectedPerson,
         bankId: _selectedBankId,
         minAmount: _minAmount,
@@ -156,6 +166,7 @@ class _LoansPageState extends State<LoansPage> {
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _TransactionFilterSheet(
         selectedTransactionFilter: _transactionFilter,
+        selectedStatusFilter: _statusFilter,
         selectedPerson: _selectedPerson,
         people: people,
         bankIds: bankIds,
@@ -169,6 +180,7 @@ class _LoansPageState extends State<LoansPage> {
     if (!mounted || selected == null) return;
     setState(() {
       _transactionFilter = selected.transactionFilter;
+      _statusFilter = selected.statusFilter;
       _selectedPerson = selected.personName;
       _selectedBankId = selected.bankId;
       _minAmount = selected.minAmount;
@@ -188,6 +200,8 @@ class _LoansPageState extends State<LoansPage> {
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _TransactionFilterSheet(
         selectedTransactionFilter: _unassignedTransactionFilter,
+        selectedStatusFilter: _LoanDebtStatusFilter.all,
+        showStatusFilter: false,
         bankIds: bankIds,
         selectedBankId: _unassignedBankId,
         minAmount: _unassignedMinAmount,
@@ -207,11 +221,11 @@ class _LoansPageState extends State<LoansPage> {
     });
   }
 
-  void _openPersonPage({
+  Future<void> _openPersonPage({
     required _LoanDebtPersonSummary person,
     required List<_LoanDebtItem> items,
-  }) {
-    Navigator.push(
+  }) async {
+    await Navigator.push(
       context,
       MaterialPageRoute<void>(
         builder: (_) => _LoanDebtPersonDetailPage(
@@ -221,10 +235,12 @@ class _LoansPageState extends State<LoansPage> {
         ),
       ),
     );
+    if (!mounted) return;
+    _refreshEntries();
   }
 
   Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
-    final saved = await showModalBottomSheet<bool>(
+    final result = await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -235,7 +251,7 @@ class _LoansPageState extends State<LoansPage> {
       ),
     );
     if (!mounted) return;
-    if (saved == true) _refreshEntries();
+    if (result != null) _refreshEntries();
   }
 
   @override
@@ -958,11 +974,16 @@ class _PersonBalanceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasOpenBalance = person.net.abs() > 0.005;
     final isOwedToYou = person.net >= 0;
-    final color = isOwedToYou ? AppColors.incomeSuccess : AppColors.red;
-    final label = isOwedToYou
-        ? context.l10nText('They owe you')
-        : context.l10nText('You owe');
+    final color = !hasOpenBalance
+        ? AppColors.blue
+        : (isOwedToYou ? AppColors.incomeSuccess : AppColors.red);
+    final label = !hasOpenBalance
+        ? context.l10nText('Settled')
+        : (isOwedToYou
+            ? context.l10nText('They owe you')
+            : context.l10nText('You owe'));
     final transactionCountLabel = _formatTransactionCount(
       context,
       person.transactionCount,
@@ -1278,11 +1299,13 @@ class _LoanDebtBaseTile extends StatelessWidget {
     final theme = Theme.of(context);
     final provider = context.read<TransactionProvider>();
     final borrowed = item.direction == LoanDebtDirection.borrowed;
-    final color = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final directionColor = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final color = _loanDebtStatusColor(item.status, directionColor);
     final bankName = context.l10nText(
       provider.getBankShortName(item.transaction.bankId),
     );
     final details = [
+      if (!item.isActive) _loanDebtStatusLabel(context, item.status),
       bankName,
       item.dateLabel(context),
       item.timeLabel(context),
@@ -1374,18 +1397,47 @@ class _LoanDebtDetailsSheet extends StatefulWidget {
   State<_LoanDebtDetailsSheet> createState() => _LoanDebtDetailsSheetState();
 }
 
+class _LoanDebtDetailsResult {
+  final String transactionReference;
+  final LoanDebtStatus? status;
+  final bool unlinked;
+
+  const _LoanDebtDetailsResult._({
+    required this.transactionReference,
+    this.status,
+    this.unlinked = false,
+  });
+
+  const _LoanDebtDetailsResult.savedPerson(String transactionReference)
+      : this._(transactionReference: transactionReference);
+
+  const _LoanDebtDetailsResult.unlinked(String transactionReference)
+      : this._(transactionReference: transactionReference, unlinked: true);
+
+  const _LoanDebtDetailsResult.status(
+    String transactionReference,
+    LoanDebtStatus status,
+  ) : this._(transactionReference: transactionReference, status: status);
+}
+
 class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
+  static const Duration _confirmWindow = Duration(milliseconds: 3500);
+
   final TextEditingController _nameController = TextEditingController();
   final FocusNode _nameFocus = FocusNode();
   List<String> _knownPeople = const [];
   bool _isLoadingPeople = true;
   bool _isSavingPerson = false;
+  Timer? _actionDisarmTimer;
+  String? _armedAction;
+  String? _pendingAction;
   String? _selectedName;
 
   _LoanDebtItem get _item => widget.item;
   Transaction get _transaction => _item.transaction;
   bool get _needsPerson => !_item.hasPerson;
   bool get _isBorrowed => _item.direction == LoanDebtDirection.borrowed;
+  bool get _isActionBusy => _pendingAction != null;
   Color get _directionColor =>
       _isBorrowed ? AppColors.red : AppColors.incomeSuccess;
 
@@ -1417,7 +1469,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
 
   Future<void> _savePerson() async {
     final personName = normalizeLoanDebtPersonName(_nameController.text);
-    if (personName.isEmpty || _isSavingPerson) {
+    if (personName.isEmpty || _isSavingPerson || _isActionBusy) {
       _nameFocus.requestFocus();
       return;
     }
@@ -1430,7 +1482,10 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
         direction: _item.direction,
       );
       if (!mounted) return;
-      Navigator.pop(context, true);
+      Navigator.pop(
+        context,
+        _LoanDebtDetailsResult.savedPerson(_transaction.reference),
+      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -1443,8 +1498,78 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     }
   }
 
+  bool _armOrConfirm(String action) {
+    if (_armedAction != action) {
+      setState(() => _armedAction = action);
+      _actionDisarmTimer?.cancel();
+      _actionDisarmTimer = Timer(_confirmWindow, () {
+        if (!mounted) return;
+        setState(() => _armedAction = null);
+      });
+      return false;
+    }
+
+    _actionDisarmTimer?.cancel();
+    setState(() => _armedAction = null);
+    return true;
+  }
+
+  Future<void> _unlinkPerson() async {
+    if (_isActionBusy) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!_armOrConfirm('unlink')) return;
+
+    setState(() => _pendingAction = 'unlink');
+    try {
+      await widget.repository.deleteEntryForTransaction(_transaction.reference);
+      if (!mounted) return;
+      Navigator.pop(
+        context,
+        _LoanDebtDetailsResult.unlinked(_transaction.reference),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(context.l10nTextRead('Could not unlink person')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      setState(() => _pendingAction = null);
+    }
+  }
+
+  Future<void> _resolveLoanDebt(LoanDebtStatus status) async {
+    if (_isActionBusy) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!_armOrConfirm(status.storageValue)) return;
+
+    setState(() => _pendingAction = status.storageValue);
+    try {
+      await widget.repository.updateEntryStatus(
+        transactionReference: _transaction.reference,
+        status: status,
+      );
+      if (!mounted) return;
+      Navigator.pop(
+        context,
+        _LoanDebtDetailsResult.status(_transaction.reference, status),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(context.l10nTextRead('Could not update loan or debt')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      setState(() => _pendingAction = null);
+    }
+  }
+
   @override
   void dispose() {
+    _actionDisarmTimer?.cancel();
     _nameController.dispose();
     _nameFocus.dispose();
     super.dispose();
@@ -1464,6 +1589,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
         : context.l10nText('Loan details');
     final status =
         _isBorrowed ? context.l10nText('Borrowed') : context.l10nText('Lent');
+    final statusColor = _loanDebtStatusColor(_item.status, _directionColor);
     final subtitle =
         _needsPerson ? context.l10nText('Needs a person') : _item.personName;
 
@@ -1502,7 +1628,19 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  _TinyStatusPill(label: status, color: _directionColor),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _TinyStatusPill(label: status, color: _directionColor),
+                      if (!_item.isActive) ...[
+                        const SizedBox(height: 5),
+                        _TinyStatusPill(
+                          label: _loanDebtStatusLabel(context, _item.status),
+                          color: statusColor,
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
               const SizedBox(height: 5),
@@ -1522,7 +1660,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                 child: Text(
                   _formatEtb(_item.amount, context),
                   style: theme.textTheme.headlineSmall?.copyWith(
-                    color: _directionColor,
+                    color: statusColor,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1536,9 +1674,12 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
 
   Widget _buildLinkedPersonPanel(BuildContext context) {
     final theme = Theme.of(context);
-    final status = _isBorrowed
-        ? context.l10nText('You owe')
-        : context.l10nText('They owe you');
+    final status = _item.isActive
+        ? (_isBorrowed
+            ? context.l10nText('You owe')
+            : context.l10nText('They owe you'))
+        : _loanDebtStatusLabel(context, _item.status);
+    final statusColor = _loanDebtStatusColor(_item.status, _directionColor);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1576,7 +1717,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
             ),
           ),
           const SizedBox(width: 10),
-          _TinyStatusPill(label: status, color: _directionColor),
+          _TinyStatusPill(label: status, color: statusColor),
         ],
       ),
     );
@@ -1853,6 +1994,73 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     );
   }
 
+  Widget _buildActionsSection(BuildContext context) {
+    if (_needsPerson) return const SizedBox.shrink();
+    final settleArmed = _armedAction == LoanDebtStatus.settled.storageValue;
+    final forgiveArmed = _armedAction == LoanDebtStatus.forgiven.storageValue;
+    final unlinkArmed = _armedAction == 'unlink';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.l10nText('Actions'),
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w900,
+              ),
+        ),
+        const SizedBox(height: 10),
+        if (_item.isActive) ...[
+          _LoanDebtActionTile(
+            icon: AppIcons.check_circle_rounded,
+            title: settleArmed
+                ? context.l10nText('Tap again to mark settled')
+                : context.l10nText('Mark as settled'),
+            subtitle: context.l10nText('Paid back and no longer open.'),
+            color: AppColors.incomeSuccess,
+            isLoading: _pendingAction == LoanDebtStatus.settled.storageValue,
+            enabled: !_isActionBusy,
+            armed: settleArmed,
+            onTap: () => _resolveLoanDebt(LoanDebtStatus.settled),
+          ),
+          const SizedBox(height: 10),
+          _LoanDebtActionTile(
+            icon: AppIcons.favorite_rounded,
+            title: forgiveArmed
+                ? (_isBorrowed
+                    ? context.l10nText('Tap again to mark forgiven')
+                    : context.l10nText('Tap again to forgive'))
+                : (_isBorrowed
+                    ? context.l10nText('Mark debt forgiven')
+                    : context.l10nText('Forgive loan')),
+            subtitle: _isBorrowed
+                ? context.l10nText('The other person waived repayment.')
+                : context.l10nText('Close it without repayment.'),
+            color: AppColors.red,
+            isLoading: _pendingAction == LoanDebtStatus.forgiven.storageValue,
+            enabled: !_isActionBusy,
+            armed: forgiveArmed,
+            onTap: () => _resolveLoanDebt(LoanDebtStatus.forgiven),
+          ),
+          const SizedBox(height: 10),
+        ],
+        _LoanDebtActionTile(
+          icon: AppIcons.close_rounded,
+          title: unlinkArmed
+              ? context.l10nText('Tap again to unlink')
+              : context.l10nText('Unlink person'),
+          subtitle: context.l10nText('Move this back to Needs a person.'),
+          color: AppColors.primaryLight,
+          isLoading: _pendingAction == 'unlink',
+          enabled: !_isActionBusy,
+          armed: unlinkArmed,
+          onTap: _unlinkPerson,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.read<TransactionProvider>();
@@ -1895,6 +2103,10 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                   _buildLinkedPersonPanel(context),
                 const SizedBox(height: 14),
                 _buildDetailRows(context, provider),
+                if (!_needsPerson) ...[
+                  const SizedBox(height: 14),
+                  _buildActionsSection(context),
+                ],
               ],
             ),
           ),
@@ -1960,6 +2172,110 @@ class _LoanDebtDetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LoanDebtActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final bool isLoading;
+  final bool enabled;
+  final bool armed;
+  final VoidCallback onTap;
+
+  const _LoanDebtActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.isLoading,
+    required this.enabled,
+    this.armed = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final effectiveColor =
+        enabled || isLoading ? color : AppColors.textTertiary(context);
+    final tileColor =
+        armed ? color.withValues(alpha: 0.10) : AppColors.surfaceColor(context);
+    final borderColor =
+        armed ? color.withValues(alpha: 0.65) : AppColors.borderColor(context);
+    final iconBackground =
+        armed ? color : effectiveColor.withValues(alpha: 0.12);
+    final iconColor = armed ? AppColors.white : effectiveColor;
+    final titleColor = armed ? color : AppColors.textPrimary(context);
+
+    return Material(
+      color: tileColor,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: enabled && !isLoading ? onTap : null,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: isLoading
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: iconColor,
+                          ),
+                        )
+                      : Icon(icon, color: iconColor, size: 20),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: titleColor,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2062,8 +2378,10 @@ class _LoanDebtPersonDetailPage extends StatefulWidget {
 }
 
 class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
+  late List<_LoanDebtItem> _items;
   _LoanDebtTransactionFilter _transactionFilter =
       _LoanDebtTransactionFilter.all;
+  _LoanDebtStatusFilter _statusFilter = _LoanDebtStatusFilter.all;
   int? _selectedBankId;
   double? _minAmount;
   double? _maxAmount;
@@ -2072,6 +2390,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
 
   _LoanDebtFilterSelection get _filterSelection => _LoanDebtFilterSelection(
         transactionFilter: _transactionFilter,
+        statusFilter: _statusFilter,
         personName: null,
         bankId: _selectedBankId,
         minAmount: _minAmount,
@@ -2079,6 +2398,12 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
         startDate: _startDate,
         endDate: _endDate,
       );
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List<_LoanDebtItem>.from(widget.items);
+  }
 
   List<int> _bankIdsForItems(List<_LoanDebtItem> items) {
     final bankIds = <int>{};
@@ -2097,7 +2422,8 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _TransactionFilterSheet(
         selectedTransactionFilter: _transactionFilter,
-        bankIds: _bankIdsForItems(widget.items),
+        selectedStatusFilter: _statusFilter,
+        bankIds: _bankIdsForItems(_items),
         selectedBankId: _selectedBankId,
         minAmount: _minAmount,
         maxAmount: _maxAmount,
@@ -2108,6 +2434,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
     if (!mounted || selected == null) return;
     setState(() {
       _transactionFilter = selected.transactionFilter;
+      _statusFilter = selected.statusFilter;
       _selectedBankId = selected.bankId;
       _minAmount = selected.minAmount;
       _maxAmount = selected.maxAmount;
@@ -2117,7 +2444,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
   }
 
   Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
-    await showModalBottomSheet<bool>(
+    final result = await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2127,33 +2454,65 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
         repository: widget.repository,
       ),
     );
+    if (!mounted || result == null) return;
+    setState(() {
+      if (result.unlinked) {
+        _items = _items
+            .where(
+              (candidate) =>
+                  candidate.transaction.reference !=
+                  result.transactionReference,
+            )
+            .toList(growable: false);
+        return;
+      }
+
+      final status = result.status;
+      if (status == null) return;
+      _items = _items
+          .map(
+            (candidate) =>
+                candidate.transaction.reference == result.transactionReference
+                    ? _loanDebtItemWithStatus(candidate, status)
+                    : candidate,
+          )
+          .toList(growable: false);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final person = widget.person;
-    final items = widget.items;
+    final items = _items;
     final filteredItems = _filteredLoanDebtItems(
       items,
       _transactionFilter,
+      statusFilter: _statusFilter,
       bankId: _selectedBankId,
       minAmount: _minAmount,
       maxAmount: _maxAmount,
       startDate: _startDate,
       endDate: _endDate,
     );
-    final lentTotal = items
+    final activeItems = items.where((item) => item.isActive);
+    final lentTotal = activeItems
         .where((item) => item.direction == LoanDebtDirection.lent)
         .fold<double>(0, (total, item) => total + item.amount);
-    final borrowedTotal = items
+    final borrowedTotal = activeItems
         .where((item) => item.direction == LoanDebtDirection.borrowed)
         .fold<double>(0, (total, item) => total + item.amount);
-    final isOwedToYou = person.net >= 0;
-    final color = isOwedToYou ? AppColors.incomeSuccess : AppColors.red;
-    final statusLabel = isOwedToYou
-        ? context.l10nText('They owe you')
-        : context.l10nText('You owe');
+    final net = lentTotal - borrowedTotal;
+    final hasOpenBalance = net.abs() > 0.005;
+    final isOwedToYou = net >= 0;
+    final color = !hasOpenBalance
+        ? AppColors.blue
+        : (isOwedToYou ? AppColors.incomeSuccess : AppColors.red);
+    final statusLabel = !hasOpenBalance
+        ? context.l10nText('Settled')
+        : (isOwedToYou
+            ? context.l10nText('They owe you')
+            : context.l10nText('You owe'));
 
     return Scaffold(
       backgroundColor: AppColors.background(context),
@@ -2210,7 +2569,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            _formatEtb(person.net.abs(), context),
+                            _formatEtb(net.abs(), context),
                             style: theme.textTheme.headlineSmall?.copyWith(
                               color: color,
                               fontWeight: FontWeight.w900,
@@ -2342,6 +2701,8 @@ class _PersonDetailMetric extends StatelessWidget {
 
 class _TransactionFilterSheet extends StatefulWidget {
   final _LoanDebtTransactionFilter selectedTransactionFilter;
+  final _LoanDebtStatusFilter selectedStatusFilter;
+  final bool showStatusFilter;
   final String? selectedPerson;
   final List<_LoanDebtPersonSummary> people;
   final List<int> bankIds;
@@ -2353,6 +2714,8 @@ class _TransactionFilterSheet extends StatefulWidget {
 
   const _TransactionFilterSheet({
     required this.selectedTransactionFilter,
+    this.selectedStatusFilter = _LoanDebtStatusFilter.all,
+    this.showStatusFilter = true,
     this.selectedPerson,
     this.people = const <_LoanDebtPersonSummary>[],
     this.bankIds = const <int>[],
@@ -2370,6 +2733,7 @@ class _TransactionFilterSheet extends StatefulWidget {
 
 class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
   late _LoanDebtTransactionFilter _selectedTransactionFilter;
+  late _LoanDebtStatusFilter _selectedStatusFilter;
   late String? _selectedPerson;
   late int? _selectedBankId;
   late final TextEditingController _minAmountController;
@@ -2382,6 +2746,7 @@ class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
   void initState() {
     super.initState();
     _selectedTransactionFilter = widget.selectedTransactionFilter;
+    _selectedStatusFilter = widget.selectedStatusFilter;
     _selectedPerson = widget.selectedPerson;
     _selectedBankId = widget.selectedBankId;
     _minAmountController = TextEditingController(
@@ -2404,6 +2769,7 @@ class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
   void _clearAll() {
     setState(() {
       _selectedTransactionFilter = _LoanDebtTransactionFilter.all;
+      _selectedStatusFilter = _LoanDebtStatusFilter.all;
       _selectedPerson = null;
       _selectedBankId = null;
       _minAmountController.clear();
@@ -2434,6 +2800,7 @@ class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
     Navigator.of(context).pop(
       _LoanDebtFilterSelection(
         transactionFilter: _selectedTransactionFilter,
+        statusFilter: _selectedStatusFilter,
         personName: _selectedPerson,
         bankId: _selectedBankId,
         minAmount: minAmount,
@@ -2542,6 +2909,12 @@ class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
       _LoanDebtTransactionFilter.lent,
       _LoanDebtTransactionFilter.borrowed,
     ];
+    final statusOptions = <_LoanDebtStatusFilter>[
+      _LoanDebtStatusFilter.all,
+      _LoanDebtStatusFilter.active,
+      _LoanDebtStatusFilter.settled,
+      _LoanDebtStatusFilter.forgiven,
+    ];
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
     final navBarPadding = MediaQuery.of(context).padding.bottom;
 
@@ -2617,6 +2990,25 @@ class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
                         ),
                     ],
                   ),
+                  if (widget.showStatusFilter) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('STATUS'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final option in statusOptions)
+                          _LoanDebtFilterChip(
+                            label: _statusFilterLabel(context, option),
+                            selected: option == _selectedStatusFilter,
+                            onTap: () => setState(
+                              () => _selectedStatusFilter = option,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                   if (widget.people.isNotEmpty) ...[
                     const SizedBox(height: 20),
                     _sectionLabel('PEOPLE'),
@@ -3048,10 +3440,12 @@ class _LoanDebtDashboard {
         direction: direction,
       );
 
-      if (direction == LoanDebtDirection.borrowed) {
-        totalBorrowed += transaction.amount.abs();
-      } else {
-        totalLent += transaction.amount.abs();
+      if (item.isActive) {
+        if (direction == LoanDebtDirection.borrowed) {
+          totalBorrowed += transaction.amount.abs();
+        } else {
+          totalLent += transaction.amount.abs();
+        }
       }
 
       if (item.hasPerson) {
@@ -3076,10 +3470,12 @@ class _LoanDebtDashboard {
         () => _MutablePersonSummary(item.personName),
       );
       summary.transactionCount += 1;
-      if (item.direction == LoanDebtDirection.lent) {
-        summary.net += item.amount;
-      } else {
-        summary.net -= item.amount;
+      if (item.isActive) {
+        if (item.direction == LoanDebtDirection.lent) {
+          summary.net += item.amount;
+        } else {
+          summary.net -= item.amount;
+        }
       }
     }
 
@@ -3092,7 +3488,11 @@ class _LoanDebtDashboard {
           ),
         )
         .toList(growable: false)
-      ..sort((a, b) => b.net.abs().compareTo(a.net.abs()));
+      ..sort((a, b) {
+        final netComparison = b.net.abs().compareTo(a.net.abs());
+        if (netComparison != 0) return netComparison;
+        return b.transactionCount.compareTo(a.transactionCount);
+      });
 
     return _LoanDebtDashboard(
       assignedItems: assignedItems,
@@ -3118,6 +3518,19 @@ class _LoanDebtItem {
   double get amount => transaction.amount.abs();
   bool get hasPerson => personName.trim().isNotEmpty;
   String get personName => entry?.personName.trim() ?? '';
+  LoanDebtStatus get status => entry?.status ?? LoanDebtStatus.active;
+  bool get isActive => status == LoanDebtStatus.active;
+
+  _LoanDebtItem copyWith({
+    LoanDebtEntry? entry,
+    LoanDebtDirection? direction,
+  }) {
+    return _LoanDebtItem(
+      transaction: transaction,
+      entry: entry ?? this.entry,
+      direction: direction ?? this.direction,
+    );
+  }
 
   int get sortTime {
     final parsed = DateTime.tryParse(transaction.time ?? '');
@@ -3175,6 +3588,7 @@ String _formatEtb(double amount, BuildContext context) {
 List<_LoanDebtItem> _filteredLoanDebtItems(
   List<_LoanDebtItem> items,
   _LoanDebtTransactionFilter filter, {
+  _LoanDebtStatusFilter statusFilter = _LoanDebtStatusFilter.all,
   int? bankId,
   double? minAmount,
   double? maxAmount,
@@ -3197,6 +3611,17 @@ List<_LoanDebtItem> _filteredLoanDebtItems(
         item.direction != LoanDebtDirection.borrowed) {
       return false;
     }
+    if (statusFilter == _LoanDebtStatusFilter.active && !item.isActive) {
+      return false;
+    }
+    if (statusFilter == _LoanDebtStatusFilter.settled &&
+        item.status != LoanDebtStatus.settled) {
+      return false;
+    }
+    if (statusFilter == _LoanDebtStatusFilter.forgiven &&
+        item.status != LoanDebtStatus.forgiven) {
+      return false;
+    }
     if (bankId != null && item.transaction.bankId != bankId) return false;
     if (minAmount != null && item.amount < minAmount) return false;
     if (maxAmount != null && item.amount > maxAmount) return false;
@@ -3209,6 +3634,27 @@ List<_LoanDebtItem> _filteredLoanDebtItems(
     }
     return true;
   }).toList(growable: false);
+}
+
+_LoanDebtItem _loanDebtItemWithStatus(
+  _LoanDebtItem item,
+  LoanDebtStatus status,
+) {
+  final entry = item.entry;
+  if (entry == null) return item;
+  final now = DateTime.now();
+  return item.copyWith(
+    entry: LoanDebtEntry(
+      id: entry.id,
+      transactionReference: entry.transactionReference,
+      personName: entry.personName,
+      direction: entry.direction,
+      status: status,
+      resolvedAt: status == LoanDebtStatus.active ? null : now,
+      createdAt: entry.createdAt,
+      updatedAt: now,
+    ),
+  );
 }
 
 String _formatEtbCompact(double amount, BuildContext context) {
@@ -3249,5 +3695,43 @@ String _transactionFilterLabel(
       return context.l10nText('Lent');
     case _LoanDebtTransactionFilter.borrowed:
       return context.l10nText('Borrowed');
+  }
+}
+
+String _statusFilterLabel(
+  BuildContext context,
+  _LoanDebtStatusFilter filter,
+) {
+  switch (filter) {
+    case _LoanDebtStatusFilter.all:
+      return context.l10nText('All statuses');
+    case _LoanDebtStatusFilter.active:
+      return context.l10nText('Active');
+    case _LoanDebtStatusFilter.settled:
+      return context.l10nText('Settled');
+    case _LoanDebtStatusFilter.forgiven:
+      return context.l10nText('Forgiven');
+  }
+}
+
+String _loanDebtStatusLabel(BuildContext context, LoanDebtStatus status) {
+  switch (status) {
+    case LoanDebtStatus.active:
+      return context.l10nText('Active');
+    case LoanDebtStatus.settled:
+      return context.l10nText('Settled');
+    case LoanDebtStatus.forgiven:
+      return context.l10nText('Forgiven');
+  }
+}
+
+Color _loanDebtStatusColor(LoanDebtStatus status, Color activeColor) {
+  switch (status) {
+    case LoanDebtStatus.active:
+      return activeColor;
+    case LoanDebtStatus.settled:
+      return AppColors.blue;
+    case LoanDebtStatus.forgiven:
+      return AppColors.amber;
   }
 }
