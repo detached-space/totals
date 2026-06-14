@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -43,11 +44,31 @@ enum _LoanDebtTransactionFilter { all, lent, borrowed }
 class _LoanDebtFilterSelection {
   final _LoanDebtTransactionFilter transactionFilter;
   final String? personName;
+  final int? bankId;
+  final double? minAmount;
+  final double? maxAmount;
+  final DateTime? startDate;
+  final DateTime? endDate;
 
   const _LoanDebtFilterSelection({
     required this.transactionFilter,
     required this.personName,
+    this.bankId,
+    this.minAmount,
+    this.maxAmount,
+    this.startDate,
+    this.endDate,
   });
+
+  int get activeCount {
+    var count = 0;
+    if (transactionFilter != _LoanDebtTransactionFilter.all) count++;
+    if (personName?.trim().isNotEmpty == true) count++;
+    if (bankId != null) count++;
+    if (minAmount != null || maxAmount != null) count++;
+    if (startDate != null || endDate != null) count++;
+    return count;
+  }
 }
 
 class _LoansPageState extends State<LoansPage> {
@@ -56,6 +77,18 @@ class _LoansPageState extends State<LoansPage> {
   String? _selectedPerson;
   _LoanDebtTransactionFilter _transactionFilter =
       _LoanDebtTransactionFilter.all;
+  int? _selectedBankId;
+  double? _minAmount;
+  double? _maxAmount;
+  DateTime? _startDate;
+  DateTime? _endDate;
+  _LoanDebtTransactionFilter _unassignedTransactionFilter =
+      _LoanDebtTransactionFilter.all;
+  int? _unassignedBankId;
+  double? _unassignedMinAmount;
+  double? _unassignedMaxAmount;
+  DateTime? _unassignedStartDate;
+  DateTime? _unassignedEndDate;
 
   @override
   void initState() {
@@ -70,11 +103,51 @@ class _LoansPageState extends State<LoansPage> {
   }
 
   List<_LoanDebtItem> _filterItems(List<_LoanDebtItem> items) {
-    return _filteredLoanDebtItems(items, _transactionFilter);
+    return _filteredLoanDebtItems(
+      items,
+      _transactionFilter,
+      bankId: _selectedBankId,
+      minAmount: _minAmount,
+      maxAmount: _maxAmount,
+      startDate: _startDate,
+      endDate: _endDate,
+    );
+  }
+
+  _LoanDebtFilterSelection get _assignedFilterSelection =>
+      _LoanDebtFilterSelection(
+        transactionFilter: _transactionFilter,
+        personName: _selectedPerson,
+        bankId: _selectedBankId,
+        minAmount: _minAmount,
+        maxAmount: _maxAmount,
+        startDate: _startDate,
+        endDate: _endDate,
+      );
+
+  _LoanDebtFilterSelection get _unassignedFilterSelection =>
+      _LoanDebtFilterSelection(
+        transactionFilter: _unassignedTransactionFilter,
+        personName: null,
+        bankId: _unassignedBankId,
+        minAmount: _unassignedMinAmount,
+        maxAmount: _unassignedMaxAmount,
+        startDate: _unassignedStartDate,
+        endDate: _unassignedEndDate,
+      );
+
+  List<int> _bankIdsForItems(List<_LoanDebtItem> items) {
+    final bankIds = <int>{};
+    for (final item in items) {
+      final bankId = item.transaction.bankId;
+      if (bankId != null) bankIds.add(bankId);
+    }
+    return bankIds.toList()..sort();
   }
 
   Future<void> _openTransactionFilterSheet({
     required List<_LoanDebtPersonSummary> people,
+    required List<int> bankIds,
   }) async {
     final selected = await showModalBottomSheet<_LoanDebtFilterSelection>(
       context: context,
@@ -85,12 +158,52 @@ class _LoansPageState extends State<LoansPage> {
         selectedTransactionFilter: _transactionFilter,
         selectedPerson: _selectedPerson,
         people: people,
+        bankIds: bankIds,
+        selectedBankId: _selectedBankId,
+        minAmount: _minAmount,
+        maxAmount: _maxAmount,
+        startDate: _startDate,
+        endDate: _endDate,
       ),
     );
     if (!mounted || selected == null) return;
     setState(() {
       _transactionFilter = selected.transactionFilter;
       _selectedPerson = selected.personName;
+      _selectedBankId = selected.bankId;
+      _minAmount = selected.minAmount;
+      _maxAmount = selected.maxAmount;
+      _startDate = selected.startDate;
+      _endDate = selected.endDate;
+    });
+  }
+
+  Future<void> _openUnassignedTransactionFilterSheet({
+    required List<int> bankIds,
+  }) async {
+    final selected = await showModalBottomSheet<_LoanDebtFilterSelection>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _TransactionFilterSheet(
+        selectedTransactionFilter: _unassignedTransactionFilter,
+        bankIds: bankIds,
+        selectedBankId: _unassignedBankId,
+        minAmount: _unassignedMinAmount,
+        maxAmount: _unassignedMaxAmount,
+        startDate: _unassignedStartDate,
+        endDate: _unassignedEndDate,
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _unassignedTransactionFilter = selected.transactionFilter;
+      _unassignedBankId = selected.bankId;
+      _unassignedMinAmount = selected.minAmount;
+      _unassignedMaxAmount = selected.maxAmount;
+      _unassignedStartDate = selected.startDate;
+      _unassignedEndDate = selected.endDate;
     });
   }
 
@@ -104,9 +217,25 @@ class _LoansPageState extends State<LoansPage> {
         builder: (_) => _LoanDebtPersonDetailPage(
           person: person,
           items: items,
+          repository: _repository,
         ),
       ),
     );
+  }
+
+  Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _LoanDebtDetailsSheet(
+        item: item,
+        repository: _repository,
+      ),
+    );
+    if (!mounted) return;
+    if (saved == true) _refreshEntries();
   }
 
   @override
@@ -133,6 +262,18 @@ class _LoansPageState extends State<LoansPage> {
                     .where((item) => item.personName == selectedPerson)
                     .toList(growable: false);
             final filteredVisibleItems = _filterItems(visibleItems);
+            final filteredUnassignedItems = _filteredLoanDebtItems(
+              dashboard.unassignedItems,
+              _unassignedTransactionFilter,
+              bankId: _unassignedBankId,
+              minAmount: _unassignedMinAmount,
+              maxAmount: _unassignedMaxAmount,
+              startDate: _unassignedStartDate,
+              endDate: _unassignedEndDate,
+            );
+            final assignedBankIds = _bankIdsForItems(dashboard.assignedItems);
+            final unassignedBankIds =
+                _bankIdsForItems(dashboard.unassignedItems);
 
             return RefreshIndicator(
               onRefresh: () async {
@@ -172,13 +313,11 @@ class _LoansPageState extends State<LoansPage> {
                       title: context.l10nText('Transactions'),
                       subtitle: selectedPerson ??
                           context.l10nText('Linked loans and debts'),
-                      filterLabel: _loanDebtFilterSummaryLabel(
-                        context,
-                        transactionFilter: _transactionFilter,
-                        personName: selectedPerson,
+                      activeFilterCount: _assignedFilterSelection.activeCount,
+                      onFilterTap: () => _openTransactionFilterSheet(
+                        people: people,
+                        bankIds: assignedBankIds,
                       ),
-                      onFilterTap: () =>
-                          _openTransactionFilterSheet(people: people),
                     ),
                     const SizedBox(height: 10),
                     if (filteredVisibleItems.isEmpty)
@@ -191,30 +330,38 @@ class _LoansPageState extends State<LoansPage> {
                       )
                     else
                       for (final item in filteredVisibleItems)
-                        _LoanDebtTransactionTile(item: item),
+                        _LoanDebtTransactionTile(
+                          item: item,
+                          onTap: () => _openLoanDebtDetailsSheet(item),
+                        ),
                     if (dashboard.unassignedItems.isNotEmpty &&
                         selectedPerson == null) ...[
                       const SizedBox(height: 18),
-                      _SectionHeader(
-                        title: context.l10nText('Needs a person'),
-                        subtitle: context.l10nText(
-                          'Pick who this loan or debt belongs to',
+                      _TransactionsHeader(
+                        title: context.l10nText('Unlinked debts and loans'),
+                        subtitle: context.l10nText('Needs a person'),
+                        activeFilterCount:
+                            _unassignedFilterSelection.activeCount,
+                        onFilterTap: () =>
+                            _openUnassignedTransactionFilterSheet(
+                          bankIds: unassignedBankIds,
                         ),
                       ),
                       const SizedBox(height: 10),
-                      for (final item in dashboard.unassignedItems)
-                        _UnassignedLoanDebtTile(
-                          item: item,
-                          onTap: () async {
-                            final saved = await showLoanDebtPersonSheet(
-                              context: context,
-                              transaction: item.transaction,
-                              repository: _repository,
-                            );
-                            if (!mounted) return;
-                            if (saved) _refreshEntries();
-                          },
-                        ),
+                      if (filteredUnassignedItems.isEmpty)
+                        _EmptyPanel(
+                          icon: AppIcons.filter_list,
+                          title: context.l10nText('No matching transactions'),
+                          subtitle: context.l10nText(
+                            'Change the filter to see other unlinked debts and loans.',
+                          ),
+                        )
+                      else
+                        for (final item in filteredUnassignedItems)
+                          _UnassignedLoanDebtTile(
+                            item: item,
+                            onTap: () => _openLoanDebtDetailsSheet(item),
+                          ),
                     ],
                   ] else
                     _EmptyPanel(
@@ -580,12 +727,7 @@ class _LoansHeader extends StatelessWidget {
           child: IconButton(
             onPressed: () => Navigator.pop(context),
             style: IconButton.styleFrom(
-              backgroundColor: AppColors.cardColor(context),
               foregroundColor: AppColors.textPrimary(context),
-              side: BorderSide(color: AppColors.borderColor(context)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
             ),
             icon: const Icon(AppIcons.arrow_back_rounded, size: 20),
           ),
@@ -618,12 +760,7 @@ class _LoansHeader extends StatelessWidget {
           child: IconButton(
             onPressed: isRefreshing ? null : onRefresh,
             style: IconButton.styleFrom(
-              backgroundColor: AppColors.cardColor(context),
               foregroundColor: AppColors.textPrimary(context),
-              side: BorderSide(color: AppColors.borderColor(context)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
             ),
             icon: isRefreshing
                 ? const SizedBox(
@@ -960,13 +1097,13 @@ class _TinyStatusPill extends StatelessWidget {
 class _TransactionsHeader extends StatelessWidget {
   final String title;
   final String subtitle;
-  final String filterLabel;
+  final int activeFilterCount;
   final VoidCallback onFilterTap;
 
   const _TransactionsHeader({
     required this.title,
     required this.subtitle,
-    required this.filterLabel,
+    required this.activeFilterCount,
     required this.onFilterTap,
   });
 
@@ -1003,58 +1140,105 @@ class _TransactionsHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        InkWell(
+        _LoanDebtFilterActionButton(
           onTap: onFilterTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            height: 38,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: AppColors.cardColor(context),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.borderColor(context)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  AppIcons.filter_list,
-                  color: AppColors.primaryLight,
-                  size: 17,
-                ),
-                const SizedBox(width: 6),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 72),
-                  child: Text(
-                    filterLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: AppColors.textPrimary(context),
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          activeFilterCount: activeFilterCount,
         ),
       ],
     );
   }
 }
 
+class _LoanDebtFilterActionButton extends StatelessWidget {
+  final VoidCallback onTap;
+  final int activeFilterCount;
+
+  const _LoanDebtFilterActionButton({
+    required this.onTap,
+    this.activeFilterCount = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 44.0;
+    final hasFilters = activeFilterCount > 0;
+    const badgeSize = size <= 40 ? 16.0 : 18.0;
+    const badgeOffset = size <= 40 ? -3.0 : -4.0;
+    const iconSize = size <= 40 ? 18.0 : 22.0;
+    const borderRadius = size <= 40 ? 9.0 : 10.0;
+    const badgeFontSize = size <= 40 ? 9.0 : 10.0;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: hasFilters
+                  ? AppColors.primaryDark.withValues(alpha: 0.1)
+                  : AppColors.cardColor(context),
+              borderRadius: BorderRadius.circular(borderRadius),
+              border: Border.all(
+                color: hasFilters
+                    ? AppColors.primaryDark
+                    : AppColors.borderColor(context),
+              ),
+            ),
+            child: Icon(
+              AppIcons.filter_list,
+              color: hasFilters
+                  ? AppColors.primaryDark
+                  : AppColors.textSecondary(context),
+              size: iconSize,
+            ),
+          ),
+          if (hasFilters)
+            Positioned(
+              top: badgeOffset,
+              right: badgeOffset,
+              child: Container(
+                width: badgeSize,
+                height: badgeSize,
+                decoration: const BoxDecoration(
+                  color: AppColors.primaryDark,
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '$activeFilterCount',
+                    style: const TextStyle(
+                      color: AppColors.white,
+                      fontSize: badgeFontSize,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LoanDebtTransactionTile extends StatelessWidget {
   final _LoanDebtItem item;
+  final VoidCallback onTap;
 
-  const _LoanDebtTransactionTile({required this.item});
+  const _LoanDebtTransactionTile({
+    required this.item,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return _LoanDebtBaseTile(
       item: item,
       personName: item.personName,
-      onTap: null,
+      onTap: onTap,
     );
   }
 }
@@ -1072,7 +1256,7 @@ class _UnassignedLoanDebtTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return _LoanDebtBaseTile(
       item: item,
-      personName: context.l10nText('Choose a person'),
+      personName: context.l10nText('Needs a person'),
       onTap: onTap,
     );
   }
@@ -1177,6 +1361,609 @@ class _LoanDebtBaseTile extends StatelessWidget {
   }
 }
 
+class _LoanDebtDetailsSheet extends StatefulWidget {
+  final _LoanDebtItem item;
+  final LoanDebtRepository repository;
+
+  const _LoanDebtDetailsSheet({
+    required this.item,
+    required this.repository,
+  });
+
+  @override
+  State<_LoanDebtDetailsSheet> createState() => _LoanDebtDetailsSheetState();
+}
+
+class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
+  final TextEditingController _nameController = TextEditingController();
+  final FocusNode _nameFocus = FocusNode();
+  List<String> _knownPeople = const [];
+  bool _isLoadingPeople = true;
+  bool _isSavingPerson = false;
+  String? _selectedName;
+
+  _LoanDebtItem get _item => widget.item;
+  Transaction get _transaction => _item.transaction;
+  bool get _needsPerson => !_item.hasPerson;
+  bool get _isBorrowed => _item.direction == LoanDebtDirection.borrowed;
+  Color get _directionColor =>
+      _isBorrowed ? AppColors.red : AppColors.incomeSuccess;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_needsPerson) {
+      _loadKnownPeople();
+    } else {
+      _isLoadingPeople = false;
+    }
+  }
+
+  Future<void> _loadKnownPeople() async {
+    try {
+      final people = await widget.repository.getKnownPeople();
+      if (!mounted) return;
+      setState(() {
+        _knownPeople = people
+            .where((name) => name.trim().isNotEmpty)
+            .toList(growable: false);
+        _isLoadingPeople = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingPeople = false);
+    }
+  }
+
+  Future<void> _savePerson() async {
+    final personName = normalizeLoanDebtPersonName(_nameController.text);
+    if (personName.isEmpty || _isSavingPerson) {
+      _nameFocus.requestFocus();
+      return;
+    }
+
+    setState(() => _isSavingPerson = true);
+    try {
+      await widget.repository.upsertTransactionPerson(
+        transactionReference: _transaction.reference,
+        personName: personName,
+        direction: _item.direction,
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(context.l10nTextRead('Could not save person')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      setState(() => _isSavingPerson = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _nameFocus.dispose();
+    super.dispose();
+  }
+
+  String _dateTimeLabel(BuildContext context) {
+    final date = _item.dateLabel(context);
+    final time = _item.timeLabel(context);
+    if (time.trim().isEmpty) return date;
+    return '$date · $time';
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = _isBorrowed
+        ? context.l10nText('Debt details')
+        : context.l10nText('Loan details');
+    final status =
+        _isBorrowed ? context.l10nText('Borrowed') : context.l10nText('Lent');
+    final subtitle =
+        _needsPerson ? context.l10nText('Needs a person') : _item.personName;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: _directionColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(
+            AppIcons.debts,
+            color: _directionColor,
+            size: 24,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _TinyStatusPill(label: status, color: _directionColor),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary(context),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _formatEtb(_item.amount, context),
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: _directionColor,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLinkedPersonPanel(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = _isBorrowed
+        ? context.l10nText('You owe')
+        : context.l10nText('They owe you');
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Row(
+        children: [
+          _PersonAvatar(name: _item.personName, color: _directionColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  context.l10nText('Linked to'),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: AppColors.textSecondary(context),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _item.personName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          _TinyStatusPill(label: status, color: _directionColor),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPersonAssignmentSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = _isBorrowed
+        ? context.l10nText('Who lent you this?')
+        : context.l10nText('Who did you loan this to?');
+    final subtitle = _isBorrowed
+        ? context.l10nText('Choose who you took this money from.')
+        : context.l10nText('Choose who you gave this money to.');
+    final canSubmit =
+        normalizeLoanDebtPersonName(_nameController.text).isNotEmpty &&
+            !_isSavingPerson;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.amber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  AppIcons.person_outline,
+                  color: AppColors.amber,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_isLoadingPeople)
+            const LinearProgressIndicator(minHeight: 2)
+          else if (_knownPeople.isNotEmpty) ...[
+            SizedBox(
+              height: 42,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _knownPeople.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final name = _knownPeople[index];
+                  final selected =
+                      _selectedName?.toLowerCase() == name.toLowerCase();
+                  return ChoiceChip(
+                    label: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 160),
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() {
+                        _selectedName = name;
+                        _nameController.text = name;
+                      });
+                    },
+                    selectedColor:
+                        AppColors.primaryLight.withValues(alpha: 0.16),
+                    backgroundColor: AppColors.cardColor(context),
+                    side: BorderSide(
+                      color: selected
+                          ? AppColors.primaryLight
+                          : AppColors.borderColor(context),
+                    ),
+                    labelStyle: theme.textTheme.labelLarge?.copyWith(
+                      color: selected
+                          ? AppColors.primaryLight
+                          : AppColors.textPrimary(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          TextField(
+            controller: _nameController,
+            focusNode: _nameFocus,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            onChanged: (value) {
+              final normalized = normalizeLoanDebtPersonName(value);
+              setState(() {
+                _selectedName = normalized.isEmpty ? null : normalized;
+              });
+            },
+            onSubmitted: (_) => _savePerson(),
+            style: TextStyle(color: AppColors.textPrimary(context)),
+            decoration: InputDecoration(
+              labelText: context.l10nText('Name'),
+              hintText: context.l10nText('Enter a new name'),
+              prefixIcon: const Icon(AppIcons.person_outline),
+              filled: true,
+              fillColor: AppColors.cardColor(context),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: AppColors.borderColor(context)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: AppColors.borderColor(context)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: AppColors.primaryLight),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              onPressed: canSubmit ? _savePerson : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primaryLight,
+                foregroundColor: AppColors.white,
+                disabledBackgroundColor:
+                    AppColors.primaryLight.withValues(alpha: 0.35),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: _isSavingPerson
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
+                  : Text(context.l10nText('Save person')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRows(
+    BuildContext context,
+    TransactionProvider provider,
+  ) {
+    final rows = <_LoanDebtDetailRow>[];
+
+    void addRow({
+      required IconData icon,
+      required String label,
+      required String? value,
+    }) {
+      final trimmed = value?.trim();
+      if (trimmed == null || trimmed.isEmpty) return;
+      rows.add(
+        _LoanDebtDetailRow(
+          icon: icon,
+          label: label,
+          value: trimmed,
+        ),
+      );
+    }
+
+    addRow(
+      icon: AppIcons.account_balance,
+      label: context.l10nText('Bank'),
+      value: context.l10nText(provider.getBankName(_transaction.bankId)),
+    );
+    addRow(
+      icon: AppIcons.calendar_today_outlined,
+      label: context.l10nText('Date & Time'),
+      value: _dateTimeLabel(context),
+    );
+    addRow(
+      icon: AppIcons.category,
+      label: context.l10nText('Category'),
+      value: context.l10nText(
+        provider.categoryLabelForTransaction(
+          _transaction,
+          uncategorizedLabel: context.l10nText('Uncategorized'),
+        ),
+      ),
+    );
+    addRow(
+      icon: AppIcons.account_balance_wallet_outlined,
+      label: context.l10nText('Account'),
+      value: _transaction.accountNumber,
+    );
+    addRow(
+      icon: AppIcons.person_outline,
+      label: context.l10nText('Receiver'),
+      value: _transaction.receiver,
+    );
+    addRow(
+      icon: AppIcons.person_outline,
+      label: context.l10nText('Creditor'),
+      value: _transaction.creditor,
+    );
+    addRow(
+      icon: AppIcons.sms_outlined,
+      label: context.l10nText('Note'),
+      value: _transaction.note,
+    );
+    addRow(
+      icon: AppIcons.receipt_long_rounded,
+      label: context.l10nText('Reference'),
+      value: _transaction.reference,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++) ...[
+            rows[i],
+            if (i != rows.length - 1)
+              Divider(
+                height: 20,
+                color: AppColors.borderColor(context),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.read<TransactionProvider>();
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.cardColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border.all(color: AppColors.borderColor(context)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.borderColor(context),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _buildHeader(context),
+                const SizedBox(height: 18),
+                if (_needsPerson)
+                  _buildPersonAssignmentSection(context)
+                else
+                  _buildLinkedPersonPanel(context),
+                const SizedBox(height: 14),
+                _buildDetailRows(context, provider),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoanDebtDetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _LoanDebtDetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: AppColors.cardColor(context),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            icon,
+            size: 17,
+            color: AppColors.textSecondary(context),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: AppColors.textSecondary(context),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                value,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _PersonAvatar extends StatelessWidget {
   final String name;
   final Color color;
@@ -1261,10 +2048,12 @@ class _EmptyPanel extends StatelessWidget {
 class _LoanDebtPersonDetailPage extends StatefulWidget {
   final _LoanDebtPersonSummary person;
   final List<_LoanDebtItem> items;
+  final LoanDebtRepository repository;
 
   const _LoanDebtPersonDetailPage({
     required this.person,
     required this.items,
+    required this.repository,
   });
 
   @override
@@ -1275,6 +2064,30 @@ class _LoanDebtPersonDetailPage extends StatefulWidget {
 class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
   _LoanDebtTransactionFilter _transactionFilter =
       _LoanDebtTransactionFilter.all;
+  int? _selectedBankId;
+  double? _minAmount;
+  double? _maxAmount;
+  DateTime? _startDate;
+  DateTime? _endDate;
+
+  _LoanDebtFilterSelection get _filterSelection => _LoanDebtFilterSelection(
+        transactionFilter: _transactionFilter,
+        personName: null,
+        bankId: _selectedBankId,
+        minAmount: _minAmount,
+        maxAmount: _maxAmount,
+        startDate: _startDate,
+        endDate: _endDate,
+      );
+
+  List<int> _bankIdsForItems(List<_LoanDebtItem> items) {
+    final bankIds = <int>{};
+    for (final item in items) {
+      final bankId = item.transaction.bankId;
+      if (bankId != null) bankIds.add(bankId);
+    }
+    return bankIds.toList()..sort();
+  }
 
   Future<void> _openTransactionFilterSheet() async {
     final selected = await showModalBottomSheet<_LoanDebtFilterSelection>(
@@ -1284,10 +2097,36 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _TransactionFilterSheet(
         selectedTransactionFilter: _transactionFilter,
+        bankIds: _bankIdsForItems(widget.items),
+        selectedBankId: _selectedBankId,
+        minAmount: _minAmount,
+        maxAmount: _maxAmount,
+        startDate: _startDate,
+        endDate: _endDate,
       ),
     );
     if (!mounted || selected == null) return;
-    setState(() => _transactionFilter = selected.transactionFilter);
+    setState(() {
+      _transactionFilter = selected.transactionFilter;
+      _selectedBankId = selected.bankId;
+      _minAmount = selected.minAmount;
+      _maxAmount = selected.maxAmount;
+      _startDate = selected.startDate;
+      _endDate = selected.endDate;
+    });
+  }
+
+  Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
+    await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.black.withValues(alpha: 0.5),
+      builder: (_) => _LoanDebtDetailsSheet(
+        item: item,
+        repository: widget.repository,
+      ),
+    );
   }
 
   @override
@@ -1295,7 +2134,15 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
     final theme = Theme.of(context);
     final person = widget.person;
     final items = widget.items;
-    final filteredItems = _filteredLoanDebtItems(items, _transactionFilter);
+    final filteredItems = _filteredLoanDebtItems(
+      items,
+      _transactionFilter,
+      bankId: _selectedBankId,
+      minAmount: _minAmount,
+      maxAmount: _maxAmount,
+      startDate: _startDate,
+      endDate: _endDate,
+    );
     final lentTotal = items
         .where((item) => item.direction == LoanDebtDirection.lent)
         .fold<double>(0, (total, item) => total + item.amount);
@@ -1322,12 +2169,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
                   child: IconButton(
                     onPressed: () => Navigator.pop(context),
                     style: IconButton.styleFrom(
-                      backgroundColor: AppColors.cardColor(context),
                       foregroundColor: AppColors.textPrimary(context),
-                      side: BorderSide(color: AppColors.borderColor(context)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
                     ),
                     icon: const Icon(AppIcons.arrow_back_rounded, size: 20),
                   ),
@@ -1411,10 +2253,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
                 filteredItems.length,
                 items.length,
               ),
-              filterLabel: _transactionFilterLabel(
-                context,
-                _transactionFilter,
-              ),
+              activeFilterCount: _filterSelection.activeCount,
               onFilterTap: _openTransactionFilterSheet,
             ),
             const SizedBox(height: 10),
@@ -1428,7 +2267,10 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
               )
             else
               for (final item in filteredItems)
-                _LoanDebtTransactionTile(item: item),
+                _LoanDebtTransactionTile(
+                  item: item,
+                  onTap: () => _openLoanDebtDetailsSheet(item),
+                ),
           ],
         ),
       ),
@@ -1498,194 +2340,489 @@ class _PersonDetailMetric extends StatelessWidget {
   }
 }
 
-class _TransactionFilterSheet extends StatelessWidget {
+class _TransactionFilterSheet extends StatefulWidget {
   final _LoanDebtTransactionFilter selectedTransactionFilter;
   final String? selectedPerson;
   final List<_LoanDebtPersonSummary> people;
+  final List<int> bankIds;
+  final int? selectedBankId;
+  final double? minAmount;
+  final double? maxAmount;
+  final DateTime? startDate;
+  final DateTime? endDate;
 
   const _TransactionFilterSheet({
     required this.selectedTransactionFilter,
     this.selectedPerson,
     this.people = const <_LoanDebtPersonSummary>[],
+    this.bankIds = const <int>[],
+    this.selectedBankId,
+    this.minAmount,
+    this.maxAmount,
+    this.startDate,
+    this.endDate,
   });
 
   @override
+  State<_TransactionFilterSheet> createState() =>
+      _TransactionFilterSheetState();
+}
+
+class _TransactionFilterSheetState extends State<_TransactionFilterSheet> {
+  late _LoanDebtTransactionFilter _selectedTransactionFilter;
+  late String? _selectedPerson;
+  late int? _selectedBankId;
+  late final TextEditingController _minAmountController;
+  late final TextEditingController _maxAmountController;
+  String? _amountErrorText;
+  DateTime? _startDate;
+  DateTime? _endDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTransactionFilter = widget.selectedTransactionFilter;
+    _selectedPerson = widget.selectedPerson;
+    _selectedBankId = widget.selectedBankId;
+    _minAmountController = TextEditingController(
+      text: _formatAmountInput(widget.minAmount),
+    );
+    _maxAmountController = TextEditingController(
+      text: _formatAmountInput(widget.maxAmount),
+    );
+    _startDate = widget.startDate;
+    _endDate = widget.endDate;
+  }
+
+  @override
+  void dispose() {
+    _minAmountController.dispose();
+    _maxAmountController.dispose();
+    super.dispose();
+  }
+
+  void _clearAll() {
+    setState(() {
+      _selectedTransactionFilter = _LoanDebtTransactionFilter.all;
+      _selectedPerson = null;
+      _selectedBankId = null;
+      _minAmountController.clear();
+      _maxAmountController.clear();
+      _amountErrorText = null;
+      _startDate = null;
+      _endDate = null;
+    });
+  }
+
+  void _apply() {
+    final minRaw = _minAmountController.text;
+    final maxRaw = _maxAmountController.text;
+    final minAmount = _parseAmountInput(minRaw);
+    final maxAmount = _parseAmountInput(maxRaw);
+    final amountError = _buildAmountValidationMessage(
+      minRaw: minRaw,
+      maxRaw: maxRaw,
+      minAmount: minAmount,
+      maxAmount: maxAmount,
+    );
+
+    if (amountError != null) {
+      setState(() => _amountErrorText = amountError);
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _LoanDebtFilterSelection(
+        transactionFilter: _selectedTransactionFilter,
+        personName: _selectedPerson,
+        bankId: _selectedBankId,
+        minAmount: minAmount,
+        maxAmount: maxAmount,
+        startDate: _startDate,
+        endDate: _endDate,
+      ),
+    );
+  }
+
+  double? _parseAmountInput(String raw) {
+    final normalized = raw.replaceAll(',', '').trim();
+    if (normalized.isEmpty) return null;
+    return double.tryParse(normalized);
+  }
+
+  bool _hasInvalidAmountInput(String raw) {
+    final normalized = raw.replaceAll(',', '').trim();
+    return normalized.isNotEmpty && double.tryParse(normalized) == null;
+  }
+
+  String? _buildAmountValidationMessage({
+    required String minRaw,
+    required String maxRaw,
+    required double? minAmount,
+    required double? maxAmount,
+  }) {
+    if (_hasInvalidAmountInput(minRaw) || _hasInvalidAmountInput(maxRaw)) {
+      return 'Enter a valid amount';
+    }
+    if (minAmount != null && maxAmount != null && maxAmount < minAmount) {
+      return 'Maximum must be at least minimum.';
+    }
+    return null;
+  }
+
+  String _formatAmountInput(double? amount) {
+    if (amount == null) return '';
+    if (amount == amount.roundToDouble()) return amount.toStringAsFixed(0);
+    return amount
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  void _handleAmountChanged(String _) {
+    if (_amountErrorText == null) return;
+    final minRaw = _minAmountController.text;
+    final maxRaw = _maxAmountController.text;
+    final minAmount = _parseAmountInput(minRaw);
+    final maxAmount = _parseAmountInput(maxRaw);
+    setState(() {
+      _amountErrorText = _buildAmountValidationMessage(
+        minRaw: minRaw,
+        maxRaw: maxRaw,
+        minAmount: minAmount,
+        maxAmount: maxAmount,
+      );
+    });
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final initial = (isStart ? _startDate : _endDate) ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      builder: (ctx, child) {
+        final dark = AppColors.isDark(ctx);
+        return Theme(
+          data: Theme.of(ctx).copyWith(
+            colorScheme: dark
+                ? const ColorScheme.dark(
+                    primary: AppColors.primaryLight,
+                    onPrimary: AppColors.white,
+                    surface: AppColors.darkCard,
+                    onSurface: AppColors.white,
+                  )
+                : const ColorScheme.light(
+                    primary: AppColors.primaryDark,
+                    onPrimary: AppColors.white,
+                    surface: AppColors.white,
+                    onSurface: AppColors.slate900,
+                  ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isStart) {
+        _startDate = picked;
+      } else {
+        _endDate = picked;
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final provider = context.read<TransactionProvider>();
     final options = <_LoanDebtTransactionFilter>[
       _LoanDebtTransactionFilter.all,
       _LoanDebtTransactionFilter.lent,
       _LoanDebtTransactionFilter.borrowed,
     ];
+    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+    final navBarPadding = MediaQuery.of(context).padding.bottom;
 
     return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
       decoration: BoxDecoration(
         color: AppColors.cardColor(context),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: AppColors.borderColor(context)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.borderColor(context),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  context.l10nText('Filter transactions'),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary(context),
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: 14),
-                _FilterSectionLabel(label: context.l10nText('Direction')),
-                const SizedBox(height: 8),
-                for (final option in options)
-                  _TransactionFilterOption(
-                    option: option,
-                    selected: option == selectedTransactionFilter,
-                    onTap: () => Navigator.pop(
-                      context,
-                      _LoanDebtFilterSelection(
-                        transactionFilter: option,
-                        personName: selectedPerson,
-                      ),
-                    ),
-                  ),
-                if (people.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _FilterSectionLabel(label: context.l10nText('People')),
-                  const SizedBox(height: 8),
-                  _PersonFilterOption(
-                    label: context.l10nText('All people'),
-                    selected: selectedPerson == null,
-                    onTap: () => Navigator.pop(
-                      context,
-                      _LoanDebtFilterSelection(
-                        transactionFilter: selectedTransactionFilter,
-                        personName: null,
-                      ),
-                    ),
-                  ),
-                  for (final person in people)
-                    _PersonFilterOption(
-                      label: person.name,
-                      selected: selectedPerson == person.name,
-                      onTap: () => Navigator.pop(
-                        context,
-                        _LoanDebtFilterSelection(
-                          transactionFilter: selectedTransactionFilter,
-                          personName: person.name,
-                        ),
-                      ),
-                    ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterSectionLabel extends StatelessWidget {
-  final String label;
-
-  const _FilterSectionLabel({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: AppColors.textSecondary(context),
-            fontWeight: FontWeight.w900,
-          ),
-    );
-  }
-}
-
-class _TransactionFilterOption extends StatelessWidget {
-  final _LoanDebtTransactionFilter option;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TransactionFilterOption({
-    required this.option,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _transactionFilterColor(option);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: selected
-            ? color.withValues(alpha: 0.1)
-            : AppColors.surfaceColor(context),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.all(14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 10),
+            width: 36,
+            height: 4,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected ? color : AppColors.borderColor(context),
-              ),
+              color: AppColors.slate400,
+              borderRadius: BorderRadius.circular(2),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
             child: Row(
               children: [
-                Icon(_transactionFilterIcon(option), color: color, size: 20),
-                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    _transactionFilterLabel(context, option),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w800,
-                        ),
+                    context.l10nText('Filter Transactions'),
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                if (selected)
-                  Icon(
-                    AppIcons.check_rounded,
-                    color: color,
-                    size: 20,
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(
+                    AppIcons.close,
+                    color: AppColors.textSecondary(context),
                   ),
+                  splashRadius: 20,
+                ),
               ],
             ),
           ),
-        ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                12,
+                20,
+                16 + bottomPadding + navBarPadding,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionLabel('DIRECTION'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final option in options)
+                        _LoanDebtFilterChip(
+                          label: _transactionFilterLabel(context, option),
+                          selected: option == _selectedTransactionFilter,
+                          onTap: () => setState(
+                            () => _selectedTransactionFilter = option,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (widget.people.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('PEOPLE'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Transform.translate(
+                        offset: const Offset(-20, 0),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              _LoanDebtFilterChip(
+                                label: context.l10nText('All people'),
+                                selected: _selectedPerson == null,
+                                onTap: () =>
+                                    setState(() => _selectedPerson = null),
+                              ),
+                              for (final person in widget.people)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _LoanDebtFilterChip(
+                                    label: person.name,
+                                    selected: _selectedPerson == person.name,
+                                    onTap: () => setState(
+                                      () => _selectedPerson = person.name,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (widget.bankIds.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('BANK'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _LoanDebtFilterChip(
+                          label: context.l10nText('All Banks'),
+                          selected: _selectedBankId == null,
+                          onTap: () => setState(() => _selectedBankId = null),
+                        ),
+                        for (final bankId in widget.bankIds)
+                          _LoanDebtFilterChip(
+                            label: context.l10nText(
+                              provider.getBankShortName(bankId),
+                            ),
+                            selected: _selectedBankId == bankId,
+                            onTap: () =>
+                                setState(() => _selectedBankId = bankId),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  _sectionLabel('AMOUNT RANGE'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _LoanDebtAmountFilterField(
+                          controller: _minAmountController,
+                          hint: 'Min',
+                          hasError: _amountErrorText != null,
+                          onChanged: _handleAmountChanged,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _LoanDebtAmountFilterField(
+                          controller: _maxAmountController,
+                          hint: 'Max',
+                          hasError: _amountErrorText != null,
+                          onChanged: _handleAmountChanged,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_amountErrorText != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      context.l10nText(_amountErrorText!),
+                      style: const TextStyle(
+                        color: AppColors.red,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  _sectionLabel('DATE RANGE'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _LoanDebtDatePickerField(
+                          hint: 'Start date',
+                          value: _startDate == null
+                              ? null
+                              : AppDateFormat.monthDayMaybeYear(_startDate!),
+                          onTap: () => _pickDate(isStart: true),
+                          onClear: _startDate == null
+                              ? null
+                              : () => setState(() => _startDate = null),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _LoanDebtDatePickerField(
+                          hint: 'End date',
+                          value: _endDate == null
+                              ? null
+                              : AppDateFormat.monthDayMaybeYear(_endDate!),
+                          onTap: () => _pickDate(isStart: false),
+                          onClear: _endDate == null
+                              ? null
+                              : () => setState(() => _endDate = null),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _clearAll,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textSecondary(context),
+                            side: BorderSide(
+                              color: AppColors.borderColor(context),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            context.l10nText('Clear All'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: _apply,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primaryDark,
+                            foregroundColor: AppColors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            context.l10nText('Apply Filters'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Text(
+      context.l10nText(text),
+      style: TextStyle(
+        color: AppColors.textSecondary(context),
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.8,
       ),
     );
   }
 }
 
-class _PersonFilterOption extends StatelessWidget {
+class _LoanDebtFilterChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
-  const _PersonFilterOption({
+  const _LoanDebtFilterChip({
     required this.label,
     required this.selected,
     required this.onTap,
@@ -1693,49 +2830,160 @@ class _PersonFilterOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const color = AppColors.primaryLight;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primaryDark
+              : AppColors.surfaceColor(context),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? AppColors.primaryDark
+                : AppColors.borderColor(context),
+          ),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color:
+                selected ? AppColors.white : AppColors.textSecondary(context),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: selected
-            ? color.withValues(alpha: 0.1)
-            : AppColors.surfaceColor(context),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected ? color : AppColors.borderColor(context),
+class _LoanDebtDatePickerField extends StatelessWidget {
+  final String hint;
+  final String? value;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  const _LoanDebtDatePickerField({
+    required this.hint,
+    required this.value,
+    required this.onTap,
+    this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceColor(context),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.borderColor(context)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                value ?? context.l10nText(hint),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: value != null
+                      ? AppColors.textPrimary(context)
+                      : AppColors.textTertiary(context),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-            child: Row(
-              children: [
-                const Icon(AppIcons.person_outline, color: color, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textPrimary(context),
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
+            if (onClear != null)
+              GestureDetector(
+                onTap: onClear,
+                child: Icon(
+                  AppIcons.close,
+                  size: 16,
+                  color: AppColors.textTertiary(context),
                 ),
-                if (selected)
-                  const Icon(
-                    AppIcons.check_rounded,
-                    color: color,
-                    size: 20,
-                  ),
-              ],
-            ),
+              )
+            else
+              Icon(
+                AppIcons.calendar_today_outlined,
+                size: 16,
+                color: AppColors.textTertiary(context),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoanDebtAmountFilterField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final bool hasError;
+  final ValueChanged<String>? onChanged;
+
+  const _LoanDebtAmountFilterField({
+    required this.controller,
+    required this.hint,
+    this.hasError = false,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+      ],
+      style: TextStyle(
+        color: AppColors.textPrimary(context),
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+      ),
+      decoration: InputDecoration(
+        hintText: context.l10nText(hint),
+        hintStyle: TextStyle(color: AppColors.textTertiary(context)),
+        prefixText: '${context.l10nText('ETB')} ',
+        prefixStyle: TextStyle(
+          color: AppColors.textSecondary(context),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+        filled: true,
+        fillColor: AppColors.surfaceColor(context),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: hasError ? AppColors.red : AppColors.borderColor(context),
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: hasError ? AppColors.red : AppColors.borderColor(context),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: hasError ? AppColors.red : AppColors.primaryLight,
+            width: 1.3,
           ),
         ),
       ),
@@ -1926,20 +3174,41 @@ String _formatEtb(double amount, BuildContext context) {
 
 List<_LoanDebtItem> _filteredLoanDebtItems(
   List<_LoanDebtItem> items,
-  _LoanDebtTransactionFilter filter,
-) {
-  switch (filter) {
-    case _LoanDebtTransactionFilter.all:
-      return items;
-    case _LoanDebtTransactionFilter.lent:
-      return items
-          .where((item) => item.direction == LoanDebtDirection.lent)
-          .toList(growable: false);
-    case _LoanDebtTransactionFilter.borrowed:
-      return items
-          .where((item) => item.direction == LoanDebtDirection.borrowed)
-          .toList(growable: false);
-  }
+  _LoanDebtTransactionFilter filter, {
+  int? bankId,
+  double? minAmount,
+  double? maxAmount,
+  DateTime? startDate,
+  DateTime? endDate,
+}) {
+  final start = startDate == null
+      ? null
+      : DateTime(startDate.year, startDate.month, startDate.day);
+  final end = endDate == null
+      ? null
+      : DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999);
+
+  return items.where((item) {
+    if (filter == _LoanDebtTransactionFilter.lent &&
+        item.direction != LoanDebtDirection.lent) {
+      return false;
+    }
+    if (filter == _LoanDebtTransactionFilter.borrowed &&
+        item.direction != LoanDebtDirection.borrowed) {
+      return false;
+    }
+    if (bankId != null && item.transaction.bankId != bankId) return false;
+    if (minAmount != null && item.amount < minAmount) return false;
+    if (maxAmount != null && item.amount > maxAmount) return false;
+    final parsed = item.parsedLocalTime;
+    if (start != null) {
+      if (parsed == null || parsed.isBefore(start)) return false;
+    }
+    if (end != null) {
+      if (parsed == null || parsed.isAfter(end)) return false;
+    }
+    return true;
+  }).toList(growable: false);
 }
 
 String _formatEtbCompact(double amount, BuildContext context) {
@@ -1980,39 +3249,5 @@ String _transactionFilterLabel(
       return context.l10nText('Lent');
     case _LoanDebtTransactionFilter.borrowed:
       return context.l10nText('Borrowed');
-  }
-}
-
-String _loanDebtFilterSummaryLabel(
-  BuildContext context, {
-  required _LoanDebtTransactionFilter transactionFilter,
-  required String? personName,
-}) {
-  final direction = _transactionFilterLabel(context, transactionFilter);
-  final person = personName?.trim();
-  if (person == null || person.isEmpty) return direction;
-  if (transactionFilter == _LoanDebtTransactionFilter.all) return person;
-  return '$person · $direction';
-}
-
-IconData _transactionFilterIcon(_LoanDebtTransactionFilter filter) {
-  switch (filter) {
-    case _LoanDebtTransactionFilter.all:
-      return AppIcons.filter_list;
-    case _LoanDebtTransactionFilter.lent:
-      return AppIcons.trending_up_rounded;
-    case _LoanDebtTransactionFilter.borrowed:
-      return AppIcons.trending_down_rounded;
-  }
-}
-
-Color _transactionFilterColor(_LoanDebtTransactionFilter filter) {
-  switch (filter) {
-    case _LoanDebtTransactionFilter.all:
-      return AppColors.primaryLight;
-    case _LoanDebtTransactionFilter.lent:
-      return AppColors.incomeSuccess;
-    case _LoanDebtTransactionFilter.borrowed:
-      return AppColors.red;
   }
 }
