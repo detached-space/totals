@@ -1998,7 +1998,63 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     if (_needsPerson) return const SizedBox.shrink();
     final settleArmed = _armedAction == LoanDebtStatus.settled.storageValue;
     final forgiveArmed = _armedAction == LoanDebtStatus.forgiven.storageValue;
+    final undoArmed = _armedAction == LoanDebtStatus.active.storageValue;
     final unlinkArmed = _armedAction == 'unlink';
+    final buttons = <Widget>[
+      if (_item.isActive) ...[
+        _LoanDebtActionButton(
+          icon: AppIcons.check_circle_rounded,
+          label: settleArmed
+              ? context.l10nText('Tap again')
+              : context.l10nText('Settled'),
+          color: AppColors.incomeSuccess,
+          isLoading: _pendingAction == LoanDebtStatus.settled.storageValue,
+          enabled: !_isActionBusy,
+          armed: settleArmed,
+          onTap: () => _resolveLoanDebt(LoanDebtStatus.settled),
+        ),
+        _LoanDebtActionButton(
+          icon: AppIcons.favorite_rounded,
+          label: forgiveArmed
+              ? context.l10nText('Tap again')
+              : (_isBorrowed
+                  ? context.l10nText('Forgiven')
+                  : context.l10nText('Forgive')),
+          color: AppColors.red,
+          isLoading: _pendingAction == LoanDebtStatus.forgiven.storageValue,
+          enabled: !_isActionBusy,
+          armed: forgiveArmed,
+          onTap: () => _resolveLoanDebt(LoanDebtStatus.forgiven),
+        ),
+      ] else ...[
+        _LoanDebtActionButton(
+          icon: AppIcons.refresh,
+          label: undoArmed
+              ? context.l10nText('Tap again')
+              : context.l10nText(
+                  _item.status == LoanDebtStatus.forgiven
+                      ? 'Unforgive'
+                      : 'Unsettle',
+                ),
+          color: AppColors.blue,
+          isLoading: _pendingAction == LoanDebtStatus.active.storageValue,
+          enabled: !_isActionBusy,
+          armed: undoArmed,
+          onTap: () => _resolveLoanDebt(LoanDebtStatus.active),
+        ),
+      ],
+      _LoanDebtActionButton(
+        icon: AppIcons.close_rounded,
+        label: unlinkArmed
+            ? context.l10nText('Tap again')
+            : context.l10nText('Unlink'),
+        color: AppColors.primaryLight,
+        isLoading: _pendingAction == 'unlink',
+        enabled: !_isActionBusy,
+        armed: unlinkArmed,
+        onTap: _unlinkPerson,
+      ),
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2011,51 +2067,13 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
               ),
         ),
         const SizedBox(height: 10),
-        if (_item.isActive) ...[
-          _LoanDebtActionTile(
-            icon: AppIcons.check_circle_rounded,
-            title: settleArmed
-                ? context.l10nText('Tap again to mark settled')
-                : context.l10nText('Mark as settled'),
-            subtitle: context.l10nText('Paid back and no longer open.'),
-            color: AppColors.incomeSuccess,
-            isLoading: _pendingAction == LoanDebtStatus.settled.storageValue,
-            enabled: !_isActionBusy,
-            armed: settleArmed,
-            onTap: () => _resolveLoanDebt(LoanDebtStatus.settled),
-          ),
-          const SizedBox(height: 10),
-          _LoanDebtActionTile(
-            icon: AppIcons.favorite_rounded,
-            title: forgiveArmed
-                ? (_isBorrowed
-                    ? context.l10nText('Tap again to mark forgiven')
-                    : context.l10nText('Tap again to forgive'))
-                : (_isBorrowed
-                    ? context.l10nText('Mark debt forgiven')
-                    : context.l10nText('Forgive loan')),
-            subtitle: _isBorrowed
-                ? context.l10nText('The other person waived repayment.')
-                : context.l10nText('Close it without repayment.'),
-            color: AppColors.red,
-            isLoading: _pendingAction == LoanDebtStatus.forgiven.storageValue,
-            enabled: !_isActionBusy,
-            armed: forgiveArmed,
-            onTap: () => _resolveLoanDebt(LoanDebtStatus.forgiven),
-          ),
-          const SizedBox(height: 10),
-        ],
-        _LoanDebtActionTile(
-          icon: AppIcons.close_rounded,
-          title: unlinkArmed
-              ? context.l10nText('Tap again to unlink')
-              : context.l10nText('Unlink person'),
-          subtitle: context.l10nText('Move this back to Needs a person.'),
-          color: AppColors.primaryLight,
-          isLoading: _pendingAction == 'unlink',
-          enabled: !_isActionBusy,
-          armed: unlinkArmed,
-          onTap: _unlinkPerson,
+        Row(
+          children: [
+            for (var index = 0; index < buttons.length; index++) ...[
+              if (index > 0) const SizedBox(width: 8),
+              Expanded(child: buttons[index]),
+            ],
+          ],
         ),
       ],
     );
@@ -2176,20 +2194,18 @@ class _LoanDebtDetailRow extends StatelessWidget {
   }
 }
 
-class _LoanDebtActionTile extends StatelessWidget {
+class _LoanDebtActionButton extends StatelessWidget {
   final IconData icon;
-  final String title;
-  final String subtitle;
+  final String label;
   final Color color;
   final bool isLoading;
   final bool enabled;
   final bool armed;
   final VoidCallback onTap;
 
-  const _LoanDebtActionTile({
+  const _LoanDebtActionButton({
     required this.icon,
-    required this.title,
-    required this.subtitle,
+    required this.label,
     required this.color,
     required this.isLoading,
     required this.enabled,
@@ -2218,58 +2234,47 @@ class _LoanDebtActionTile extends StatelessWidget {
         onTap: enabled && !isLoading ? onTap : null,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.all(14),
+          height: 78,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: borderColor),
           ),
-          child: Row(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
                   color: iconBackground,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Center(
                   child: isLoading
                       ? SizedBox(
-                          width: 18,
-                          height: 18,
+                          width: 16,
+                          height: 16,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: iconColor,
                           ),
                         )
-                      : Icon(icon, color: iconColor, size: 20),
+                      : Icon(icon, color: iconColor, size: 18),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: titleColor,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppColors.textSecondary(context),
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
+              const SizedBox(height: 7),
+              SizedBox(
+                width: double.infinity,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: titleColor,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ],
