@@ -222,6 +222,13 @@ class AppLocalizations {
     "shared.engineUnreachable": "Totals Engine አይገኝም",
     "shared.localSyncNote": "Totals Engine ሲገኝ የአካባቢ ለውጦች ይመሳሰላሉ",
     "shared.alreadyShared": "ያ ትራንዛክሽን አስቀድሞ በዚህ ቡድን ውስጥ ተጋርቷል",
+    "shared.groupLimitBody": "በአንድ ጊዜ እስከ {limit} ንቁ ቡድኖች አባል መሆን ብቻ ይችላሉ።",
+    "shared.expenseAddedToGroup": "ወጪ ወደ {group} ታክሏል",
+    "shared.settledWithName": "ከ{name} ጋር ተስተካክሏል",
+    "shared.offlinePeersSingle":
+        "ሌሎች አባላት ከመስመር ውጭ ናቸው። {group} ከእነሱ አንዱ መተግበሪያውን ሲከፍት ይመሳሰላል።",
+    "shared.offlinePeersMultiple":
+        "{count} ቡድኖች ሌሎች አባላት መስመር ላይ እስኪመጡ እየጠበቁ ናቸው። ታሪክ ከእነሱ አንዱ መተግበሪያውን ሲከፍት ይመሳሰላል።",
     "shared.chooseWhereToAddAmount": "{amount} የት እንደሚጨመር ይምረጡ።",
     "shared.youAreOwedAmount": "{amount} ይከፈልዎታል",
     "shared.youOweAmount": "{amount} መክፈል አለብዎት",
@@ -400,6 +407,24 @@ class AppLocalizations {
     "settings.exportDataSubtitle": "ምትኬ አስቀምጥ ወይም አጋራ",
     "settings.privacyPolicySubtitle":
         "Totals ኤስኤምኤስ፣ ካሜራ እና የአካባቢ ዳታን እንዴት እንደሚይዝ",
+    "vault.pinMinDigits": "PIN ቢያንስ {count} አሃዞች መሆን አለበት።",
+    "vault.pinMismatch": "PINዎቹ አይዛመዱም። እንደገና ይሞክሩ።",
+    "vault.setupFailed": "ምትኬ ማዋቀር አልተቻለም፦ {error}",
+    "vault.wrongPinTryAgain": "PIN ትክክል አይደለም። እንደገና ይሞክሩ።",
+    "vault.wrongPin": "PIN ትክክል አይደለም።",
+    "vault.unlockFailed": "መክፈት አልተቻለም፦ {error}",
+    "vault.recoveryCodeInvalid": "ያ የመመለሻ ኮድ ትክክል አይመስልም።",
+    "vault.noBackupForRecoveryCode": "ለዚያ የመመለሻ ኮድ ምትኬ አልተገኘም።",
+    "vault.restoreFailed": "መመለስ አልተቻለም፦ {error}",
+    "vault.samePin": "ከቀድሞው የተለየ PIN ይምረጡ።",
+    "vault.oldPinWrong": "የቀድሞው PIN ትክክል አልነበረም።",
+    "vault.changePinFailed": "PIN መቀየር አልተቻለም፦ {error}",
+    "vault.tooManyWrongPinsHour":
+        "ብዙ ጊዜ የተሳሳተ PIN ገብቷል። በአንድ ሰዓት ውስጥ እንደገና ይሞክሩ።",
+    "vault.lockoutJustLifted": "መቆለፊያው አሁን ተነስቷል። እንደገና ይሞክሩ።",
+    "vault.lockedMinute": "ተቆልፏል። በአንድ ደቂቃ ውስጥ እንደገና ይሞክሩ።",
+    "vault.lockedMinutes": "ተቆልፏል። በ{count} ደቂቃዎች ውስጥ እንደገና ይሞክሩ።",
+    "vault.lockedHours": "ተቆልፏል። በ{count} ሰዓት ውስጥ እንደገና ይሞክሩ።",
   };
 
   static const Map<String, String> _amharicByEnglish = <String, String>{
@@ -782,21 +807,77 @@ class AppLocalizations {
     "Maximum must be at least minimum.": "ከፍተኛው ቢያንስ እንደ አነስተኛው መሆን አለበት።",
     "Shared group": "የጋራ ቡድን",
     "Shared transaction": "የጋራ ትራንዛክሽን",
+    "Account number copied": "የአካውንት ቁጥር ተቀድቷል",
+    "Back up your shared expense identity": "የጋራ ወጪ መታወቂያዎን ምትኬ ያድርጉ",
+    "Backup is paused": "ምትኬ ቆሟል",
+    "Set a PIN so you can restore your groups on a new phone.":
+        "ቡድኖችዎን በአዲስ ስልክ ላይ መመለስ እንዲችሉ PIN ያዘጋጁ።",
+    "Unlock with your PIN to resume backing up.":
+        "ምትኬውን ለመቀጠል በPINዎ ይክፈቱ።",
+    "Set up": "አዋቅር",
+    "Unlock": "ክፈት",
+    "Restore from another device": "ከሌላ መሳሪያ መልስ",
+    "Pick a PIN. We use it to encrypt your backup. We can't recover it if you forget.":
+        "PIN ይምረጡ። ምትኬዎን ለማመስጠር እንጠቀምበታለን። ከረሱት ልንመልሰው አንችልም።",
+    "Enter PIN": "PIN ያስገቡ",
+    "Continue": "ቀጥል",
+    "Confirm your PIN": "PINዎን ያረጋግጡ",
+    "Type it once more.": "እንደገና ያስገቡት።",
+    "Confirm PIN": "PIN ያረጋግጡ",
+    "Set up backup": "ምትኬ አዋቅር",
+    "Save this code": "ይህን ኮድ አስቀምጡ",
+    "You'll need this code plus your PIN to restore on a new device.":
+        "በአዲስ መሳሪያ ላይ ለመመለስ ይህ ኮድ ከPINዎ ጋር ያስፈልግዎታል።",
+    "I saved it": "አስቀምጬዋለሁ",
+    "Recovery code copied": "የመመለሻ ኮድ ተቀድቷል",
+    "Unlock backup": "ምትኬ ክፈት",
+    "Enter your PIN to resume backing up your shared expense changes.":
+        "የጋራ ወጪ ለውጦችዎን ምትኬ መቀጠል እንዲችሉ PINዎን ያስገቡ።",
+    "Enter the recovery code from your old device and the PIN you set there.":
+        "ከድሮ መሳሪያዎ ያገኙትን የመመለሻ ኮድ እና በዚያ ያዘጋጁትን PIN ያስገቡ።",
+    "Recovery code": "የመመለሻ ኮድ",
+    "PIN": "PIN",
+    "Restore": "መልስ",
+    "Change PIN": "PIN ቀይር",
+    "Enter your current PIN to continue.": "ለመቀጠል የአሁኑን PIN ያስገቡ።",
+    "Current PIN": "የአሁኑ PIN",
+    "Set a new PIN": "አዲስ PIN ያዘጋጁ",
+    "New PIN": "አዲስ PIN",
+    "Confirm new PIN": "አዲሱን PIN ያረጋግጡ",
+    "PIN updated": "PIN ተዘምኗል",
+    "Your backup is now encrypted with the new PIN.":
+        "ምትኬዎ አሁን በአዲሱ PIN ተመስጥሯል።",
+    "Done": "ጨርስ",
+    "Your recovery code": "የእርስዎ የመመለሻ ኮድ",
+    "Save this somewhere safe. You need it plus your PIN to restore on a new device.":
+        "ይህን በደህና ቦታ አስቀምጡ። በአዲስ መሳሪያ ላይ ለመመለስ ከPINዎ ጋር ያስፈልግዎታል።",
     "Personal funds": "የግል ገንዘብ",
     "Data": "ዳታ",
     "Save": "አስቀምጥ",
+    "Saved": "ተቀምጧል",
     "Saving": "በማስቀመጥ ላይ",
     "Sending": "በመላክ ላይ",
+    "Creating": "በመፍጠር ላይ",
     "Adding": "በመጨመር ላይ",
     "Deleting": "በመሰረዝ ላይ",
+    "Settling": "በማስተካከል ላይ",
+    "Sending nudge": "አስታዋሽ በመላክ ላይ",
+    "Cancelling request": "ጥያቄ በመሰረዝ ላይ",
+    "Leaving group": "ከቡድን በመውጣት ላይ",
     "Mine": "የእኔ",
     "Group": "ቡድን",
     "Groups": "ቡድኖች",
+    "GROUP": "ቡድን",
+    "GROUPS": "ቡድኖች",
+    "PERSON": "ሰው",
     "Group name": "የቡድን ስም",
     "GROUP NAME": "የቡድን ስም",
     "GROUP CODE": "የቡድን ኮድ",
     "Group details": "የቡድን ዝርዝሮች",
     "Group ID": "የቡድን መታወቂያ",
+    "SHARED": "የጋራ",
+    "SHARED GROUPS": "የጋራ ቡድኖች",
+    "OVERVIEW": "አጠቃላይ እይታ",
     "Create group": "ቡድን ፍጠር",
     "Create Group": "ቡድን ፍጠር",
     "Creating group": "ቡድን በመፍጠር ላይ",
@@ -807,8 +888,17 @@ class AppLocalizations {
     "Sending request": "ጥያቄ በመላክ ላይ",
     "Join locally": "በአካባቢው ተቀላቀል",
     "New": "አዲስ",
+    "Group expenses and balances": "የቡድን ወጪዎች እና ቀሪ ሂሳቦች",
+    "Your standings across shared groups": "በጋራ ቡድኖችዎ ውስጥ ያለዎት ሁኔታ",
+    "You're square": "ሂሳብዎ ተስተካክሏል",
+    "You're owed": "ይከፈልዎታል",
+    "more group": "ተጨማሪ ቡድን",
+    "more groups": "ተጨማሪ ቡድኖች",
+    "just you": "እርስዎ ብቻ",
+    "to": "ወደ",
     "Invite link": "የመጋበዣ ሊንክ",
     "Invite link copied": "የመጋበዣ ሊንክ ተቀድቷል",
+    "Invite code copied": "የመጋበዣ ኮድ ተቀድቷል",
     "Invite link or code": "የመጋበዣ ሊንክ ወይም ኮድ",
     "Paste a Totals invite link with a group key":
         "የቡድን ቁልፍ ያለው የTotals የመጋበዣ ሊንክ ይለጥፉ",
@@ -827,6 +917,14 @@ class AppLocalizations {
     "For what?": "ለምን?",
     "e.g., Dinner, Hotel, Taxi": "ለምሳሌ፦ እራት፣ ሆቴል፣ ታክሲ",
     "When": "መቼ",
+    "This transaction cannot be split because it has no reference.":
+        "ይህ ትራንዛክሽን ማጣቀሻ ስለሌለው ሊካፈል አይችልም።",
+    "This transaction is already split with a group.":
+        "ይህ ትራንዛክሽን አስቀድሞ ከቡድን ጋር ተካፍሏል።",
+    "Create or join an approved shared group before splitting.":
+        "ከማካፈልዎ በፊት የጸደቀ የጋራ ቡድን ይፍጠሩ ወይም ይቀላቀሉ።",
+    "Saved locally. We'll send it when you're connected.":
+        "በመሳሪያዎ ላይ ተቀምጧል። ሲገናኙ እንልካለን።",
     "Link Transaction": "ትራንዛክሽን አገናኝ",
     "Link transaction": "ትራንዛክሽን አገናኝ",
     "Linked transaction": "የተገናኘ ትራንዛክሽን",
@@ -865,6 +963,7 @@ class AppLocalizations {
     "No shared groups yet": "እስካሁን ምንም የጋራ ቡድኖች የሉም",
     "No groups yet": "እስካሁን ቡድኖች የሉም",
     "No expenses yet": "እስካሁን ወጪዎች የሉም",
+    "No spending yet": "እስካሁን ወጪ የለም",
     "No debts": "እዳዎች የሉም",
     "No members": "አባላት የሉም",
     "No unshared transactions": "ያልተጋሩ ትራንዛክሽኖች የሉም",
@@ -897,12 +996,14 @@ class AppLocalizations {
     "Local only": "በዚህ መሳሪያ ብቻ",
     "Waiting for approval": "ፈቃድ በመጠበቅ ላይ",
     "Waiting for group approval": "የቡድን ፈቃድ በመጠበቅ ላይ",
+    "Waiting for someone to send the key…": "አንድ ሰው ቁልፉን እስኪልክ በመጠበቅ ላይ…",
     "Approval needed": "ፈቃድ ያስፈልጋል",
     "Approve": "ፍቀድ",
     "Approving": "በመፍቀድ ላይ",
     "Cancel request": "ጥያቄን ሰርዝ",
     "Tap again to cancel": "ለመሰረዝ እንደገና ይንኩ",
     "Copy code": "ኮድ ቅዳ",
+    "More options": "ተጨማሪ አማራጮች",
     "Activities": "እንቅስቃሴዎች",
     "ACTIVITIES": "እንቅስቃሴዎች",
     "ANALYTICS": "ትንታኔዎች",
@@ -967,6 +1068,33 @@ class AppLocalizations {
     "Activity mix": "የእንቅስቃሴ ድብልቅ",
     "Expenses compared with settlements": "ወጪዎች ከማስተካከያዎች ጋር",
     "Add a shared expense to start analytics.": "ትንታኔን ለመጀመር የጋራ ወጪ ያክሉ።",
+    "You can open this group after approval.": "ይህን ቡድን ከፈቃድ በኋላ መክፈት ይችላሉ።",
+    "You left the group": "ከቡድኑ ወጥተዋል",
+    "Wait until you have the group key before adding an expense.":
+        "ወጪ ከማከልዎ በፊት የቡድን ቁልፍ እስኪኖርዎት ይጠብቁ።",
+    "Expense deleted": "ወጪው ተሰርዟል",
+    "Expense updated": "ወጪው ተዘምኗል",
+    "Expense added": "ወጪ ታክሏል",
+    "Only people in this debt can settle it":
+        "ይህን እዳ ሊያስተካክሉ የሚችሉት በዚህ እዳ ውስጥ ያሉ ሰዎች ብቻ ናቸው",
+    "Only people in this debt can mark it settled":
+        "ይህን እዳ እንደተከፈለ ሊያመለክቱ የሚችሉት በዚህ እዳ ውስጥ ያሉ ሰዎች ብቻ ናቸው",
+    "No one owes you right now": "አሁን ማንም አይከፍልዎትም",
+    "Nudge sent": "አስታዋሽ ተልኳል",
+    "Open a group first to add an expense.": "ወጪ ለማከል መጀመሪያ ቡድን ይክፈቱ።",
+    "Join request sent": "የመቀላቀል ጥያቄ ተልኳል",
+    "Joined group": "ቡድን ተቀላቅለዋል",
+    "Member approved": "አባል ተፈቅዷል",
+    "Join request cancelled": "የመቀላቀል ጥያቄ ተሰርዟል",
+    "Group limit reached": "የቡድን ገደብ ደርሷል",
+    "Got it": "ገባኝ",
+    "Leave one from the list below to free up a slot, then try again.":
+        "ቦታ ለማስለቀቅ ከታች ካለው ዝርዝር አንዱን ይውጡ፣ ከዚያ እንደገና ይሞክሩ።",
+    "Create or join a group to split expenses with friends.":
+        "ወጪዎችን ከጓደኞች ጋር ለማካፈል ቡድን ይፍጠሩ ወይም ይቀላቀሉ።",
+    "Tap + to add the first group expense.": "የመጀመሪያውን የቡድን ወጪ ለማከል +ን ይንኩ።",
+    "Expenses, approvals, and settlements will appear here.":
+        "ወጪዎች፣ ፈቃዶች እና ማስተካከያዎች እዚህ ይታያሉ።",
     "Someone": "አንድ ሰው",
     "paid": "ከፍሏል",
     "split": "የተካፈሉት",
@@ -1448,6 +1576,7 @@ class AppLocalizations {
         "የግላዊነት መመሪያውን አሁን መጫን አልተቻለም።",
     "Privacy Policy for Totals": "የTotals የግላዊነት መመሪያ",
     "Effective date: April 23, 2026": "የሚጸናበት ቀን፦ ኤፕሪል 23, 2026",
+    "Effective date: June 14, 2026": "የሚጸናበት ቀን፦ ጁን 14, 2026",
     "Totals is a personal finance application published by Detached. This Privacy Policy explains how Totals accesses, uses, stores, and shares data when you use the Android application package `detached.totals`.":
         "Totals በDetached የታተመ የግል ፋይናንስ መተግበሪያ ነው። ይህ የግላዊነት መመሪያ የAndroid መተግበሪያ ጥቅል `detached.totals`ን ሲጠቀሙ Totals ዳታን እንዴት እንደሚደርስበት፣ እንደሚጠቀምበት፣ እንደሚያስቀምጥ እና እንደሚያጋራ ያብራራል።",
     "Summary": "ማጠቃለያ",
@@ -1459,6 +1588,10 @@ class AppLocalizations {
         "አንዳንድ አማራጭ ባህሪያት ኢንተርኔትን ይጠቀማሉ፦",
     "Payment verification can send the image, payment reference, selected account number, and selected bank identifier you submit to our verification service to process your request.":
         "የክፍያ ማረጋገጫ ጥያቄዎን ለማስኬድ ያስገቡትን ምስል፣ የክፍያ ማጣቀሻ፣ የተመረጠ አካውንት ቁጥር እና የተመረጠ የባንክ መለያ ወደ ማረጋገጫ አገልግሎታችን ሊልክ ይችላል።",
+    "Shared expenses lets you split expenses with friends in end-to-end encrypted groups. The Totals Engine relays encrypted payloads it cannot read, and push notifications are doorbell pings that do not include expense content.":
+        "የጋራ ወጪዎች ከጓደኞች ጋር ወጪዎችን ከጫፍ እስከ ጫፍ በተመሰጠሩ ቡድኖች ውስጥ እንዲካፈሉ ያስችላል። Totals Engine ሊያነበው የማይችለውን የተመሰጠረ ይዘት ያስተላልፋል፣ push ማሳወቂያዎችም የወጪ ይዘት የማያካትቱ የማንቂያ ምልክቶች ብቻ ናቸው።",
+    "An optional identity backup vault lets you restore your shared-expense identity and group keys on a new device using a recovery code shown to you in the app plus a PIN you choose. Vault contents are encrypted on-device before being uploaded.":
+        "አማራጭ የመታወቂያ ምትኬ ቮልት በመተግበሪያው ውስጥ የሚታይልዎትን የመመለሻ ኮድ እና የሚመርጡትን PIN በመጠቀም የጋራ ወጪ መታወቂያዎን እና የቡድን ቁልፎችን በአዲስ መሳሪያ ላይ እንዲመልሱ ያስችላል። የቮልት ይዘቶች ከመሰቀላቸው በፊት በመሳሪያዎ ላይ ይመሰጠራሉ።",
     "The app may download updated SMS parsing patterns and bank configuration files from our servers during setup, refresh, or manual update actions. This does not upload your SMS contents.":
         "መተግበሪያው በማዋቀር፣ በማደስ ወይም በእጅ የዝማኔ ተግባራት ጊዜ የተዘመኑ የኤስኤምኤስ መተንተኛ ንድፎችን እና የባንክ ውቅር ፋይሎችን ከሰርቨሮቻችን ሊያወርድ ይችላል። ይህ የኤስኤምኤስ ይዘትዎን አይሰቅልም።",
     "Totals does not require account registration.":
@@ -1484,6 +1617,16 @@ class AppLocalizations {
         "ለመፍጠር ወይም ለመመለስ የሚመርጧቸው የተላኩ ወይም የተገቡ የምትኬ ፋይሎች።",
     "Optional local network access if you manually start the in-app local web dashboard or server.":
         "በመተግበሪያው ውስጥ ያለውን የአካባቢ ድር ዳሽቦርድ ወይም ሰርቨር በእጅ ካስጀመሩ አማራጭ የአካባቢ ኔትወርክ መዳረሻ።",
+    "An on-device key pair used to identify your device for the shared-expenses feature and to encrypt payloads to other members of your shared groups.":
+        "ለጋራ ወጪዎች ባህሪ መሳሪያዎን ለመለየት እና ይዘቶችን ለጋራ ቡድኖችዎ ሌሎች አባላት ለማመስጠር የሚጠቅም በመሳሪያዎ ላይ ያለ የቁልፍ ጥንድ።",
+    "Per-group symmetric encryption keys used to encrypt expense, settlement, and activity data shared within each group.":
+        "በእያንዳንዱ ቡድን ውስጥ የሚጋሩ የወጪ፣ የማስተካከያ እና የእንቅስቃሴ ዳታን ለማመስጠር የሚጠቅሙ ለእያንዳንዱ ቡድን የተለዩ ሲሜትሪክ የማመስጠሪያ ቁልፎች።",
+    "The display name, payment account details, and expense data you choose to share with members of a group you have joined.":
+        "ከተቀላቀሉት ቡድን አባላት ጋር ለማጋራት የሚመርጡት የሚታይ ስም፣ የክፍያ አካውንት ዝርዝሮች እና የወጪ ዳታ።",
+    "A Firebase Cloud Messaging device token, when shared-expense notifications are enabled, used to deliver doorbell pings.":
+        "የጋራ ወጪ ማሳወቂያዎች ሲበሩ የማንቂያ ምልክቶችን ለማድረስ የሚጠቅም የFirebase Cloud Messaging የመሳሪያ ቶከን።",
+    "The recovery code and PIN you provide when setting up or unlocking the optional identity backup vault. The PIN is used only on-device to derive an encryption key and is never transmitted.":
+        "አማራጭ የመታወቂያ ምትኬ ቮልትን ሲያዋቅሩ ወይም ሲከፍቱ የሚሰጡት የመመለሻ ኮድ እና PIN። PIN የማመስጠሪያ ቁልፍ ለማመንጨት በመሳሪያዎ ላይ ብቻ ይጠቀማል እና ፈጽሞ አይተላለፍም።",
     "How We Use Data": "ዳታን እንዴት እንጠቀማለን",
     "To detect and parse bank SMS messages into transactions.":
         "የባንክ ኤስኤምኤስ መልዕክቶችን እንደ ትራንዛክሽን ለማግኘት እና ለመተንተን።",
@@ -1499,6 +1642,12 @@ class AppLocalizations {
         "የመሳሪያ ማረጋገጫ ወይም የመተግበሪያ መቆለፊያ ከተጠቀሙ ወደ መተግበሪያው መዳረሻን ለማስጠበቅ።",
     "To export, import, or share data when you explicitly choose those actions.":
         "እነዚያን ተግባራት በግልጽ ሲመርጡ ዳታን ለመላክ፣ ለማስገባት ወይም ለማጋራት።",
+    "To synchronize shared-expense activity, group membership, approvals, and settlement updates between you and the other members of your shared groups using end-to-end encryption.":
+        "ከጫፍ እስከ ጫፍ ማመስጠርን በመጠቀም የጋራ ወጪ እንቅስቃሴ፣ የቡድን አባልነት፣ ፈቃዶች እና የማስተካከያ ዝመናዎችን በእርስዎ እና በጋራ ቡድኖችዎ ሌሎች አባላት መካከል ለማመሳሰል።",
+    "To deliver doorbell push notifications that prompt the app to pull and decrypt new shared-expense activity locally.":
+        "መተግበሪያው አዲስ የጋራ ወጪ እንቅስቃሴን በአካባቢው እንዲያወርድ እና እንዲፈታ የሚጠቁሙ የpush ማንቂያ ምልክቶችን ለማድረስ።",
+    "To store and retrieve an optional encrypted identity vault so that you can restore your shared-expense identity and group keys on a new device.":
+        "የጋራ ወጪ መታወቂያዎን እና የቡድን ቁልፎችን በአዲስ መሳሪያ ላይ መመለስ እንዲችሉ አማራጭ የተመሰጠረ የመታወቂያ ቮልትን ለማከማቸት እና ለማምጣት።",
     "When Data Leaves Your Device": "ዳታ ከመሳሪያዎ ሲወጣ",
     "Core SMS tracking: SMS contents used for normal transaction tracking stay on your device.":
         "ዋና የኤስኤምኤስ ክትትል፦ ለመደበኛ የትራንዛክሽን ክትትል የሚጠቀሙ የኤስኤምኤስ ይዘቶች በመሳሪያዎ ላይ ይቆያሉ።",
@@ -1506,6 +1655,12 @@ class AppLocalizations {
         "የክፍያ ማረጋገጫ፦ የክፍያ ማረጋገጫ ባህሪውን ከተጠቀሙ፣ ያስገቡት ዳታ ጥያቄዎን ለማስኬድ በ`sms-parsing-visualizer.vercel.app` ወደሚስተናገደው የማረጋገጫ አገልግሎታችን በHTTPS ሊተላለፍ ይችላል።",
     "Configuration updates: When Totals downloads updated SMS parsing patterns or bank configuration files, it connects to our hosted configuration endpoints. The app may also perform basic connectivity checks to confirm internet access. These requests are used to download configuration, not to upload your SMS contents for normal tracking.":
         "የውቅር ዝማኔዎች፦ Totals የተዘመኑ የኤስኤምኤስ መተንተኛ ንድፎችን ወይም የባንክ ውቅር ፋይሎችን ሲያወርድ ከተስተናገዱ የውቅር መጨረሻ ነጥቦቻችን ጋር ይገናኛል። መተግበሪያው የኢንተርኔት መዳረሻን ለማረጋገጥ መሰረታዊ የግንኙነት ፍተሻዎችንም ሊያከናውን ይችላል። እነዚህ ጥያቄዎች ውቅርን ለማውረድ እንጂ የኤስኤምኤስ ይዘትዎን ለመደበኛ ክትትል ለመስቀል አይደሉም።",
+    "Shared expenses (optional): If you create or join a shared expense group, the app exchanges encrypted payloads with our Totals Engine service at `engine.totals.detached.space` over HTTPS. Each payload is encrypted on-device with a group symmetric key (for group-wide payloads) or with a one-to-one shared secret derived from device key pairs (for targeted payloads). The Totals Engine stores and relays the encrypted blobs and the public identifiers needed for delivery, such as the random group identifier and the sender and recipient device public keys. The Totals Engine cannot decrypt expense amounts, descriptions, member display names, or other group contents.":
+        "የጋራ ወጪዎች (አማራጭ)፦ የጋራ ወጪ ቡድን ከፈጠሩ ወይም ከተቀላቀሉ፣ መተግበሪያው በ`engine.totals.detached.space` ላይ ካለው የTotals Engine አገልግሎታችን ጋር በHTTPS የተመሰጠሩ ይዘቶችን ይለዋወጣል። እያንዳንዱ ይዘት በመሳሪያዎ ላይ በቡድን ሲሜትሪክ ቁልፍ (ለቡድን ሁሉ የሚላኩ ይዘቶች) ወይም ከመሳሪያ ቁልፍ ጥንዶች በተወሰደ አንድ-ለ-አንድ የጋራ ሚስጥር (ለተወሰኑ ይዘቶች) ይመሰጠራል። Totals Engine የተመሰጠሩትን ይዘቶች እና ለማድረስ የሚያስፈልጉ የህዝብ መለያዎችን፣ ለምሳሌ የተሰጠ የቡድን መለያ እና የላኪና ተቀባይ መሳሪያ የህዝብ ቁልፎችን፣ ያከማቻል እና ያስተላልፋል። Totals Engine የወጪ መጠኖችን፣ መግለጫዎችን፣ የአባላት የሚታዩ ስሞችን ወይም ሌላ የቡድን ይዘትን መፍታት አይችልም።",
+    "Push notifications (optional): If you enable shared-expense notifications, the app registers a Firebase Cloud Messaging device token with the Totals Engine so the engine can wake the app when there is new activity. The push payload itself does not include expense content; the app pulls the encrypted payload over HTTPS and composes the notification text locally on your device.":
+        "Push ማሳወቂያዎች (አማራጭ)፦ የጋራ ወጪ ማሳወቂያዎችን ካበሩ፣ አዲስ እንቅስቃሴ ሲኖር Engine መተግበሪያውን እንዲያነቃ መተግበሪያው የFirebase Cloud Messaging የመሳሪያ ቶከንን በTotals Engine ይመዘግባል። የpush ይዘቱ ራሱ የወጪ ይዘት አያካትትም፤ መተግበሪያው የተመሰጠረውን ይዘት በHTTPS ያወርዳል እና የማሳወቂያውን ጽሑፍ በመሳሪያዎ ላይ ያዘጋጃል።",
+    "Identity backup vault (optional): If you turn on the identity backup feature, the app encrypts your shared-expense identity seed and your group keys on-device using a key derived from a PIN you choose and a random recovery code shown to you in the app. The encrypted blob is then uploaded to the Totals Engine, indexed only by an opaque identifier derived from the recovery code. The PIN is not transmitted, and the engine cannot derive it or decrypt the blob.":
+        "የመታወቂያ ምትኬ ቮልት (አማራጭ)፦ የመታወቂያ ምትኬ ባህሪን ካበሩ፣ መተግበሪያው የጋራ ወጪ መታወቂያ seedዎን እና የቡድን ቁልፎችዎን ከሚመርጡት PIN እና በመተግበሪያው ከሚታይልዎት የዘፈቀደ የመመለሻ ኮድ በተወሰደ ቁልፍ በመሳሪያዎ ላይ ያመሰጥራል። ከዚያ የተመሰጠረው blob ወደ Totals Engine ይሰቀላል፣ እና ከመመለሻ ኮድ በተወሰደ ግልጽ ያልሆነ መለያ ብቻ ይመዘገባል። PIN አይተላለፍም፣ Engineም ሊያመነጨው ወይም blobን ሊፈታ አይችልም።",
     "Support and external links: If you open external links from the app, such as support pages, Telegram, or bank links, those services receive information according to their own privacy policies.":
         "ድጋፍ እና ውጫዊ ሊንኮች፦ ከመተግበሪያው ውጫዊ ሊንኮችን ከከፈቱ፣ ለምሳሌ የድጋፍ ገጾች፣ Telegram ወይም የባንክ ሊንኮች፣ እነዚያ አገልግሎቶች መረጃን በራሳቸው የግላዊነት መመሪያዎች መሰረት ይቀበላሉ።",
     "Local network dashboard: If you manually start the optional local web dashboard or server, your financial data may be available to devices on the same local network using the URL shown in the app until you stop the server.":
@@ -1530,6 +1685,12 @@ class AppLocalizations {
         "የክፍያ ማረጋገጫ ማስገባቶች በማረጋገጫ አገልግሎቱ ሊሰሩ ይችላሉ እና አገልግሎቱን ለማስኬድ፣ ለማስጠበቅ፣ ስህተት ለመፈለግ እና ለመጠበቅ በሚያስፈልግ ተገቢ ጊዜ ብቻ ወይም በህግ እንደሚጠየቀው ሊቆዩ ይችላሉ።",
     "Downloaded SMS pattern files and bank configuration files may be cached on your device for future use.":
         "የወረዱ የኤስኤምኤስ ንድፍ ፋይሎች እና የባንክ ውቅር ፋይሎች ለወደፊት ጥቅም በመሳሪያዎ ላይ ሊቀመጡ ይችላሉ።",
+    "Your shared-expense identity key pair, your per-group symmetric keys, and your locally cached copy of group activity are stored in app-private storage on your device. They are removed when you leave the group, clear app data, or uninstall the app.":
+        "የጋራ ወጪ መታወቂያ ቁልፍ ጥንድዎ፣ የእያንዳንዱ ቡድን ሲሜትሪክ ቁልፎችዎ እና በአካባቢው የተቀመጠው የቡድን እንቅስቃሴ ቅጂ በመሳሪያዎ ላይ በመተግበሪያ-ግል ማከማቻ ውስጥ ይቀመጣሉ። ከቡድኑ ሲወጡ፣ የመተግበሪያ ዳታን ሲያጸዱ ወይም መተግበሪያውን ሲያስወግዱ ይወገዳሉ።",
+    "Encrypted payloads relayed by the Totals Engine on your behalf are stored on the server only as long as needed to deliver them to every intended recipient. Once a recipient acknowledges a payload, the engine removes its copy for that recipient.":
+        "በእርስዎ ምትክ Totals Engine የሚያስተላልፋቸው የተመሰጠሩ ይዘቶች ለተመደቡት ተቀባዮች ሁሉ እስኪደርሱ ድረስ ብቻ በሰርቨሩ ላይ ይቀመጣሉ። አንድ ተቀባይ ይዘቱን እንደተቀበለ ሲያረጋግጥ፣ Engine ለዚያ ተቀባይ ያለውን ቅጂ ያስወግዳል።",
+    "If you upload an encrypted identity vault blob, it remains stored on the Totals Engine, in encrypted form indexed by the opaque recovery code identifier, until you delete it from within the app or replace it with a new vault. Without the matching recovery code and PIN, the engine cannot recover the contents.":
+        "የተመሰጠረ የመታወቂያ ቮልት blob ካሰቀሉ፣ ከመተግበሪያው ውስጥ እስኪሰርዙት ወይም በአዲስ ቮልት እስኪተኩት ድረስ በግልጽ ያልሆነ የመመለሻ ኮድ መለያ በተመዘገበ የተመሰጠረ መልክ በTotals Engine ላይ ይቀመጣል። ተዛማጅ የመመለሻ ኮድ እና PIN ከሌለ፣ Engine ይዘቱን መመለስ አይችልም።",
     "Security": "ደህንነት",
     "We rely on your device operating system and application sandbox for local storage protection.":
         "ለአካባቢ ማከማቻ ጥበቃ በመሳሪያዎ ስርዓተ ክወና እና በመተግበሪያ ሳንድቦክስ እንመካለን።",
@@ -1542,6 +1703,12 @@ class AppLocalizations {
         "ፈቃዶችን መከልከል ይችላሉ፣ ግን አንዳንድ ባህሪያት ያለእነሱ ላይሰሩ ይችላሉ።",
     "You can avoid optional online features if you do not want to send verification data or download remote configuration updates.":
         "የማረጋገጫ ዳታ መላክ ወይም የሩቅ ውቅር ዝማኔዎችን ማውረድ ካልፈለጉ አማራጭ የኦንላይን ባህሪያትን መተው ይችላሉ።",
+    "You can choose not to use the shared-expenses feature, or to leave a group at any time. Leaving a group removes its local data on your device and unregisters your device from that group on the Totals Engine.":
+        "የጋራ ወጪዎች ባህሪን አለመጠቀም ወይም በማንኛውም ጊዜ ከቡድን መውጣት መምረጥ ይችላሉ። ከቡድን መውጣት በመሳሪያዎ ላይ ያለውን የአካባቢ ዳታ ያስወግዳል እና መሳሪያዎን ከዚያ ቡድን በTotals Engine ላይ ይሰርዛል።",
+    "You can disable shared-expense push notifications from the in-app settings. This unregisters your Firebase Cloud Messaging token with the Totals Engine.":
+        "የጋራ ወጪ push ማሳወቂያዎችን ከመተግበሪያው ቅንብሮች ውስጥ ማጥፋት ይችላሉ። ይህ የFirebase Cloud Messaging ቶከንዎን ከTotals Engine ላይ ያስወግዳል።",
+    "You can choose not to set up an identity backup vault, or delete an existing vault from within the app.":
+        "የመታወቂያ ምትኬ ቮልትን አለማዋቀር ወይም ያለውን ቮልት ከመተግበሪያው ውስጥ መሰረዝ መምረጥ ይችላሉ።",
     "You can export or import your data using in-app tools.":
         "በመተግበሪያ ውስጥ ያሉ መሳሪያዎችን በመጠቀም ዳታዎን መላክ ወይም ማስገባት ይችላሉ።",
     "You can clear local app data or uninstall the app to remove locally stored data.":
@@ -1554,8 +1721,10 @@ class AppLocalizations {
     "We may update this Privacy Policy from time to time. When we do, we will update the effective date above and the in-app copy where appropriate.":
         "ይህን የግላዊነት መመሪያ ከጊዜ ወደ ጊዜ ልናዘምን እንችላለን። ሲሆንም ከላይ ያለውን የሚጸናበት ቀን እና በመተግበሪያ ውስጥ ያለውን ቅጂ በሚገባ እናዘምናለን።",
     "Contact": "አግኙን",
+    "Detached": "Detached",
     "For privacy questions or requests, use one of the following support channels:":
         "ለግላዊነት ጥያቄዎች ወይም ጥያቄዎች፣ ከሚከተሉት የድጋፍ መንገዶች አንዱን ይጠቀሙ፦",
+    "https://t.me/totals_chat": "https://t.me/totals_chat",
     "Welcome to Totals": "ወደ Totals እንኳን በደህና መጡ",
     "Personal finance tracker for Ethiopian banks":
         "የኢትዮጵያ ባንኮች የግል ፋይናንስ መከታተያ",

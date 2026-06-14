@@ -410,9 +410,12 @@ class _GroupCardBalanceBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final isOwed = myBalance > 0;
     final amount = _formatEtb(myBalance.abs(), context);
-    final balanceText = isOwed
-        ? context.l10nText("you're owed $amount")
-        : context.l10nText('you owe $amount');
+    final balanceText = context
+        .l10n(
+          isOwed ? 'shared.youAreOwedAmount' : 'shared.youOweAmount',
+          isOwed ? "you're owed {amount}" : 'you owe {amount}',
+        )
+        .replaceFirst('{amount}', amount);
     final balanceColor = isOwed ? AppColors.incomeSuccess : AppColors.red;
     final plan = settlementPlanFor(group);
     SettlementDebt? topDebt;
@@ -457,8 +460,8 @@ class _GroupCardBalanceBlock extends StatelessWidget {
               children: [
                 TextSpan(
                   text: iAmDebtor
-                      ? context.l10nText('to ')
-                      : context.l10nText('from '),
+                      ? '${context.l10nText('to')} '
+                      : '${context.l10nText('from')} ',
                   style: TextStyle(
                     color: AppColors.textTertiary(context),
                     fontWeight: FontWeight.w500,
@@ -722,4 +725,3 @@ class _PendingMemberRow extends StatelessWidget {
     );
   }
 }
-

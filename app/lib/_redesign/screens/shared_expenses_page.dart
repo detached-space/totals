@@ -339,7 +339,12 @@ Future<bool> showSplitTransactionWithGroupFlow({
             }
 
             showSnack(
-              context.l10nTextRead('Expense added to ${selectedGroup.name}'),
+              context
+                  .l10nRead(
+                    'shared.expenseAddedToGroup',
+                    'Expense added to {group}',
+                  )
+                  .replaceFirst('{group}', selectedGroup.name),
             );
             return true;
           } catch (error) {
@@ -707,10 +712,18 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     if (pending.isEmpty) return;
     final single = pending.length == 1;
     final message = single
-        ? 'All other members are offline. ${pending.first.name} will sync '
-            'when one of them opens the app.'
-        : '${pending.length} groups are waiting for other members to come '
-            'online. History will sync when one of them opens the app.';
+        ? context
+            .l10nRead(
+              'shared.offlinePeersSingle',
+              'All other members are offline. {group} will sync when one of them opens the app.',
+            )
+            .replaceFirst('{group}', pending.first.name)
+        : context
+            .l10nRead(
+              'shared.offlinePeersMultiple',
+              '{count} groups are waiting for other members to come online. History will sync when one of them opens the app.',
+            )
+            .replaceFirst('{count}', '${pending.length}');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1390,6 +1403,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     String recipientPk,
     double amount,
   ) async {
+    final settledWithTemplate =
+        context.l10nRead('shared.settledWithName', 'Settled with {name}');
     _beginMutation('Settling');
     try {
       final updated = await _repository.settleUpWith(
@@ -1405,7 +1420,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       });
       _syncRealtimeSubscriptions(groups);
       final name = group.displayNameFor(_myPublicKey, recipientPk);
-      _showSnack('Settled with $name');
+      _showSnack(settledWithTemplate.replaceFirst('{name}', name));
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -1427,6 +1442,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       return;
     }
 
+    final settledWithTemplate =
+        context.l10nRead('shared.settledWithName', 'Settled with {name}');
     _beginMutation('Settling');
     try {
       final updated = await _repository.createExpense(
@@ -1446,7 +1463,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
       });
       _syncRealtimeSubscriptions(groups);
       final name = group.displayNameFor(_myPublicKey, debt.from);
-      _showSnack('Settled with $name');
+      _showSnack(settledWithTemplate.replaceFirst('{name}', name));
     } catch (error) {
       _showSnack(error.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -2765,8 +2782,8 @@ class _SplitGroupOption extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     group.memberCount == 1
-                        ? '1 member'
-                        : '${group.memberCount} members',
+                        ? context.l10nText('1 member')
+                        : '${group.memberCount} ${context.l10nText('members')}',
                     style: TextStyle(
                       color: textSecondary,
                       fontSize: 13,

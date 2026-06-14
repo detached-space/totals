@@ -265,25 +265,57 @@ class _PrimaryButton extends StatelessWidget {
   }
 }
 
+String _pinMinMessage(BuildContext context) {
+  return context
+      .l10nRead('vault.pinMinDigits', 'PIN must be at least {count} digits.')
+      .replaceAll('{count}', '$_minPinLength');
+}
+
+String _failureMessage(
+  BuildContext context,
+  String key,
+  String fallback,
+  Object error,
+) {
+  return context.l10nRead(key, fallback).replaceAll('{error}', '$error');
+}
+
 /// Format the "vault is locked" message — shown after too many wrong-PIN
 /// attempts pile up server-side. We try to be specific about how long the
 /// wait is, since that's the actual question the user will ask.
-String _lockedMessage(DateTime? lockedUntil) {
+String _lockedMessage(BuildContext context, DateTime? lockedUntil) {
   if (lockedUntil == null) {
-    return 'Too many wrong PINs. Try again in an hour.';
+    return context.l10nRead(
+      'vault.tooManyWrongPinsHour',
+      'Too many wrong PINs. Try again in an hour.',
+    );
   }
   final remaining = lockedUntil.difference(DateTime.now());
   if (remaining.isNegative) {
-    return 'Lockout just lifted — try again.';
+    return context.l10nRead(
+      'vault.lockoutJustLifted',
+      'Lockout just lifted — try again.',
+    );
   }
   if (remaining.inMinutes < 2) {
-    return 'Locked. Try again in a minute.';
+    return context.l10nRead(
+      'vault.lockedMinute',
+      'Locked. Try again in a minute.',
+    );
   }
   if (remaining.inMinutes < 60) {
-    return 'Locked. Try again in ${remaining.inMinutes} minutes.';
+    return context
+        .l10nRead(
+          'vault.lockedMinutes',
+          'Locked. Try again in {count} minutes.',
+        )
+        .replaceAll('{count}', '${remaining.inMinutes}');
   }
   final hours = (remaining.inMinutes / 60).ceil();
-  return 'Locked. Try again in $hours hour${hours == 1 ? '' : 's'}.';
+  final unit = hours == 1 ? 'hour' : 'hours';
+  return context
+      .l10nRead('vault.lockedHours', 'Locked. Try again in {count} $unit.')
+      .replaceAll('{count}', '$hours');
 }
 
 class _ErrorText extends StatelessWidget {
@@ -575,7 +607,7 @@ class _VaultSetupSheetState extends State<_VaultSetupSheet> {
     final pin = _firstPinController.text.trim();
     if (pin.length < _minPinLength) {
       setState(() {
-        _error = 'PIN must be at least $_minPinLength digits.';
+        _error = _pinMinMessage(context);
       });
       return;
     }
@@ -598,7 +630,10 @@ class _VaultSetupSheetState extends State<_VaultSetupSheet> {
     final second = _secondPinController.text.trim();
     if (second != _pinBuffer) {
       setState(() {
-        _error = 'PINs don\'t match. Try again.';
+        _error = context.l10nRead(
+          'vault.pinMismatch',
+          'PINs don\'t match. Try again.',
+        );
       });
       return;
     }
@@ -620,7 +655,12 @@ class _VaultSetupSheetState extends State<_VaultSetupSheet> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Couldn\'t set up backup: $error';
+        _error = _failureMessage(
+          context,
+          'vault.setupFailed',
+          'Couldn\'t set up backup: {error}',
+          error,
+        );
       });
     }
   }
@@ -773,7 +813,7 @@ class _VaultUnlockSheetState extends State<_VaultUnlockSheet> {
   Future<void> _submit() async {
     final pin = _pinController.text.trim();
     if (pin.length < _minPinLength) {
-      setState(() => _error = 'PIN must be at least $_minPinLength digits.');
+      setState(() => _error = _pinMinMessage(context));
       return;
     }
     setState(() {
@@ -788,19 +828,27 @@ class _VaultUnlockSheetState extends State<_VaultUnlockSheet> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Wrong PIN. Try again.';
+        _error = context.l10nRead(
+          'vault.wrongPinTryAgain',
+          'Wrong PIN. Try again.',
+        );
       });
     } on SharedExpenseVaultLockedException catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = _lockedMessage(error.lockedUntil);
+        _error = _lockedMessage(context, error.lockedUntil);
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Couldn\'t unlock: $error';
+        _error = _failureMessage(
+          context,
+          'vault.unlockFailed',
+          'Couldn\'t unlock: {error}',
+          error,
+        );
       });
     }
   }
@@ -862,11 +910,16 @@ class _VaultRestoreSheetState extends State<_VaultRestoreSheet> {
     final code = _codeController.text.trim();
     final pin = _pinController.text.trim();
     if (!SharedExpenseRecoveryCode.isWellFormed(code)) {
-      setState(() => _error = 'That recovery code doesn\'t look right.');
+      setState(() {
+        _error = context.l10nRead(
+          'vault.recoveryCodeInvalid',
+          'That recovery code doesn\'t look right.',
+        );
+      });
       return;
     }
     if (pin.length < _minPinLength) {
-      setState(() => _error = 'PIN must be at least $_minPinLength digits.');
+      setState(() => _error = _pinMinMessage(context));
       return;
     }
     setState(() {
@@ -882,25 +935,33 @@ class _VaultRestoreSheetState extends State<_VaultRestoreSheet> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Wrong PIN.';
+        _error = context.l10nRead('vault.wrongPin', 'Wrong PIN.');
       });
     } on SharedExpenseVaultLockedException catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = _lockedMessage(error.lockedUntil);
+        _error = _lockedMessage(context, error.lockedUntil);
       });
     } on SharedExpenseNoVaultException {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'No backup found for that recovery code.';
+        _error = context.l10nRead(
+          'vault.noBackupForRecoveryCode',
+          'No backup found for that recovery code.',
+        );
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Restore failed: $error';
+        _error = _failureMessage(
+          context,
+          'vault.restoreFailed',
+          'Restore failed: {error}',
+          error,
+        );
       });
     }
   }
@@ -992,7 +1053,7 @@ class _VaultChangePinSheetState extends State<_VaultChangePinSheet> {
   void _advanceToNewPin() {
     final pin = _oldPinController.text.trim();
     if (pin.length < _minPinLength) {
-      setState(() => _error = 'PIN must be at least $_minPinLength digits.');
+      setState(() => _error = _pinMinMessage(context));
       return;
     }
     setState(() {
@@ -1005,11 +1066,16 @@ class _VaultChangePinSheetState extends State<_VaultChangePinSheet> {
   void _advanceToConfirm() {
     final pin = _newPinController.text.trim();
     if (pin.length < _minPinLength) {
-      setState(() => _error = 'PIN must be at least $_minPinLength digits.');
+      setState(() => _error = _pinMinMessage(context));
       return;
     }
     if (pin == _oldPinBuffer) {
-      setState(() => _error = 'Pick a new PIN, not the same one.');
+      setState(() {
+        _error = context.l10nRead(
+          'vault.samePin',
+          'Pick a new PIN, not the same one.',
+        );
+      });
       return;
     }
     setState(() {
@@ -1022,7 +1088,12 @@ class _VaultChangePinSheetState extends State<_VaultChangePinSheet> {
   Future<void> _confirmAndUpload() async {
     final confirm = _confirmController.text.trim();
     if (confirm != _newPinBuffer) {
-      setState(() => _error = 'PINs don\'t match. Try again.');
+      setState(() {
+        _error = context.l10nRead(
+          'vault.pinMismatch',
+          'PINs don\'t match. Try again.',
+        );
+      });
       return;
     }
     setState(() {
@@ -1043,7 +1114,7 @@ class _VaultChangePinSheetState extends State<_VaultChangePinSheet> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Old PIN was wrong.';
+        _error = context.l10nRead('vault.oldPinWrong', 'Old PIN was wrong.');
         _step = _ChangePinStep.oldPin;
         _oldPinController.clear();
       });
@@ -1051,13 +1122,18 @@ class _VaultChangePinSheetState extends State<_VaultChangePinSheet> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = _lockedMessage(error.lockedUntil);
+        _error = _lockedMessage(context, error.lockedUntil);
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Couldn\'t change PIN: $error';
+        _error = _failureMessage(
+          context,
+          'vault.changePinFailed',
+          'Couldn\'t change PIN: {error}',
+          error,
+        );
       });
     }
   }
