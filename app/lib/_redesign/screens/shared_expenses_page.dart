@@ -397,6 +397,10 @@ class SharedExpenseNavigationController {
     _state?._refreshFromTabSwitch();
   }
 
+  bool handleSystemBack() {
+    return _state?._handleSystemBack() ?? false;
+  }
+
   void _attach(_RedesignSharedExpensesPageState state) {
     _state = state;
     final pendingGroupId = _pendingActivitiesGroupId;
@@ -569,6 +573,8 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   int _pendingRealtimeReconnectAttempts = 0;
   StreamSubscription<SharedExpenseGroup>? _realtimeBusSubscription;
   StreamSubscription<void>? _vaultRestoreSubscription;
+  final GlobalKey<_SharedGroupDetailViewState> _groupDetailKey =
+      GlobalKey<_SharedGroupDetailViewState>();
 
   @override
   void initState() {
@@ -940,8 +946,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     TransactionProvider provider,
   ) async {
     final accounts = _selectablePaymentAccounts(provider);
-    final hasNonCash =
-        accounts.any((a) => a.bankId != CashConstants.bankId);
+    final hasNonCash = accounts.any((a) => a.bankId != CashConstants.bankId);
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_sharedExpensePaymentAddressKey);
@@ -1170,6 +1175,18 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     _sharedExpensesPageLog('closeGroup');
     widget.fabController?.clear();
     setState(() => _selectedGroup = null);
+  }
+
+  bool _handleSystemBack() {
+    final selectedGroup = _selectedGroup;
+    if (selectedGroup == null || !_canOpenGroup(selectedGroup)) {
+      return false;
+    }
+    final detailHandled =
+        _groupDetailKey.currentState?.handleSystemBack() ?? false;
+    if (detailHandled) return true;
+    _closeGroup();
+    return true;
   }
 
   Future<void> _openGroupSettings(SharedExpenseGroup group) async {
@@ -1775,6 +1792,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     final selectedGroup = _selectedGroup;
     if (selectedGroup != null && _canOpenGroup(selectedGroup)) {
       return _SharedGroupDetailView(
+        key: _groupDetailKey,
         group: selectedGroup,
         myPublicKey: _myPublicKey,
         initialTabIndex: _selectedGroupInitialTabIndex,
@@ -2403,9 +2421,8 @@ class _StackedAvatars extends StatelessWidget {
   Widget build(BuildContext context) {
     if (people.isEmpty) return const SizedBox.shrink();
     final overflow = people.length - _maxVisible;
-    final visible = overflow > 0
-        ? people.take(_maxVisible).toList()
-        : people.toList();
+    final visible =
+        overflow > 0 ? people.take(_maxVisible).toList() : people.toList();
     const avatarSize = 28.0;
     const overlap = 10.0;
     final slotCount = visible.length + (overflow > 0 ? 1 : 0);
@@ -2928,4 +2945,3 @@ class _CreatingGroupCard extends StatelessWidget {
     );
   }
 }
-

@@ -825,6 +825,11 @@ class RedesignShellState extends State<RedesignShell>
                               false;
                       if (handled) return false;
                     }
+                    if (_currentIndex == _sharedIndex) {
+                      final handled =
+                          _sharedExpenseNavigationController.handleSystemBack();
+                      if (handled) return false;
+                    }
                     return true;
                   },
                   child: Scaffold(

@@ -18,6 +18,7 @@ class _SharedGroupDetailView extends StatefulWidget {
   final void Function(String debtorPk, double amount) onNudgeDebt;
 
   const _SharedGroupDetailView({
+    super.key,
     required this.group,
     required this.myPublicKey,
     required this.initialTabIndex,
@@ -99,6 +100,18 @@ class _SharedGroupDetailViewState extends State<_SharedGroupDetailView> {
       isBusy: widget.isMutating,
       busyLabel: widget.mutationLabel,
     );
+  }
+
+  bool handleSystemBack() {
+    if (_showTransactions) {
+      _setShowTransactions(false);
+      return true;
+    }
+    if (_showMembers) {
+      _setShowMembers(false);
+      return true;
+    }
+    return false;
   }
 
   void _setShowTransactions(bool value) {
@@ -2070,7 +2083,6 @@ class _ActivityRow extends StatelessWidget {
   }
 }
 
-
 class _SharedSectionHeader extends StatelessWidget {
   final String label;
   final String? actionLabel;
@@ -2280,4 +2292,3 @@ class _SharedMetricTile extends StatelessWidget {
     );
   }
 }
-
