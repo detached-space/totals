@@ -1807,6 +1807,11 @@ class _FAQPageState extends State<FAQPage> {
       'answer':
           "In Today's transactions, tap the refresh button to rescan today's bank SMS to add anything that was missed.",
     },
+    {
+      'question': 'How do shared expenses work?',
+      'answer':
+          'Create a group in the Shared tab, add expenses, and split them with the people involved. Shared expense updates are encrypted with the group key, so only members of that group can see them. For anyone outside the group, the synced data is just encrypted data. Your personal transactions stay private unless you choose to link one to a shared expense.',
+    },
   ];
 
   @override

@@ -1311,6 +1311,9 @@ class AppLocalizations {
         "በየዛሬ ትራንዛክሽኖች ውስጥ የዛሬን የባንክ ኤስኤምኤስ እንደገና ለመቃኘት እና ያመለጠውን ለመያዝ የማደሻ አዝራሩን ይንኩ።",
     "Create a budget in the Budget tab with a spending limit and time period. Totals tracks your spending against it and notifies you when you are close to your limit.":
         "በበጀት ትር ውስጥ የወጪ ገደብ እና የጊዜ ወቅት ያለው በጀት ይፍጠሩ። Totals ወጪዎን ከዚያ ጋር ይከታተላል እና ወደ ገደብዎ ሲቀርቡ ያሳውቅዎታል።",
+    "How do shared expenses work?": "የጋራ ወጪዎች እንዴት ይሰራሉ?",
+    "Create a group in the Shared tab, add expenses, and split them with the people involved. Shared expense updates are encrypted with the group key, so only members of that group can see them. For anyone outside the group, the synced data is just encrypted data. Your personal transactions stay private unless you choose to link one to a shared expense.":
+        "በየጋራ ትር ውስጥ ቡድን ይፍጠሩ፣ ወጪዎችን ያክሉ፣ እና ከተሳታፊዎች ጋር ይካፈሉ። የጋራ ወጪ ዝመናዎች በቡድኑ ቁልፍ ይመሰጠራሉ፣ ስለዚህ የዚያ ቡድን አባላት ብቻ ማየት ይችላሉ። ከቡድኑ ውጭ ላለ ማንኛውም ሰው፣ የተመሳሰለው ዳታ የተመሰጠረ ዳታ ብቻ ነው። የግል ትራንዛክሽኖችዎ ከጋራ ወጪ ጋር ለማገናኘት ካልመረጡ በስተቀር የግል ይቆያሉ።",
     "Double-tap the lock icon on the home screen to instantly lock the app. You will need to authenticate to get back in.":
         "መተግበሪያውን ወዲያውኑ ለመቆለፍ በመነሻ ገጽ ላይ የቁልፍ አዶውን ሁለቴ ይንኩ። እንደገና ለመግባት ራስዎን ማረጋገጥ ያስፈልግዎታል።",
     "Long-press the bottom navigation bar items for quick actions. Long-press Money to add a cash transaction, long-press Tools to open your quick-access accounts, and long-press You to switch between profiles.":

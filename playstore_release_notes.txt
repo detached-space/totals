@@ -1,0 +1,5 @@
+- New: Shared Expenses with private encrypted groups, splits, balances, settlements, nudges, activity, analytics, realtime sync, notifications, recovery, and transaction linking.
+- Added manual cash entries with bank/wallet selection and custom dates.
+- Moved tools into the home page floating action button for faster access.
+- Added Loans & Debts tracking.
+- Improved calendar budgets, widgets, SMS parsing, missed/failed transaction handling, sharing/scanning, Amharic, UI polish, and stability.

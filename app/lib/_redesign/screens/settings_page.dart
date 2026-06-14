@@ -2252,6 +2252,16 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
           'notifies you when you are close to your limit.',
     },
     {
+      'icon': 'shared',
+      'question': 'How do shared expenses work?',
+      'answer': 'Create a group in the Shared tab, add expenses, and split them '
+          'with the people involved. Shared expense updates are encrypted with '
+          'the group key, so only members of that group can see them. For '
+          'anyone outside the group, the synced data is just encrypted data. '
+          'Your personal transactions stay private unless you choose to link '
+          'one to a shared expense.',
+    },
+    {
       'icon': 'lock',
       'question': 'How do I lock the app?',
       'answer': 'Double-tap the lock icon on the home screen to instantly '
@@ -2289,6 +2299,8 @@ class _RedesignFAQPageState extends State<_RedesignFAQPage> {
         return AppIcons.refresh;
       case 'budget':
         return AppIcons.savings_outlined;
+      case 'shared':
+        return AppIcons.group_outlined;
       default:
         return AppIcons.help_outline_rounded;
     }
