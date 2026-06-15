@@ -1896,15 +1896,13 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         onJoin: _joinGroup,
                       ),
                       const SizedBox(height: 16),
-                      if (_groups.isNotEmpty) ...[
-                        _SharedHeroCard(
-                          summary: _SharedHeroSummary.fromGroups(
-                            _groups,
-                            _myPublicKey,
-                          ),
+                      _SharedHeroCard(
+                        summary: _SharedHeroSummary.fromGroups(
+                          _groups,
+                          _myPublicKey,
                         ),
-                        const SizedBox(height: 16),
-                      ],
+                      ),
+                      const SizedBox(height: 16),
                       SharedExpenseVaultBanner(hasGroups: _groups.isNotEmpty),
                       const SharedExpenseVaultDebugRow(),
                       if (!_engineReachable) ...[
@@ -2339,10 +2337,8 @@ class _SharedHeroCard extends StatelessWidget {
               _HeroTotalAside(net: summary.netBalance),
             ],
           ),
-          if (summary.breakdown.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _HeroBreakdown(items: summary.breakdown),
-          ],
+          const SizedBox(height: 14),
+          _HeroBreakdown(items: summary.breakdown),
           const SizedBox(height: 12),
           Text(
             _heroSummarySubtitle(context, summary),
@@ -2458,13 +2454,26 @@ class _HeroBreakdown extends StatelessWidget {
 /// Stacked-bar visualization of each group's contribution to the overall
 /// balance. Segments are sized by |balance| and coloured by per-group
 /// palette so they line up with the dot colour in the breakdown row below.
+///
+/// When [items] is empty (no groups yet, or every group is settled) the
+/// bar still renders as a flat grey track so the overview card always
+/// has the same vertical rhythm — empty users see where balances will
+/// eventually appear.
 class _GroupSegmentBar extends StatelessWidget {
   final List<_HeroGroupBalance> items;
   const _GroupSegmentBar({required this.items});
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
+    if (items.isEmpty) {
+      return Container(
+        height: 8,
+        decoration: BoxDecoration(
+          color: AppColors.borderColor(context).withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(4),
+        ),
+      );
+    }
     return SizedBox(
       height: 8,
       child: ClipRRect(

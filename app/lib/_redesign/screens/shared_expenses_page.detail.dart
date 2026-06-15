@@ -1963,11 +1963,13 @@ class _SharedGroupActivitiesTab extends StatelessWidget {
         else
           Column(
             children: [
-              for (final entry in entries)
+              for (var i = 0; i < entries.length; i++)
                 _ActivityRow(
-                  entry: entry,
+                  entry: entries[i],
                   group: group,
                   myPublicKey: myPublicKey,
+                  isFirst: i == 0,
+                  isLast: i == entries.length - 1,
                 ),
             ],
           ),
@@ -1980,11 +1982,45 @@ class _ActivityRow extends StatelessWidget {
   final SharedActivityEntry entry;
   final SharedExpenseGroup group;
   final String myPublicKey;
+  final bool isFirst;
+  final bool isLast;
   const _ActivityRow({
     required this.entry,
     required this.group,
     required this.myPublicKey,
+    required this.isFirst,
+    required this.isLast,
   });
+
+  /// Find the SharedExpense this activity entry is tied to (when the
+  /// kind is one of the expense_* / settlement_created kinds). Falls back
+  /// to null when the expense was deleted, or when the entry doesn't
+  /// reference one.
+  SharedExpense? _linkedExpense() {
+    final id = entry.data['expenseId'];
+    if (id is! String || id.isEmpty) return null;
+    for (final e in group.expenses) {
+      if (e.id == id) return e;
+    }
+    return null;
+  }
+
+  /// Snapshot of "what was this entry about?" — preserves the reason and
+  /// amount even when the expense was later deleted (the entry itself
+  /// stores `reason` / `amount` at creation/deletion time as a fallback).
+  ({String reason, double amount})? _expenseSnapshot() {
+    final expense = _linkedExpense();
+    if (expense != null) {
+      return (reason: expense.reason, amount: expense.amount);
+    }
+    final dataReason = entry.data['reason'];
+    final dataAmount = entry.data['amount'];
+    if (dataReason is String && dataReason.isNotEmpty) {
+      final amt = dataAmount is num ? dataAmount.toDouble() : 0.0;
+      return (reason: dataReason, amount: amt);
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1996,44 +2032,63 @@ class _ActivityRow extends StatelessWidget {
         : Color(memberColorFor(group, entry.actor));
     final message = _describe(entry, context);
     final ago = _shortRelative(entry.timestamp);
+    final expenseSnap = _expenseSnapshot();
+    final tsLine = _exactTime(entry.timestamp);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+    return IntrinsicHeight(
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.only(top: 7, right: 10),
-            decoration: BoxDecoration(
-              color: actorColor,
-              shape: BoxShape.circle,
-            ),
+          _TimelineRail(
+            dotColor: actorColor,
+            isFirst: isFirst,
+            isLast: isLast,
           ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text.rich(
-              TextSpan(
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary(context),
-                    ),
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TextSpan(
-                    text: actorName,
-                    style: TextStyle(
-                      color: actorColor,
-                      fontWeight: FontWeight.w700,
+                  Text.rich(
+                    TextSpan(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary(context),
+                            height: 1.3,
+                          ),
+                      children: [
+                        TextSpan(
+                          text: actorName,
+                          style: TextStyle(
+                            color: actorColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        TextSpan(text: ' $message'),
+                      ],
                     ),
                   ),
-                  TextSpan(text: ' $message'),
-                  if (ago.isNotEmpty)
-                    TextSpan(
-                      text: '  ·  $ago',
+                  if (expenseSnap != null &&
+                      !_describeReferencesExpense(entry))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: _ExpenseRefChip(
+                        reason: expenseSnap.reason,
+                        amount: expenseSnap.amount,
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      ago.isEmpty ? tsLine : '$tsLine  ·  $ago',
                       style: TextStyle(
                         color: AppColors.textTertiary(context),
                         fontSize: 11,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -2043,12 +2098,51 @@ class _ActivityRow extends StatelessWidget {
     );
   }
 
+  /// The kinds whose [_describe] already inlines the reason+amount — for
+  /// those we don't render the expense ref chip below, to avoid duplicating
+  /// the same expense reference twice in the same row.
+  bool _describeReferencesExpense(SharedActivityEntry e) {
+    return e.kind == 'expense_created' ||
+        e.kind == 'expense_deleted' ||
+        e.kind == 'settlement_created';
+  }
+
+  static String _exactTime(int ts) {
+    if (ts <= 0) return '';
+    final d = DateTime.fromMillisecondsSinceEpoch(ts);
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final hh = d.hour.toString().padLeft(2, '0');
+    final mm = d.minute.toString().padLeft(2, '0');
+    return '${months[d.month - 1]} ${d.day} · $hh:$mm';
+  }
+
+  /// Compact date used by the expense-date-edit before→after pair (no
+  /// time-of-day component since the date is the *expense's* date, not
+  /// when the edit happened).
+  static String _formatDateShort(int ts) {
+    if (ts <= 0) return '—';
+    final d = DateTime.fromMillisecondsSinceEpoch(ts);
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.day}';
+  }
+
   String _describe(SharedActivityEntry e, BuildContext context) {
     switch (e.kind) {
       case 'group_created':
         return context.l10nText('created the group');
       case 'group_renamed':
-        return '${context.l10nText('renamed the group to')} "${e.data['after'] ?? ''}"';
+        final before = (e.data['before'] as String?)?.trim() ?? '';
+        final after = (e.data['after'] as String?)?.trim() ?? '';
+        if (before.isEmpty) {
+          return '${context.l10nText('renamed the group to')} "$after"';
+        }
+        return '${context.l10nText('renamed the group:')} "$before" → "$after"';
       case 'member_approved':
         return context.l10nText('approved a new member');
       case 'member_joined':
@@ -2058,19 +2152,50 @@ class _ActivityRow extends StatelessWidget {
       case 'expense_created':
         return '${context.l10nText('added')} "${e.data['reason'] ?? context.l10nText('an expense')}" · ${_formatEtb(e.data['amount'] ?? 0, context)}';
       case 'expense_amount_changed':
-        return '${context.l10nText('changed amount to')} ${_formatEtb(e.data['after'] ?? 0, context)}';
+        final beforeAmt = (e.data['before'] as num?)?.toDouble() ?? 0;
+        final afterAmt = (e.data['after'] as num?)?.toDouble() ?? 0;
+        return '${context.l10nText('changed amount:')} '
+            '${_formatEtb(beforeAmt, context)} → ${_formatEtb(afterAmt, context)}';
       case 'expense_reason_changed':
-        return '${context.l10nText('renamed expense to')} "${e.data['after'] ?? ''}"';
+        final before = (e.data['before'] as String?) ?? '';
+        final after = (e.data['after'] as String?) ?? '';
+        return '${context.l10nText('renamed expense:')} "$before" → "$after"';
       case 'expense_paid_by_changed':
-        return context.l10nText('changed who paid');
+        final beforePk = (e.data['before'] as String?) ?? '';
+        final afterPk = (e.data['after'] as String?) ?? '';
+        final beforeName = beforePk.isEmpty
+            ? context.l10nText('nobody')
+            : group.displayNameFor(myPublicKey, beforePk);
+        final afterName = afterPk.isEmpty
+            ? context.l10nText('nobody')
+            : group.displayNameFor(myPublicKey, afterPk);
+        return '${context.l10nText('changed payer:')} $beforeName → $afterName';
       case 'expense_split_changed':
-        return context.l10nText('changed the split');
+        final beforeCount = (e.data['before'] as List?)?.length ?? 0;
+        final afterCount = (e.data['after'] as List?)?.length ?? 0;
+        final beforeLabel = beforeCount == 1
+            ? context.l10nText('person')
+            : context.l10nText('people');
+        final afterLabel = afterCount == 1
+            ? context.l10nText('person')
+            : context.l10nText('people');
+        return '${context.l10nText('changed split:')} '
+            '$beforeCount $beforeLabel → $afterCount $afterLabel';
       case 'expense_date_changed':
-        return context.l10nText('updated the date');
+        final beforeMs = (e.data['before'] as num?)?.toInt() ?? 0;
+        final afterMs = (e.data['after'] as num?)?.toInt() ?? 0;
+        return '${context.l10nText('changed date:')} '
+            '${_formatDateShort(beforeMs)} → ${_formatDateShort(afterMs)}';
       case 'expense_linked_transaction_changed':
-        return e.data['after'] == null
-            ? context.l10nText('removed the linked transaction')
-            : context.l10nText('linked a transaction');
+        final beforeRef = (e.data['before'] as String?) ?? '';
+        final afterRef = (e.data['after'] as String?) ?? '';
+        if (beforeRef.isEmpty && afterRef.isNotEmpty) {
+          return context.l10nText('linked a transaction');
+        }
+        if (beforeRef.isNotEmpty && afterRef.isEmpty) {
+          return context.l10nText('removed the linked transaction');
+        }
+        return context.l10nText('changed the linked transaction');
       case 'expense_deleted':
         return '${context.l10nText('deleted')} "${e.data['reason'] ?? context.l10nText('an expense')}"';
       case 'settlement_created':
@@ -2080,6 +2205,127 @@ class _ActivityRow extends StatelessWidget {
       default:
         return e.kind;
     }
+  }
+}
+
+/// Left-side rail that connects sibling activity entries with a vertical
+/// line, with a single dot for this entry's row. [isFirst] and [isLast]
+/// trim the line so it doesn't dangle above the topmost or below the
+/// bottommost entry. Used by [_ActivityRow]; the row's [IntrinsicHeight]
+/// stretches the rail to the row's full height so [Expanded] below works.
+class _TimelineRail extends StatelessWidget {
+  final Color dotColor;
+  final bool isFirst;
+  final bool isLast;
+  const _TimelineRail({
+    required this.dotColor,
+    required this.isFirst,
+    required this.isLast,
+  });
+
+  static const double _railWidth = 18;
+  static const double _dotSize = 12;
+  static const double _stubHeight = 6;
+  static const double _lineThickness = 2;
+
+  @override
+  Widget build(BuildContext context) {
+    final lineColor = AppColors.borderColor(context);
+    return SizedBox(
+      width: _railWidth,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Stub above the dot — connects to the previous entry's tail.
+          SizedBox(
+            height: _stubHeight,
+            width: _lineThickness,
+            child: isFirst
+                ? const SizedBox.shrink()
+                : ColoredBox(color: lineColor),
+          ),
+          // The dot itself, in the actor's group colour.
+          Container(
+            width: _dotSize,
+            height: _dotSize,
+            decoration: BoxDecoration(
+              color: dotColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          // Continuation tail — fills the remaining row height down to the
+          // next entry's stub, except on the last row where it's hidden so
+          // the line doesn't dangle past the final dot.
+          Expanded(
+            child: isLast
+                ? const SizedBox.shrink()
+                : SizedBox(
+                    width: _lineThickness,
+                    child: ColoredBox(color: lineColor),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pill that names the expense an activity entry refers to. Surfaced under
+/// the activity message when the kind is one of the expense_* edit kinds
+/// whose description ("changed who paid", "updated the date", …) doesn't
+/// already inline the expense reason. Keeps the user from having to guess
+/// "edited what?" — common request once a group has more than a handful
+/// of expenses.
+class _ExpenseRefChip extends StatelessWidget {
+  final String reason;
+  final double amount;
+  const _ExpenseRefChip({required this.reason, required this.amount});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasReason = reason.trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            AppIcons.receipt_long_rounded,
+            size: 12,
+            color: AppColors.textTertiary(context),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              hasReason ? reason : context.l10nText('Expense'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColors.textPrimary(context),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (amount > 0) ...[
+            const SizedBox(width: 6),
+            Text(
+              '· ${_formatEtb(amount, context)}',
+              style: TextStyle(
+                color: AppColors.textSecondary(context),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
