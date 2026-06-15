@@ -580,7 +580,7 @@ class _GroupCardKebabMenu extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(
-                    AppIcons.copy,
+                    AppIcons.share_outline,
                     size: 16,
                     color: AppColors.textSecondary(menuContext),
                   ),
@@ -589,7 +589,7 @@ class _GroupCardKebabMenu extends StatelessWidget {
                   // handleTap), NOT during a build pass. l10nText uses
                   // context.watch under the hood, which throws outside build.
                   // Use the read-only variant here.
-                  Text(menuContext.l10nTextRead('Copy invite')),
+                  Text(menuContext.l10nTextRead('Share invite')),
                 ],
               ),
             ),

@@ -229,6 +229,11 @@ class _GroupFormSheet extends StatefulWidget {
   final String initialName;
   final List<AccountSummary> paymentAccounts;
   final SharedPaymentAddress initialPaymentAddress;
+  /// Show a "Scan QR" affordance above the group code/name input. Used by
+  /// the Join flow so the user can scan an invite QR generated on a
+  /// friend's phone instead of typing the code. Defaults to false — the
+  /// Create flow doesn't need it.
+  final bool showQrScan;
 
   const _GroupFormSheet({
     required this.title,
@@ -240,6 +245,7 @@ class _GroupFormSheet extends StatefulWidget {
     required this.initialName,
     required this.paymentAccounts,
     required this.initialPaymentAddress,
+    this.showQrScan = false,
   });
 
   @override
@@ -365,6 +371,15 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
                               ],
                             ),
                             const SizedBox(height: 28),
+                            if (widget.showQrScan) ...[
+                              _ScanInviteChip(
+                                onScanned: (code) {
+                                  _groupController.text = code;
+                                  setState(() {});
+                                },
+                              ),
+                              const SizedBox(height: 14),
+                            ],
                             _SheetTextField(
                               controller: _groupController,
                               label: widget.groupLabel,
@@ -436,6 +451,193 @@ class _GroupFormSheetState extends State<_GroupFormSheet> {
             },
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Inline "Scan QR" chip shown above the invite-code input on the Join
+/// flow. Pushes a full-screen scanner page that returns the decoded
+/// payload — typically the bare UUID we ship in the share text — and
+/// hands it back via [onScanned].
+class _ScanInviteChip extends StatelessWidget {
+  final ValueChanged<String> onScanned;
+  const _ScanInviteChip({required this.onScanned});
+
+  Future<void> _open(BuildContext context) async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        fullscreenDialog: true,
+        builder: (_) => const _ScanInvitePage(),
+      ),
+    );
+    if (code == null || code.isEmpty) return;
+    onScanned(code);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => _open(context),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.primaryLight.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.primaryLight.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              AppIcons.qr_code_scanner_rounded,
+              size: 22,
+              color: AppColors.primaryLight,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    context.l10nText('Scan invite QR'),
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    context.l10nText(
+                      'Point the camera at your friend\'s invite code.',
+                    ),
+                    style: TextStyle(
+                      color: AppColors.textSecondary(context),
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              AppIcons.chevron_right,
+              size: 18,
+              color: AppColors.textTertiary(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ScanInvitePage extends StatefulWidget {
+  const _ScanInvitePage();
+
+  @override
+  State<_ScanInvitePage> createState() => _ScanInvitePageState();
+}
+
+class _ScanInvitePageState extends State<_ScanInvitePage> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _handled = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleDetect(BarcodeCapture capture) {
+    if (_handled) return;
+    for (final code in capture.barcodes) {
+      final value = code.rawValue;
+      if (value == null || value.isEmpty) continue;
+      _handled = true;
+      Navigator.of(context).pop(value.trim());
+      return;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.black,
+      appBar: AppBar(
+        backgroundColor: AppColors.black,
+        foregroundColor: AppColors.white,
+        elevation: 0,
+        title: Text(context.l10nText('Scan invite QR')),
+        centerTitle: true,
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: _handleDetect,
+            errorBuilder: (context, error) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    context.l10nText(
+                      'Camera unavailable. Enable camera permission and try again.',
+                    ),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.white,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          // Lightweight viewfinder frame in the centre to hint where to aim.
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 240,
+                  height: 240,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: AppColors.white.withValues(alpha: 0.75),
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: 32,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                context.l10nText(
+                  'Line up your friend\'s invite QR inside the frame.',
+                ),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1254,6 +1456,188 @@ class _LinkedTransactionOption extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ============================================================================
+// Invite sheet — QR code + OS share sheet + copy fallback. Opened from the
+// kebab menu on synced cards and from the Copy invite pill on pending cards
+// (so the user gets the same flow whether they're inviting more people to a
+// group they're already in, or sharing the code they themselves used while
+// pending).
+// ============================================================================
+
+Future<void> showGroupInviteSheet(
+  BuildContext context, {
+  required String groupName,
+  required String inviteCode,
+}) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: AppColors.black.withValues(alpha: 0.5),
+    builder: (sheetContext) => _GroupInviteSheet(
+      groupName: groupName,
+      inviteCode: inviteCode,
+    ),
+  );
+}
+
+class _GroupInviteSheet extends StatelessWidget {
+  final String groupName;
+  final String inviteCode;
+  const _GroupInviteSheet({
+    required this.groupName,
+    required this.inviteCode,
+  });
+
+  String _shareText(BuildContext context) {
+    // l10nText uses context.watch under the hood; this method is called
+    // from the Share button's onTap (outside a build pass), so we must
+    // use the read-only variant or Provider asserts.
+    final groupLabel = groupName.trim().isEmpty ? 'a Totals group' : groupName;
+    return context
+        .l10nTextRead('Join "{group}" on Totals with this invite code:\n{code}')
+        .replaceFirst('{group}', groupLabel)
+        .replaceFirst('{code}', inviteCode);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shellTitle = groupName.trim().isEmpty
+        ? context.l10nText('Invite to group')
+        : context
+            .l10n('shared.inviteTo', 'Invite to {name}')
+            .replaceFirst('{name}', groupName);
+    return _IosModalShell(
+      title: shellTitle,
+      footer: [
+        _IosFormSubmit(
+          label: context.l10nText('Share'),
+          icon: AppIcons.share_outline,
+          enabled: true,
+          onTap: () async {
+            debugPrint('debug: invite-share button tapped');
+            final messenger = ScaffoldMessenger.maybeOf(context);
+            final unavailableText = context
+                .l10nTextRead('Sharing is unavailable on this device.');
+            final box = context.findRenderObject() as RenderBox?;
+            final shareText = _shareText(context);
+            debugPrint(
+              'debug: invite-share text="${shareText.replaceAll('\n', ' / ')}"',
+            );
+            try {
+              // iPad / desktop need a popover anchor or Share.share()
+              // silently no-ops. On phone Android/iOS this is harmless.
+              final result = await Share.share(
+                shareText,
+                subject: shellTitle,
+                sharePositionOrigin: box == null
+                    ? null
+                    : box.localToGlobal(Offset.zero) & box.size,
+              );
+              debugPrint(
+                'debug: invite-share result=${result.status} raw=${result.raw}',
+              );
+              if (result.status == ShareResultStatus.unavailable) {
+                messenger?.showSnackBar(
+                  SnackBar(
+                    content: Text(unavailableText),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+                return;
+              }
+              if (context.mounted) Navigator.of(context).pop();
+            } catch (error, stack) {
+              debugPrint('debug: invite-share threw: $error\n$stack');
+              messenger?.showSnackBar(
+                SnackBar(
+                  content: Text(error.toString()),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          },
+          topPadding: 0,
+        ),
+        const SizedBox(height: 10),
+        _IosSecondaryButton(
+          label: context.l10nText('Copy code'),
+          icon: Icons.content_copy,
+          onTap: () async {
+            await Clipboard.setData(ClipboardData(text: inviteCode));
+            if (!context.mounted) return;
+            final messenger = ScaffoldMessenger.maybeOf(context);
+            Navigator.of(context).pop();
+            messenger?.showSnackBar(
+              SnackBar(
+                content: Text(context.l10nTextRead('Invite code copied')),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+        ),
+      ],
+      children: [
+        // White card around the QR so it scans cleanly on a dark theme too.
+        Center(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: SizedBox(
+              width: 220,
+              height: 220,
+              child: PrettyQrView.data(
+                data: inviteCode,
+                decoration: const PrettyQrDecoration(
+                  shape: PrettyQrSmoothSymbol(
+                    color: AppColors.black,
+                    roundFactor: 0.65,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          context.l10nText(
+            'Friends can scan this QR or use the code below.',
+          ),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.textSecondary(context),
+            fontSize: 12.5,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceColor(context),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.borderColor(context)),
+          ),
+          child: Text(
+            inviteCode,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: AppColors.textPrimary(context),
+              fontSize: 13.5,
+              letterSpacing: 0.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

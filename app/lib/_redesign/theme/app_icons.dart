@@ -71,6 +71,7 @@ class AppIcons {
   static const IconData phone_iphone_rounded =
       PhosphorIconsRegular.deviceMobile;
   static const IconData qr_code_scanner_rounded = PhosphorIconsRegular.scan;
+  static const IconData share_outline = PhosphorIconsRegular.shareNetwork;
   static const IconData receipt_long_rounded = PhosphorIconsRegular.receipt;
   static const IconData refresh = PhosphorIconsRegular.arrowClockwise;
   static const IconData remove_circle_outline =

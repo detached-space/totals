@@ -6,7 +6,10 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/_redesign/screens/shared_expense_vault_sheets.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
@@ -1225,7 +1228,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     if (result == null || !mounted) return;
 
     if (result is _GroupSettingsCopyInvite) {
-      await _copyInvite(group);
+      await _shareInvite(group);
       return;
     }
 
@@ -1701,6 +1704,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         initialName: displayName,
         paymentAccounts: accounts,
         initialPaymentAddress: paymentAddress,
+        showQrScan: true,
       ),
     );
     if (input == null) return;
@@ -1794,6 +1798,18 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     );
     if (!mounted || !showSnack) return;
     _showSnack(context.l10nTextRead('Invite code copied'));
+  }
+
+  /// Opens the share sheet: QR code + OS-level Share + Copy fallback. The
+  /// raw `_copyInvite` above stays as a non-interactive helper for the
+  /// post-create-group auto-copy path.
+  Future<void> _shareInvite(SharedExpenseGroup group) async {
+    final inviteCode = _repository.inviteCodeFor(group.id);
+    await showGroupInviteSheet(
+      context,
+      groupName: group.name,
+      inviteCode: inviteCode,
+    );
   }
 
   Future<void> _cancelJoinRequest(SharedExpenseGroup group) async {
@@ -1944,7 +1960,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         shortKey: _shortKey,
                         approvingMemberKey: _approvingMemberKey,
                         onOpen: () => _openGroup(group),
-                        onCopyInvite: () => _copyInvite(group),
+                        onCopyInvite: () => _shareInvite(group),
                         onApproveMember: (member) =>
                             _approveMember(group, member),
                         onCancelJoinRequest: () => _cancelJoinRequest(group),

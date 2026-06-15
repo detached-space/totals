@@ -368,12 +368,14 @@ class SharedExpenseVaultBanner extends StatelessWidget {
         final isSetup = !service.hasVault;
         final label = isSetup
             ? context.l10nText('Back up your shared expense identity')
-            : context.l10nText('Backup is paused');
+            : context.l10nText('Unlock backup');
         final detail = isSetup
             ? context.l10nText(
                 'Set a PIN so you can restore your groups on a new phone.',
               )
-            : context.l10nText('Unlock with your PIN to resume backing up.');
+            : context.l10nText(
+                'Enter your PIN once to resume automatic backup.',
+              );
         final action = isSetup
             ? context.l10nText('Set up')
             : context.l10nText('Unlock');

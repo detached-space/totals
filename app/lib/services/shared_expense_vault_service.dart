@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -65,6 +66,16 @@ class SharedExpenseVaultService extends ChangeNotifier {
 
   static const String _recoveryCodeKey = 'shared_expense_vault_recovery_code';
 
+  /// Key under which we persist the PIN-derived KEK + matching salt/KDF so
+  /// the vault can auto-unlock on every app launch without the user
+  /// re-entering their PIN. flutter_secure_storage encrypts at rest using
+  /// the OS keystore/keychain — the value is only readable while the
+  /// device is unlocked. PIN is still required for new-device restore
+  /// (we don't have access to this secure-storage entry there) and for
+  /// change-pin / delete-vault flows.
+  static const String _persistedKekKey =
+      'shared_expense_vault_persisted_kek_v1';
+
   final SharedExpenseRepository _repository;
   final SharedExpenseCryptoService _cryptoService;
   final TotalsEngineClient _engineClient;
@@ -93,6 +104,13 @@ class SharedExpenseVaultService extends ChangeNotifier {
     try {
       _recoveryCode = await _secureStorage.read(key: _recoveryCodeKey);
       _vaultLog('initialized hasVault=$hasVault');
+      if (hasVault) {
+        // Best-effort auto-unlock from a previously persisted KEK. Silent
+        // success path = backup just keeps working across launches with no
+        // PIN prompt. Silent failure path = the banner / sheets fall back
+        // to the existing PIN flow.
+        await _loadKekFromDevice();
+      }
     } catch (error) {
       _vaultLog('initialize read failed: $error');
       _recoveryCode = null;
@@ -145,6 +163,7 @@ class SharedExpenseVaultService extends ChangeNotifier {
       ),
       sealed: sealed,
     );
+    await _persistKekToDevice();
     _vaultLog('setupNew ok groupKeys=${content.groupKeys.length}');
     notifyListeners();
     return recoveryCode;
@@ -171,6 +190,7 @@ class SharedExpenseVaultService extends ChangeNotifier {
         params: sealed.kdfParams,
       );
       _cacheKekFromSealed(kek: kek, sealed: sealed);
+      await _persistKekToDevice();
       _vaultLog('unlock ok');
       notifyListeners();
     } on SharedExpenseVaultWrongPinException {
@@ -218,6 +238,7 @@ class SharedExpenseVaultService extends ChangeNotifier {
       params: sealed.kdfParams,
     );
     _cacheKekFromSealed(kek: kek, sealed: sealed);
+    await _persistKekToDevice();
     _vaultLog(
       'restore ok seed-set groupKeys=${content.groupKeys.length}',
     );
@@ -299,6 +320,7 @@ class SharedExpenseVaultService extends ChangeNotifier {
       params: sealed.kdfParams,
     );
     _cacheKekFromSealed(kek: newKek, sealed: sealed);
+    await _persistKekToDevice();
     _vaultLog('changePin ok');
     notifyListeners();
   }
@@ -334,6 +356,7 @@ class SharedExpenseVaultService extends ChangeNotifier {
     } catch (error) {
       _vaultLog('debugReset secure-storage delete failed: $error');
     }
+    await _clearPersistedKek();
     _recoveryCode = null;
     _cachedKek = null;
     _cachedSaltBase64 = null;
@@ -423,5 +446,72 @@ class SharedExpenseVaultService extends ChangeNotifier {
     _cachedKek = kek;
     _cachedSaltBase64 = sealed.saltBase64;
     _cachedKdfParams = sealed.kdfParams;
+  }
+
+  /// Persist the in-memory KEK + matching salt + KDF params to OS secure
+  /// storage so the vault auto-unlocks on the next launch without a PIN
+  /// prompt. Called from every code path that derives a fresh KEK
+  /// (setupNew / unlock / restore / changePin). Best effort: a write
+  /// failure isn't fatal — the user will just be prompted for their PIN
+  /// next time, same as the pre-auto-unlock behavior.
+  Future<void> _persistKekToDevice() async {
+    if (_cachedKek == null ||
+        _cachedSaltBase64 == null ||
+        _cachedKdfParams == null) {
+      return;
+    }
+    try {
+      final blob = jsonEncode({
+        'kek': SharedExpenseCryptoService.toHex(_cachedKek!),
+        'salt': _cachedSaltBase64,
+        'kdf': _cachedKdfParams!.toJson(),
+      });
+      await _secureStorage.write(key: _persistedKekKey, value: blob);
+      _vaultLog('persisted KEK to device');
+    } catch (error) {
+      _vaultLog('persist KEK failed: $error');
+    }
+  }
+
+  /// Try to restore the cached KEK from secure storage. Returns true if a
+  /// stored entry exists and was loaded — in which case [isUnlocked] flips
+  /// to true and sync resumes silently. Returns false (and leaves cached
+  /// fields null) if there's nothing stored, the entry is malformed, or
+  /// the OS refused to release it (e.g. device locked).
+  Future<bool> _loadKekFromDevice() async {
+    try {
+      final raw = await _secureStorage.read(key: _persistedKekKey);
+      if (raw == null || raw.isEmpty) return false;
+      final blob = jsonDecode(raw);
+      if (blob is! Map) return false;
+      final kekHex = blob['kek'] as String?;
+      final saltBase64 = blob['salt'] as String?;
+      final kdfMap = blob['kdf'];
+      if (kekHex == null ||
+          saltBase64 == null ||
+          kdfMap is! Map<String, dynamic>) {
+        return false;
+      }
+      _cachedKek = SharedExpenseCryptoService.fromHex(kekHex);
+      _cachedSaltBase64 = saltBase64;
+      _cachedKdfParams = SharedExpenseVaultKdfParams.fromJson(kdfMap);
+      _vaultLog('loaded KEK from device — auto-unlocked');
+      return true;
+    } catch (error) {
+      _vaultLog('load KEK failed: $error');
+      return false;
+    }
+  }
+
+  /// Wipe the persisted KEK entry. Called from debugReset and from any
+  /// future delete-vault / opt-out-of-backup flow. Future app launches
+  /// will fall back to the PIN entry path until the user unlocks again.
+  Future<void> _clearPersistedKek() async {
+    try {
+      await _secureStorage.delete(key: _persistedKekKey);
+      _vaultLog('cleared persisted KEK');
+    } catch (error) {
+      _vaultLog('clear persisted KEK failed: $error');
+    }
   }
 }
