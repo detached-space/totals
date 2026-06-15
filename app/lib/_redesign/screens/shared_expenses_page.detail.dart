@@ -1858,6 +1858,199 @@ class _DebtActionSheet extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// Partial settlement sheet — runs after the user picks "Settle" on the debt
+// action sheet. The user can edit the amount; we prefill with the suggested
+// debt amount and let them go higher OR lower. Returns the validated amount
+// (always > 0) or null when the user dismisses without confirming.
+// ============================================================================
+
+Future<double?> showPartialSettleSheet(
+  BuildContext context, {
+  required SharedExpenseGroup group,
+  required SettlementDebt debt,
+  required String myPublicKey,
+}) async {
+  return showModalBottomSheet<double>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: AppColors.black.withValues(alpha: 0.5),
+    builder: (sheetContext) => _PartialSettleSheet(
+      group: group,
+      debt: debt,
+      myPublicKey: myPublicKey,
+    ),
+  );
+}
+
+class _PartialSettleSheet extends StatefulWidget {
+  final SharedExpenseGroup group;
+  final SettlementDebt debt;
+  final String myPublicKey;
+  const _PartialSettleSheet({
+    required this.group,
+    required this.debt,
+    required this.myPublicKey,
+  });
+
+  @override
+  State<_PartialSettleSheet> createState() => _PartialSettleSheetState();
+}
+
+class _PartialSettleSheetState extends State<_PartialSettleSheet> {
+  late final TextEditingController _amountCtrl = TextEditingController(
+    text: _formatExpenseAmountInput(widget.debt.amount),
+  );
+  late final FocusNode _amountFocusNode = FocusNode();
+  String? _error;
+
+  bool get _iAmThePayer => widget.debt.from == widget.myPublicKey;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _amountFocusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _amountFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final raw = _amountCtrl.text.trim().replaceAll(',', '');
+    final parsed = double.tryParse(raw);
+    if (parsed == null || parsed <= 0) {
+      setState(() {
+        _error =
+            context.l10nText('Enter an amount greater than zero.');
+      });
+      return;
+    }
+    Navigator.of(context).pop(parsed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final counterpartyPk =
+        _iAmThePayer ? widget.debt.to : widget.debt.from;
+    final counterpartyName =
+        widget.group.displayNameFor(widget.myPublicKey, counterpartyPk);
+    final title = _iAmThePayer
+        ? '${context.l10nText('Settle with')} $counterpartyName'
+        : '${context.l10nText('Mark received from')} $counterpartyName';
+    final cta = _iAmThePayer
+        ? context.l10nText('Confirm payment')
+        : context.l10nText('Mark received');
+    final owedLine = '${context.l10nText('Owed:')} '
+        '${_formatEtb(widget.debt.amount, context)}';
+
+    return _IosModalShell(
+      title: title,
+      footer: [
+        _IosFormSubmit(
+          label: cta,
+          enabled: true,
+          onTap: _submit,
+          topPadding: 0,
+        ),
+      ],
+      children: [
+        _IosAmountRow(
+          controller: _amountCtrl,
+          focusNode: _amountFocusNode,
+          autofocus: false,
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          },
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              _error!,
+              style: const TextStyle(
+                color: AppColors.red,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        Row(
+          children: [
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primaryLight.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                owedLine,
+                style: const TextStyle(
+                  color: AppColors.primaryLight,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _amountCtrl.text =
+                      _formatExpenseAmountInput(widget.debt.amount);
+                  _amountCtrl.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _amountCtrl.text.length),
+                  );
+                  _error = null;
+                });
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  border:
+                      Border.all(color: AppColors.borderColor(context)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  context.l10nText('Full amount'),
+                  style: TextStyle(
+                    color: AppColors.textSecondary(context),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _iAmThePayer
+              ? context.l10nText(
+                  'Pay less than what\'s owed to record a partial settlement. The remainder stays as debt until you settle it later.',
+                )
+              : context.l10nText(
+                  'Enter what you actually received. The remainder stays as debt until they pay the rest.',
+                ),
+          style: TextStyle(
+            color: AppColors.textSecondary(context),
+            fontSize: 12.5,
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 String _formatSharedDate(DateTime date) {
   const months = [
     'Jan',

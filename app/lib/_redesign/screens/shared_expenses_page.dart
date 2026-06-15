@@ -1435,13 +1435,26 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     SharedExpenseGroup group,
     SettlementDebt debt,
   ) async {
-    if (debt.from == _myPublicKey) {
-      await _settleWith(group, debt.to, debt.amount);
-      return;
-    }
-    if (debt.to != _myPublicKey) {
+    if (debt.from != _myPublicKey && debt.to != _myPublicKey) {
       _showSnack(
           context.l10nTextRead('Only people in this debt can settle it'));
+      return;
+    }
+
+    // Ask the user how much actually changed hands. Defaults to the full
+    // debt amount but lets them go lower for partial settlements (e.g. "I
+    // paid 50 of 100; the other 50 stays open") or higher (e.g. they're
+    // squaring multiple debts at once and want to record a round number).
+    final amount = await showPartialSettleSheet(
+      context,
+      group: group,
+      debt: debt,
+      myPublicKey: _myPublicKey,
+    );
+    if (amount == null || !mounted) return;
+
+    if (debt.from == _myPublicKey) {
+      await _settleWith(group, debt.to, amount);
       return;
     }
 
@@ -1451,7 +1464,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     try {
       final updated = await _repository.createExpense(
         group: group,
-        amount: debt.amount,
+        amount: amount,
         reason: 'Settlement',
         paidBy: debt.from,
         splitAmong: [debt.to],
