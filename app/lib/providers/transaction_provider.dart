@@ -5,10 +5,12 @@ import 'package:flutter/foundation.dart' hide Category;
 import 'package:totals/models/account.dart';
 import 'package:totals/models/auto_categorization.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -20,6 +22,7 @@ import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
+import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
 
 class TransactionTotals {
@@ -161,6 +164,7 @@ class TransactionProvider with ChangeNotifier {
   final CategoryRepository _categoryRepo = CategoryRepository();
   final BankConfigService _bankConfigService = BankConfigService();
   final SharedExpenseRepository _sharedExpenseRepo = SharedExpenseRepository();
+  final LoanDebtRepository _loanDebtRepo = LoanDebtRepository();
   final BudgetAlertService _budgetAlertService = BudgetAlertService();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
@@ -194,6 +198,7 @@ class TransactionProvider with ChangeNotifier {
   List<Transaction> _allTransactions = [];
   Set<String> _sharedExpenseLinkedRefs = {};
   final Set<String> _sharedExpenseSharingRefs = {};
+  Map<String, String> _loanDebtPersonByReference = {};
 
   // Redesign home cached metrics
   List<Transaction> _todayTransactions = [];
@@ -330,6 +335,20 @@ class TransactionProvider with ChangeNotifier {
     final extraCount = categories.length - 1;
     if (extraCount <= 0) return primaryLabel;
     return '$primaryLabel +$extraCount';
+  }
+
+  String? loanDebtPersonNameForTransaction(Transaction transaction) {
+    final normalizedReference = transaction.reference.trim();
+    if (normalizedReference.isEmpty) return null;
+
+    final appliesToLoanDebt = categoriesForTransaction(transaction).any(
+      (category) =>
+          isLoanDebtCategory(category) || isRepaymentCategory(category),
+    );
+    if (!appliesToLoanDebt) return null;
+
+    final personName = _loanDebtPersonByReference[normalizedReference]?.trim();
+    return personName == null || personName.isEmpty ? null : personName;
   }
 
   List<AutoCategorizationRule> autoCategorizationRulesForFlow(String flow) {
@@ -507,6 +526,7 @@ class TransactionProvider with ChangeNotifier {
         }
         _sharedExpenseLinkedRefs = {};
       }
+      await _refreshLoanDebtPeople();
       debugPrint("debug: Transactions: ${_allTransactions.length}");
 
       final banks = await _bankConfigService.getBanks();
@@ -534,6 +554,50 @@ class TransactionProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _refreshLoanDebtPeople() async {
+    try {
+      final entries = await _loanDebtRepo.getEntries();
+      final repayments = await _loanDebtRepo.getRepayments();
+      _loanDebtPersonByReference = _buildLoanDebtPersonLabels(
+        entries: entries,
+        repayments: repayments,
+      );
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('debug: Could not load loan/debt person labels: $error');
+      }
+      _loanDebtPersonByReference = {};
+    }
+  }
+
+  Map<String, String> _buildLoanDebtPersonLabels({
+    required List<LoanDebtEntry> entries,
+    required List<LoanDebtRepayment> repayments,
+  }) {
+    final personByReference = <String, String>{};
+    final personByLoanReference = <String, String>{};
+
+    for (final entry in entries) {
+      final reference = entry.transactionReference.trim();
+      final personName = entry.personName.trim();
+      if (reference.isEmpty || personName.isEmpty) continue;
+      personByReference[reference] = personName;
+      personByLoanReference[reference] = personName;
+    }
+
+    for (final repayment in repayments) {
+      final repaymentReference = repayment.repaymentTransactionReference.trim();
+      final loanDebtReference = repayment.loanDebtTransactionReference.trim();
+      if (repaymentReference.isEmpty || loanDebtReference.isEmpty) continue;
+
+      final personName = personByLoanReference[loanDebtReference]?.trim();
+      if (personName == null || personName.isEmpty) continue;
+      personByReference[repaymentReference] = personName;
+    }
+
+    return personByReference;
   }
 
   void updateSearchKey(String key) {

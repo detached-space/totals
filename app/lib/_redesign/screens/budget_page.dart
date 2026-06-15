@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
@@ -19,6 +20,7 @@ import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/utils/app_calendar_date_utils.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
@@ -689,9 +691,8 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     final categorySummary = _categorySummaryForBudget(budget, tp);
 
     // Transactions for this budget
-    final txns = debits
-        .where((t) => _transactionMatchesBudget(t, budget))
-        .toList();
+    final txns =
+        debits.where((t) => _transactionMatchesBudget(t, budget)).toList();
     // Sort newest first
     txns.sort((a, b) {
       final ta = a.time != null ? DateTime.tryParse(a.time!) : null;
@@ -789,6 +790,11 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                           ),
                         ),
                         categoryModel: transactionCategory,
+                        personLabel: tp.loanDebtPersonNameForTransaction(t),
+                        onPersonTap: (personName) => openLoansPersonPage(
+                          context: context,
+                          personName: personName,
+                        ),
                         isCategorized: t.selectedCategoryIds.isNotEmpty,
                         isDebit: t.type?.toUpperCase() == 'DEBIT',
                         isSharing: tp.isSharingSharedExpenseTransaction(t),
@@ -1481,6 +1487,11 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                     bank: _localizedBankLabel(context, t.bankId),
                     category: context.l10nText(categoryLabel),
                     categoryModel: cat,
+                    personLabel: provider.loanDebtPersonNameForTransaction(t),
+                    onPersonTap: (personName) => openLoansPersonPage(
+                      context: context,
+                      personName: personName,
+                    ),
                     isCategorized: isCategorized,
                     isDebit: !isCredit,
                     isSelfTransfer: isSelfTransfer,
@@ -1840,10 +1851,9 @@ class _NewBudgetFormSheetState extends State<_NewBudgetFormSheet> {
 
   List<Category> get _filteredCategories {
     final isNeeds = _selectedGroup == 'needs';
-    return widget.transactionProvider.categories
+    return sortCategoriesAlphabetically(widget.transactionProvider.categories
         .where((c) =>
-            c.flow == 'expense' && !c.uncategorized && c.essential == isNeeds)
-        .toList();
+            c.flow == 'expense' && !c.uncategorized && c.essential == isNeeds));
   }
 
   String? _extractColorKey(String? iconKey) {

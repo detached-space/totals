@@ -265,6 +265,16 @@ class BuiltInCategories {
       builtInKey: 'income_debt',
     ),
     Category(
+      name: 'Repayment',
+      essential: false,
+      iconKey: 'request_quote',
+      description: 'Money paid back toward a loan or debt',
+      flow: 'income',
+      recurring: false,
+      builtIn: true,
+      builtInKey: 'income_repayment',
+    ),
+    Category(
       name: 'Misc',
       essential: false,
       uncategorized: true,
@@ -364,6 +374,16 @@ class BuiltInCategories {
       recurring: true,
       builtIn: true,
       builtInKey: 'expense_loan',
+    ),
+    Category(
+      name: 'Repayment',
+      essential: false,
+      iconKey: 'request_quote',
+      description: 'Money paid back toward a loan or debt',
+      flow: 'expense',
+      recurring: false,
+      builtIn: true,
+      builtInKey: 'expense_repayment',
     ),
     Category(
       name: 'Beauty',

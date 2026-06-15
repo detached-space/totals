@@ -13,6 +13,8 @@ class TransactionTile extends StatelessWidget {
   final String bank;
   final String category;
   final Category? categoryModel;
+  final String? personLabel;
+  final ValueChanged<String>? onPersonTap;
   final bool isCategorized;
 
   /// Whether the transaction is a debit (expense).
@@ -50,6 +52,8 @@ class TransactionTile extends StatelessWidget {
     required this.bank,
     required this.category,
     this.categoryModel,
+    this.personLabel,
+    this.onPersonTap,
     required this.isCategorized,
     required this.isDebit,
     required this.amount,
@@ -70,6 +74,7 @@ class TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final faded = isSelfTransfer || isMisc;
+    final resolvedPersonLabel = personLabel?.trim();
 
     return Opacity(
       opacity: faded ? 0.5 : 1.0,
@@ -129,6 +134,15 @@ class TransactionTile extends StatelessWidget {
                             isMisc: isMisc,
                             onTap: onCategoryTap,
                           ),
+                          if (resolvedPersonLabel != null &&
+                              resolvedPersonLabel.isNotEmpty)
+                            _TransactionPersonChip(
+                              label: resolvedPersonLabel,
+                              muted: faded,
+                              onTap: onPersonTap == null
+                                  ? null
+                                  : () => onPersonTap!(resolvedPersonLabel),
+                            ),
                           if (isSharing)
                             _SharedTransactionChip(
                               label: context.l10nText('Sharing'),
@@ -218,6 +232,65 @@ class _SharedTransactionChip extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         softWrap: false,
       ),
+    );
+  }
+}
+
+class _TransactionPersonChip extends StatelessWidget {
+  final String label;
+  final bool muted;
+  final VoidCallback? onTap;
+
+  const _TransactionPersonChip({
+    required this.label,
+    required this.muted,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = muted
+        ? AppColors.textTertiary(context)
+        : AppColors.textSecondary(context);
+
+    final chip = Container(
+      constraints: const BoxConstraints(maxWidth: 132),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            AppIcons.person_outline,
+            size: 12,
+            color: color,
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return chip;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: chip,
     );
   }
 }

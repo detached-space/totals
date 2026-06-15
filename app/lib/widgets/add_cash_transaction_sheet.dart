@@ -11,6 +11,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_sort.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showAddCashTransactionSheet({
@@ -64,7 +65,7 @@ class _AddCashTransactionContentState
   late AccountSummary _selectedAccount;
   late DateTime _selectedDateTime;
   List<Bank> _banks = const [];
-  int? _selectedCategoryId;
+  final List<int> _selectedCategoryIds = <int>[];
   bool _isLoading = false;
 
   @override
@@ -80,9 +81,8 @@ class _AddCashTransactionContentState
 
   List<Category> get _filteredCategories {
     final flow = _isDebit ? 'expense' : 'income';
-    return widget.provider.categories
-        .where((c) => c.flow == flow && !c.uncategorized)
-        .toList();
+    return sortCategoriesAlphabetically(widget.provider.categories
+        .where((c) => c.flow == flow && !c.uncategorized));
   }
 
   @override
@@ -404,6 +404,8 @@ class _AddCashTransactionContentState
       final now = DateTime.now();
       final note = _noteController.text.trim();
       final remainingBalance = _remainingBalanceAfter(selectedAccount, amount);
+      final selectedCategoryIds =
+          List<int>.from(_selectedCategoryIds, growable: false);
       await _updateStoredAccountBalance(selectedAccount, remainingBalance);
       final reference = _manualReference(
         selectedAccount.bankId,
@@ -419,7 +421,9 @@ class _AddCashTransactionContentState
         type: _isDebit ? 'DEBIT' : 'CREDIT',
         currentBalance: remainingBalance.toStringAsFixed(2),
         accountNumber: selectedAccount.accountNumber,
-        categoryId: _selectedCategoryId,
+        categoryId:
+            selectedCategoryIds.isEmpty ? null : selectedCategoryIds.first,
+        categoryIds: selectedCategoryIds.isEmpty ? null : selectedCategoryIds,
       );
 
       await widget.provider.addTransaction(transaction);
@@ -545,7 +549,7 @@ class _AddCashTransactionContentState
                                         color: Colors.red,
                                         onTap: () => setState(() {
                                           _isDebit = true;
-                                          _selectedCategoryId = null;
+                                          _selectedCategoryIds.clear();
                                         }),
                                       ),
                                     ),
@@ -558,7 +562,7 @@ class _AddCashTransactionContentState
                                         color: Colors.green,
                                         onTap: () => setState(() {
                                           _isDebit = false;
-                                          _selectedCategoryId = null;
+                                          _selectedCategoryIds.clear();
                                         }),
                                       ),
                                     ),
@@ -668,11 +672,11 @@ class _AddCashTransactionContentState
                             ),
                             const SizedBox(height: 16),
 
-                            // Category
+                            // Categories
                             Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
-                                context.l10nText('Category'),
+                                context.l10nText('Categories'),
                                 style: theme.textTheme.labelMedium?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                   fontWeight: FontWeight.w600,
@@ -688,22 +692,33 @@ class _AddCashTransactionContentState
                                   _CashCategoryChip(
                                     label: 'None',
                                     icon: null,
-                                    selected: _selectedCategoryId == null,
+                                    selected: _selectedCategoryIds.isEmpty,
                                     accentColor:
                                         _isDebit ? Colors.red : Colors.green,
-                                    onTap: () => setState(
-                                        () => _selectedCategoryId = null),
+                                    onTap: () =>
+                                        setState(_selectedCategoryIds.clear),
                                   ),
                                   ..._filteredCategories.map((cat) {
+                                    final categoryId = cat.id;
+                                    if (categoryId == null) {
+                                      return const SizedBox.shrink();
+                                    }
                                     return _CashCategoryChip(
                                       label: cat.name,
                                       icon: iconForCategoryKey(cat.iconKey),
-                                      selected: _selectedCategoryId == cat.id,
+                                      selected: _selectedCategoryIds
+                                          .contains(categoryId),
                                       accentColor:
                                           _isDebit ? Colors.red : Colors.green,
-                                      onTap: () => setState(
-                                        () => _selectedCategoryId = cat.id,
-                                      ),
+                                      onTap: () => setState(() {
+                                        if (_selectedCategoryIds
+                                            .contains(categoryId)) {
+                                          _selectedCategoryIds
+                                              .remove(categoryId);
+                                        } else {
+                                          _selectedCategoryIds.add(categoryId);
+                                        }
+                                      }),
                                     );
                                   }),
                                 ],

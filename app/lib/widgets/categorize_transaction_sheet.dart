@@ -3,6 +3,7 @@ import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/category_icons.dart';
+import 'package:totals/utils/category_sort.dart';
 
 Future<void> showCategorizeTransactionSheet({
   required BuildContext context,
@@ -13,7 +14,9 @@ Future<void> showCategorizeTransactionSheet({
   final filtered = provider.categories
       .where((c) => c.flow.toLowerCase() == desiredFlow)
       .toList(growable: false);
-  final categories = filtered.isEmpty ? provider.categories : filtered;
+  final categories = sortCategoriesAlphabetically(
+    filtered.isEmpty ? provider.categories : filtered,
+  );
   final current = provider.getCategoryById(transaction.categoryId);
 
   if (categories.isEmpty) {
@@ -36,7 +39,8 @@ Future<void> showCategorizeTransactionSheet({
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
                   'Categorize',
                   style: TextStyle(
@@ -69,11 +73,13 @@ Future<void> showCategorizeTransactionSheet({
                       leading: Icon(iconForCategoryKey(c.iconKey)),
                       title: Text(c.name),
                       subtitle: Text(c.typeLabel()),
-                      trailing: selected ? const Icon(Icons.check_rounded) : null,
+                      trailing:
+                          selected ? const Icon(Icons.check_rounded) : null,
                       onTap: () async {
                         if (c.id == null) return;
                         Navigator.pop(context);
-                        await provider.setCategoryForTransaction(transaction, c);
+                        await provider.setCategoryForTransaction(
+                            transaction, c);
                       },
                     );
                   },
@@ -86,4 +92,3 @@ Future<void> showCategorizeTransactionSheet({
     },
   );
 }
-

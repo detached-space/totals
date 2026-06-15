@@ -24,6 +24,7 @@ import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
@@ -2103,6 +2104,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       bank: bankLabel,
       category: localizedCategoryLabel,
       categoryModel: category,
+      personLabel: provider.loanDebtPersonNameForTransaction(transaction),
+      onPersonTap: (personName) => openLoansPersonPage(
+        context: context,
+        personName: personName,
+      ),
       isCategorized: isCategorized,
       isDebit: !isCredit,
       isSelfTransfer: isSelfTransfer,

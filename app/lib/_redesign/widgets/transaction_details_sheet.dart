@@ -6,11 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -77,6 +80,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _showNewCategoryForm = false;
   bool _showColorChoices = false;
   bool _autoCategorizeFutureTransactions = false;
+  bool _isCheckingRepaymentCandidates = true;
+  bool _hasRepaymentLinkCandidate = false;
   String _draftColorKey = _kCategoryColorOptions.first.key;
   List<int> _quickCategoryIds = const [];
   List<int> _autoCategorizationDraftCategoryIds = const [];
@@ -110,7 +115,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
-      _provider.canConfigureAutoCategorizationForTransaction(_tx);
+      _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
+      !_currentCategories.any(isRepaymentCategory);
+  bool get _canSelectRepaymentCategory =>
+      !_isCheckingRepaymentCandidates && _hasRepaymentLinkCandidate;
+  bool get _shouldShowRepaymentUnavailableHint =>
+      !_isCheckingRepaymentCandidates &&
+      !_hasRepaymentLinkCandidate &&
+      !_currentCategories.any(isRepaymentCategory) &&
+      _availableCategories.any(isRepaymentCategory);
 
   @override
   void initState() {
@@ -122,6 +135,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     _counterpartyFocus.addListener(_handleCounterpartyFocusChange);
     _noteController.text = _tx.note?.trim() ?? '';
     _noteFocus.addListener(_handleNoteFocusChange);
+    _loadRepaymentCandidateAvailability();
     if (widget.showQuickAccessCategories) {
       _loadQuickCategoryIds();
     }
@@ -232,9 +246,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         .where((c) => c.flow.toLowerCase() == desiredFlow)
         .toList(growable: false);
     final base = filtered.isEmpty ? _provider.categories : filtered;
-    return base
-        .where((c) => c.name.trim().toLowerCase() != 'self')
-        .toList(growable: false);
+    return sortCategoriesAlphabetically(
+      base.where((c) => c.name.trim().toLowerCase() != 'self'),
+    );
   }
 
   List<Category> get _quickAccessCategories {
@@ -477,6 +491,36 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     });
   }
 
+  Future<bool> _loadRepaymentCandidateAvailability() async {
+    try {
+      final repository = LoanDebtRepository();
+      final results = await Future.wait<Object>([
+        repository.getEntries(),
+        repository.getRepayments(),
+      ]);
+      final hasCandidate = hasEligibleRepaymentLinkCandidate(
+        repaymentTransaction: _tx,
+        transactions: _provider.allTransactions,
+        entries: results[0] as List<LoanDebtEntry>,
+        repayments: results[1] as List<LoanDebtRepayment>,
+      );
+      if (!mounted) return hasCandidate;
+      setState(() {
+        _hasRepaymentLinkCandidate = hasCandidate;
+        _isCheckingRepaymentCandidates = false;
+      });
+      return hasCandidate;
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _hasRepaymentLinkCandidate = false;
+          _isCheckingRepaymentCandidates = false;
+        });
+      }
+      return false;
+    }
+  }
+
   void _dismissComposerState({bool clearDraft = false}) {
     FocusManager.instance.primaryFocus?.unfocus();
     _newCategoryFocus.unfocus();
@@ -501,6 +545,67 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return _isSelfCategory(category);
   }
 
+  bool _transactionHasRepaymentCategory(Transaction transaction) {
+    return transaction.selectedCategoryIds.any((id) {
+      final category = _provider.getCategoryById(id);
+      return category != null && isRepaymentCategory(category);
+    });
+  }
+
+  bool _isRepaymentCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    return category != null && isRepaymentCategory(category);
+  }
+
+  List<int> _categoryIdsWithoutRepayment(Transaction transaction) {
+    return transaction.selectedCategoryIds
+        .where((id) => !_isRepaymentCategoryId(id))
+        .toList(growable: false);
+  }
+
+  int? _primaryCategoryForIds(Transaction transaction, List<int> categoryIds) {
+    if (categoryIds.isEmpty) return null;
+    final currentPrimary = transaction.categoryId;
+    if (currentPrimary != null && categoryIds.contains(currentPrimary)) {
+      return currentPrimary;
+    }
+    return categoryIds.first;
+  }
+
+  Future<bool> _ensureRepaymentCandidateAvailable(String message) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final hasCandidate = _canSelectRepaymentCategory
+        ? true
+        : await _loadRepaymentCandidateAvailability();
+    if (hasCandidate) return true;
+    if (mounted) {
+      messenger?.showSnackBar(SnackBar(content: Text(message)));
+    }
+    return false;
+  }
+
+  Future<bool> _removeUnlinkedRepaymentCategory(
+    Transaction transaction,
+  ) async {
+    final nextCategoryIds = _categoryIdsWithoutRepayment(transaction);
+    try {
+      await LoanDebtRepository().deleteRepaymentForTransaction(
+        transaction.reference,
+      );
+      final updated = await _provider.updateCategoriesForTransaction(
+        transaction,
+        categoryIds: nextCategoryIds,
+        primaryCategoryId: _primaryCategoryForIds(transaction, nextCategoryIds),
+      );
+      if (mounted) {
+        setState(() => _transaction = updated);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Transaction?> _applyCategorySelection({
     required List<int> categoryIds,
     int? primaryCategoryId,
@@ -509,11 +614,17 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final shouldAutoCategorize = _autoCategorizeFutureTransactions;
     final previousTransaction = _tx;
+    final hadRepaymentCategory =
+        _transactionHasRepaymentCategory(previousTransaction);
+    final hasRepaymentCategory = categoryIds.any(_isRepaymentCategoryId);
     final hadExistingRules = _provider
         .autoCategorizationRulesForTransaction(previousTransaction)
         .isNotEmpty;
     final revertedMessage = context.l10nTextRead(
       'Could not update category. Changes were reverted.',
+    );
+    final repaymentCleanupErrorMessage = context.l10nTextRead(
+      'Category was saved, but repayment link could not be removed.',
     );
     _dismissComposerState(clearDraft: true);
     setState(() => _isApplyingCategory = true);
@@ -528,8 +639,26 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         previous: previousTransaction,
         updated: updated,
       );
-      final shouldPersistAutoCategorization =
-          shouldAutoCategorize && nextAutoCategoryIds.isNotEmpty;
+      final shouldPersistAutoCategorization = shouldAutoCategorize &&
+          nextAutoCategoryIds.isNotEmpty &&
+          !hasRepaymentCategory;
+      final removedRepaymentCategory =
+          hadRepaymentCategory && !_transactionHasRepaymentCategory(updated);
+      if (removedRepaymentCategory) {
+        try {
+          await LoanDebtRepository().deleteRepaymentForTransaction(
+            updated.reference,
+          );
+        } catch (_) {
+          if (mounted) {
+            messenger?.showSnackBar(
+              SnackBar(
+                content: Text(repaymentCleanupErrorMessage),
+              ),
+            );
+          }
+        }
+      }
       if (!mounted) return updated;
       setState(() {
         _transaction = updated;
@@ -593,12 +722,34 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       return;
     }
 
+    if (isRepaymentCategory(category)) {
+      final unavailableMessage = context.l10nTextRead(
+        'Add an active loan or debt first, then link a repayment.',
+      );
+      final canSelectRepayment = await _ensureRepaymentCandidateAvailable(
+        unavailableMessage,
+      );
+      if (!canSelectRepayment || !mounted) return;
+      nextIds.removeWhere((id) {
+        final existing = _provider.getCategoryById(id);
+        return existing != null && isLoanDebtCategory(existing);
+      });
+    } else if (isLoanDebtCategory(category)) {
+      nextIds.removeWhere((id) {
+        final existing = _provider.getCategoryById(id);
+        return existing != null && isRepaymentCategory(existing);
+      });
+    }
+
     nextIds.insert(0, categoryId);
     final updated = await _applyCategorySelection(
       categoryIds: nextIds,
       primaryCategoryId: categoryId,
     );
-    if (updated != null && isLoanDebtCategory(category)) {
+    if (updated == null || !mounted) return;
+    if (isRepaymentCategory(category)) {
+      await _openRepaymentLinkPrompt(updated);
+    } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
     }
   }
@@ -993,6 +1144,38 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       transaction: transaction,
     );
     if (saved) {
+      unawaited(_provider.loadData());
+    }
+  }
+
+  Future<void> _openRepaymentLinkPrompt(Transaction transaction) async {
+    final hostContext = widget.hostContext;
+    final rollbackMessage = context.l10nTextRead(
+      'Repayment was not linked, so the category was removed.',
+    );
+    final rollbackErrorMessage = context.l10nTextRead(
+      'Could not remove the unlinked repayment category.',
+    );
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    final saved = await showRepaymentLinkSheet(
+      context: hostContext,
+      transaction: transaction,
+    );
+    if (saved) {
+      unawaited(_provider.loadData());
+      return;
+    }
+    final removed = await _removeUnlinkedRepaymentCategory(transaction);
+    if (!hostContext.mounted) return;
+    ScaffoldMessenger.maybeOf(hostContext)?.showSnackBar(
+      SnackBar(
+        content: Text(removed ? rollbackMessage : rollbackErrorMessage),
+      ),
+    );
+    if (removed) {
       unawaited(_provider.loadData());
     }
   }
@@ -1430,11 +1613,14 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                 ...quickCategories.map((category) {
                   final isSelected = category.id != null &&
                       _selectedCategoryIds.contains(category.id);
+                  final isRepaymentDisabled = isRepaymentCategory(category) &&
+                      !isSelected &&
+                      !_canSelectRepaymentCategory;
                   return _CategoryPickerChip(
                     label: category.name,
                     color: _categoryColor(category),
                     isSelected: isSelected,
-                    onTap: _isApplyingCategory
+                    onTap: _isApplyingCategory || isRepaymentDisabled
                         ? null
                         : () => _toggleCategory(category),
                   );
@@ -1454,15 +1640,44 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
               ...categories.map((c) {
                 final isSelected =
                     c.id != null && _selectedCategoryIds.contains(c.id);
+                final isRepaymentDisabled = isRepaymentCategory(c) &&
+                    !isSelected &&
+                    !_canSelectRepaymentCategory;
                 return _CategoryPickerChip(
                   label: c.name,
                   color: _categoryColor(c),
                   isSelected: isSelected,
-                  onTap: _isApplyingCategory ? null : () => _toggleCategory(c),
+                  onTap: _isApplyingCategory || isRepaymentDisabled
+                      ? null
+                      : () => _toggleCategory(c),
                 );
               }),
             ],
           ),
+          if (_shouldShowRepaymentUnavailableHint) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  AppIcons.info_outline_rounded,
+                  size: 14,
+                  color: AppColors.textTertiary(context),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    context.l10nText(
+                      'Repayment needs an active linked loan or debt first.',
+                    ),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppColors.textSecondary(context),
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,

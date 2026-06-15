@@ -12,6 +12,32 @@ class LoanDebtRepository {
     return rows.map(LoanDebtEntry.fromDb).toList(growable: false);
   }
 
+  Future<List<LoanDebtRepayment>> getRepayments() async {
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'loan_debt_repayments',
+      orderBy: 'updatedAt DESC, id DESC',
+    );
+    return rows.map(LoanDebtRepayment.fromDb).toList(growable: false);
+  }
+
+  Future<LoanDebtRepayment?> getRepaymentForTransaction(
+    String repaymentReference,
+  ) async {
+    final normalizedReference = repaymentReference.trim();
+    if (normalizedReference.isEmpty) return null;
+
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'loan_debt_repayments',
+      where: 'repaymentTransactionReference = ?',
+      whereArgs: [normalizedReference],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return LoanDebtRepayment.fromDb(rows.first);
+  }
+
   Future<LoanDebtEntry?> getEntryForTransaction(String reference) async {
     final normalizedReference = reference.trim();
     if (normalizedReference.isEmpty) return null;
@@ -91,6 +117,47 @@ class LoanDebtRepository {
     );
   }
 
+  Future<void> linkRepayment({
+    required String repaymentTransactionReference,
+    required String loanDebtTransactionReference,
+    required double appliedAmount,
+  }) async {
+    final normalizedRepaymentReference = repaymentTransactionReference.trim();
+    final normalizedLoanDebtReference = loanDebtTransactionReference.trim();
+    final normalizedAmount = appliedAmount.isFinite ? appliedAmount.abs() : 0;
+    if (normalizedRepaymentReference.isEmpty ||
+        normalizedLoanDebtReference.isEmpty ||
+        normalizedAmount <= 0) {
+      return;
+    }
+
+    final db = await DatabaseHelper.instance.database;
+    final now = DateTime.now().toIso8601String();
+    await db.insert(
+      'loan_debt_repayments',
+      {
+        'repaymentTransactionReference': normalizedRepaymentReference,
+        'loanDebtTransactionReference': normalizedLoanDebtReference,
+        'appliedAmount': normalizedAmount,
+        'createdAt': now,
+        'updatedAt': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteRepaymentForTransaction(String repaymentReference) async {
+    final normalizedReference = repaymentReference.trim();
+    if (normalizedReference.isEmpty) return;
+
+    final db = await DatabaseHelper.instance.database;
+    await db.delete(
+      'loan_debt_repayments',
+      where: 'repaymentTransactionReference = ?',
+      whereArgs: [normalizedReference],
+    );
+  }
+
   Future<void> deleteEntryForTransaction(String reference) async {
     final normalizedReference = reference.trim();
     if (normalizedReference.isEmpty) return;
@@ -100,6 +167,12 @@ class LoanDebtRepository {
       'loan_debt_entries',
       where: 'transactionReference = ?',
       whereArgs: [normalizedReference],
+    );
+    await db.delete(
+      'loan_debt_repayments',
+      where:
+          'loanDebtTransactionReference = ? OR repaymentTransactionReference = ?',
+      whereArgs: [normalizedReference, normalizedReference],
     );
   }
 }

@@ -1247,6 +1247,16 @@ class DatabaseHelper {
         updatedAt TEXT NOT NULL
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS loan_debt_repayments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repaymentTransactionReference TEXT NOT NULL UNIQUE,
+        loanDebtTransactionReference TEXT NOT NULL,
+        appliedAmount REAL NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
     final columns = await db.rawQuery('PRAGMA table_info(loan_debt_entries)');
     final names = columns.map((column) => column['name'] as String?).toSet();
     Future<void> addColumn(String sql) async {
@@ -1272,6 +1282,12 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_status ON loan_debt_entries(status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_loan_debt_repayments_loan ON loan_debt_repayments(loanDebtTransactionReference)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_loan_debt_repayments_repayment ON loan_debt_repayments(repaymentTransactionReference)',
     );
   }
 

@@ -365,6 +365,14 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                     bank: bankLabel,
                                     category: categoryLabel,
                                     categoryModel: category,
+                                    personLabel: provider
+                                        .loanDebtPersonNameForTransaction(
+                                            transaction),
+                                    onPersonTap: (personName) =>
+                                        openLoansPersonPage(
+                                      context: context,
+                                      personName: personName,
+                                    ),
                                     isCategorized: isCategorize,
                                     isDebit: !isCredit,
                                     isSelfTransfer: isSelfTransfer,

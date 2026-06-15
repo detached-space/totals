@@ -24,7 +24,7 @@ import 'package:totals/utils/transaction_duplicate_detector.dart';
 const int _dashenBankId = 4;
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 7;
+  static const int currentSchemaVersion = 8;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -53,6 +53,7 @@ class DataExportImportService {
       final smsPatterns =
           await _smsConfigService.getPatterns(allowRemoteFetch: false);
       final loanDebtEntries = await _getLoanDebtEntriesFromDb();
+      final loanDebtRepayments = await _getLoanDebtRepaymentsFromDb();
 
       final exportData = {
         'schemaVersion': currentSchemaVersion,
@@ -72,6 +73,8 @@ class DataExportImportService {
             .toList(),
         'smsPatterns': smsPatterns.map((p) => p.toJson()).toList(),
         'loanDebtEntries': loanDebtEntries.map((e) => e.toJson()).toList(),
+        'loanDebtRepayments':
+            loanDebtRepayments.map((e) => e.toJson()).toList(),
       };
 
       return jsonEncode(exportData);
@@ -441,6 +444,32 @@ class DataExportImportService {
         await batch.commit(noResult: true);
       }
 
+      final loanDebtRepaymentRaw = _asMapList(data['loanDebtRepayments']);
+      if (loanDebtRepaymentRaw.isNotEmpty) {
+        final batch = db.batch();
+        for (final rawRepayment in loanDebtRepaymentRaw) {
+          final repayment = LoanDebtRepayment.fromJson(rawRepayment);
+          final repaymentReference =
+              repayment.repaymentTransactionReference.trim();
+          final loanDebtReference =
+              repayment.loanDebtTransactionReference.trim();
+          if (repaymentReference.isEmpty ||
+              loanDebtReference.isEmpty ||
+              repayment.appliedAmount <= 0) {
+            continue;
+          }
+          final repaymentData = repayment.toDb()..remove('id');
+          repaymentData['repaymentTransactionReference'] = repaymentReference;
+          repaymentData['loanDebtTransactionReference'] = loanDebtReference;
+          batch.insert(
+            'loan_debt_repayments',
+            repaymentData,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+        await batch.commit(noResult: true);
+      }
+
       // Import explicit auto-category rules.
       final autoCategoryRulesRaw = _asMapList(data['autoCategoryRules']);
       if (autoCategoryRulesRaw.isNotEmpty) {
@@ -635,6 +664,11 @@ class DataExportImportService {
         'loanDebtEntries',
         aliases: const ['loan_debt_entries'],
       ),
+      'loanDebtRepayments': _readList(
+        raw,
+        'loanDebtRepayments',
+        aliases: const ['loan_debt_repayments'],
+      ),
       'smsPatterns': _readList(
         raw,
         'smsPatterns',
@@ -648,6 +682,12 @@ class DataExportImportService {
         _asInt(data['schemaVersion']) ?? _asInt(data['schema_version']);
     if (explicit != null) return explicit;
 
+    if (_hasAnySection(data, const [
+      'loanDebtRepayments',
+      'loan_debt_repayments',
+    ])) {
+      return 8;
+    }
     if (_hasAnySection(data, const [
       'autoCategoryRules',
       'auto_category_rules',
@@ -793,6 +833,15 @@ class DataExportImportService {
       orderBy: 'updatedAt DESC, id DESC',
     );
     return rows.map(LoanDebtEntry.fromDb).toList(growable: false);
+  }
+
+  Future<List<LoanDebtRepayment>> _getLoanDebtRepaymentsFromDb() async {
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'loan_debt_repayments',
+      orderBy: 'updatedAt DESC, id DESC',
+    );
+    return rows.map(LoanDebtRepayment.fromDb).toList(growable: false);
   }
 
   Future<void> _removeImportedDashenDuplicates() async {

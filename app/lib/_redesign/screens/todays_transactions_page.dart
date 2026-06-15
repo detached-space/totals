@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
@@ -185,6 +186,12 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       bank: bankLabel,
                       category: categoryLabel,
                       categoryModel: category,
+                      personLabel:
+                          provider.loanDebtPersonNameForTransaction(tx),
+                      onPersonTap: (personName) => openLoansPersonPage(
+                        context: context,
+                        personName: personName,
+                      ),
                       isCategorized: isCategorized,
                       isDebit: !isCredit,
                       isSelfTransfer: isSelfTransfer,

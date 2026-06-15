@@ -122,3 +122,73 @@ class LoanDebtEntry {
     );
   }
 }
+
+class LoanDebtRepayment {
+  final int? id;
+  final String repaymentTransactionReference;
+  final String loanDebtTransactionReference;
+  final double appliedAmount;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const LoanDebtRepayment({
+    this.id,
+    required this.repaymentTransactionReference,
+    required this.loanDebtTransactionReference,
+    required this.appliedAmount,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory LoanDebtRepayment.fromDb(Map<String, dynamic> row) {
+    final createdAt = DateTime.tryParse(row['createdAt'] as String? ?? '');
+    final updatedAt = DateTime.tryParse(row['updatedAt'] as String? ?? '');
+    final now = DateTime.now();
+    return LoanDebtRepayment(
+      id: row['id'] as int?,
+      repaymentTransactionReference:
+          (row['repaymentTransactionReference'] as String?) ?? '',
+      loanDebtTransactionReference:
+          (row['loanDebtTransactionReference'] as String?) ?? '',
+      appliedAmount: (row['appliedAmount'] as num?)?.toDouble() ?? 0,
+      createdAt: createdAt ?? now,
+      updatedAt: updatedAt ?? createdAt ?? now,
+    );
+  }
+
+  Map<String, dynamic> toDb() {
+    return {
+      if (id != null) 'id': id,
+      'repaymentTransactionReference': repaymentTransactionReference,
+      'loanDebtTransactionReference': loanDebtTransactionReference,
+      'appliedAmount': appliedAmount,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> toJson() => toDb();
+
+  factory LoanDebtRepayment.fromJson(Map<String, dynamic> json) {
+    final createdAt = DateTime.tryParse(json['createdAt'] as String? ?? '');
+    final updatedAt = DateTime.tryParse(json['updatedAt'] as String? ?? '');
+    final now = DateTime.now();
+
+    double toDouble(Object? value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value.trim()) ?? 0;
+      return 0;
+    }
+
+    return LoanDebtRepayment(
+      id: json['id'] is int ? json['id'] as int : null,
+      repaymentTransactionReference:
+          (json['repaymentTransactionReference'] as String?) ?? '',
+      loanDebtTransactionReference:
+          (json['loanDebtTransactionReference'] as String?) ?? '',
+      appliedAmount: toDouble(json['appliedAmount']),
+      createdAt: createdAt ?? now,
+      updatedAt: updatedAt ?? createdAt ?? now,
+    );
+  }
+}
