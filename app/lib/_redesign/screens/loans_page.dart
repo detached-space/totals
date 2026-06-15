@@ -560,6 +560,23 @@ class _LoanDebtPersonSheet extends StatefulWidget {
   State<_LoanDebtPersonSheet> createState() => _LoanDebtPersonSheetState();
 }
 
+String _suggestedLoanDebtPersonName(Transaction transaction) {
+  return normalizeLoanDebtPersonName(transaction.receiver ?? '');
+}
+
+void _setLoanDebtNameFieldValue(
+  TextEditingController controller,
+  String value, {
+  required bool selectAll,
+}) {
+  controller.value = TextEditingValue(
+    text: value,
+    selection: selectAll
+        ? TextSelection(baseOffset: 0, extentOffset: value.length)
+        : TextSelection.collapsed(offset: value.length),
+  );
+}
+
 class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
   final TextEditingController _nameController = TextEditingController();
   final FocusNode _nameFocus = FocusNode();
@@ -579,6 +596,17 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
     _loadInitialState();
   }
 
+  void _focusSuggestedNameAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _nameController.text.trim().isEmpty) return;
+      _nameFocus.requestFocus();
+      _nameController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _nameController.text.length,
+      );
+    });
+  }
+
   Future<void> _loadInitialState() async {
     final List<Object?> results;
     try {
@@ -587,8 +615,22 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
         widget.repository.getEntryForTransaction(widget.transaction.reference),
       ]);
     } catch (_) {
+      final suggestedName = _suggestedLoanDebtPersonName(widget.transaction);
       if (!mounted) return;
-      setState(() => _isLoading = false);
+      setState(() {
+        if (suggestedName.isNotEmpty) {
+          _selectedName = suggestedName;
+          _setLoanDebtNameFieldValue(
+            _nameController,
+            suggestedName,
+            selectAll: true,
+          );
+        }
+        _isLoading = false;
+      });
+      if (suggestedName.isNotEmpty) {
+        _focusSuggestedNameAfterLayout();
+      }
       return;
     }
     if (!mounted) return;
@@ -604,15 +646,27 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
             .any((name) => name.toLowerCase() == existingName.toLowerCase())) {
       people.insert(0, existingName);
     }
-    final selectedName =
-        existingName != null && existingName.isNotEmpty ? existingName : null;
+    final suggestedName = _suggestedLoanDebtPersonName(widget.transaction);
+    final selectedName = existingName != null && existingName.isNotEmpty
+        ? existingName
+        : (suggestedName.isNotEmpty ? suggestedName : null);
+    final shouldHighlightSuggestion =
+        (existingName == null || existingName.isEmpty) &&
+            suggestedName.isNotEmpty;
 
     setState(() {
       _knownPeople = people;
       _selectedName = selectedName;
-      _nameController.text = _selectedName ?? '';
+      _setLoanDebtNameFieldValue(
+        _nameController,
+        _selectedName ?? '',
+        selectAll: shouldHighlightSuggestion,
+      );
       _isLoading = false;
     });
+    if (shouldHighlightSuggestion) {
+      _focusSuggestedNameAfterLayout();
+    }
   }
 
   Future<void> _save() async {
@@ -2304,19 +2358,60 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     }
   }
 
+  void _focusSuggestedNameAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _nameController.text.trim().isEmpty) return;
+      _nameFocus.requestFocus();
+      _nameController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _nameController.text.length,
+      );
+    });
+  }
+
   Future<void> _loadKnownPeople() async {
     try {
       final people = await widget.repository.getKnownPeople();
+      final suggestedName = _suggestedLoanDebtPersonName(_transaction);
       if (!mounted) return;
+      var shouldHighlightSuggestion = false;
       setState(() {
         _knownPeople = people
             .where((name) => name.trim().isNotEmpty)
             .toList(growable: false);
+        if (suggestedName.isNotEmpty && _nameController.text.trim().isEmpty) {
+          _selectedName = suggestedName;
+          _setLoanDebtNameFieldValue(
+            _nameController,
+            suggestedName,
+            selectAll: true,
+          );
+          shouldHighlightSuggestion = true;
+        }
         _isLoadingPeople = false;
       });
+      if (shouldHighlightSuggestion) {
+        _focusSuggestedNameAfterLayout();
+      }
     } catch (_) {
+      final suggestedName = _suggestedLoanDebtPersonName(_transaction);
       if (!mounted) return;
-      setState(() => _isLoadingPeople = false);
+      var shouldHighlightSuggestion = false;
+      setState(() {
+        if (suggestedName.isNotEmpty && _nameController.text.trim().isEmpty) {
+          _selectedName = suggestedName;
+          _setLoanDebtNameFieldValue(
+            _nameController,
+            suggestedName,
+            selectAll: true,
+          );
+          shouldHighlightSuggestion = true;
+        }
+        _isLoadingPeople = false;
+      });
+      if (shouldHighlightSuggestion) {
+        _focusSuggestedNameAfterLayout();
+      }
     }
   }
 
