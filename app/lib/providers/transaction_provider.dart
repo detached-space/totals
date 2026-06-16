@@ -509,6 +509,7 @@ class TransactionProvider with ChangeNotifier {
         "debug: Accounts: ${_accounts.map((a) => a.balance).join(', ')}",
       );
 
+      await _categoryRepo.ensureSeeded();
       _categories = await _categoryRepo.getCategories();
       _categoryById = {
         for (final c in _categories)
