@@ -1247,6 +1247,8 @@ class DatabaseHelper {
         personName TEXT NOT NULL,
         direction TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
+        principalAmount REAL,
+        source TEXT NOT NULL DEFAULT 'transaction',
         resolvedAt TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
@@ -1255,11 +1257,12 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS loan_debt_repayments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        repaymentTransactionReference TEXT NOT NULL UNIQUE,
+        repaymentTransactionReference TEXT NOT NULL,
         loanDebtTransactionReference TEXT NOT NULL,
         appliedAmount REAL NOT NULL,
         createdAt TEXT NOT NULL,
-        updatedAt TEXT NOT NULL
+        updatedAt TEXT NOT NULL,
+        UNIQUE(repaymentTransactionReference, loanDebtTransactionReference)
       )
     ''');
     final columns = await db.rawQuery('PRAGMA table_info(loan_debt_entries)');
@@ -1279,6 +1282,21 @@ class DatabaseHelper {
       await addColumn(
           'ALTER TABLE loan_debt_entries ADD COLUMN resolvedAt TEXT');
     }
+    if (!names.contains('principalAmount')) {
+      await addColumn(
+          'ALTER TABLE loan_debt_entries ADD COLUMN principalAmount REAL');
+    }
+    if (!names.contains('source')) {
+      await addColumn(
+        "ALTER TABLE loan_debt_entries ADD COLUMN source TEXT NOT NULL DEFAULT 'transaction'",
+      );
+      await db.update(
+        'loan_debt_entries',
+        {'source': 'repayment_surplus'},
+        where: 'principalAmount IS NOT NULL',
+      );
+    }
+    await _ensureLoanDebtRepaymentSplitSchema(db);
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_personName ON loan_debt_entries(personName COLLATE NOCASE)",
     );
@@ -1293,6 +1311,61 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_repayments_repayment ON loan_debt_repayments(repaymentTransactionReference)',
+    );
+  }
+
+  Future<void> _ensureLoanDebtRepaymentSplitSchema(Database db) async {
+    final rows = await db.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='loan_debt_repayments'",
+    );
+    if (rows.isEmpty) return;
+
+    final createSql = ((rows.first['sql'] as String?) ?? '').toLowerCase();
+    final hasSingleRepaymentUnique = createSql
+        .contains('repaymenttransactionreference text not null unique');
+    if (hasSingleRepaymentUnique) {
+      await db.transaction((txn) async {
+        await txn.execute(
+          'ALTER TABLE loan_debt_repayments RENAME TO loan_debt_repayments_legacy',
+        );
+        await txn.execute('''
+          CREATE TABLE loan_debt_repayments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repaymentTransactionReference TEXT NOT NULL,
+            loanDebtTransactionReference TEXT NOT NULL,
+            appliedAmount REAL NOT NULL,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            UNIQUE(repaymentTransactionReference, loanDebtTransactionReference)
+          )
+        ''');
+        await txn.execute('''
+          INSERT OR IGNORE INTO loan_debt_repayments (
+            id,
+            repaymentTransactionReference,
+            loanDebtTransactionReference,
+            appliedAmount,
+            createdAt,
+            updatedAt
+          )
+          SELECT
+            id,
+            repaymentTransactionReference,
+            loanDebtTransactionReference,
+            appliedAmount,
+            createdAt,
+            updatedAt
+          FROM loan_debt_repayments_legacy
+          WHERE TRIM(repaymentTransactionReference) <> ''
+            AND TRIM(loanDebtTransactionReference) <> ''
+            AND appliedAmount > 0
+        ''');
+        await txn.execute('DROP TABLE loan_debt_repayments_legacy');
+      });
+    }
+
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_loan_debt_repayments_pair ON loan_debt_repayments(repaymentTransactionReference, loanDebtTransactionReference)',
     );
   }
 

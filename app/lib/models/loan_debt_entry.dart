@@ -9,6 +9,11 @@ enum LoanDebtStatus {
   forgiven,
 }
 
+enum LoanDebtEntrySource {
+  transaction,
+  repaymentSurplus,
+}
+
 extension LoanDebtDirectionStorage on LoanDebtDirection {
   String get storageValue {
     switch (this) {
@@ -51,12 +56,31 @@ LoanDebtStatus loanDebtStatusFromStorage(String? value) {
   }
 }
 
+extension LoanDebtEntrySourceStorage on LoanDebtEntrySource {
+  String get storageValue {
+    switch (this) {
+      case LoanDebtEntrySource.transaction:
+        return 'transaction';
+      case LoanDebtEntrySource.repaymentSurplus:
+        return 'repayment_surplus';
+    }
+  }
+}
+
+LoanDebtEntrySource loanDebtEntrySourceFromStorage(String? value) {
+  return value == LoanDebtEntrySource.repaymentSurplus.storageValue
+      ? LoanDebtEntrySource.repaymentSurplus
+      : LoanDebtEntrySource.transaction;
+}
+
 class LoanDebtEntry {
   final int? id;
   final String transactionReference;
   final String personName;
   final LoanDebtDirection direction;
   final LoanDebtStatus status;
+  final double? principalAmount;
+  final LoanDebtEntrySource source;
   final DateTime? resolvedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -67,6 +91,8 @@ class LoanDebtEntry {
     required this.personName,
     required this.direction,
     this.status = LoanDebtStatus.active,
+    this.principalAmount,
+    this.source = LoanDebtEntrySource.transaction,
     this.resolvedAt,
     required this.createdAt,
     required this.updatedAt,
@@ -84,6 +110,8 @@ class LoanDebtEntry {
         row['direction'] as String?,
       ),
       status: loanDebtStatusFromStorage(row['status'] as String?),
+      principalAmount: (row['principalAmount'] as num?)?.toDouble(),
+      source: loanDebtEntrySourceFromStorage(row['source'] as String?),
       resolvedAt: DateTime.tryParse(row['resolvedAt'] as String? ?? ''),
       createdAt: createdAt ?? now,
       updatedAt: updatedAt ?? createdAt ?? now,
@@ -97,6 +125,8 @@ class LoanDebtEntry {
       'personName': personName,
       'direction': direction.storageValue,
       'status': status.storageValue,
+      'principalAmount': principalAmount,
+      'source': source.storageValue,
       'resolvedAt': resolvedAt?.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -110,12 +140,20 @@ class LoanDebtEntry {
     final updatedAt = DateTime.tryParse(json['updatedAt'] as String? ?? '');
     final resolvedAt = DateTime.tryParse(json['resolvedAt'] as String? ?? '');
     final now = DateTime.now();
+    double? toNullableDouble(Object? value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value.trim());
+      return null;
+    }
+
     return LoanDebtEntry(
       id: json['id'] is int ? json['id'] as int : null,
       transactionReference: (json['transactionReference'] as String?) ?? '',
       personName: (json['personName'] as String?) ?? '',
       direction: loanDebtDirectionFromStorage(json['direction'] as String?),
       status: loanDebtStatusFromStorage(json['status'] as String?),
+      principalAmount: toNullableDouble(json['principalAmount']),
+      source: loanDebtEntrySourceFromStorage(json['source'] as String?),
       resolvedAt: resolvedAt,
       createdAt: createdAt ?? now,
       updatedAt: updatedAt ?? createdAt ?? now,

@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
-import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
@@ -80,8 +79,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _showNewCategoryForm = false;
   bool _showColorChoices = false;
   bool _autoCategorizeFutureTransactions = false;
-  bool _isCheckingRepaymentCandidates = true;
-  bool _hasRepaymentLinkCandidate = false;
   String _draftColorKey = _kCategoryColorOptions.first.key;
   List<int> _quickCategoryIds = const [];
   List<int> _autoCategorizationDraftCategoryIds = const [];
@@ -117,13 +114,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
       !_currentCategories.any(isRepaymentCategory);
-  bool get _canSelectRepaymentCategory =>
-      !_isCheckingRepaymentCandidates && _hasRepaymentLinkCandidate;
-  bool get _shouldShowRepaymentUnavailableHint =>
-      !_isCheckingRepaymentCandidates &&
-      !_hasRepaymentLinkCandidate &&
-      !_currentCategories.any(isRepaymentCategory) &&
-      _availableCategories.any(isRepaymentCategory);
+  bool get _canSelectRepaymentCategory => true;
+  bool get _shouldShowRepaymentUnavailableHint => false;
 
   @override
   void initState() {
@@ -135,7 +127,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     _counterpartyFocus.addListener(_handleCounterpartyFocusChange);
     _noteController.text = _tx.note?.trim() ?? '';
     _noteFocus.addListener(_handleNoteFocusChange);
-    _loadRepaymentCandidateAvailability();
     if (widget.showQuickAccessCategories) {
       _loadQuickCategoryIds();
     }
@@ -491,36 +482,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     });
   }
 
-  Future<bool> _loadRepaymentCandidateAvailability() async {
-    try {
-      final repository = LoanDebtRepository();
-      final results = await Future.wait<Object>([
-        repository.getEntries(),
-        repository.getRepayments(),
-      ]);
-      final hasCandidate = hasEligibleRepaymentLinkCandidate(
-        repaymentTransaction: _tx,
-        transactions: _provider.allTransactions,
-        entries: results[0] as List<LoanDebtEntry>,
-        repayments: results[1] as List<LoanDebtRepayment>,
-      );
-      if (!mounted) return hasCandidate;
-      setState(() {
-        _hasRepaymentLinkCandidate = hasCandidate;
-        _isCheckingRepaymentCandidates = false;
-      });
-      return hasCandidate;
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _hasRepaymentLinkCandidate = false;
-          _isCheckingRepaymentCandidates = false;
-        });
-      }
-      return false;
-    }
-  }
-
   void _dismissComposerState({bool clearDraft = false}) {
     FocusManager.instance.primaryFocus?.unfocus();
     _newCategoryFocus.unfocus();
@@ -572,16 +533,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return categoryIds.first;
   }
 
-  Future<bool> _ensureRepaymentCandidateAvailable(String message) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final hasCandidate = _canSelectRepaymentCategory
-        ? true
-        : await _loadRepaymentCandidateAvailability();
-    if (hasCandidate) return true;
-    if (mounted) {
-      messenger?.showSnackBar(SnackBar(content: Text(message)));
-    }
-    return false;
+  Future<bool> _ensureRepaymentCandidateAvailable(String _) async {
+    return true;
   }
 
   Future<bool> _removeUnlinkedRepaymentCategory(
