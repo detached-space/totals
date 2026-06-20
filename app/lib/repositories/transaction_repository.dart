@@ -6,6 +6,9 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/auto_categorization_service.dart';
+import 'package:totals/services/data_sync/data_sync_settings_service.dart';
+import 'package:totals/services/data_sync/sync_enqueuer.dart';
+import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/constants/cash_constants.dart';
 
 class TransactionRepository {
@@ -175,12 +178,20 @@ class TransactionRepository {
 
     print(
         "debug: Transaction ${transactionToSave.reference} saved successfully");
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.transactions,
+      entityRef: transactionToSave.reference,
+      op: SyncOp.upsert,
+      row: Map<String, dynamic>.from(dataToSave),
+    );
   }
 
   Future<void> saveAllTransactions(List<Transaction> transactions) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
     final batch = db.batch();
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
 
     for (var transaction in transactions) {
       // Use transaction's profileId if provided, otherwise use active profile
@@ -229,9 +240,23 @@ class TransactionRepository {
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+
+      syncRecords.add(MapEntry(transaction.reference, {
+        'reference': transaction.reference,
+        'type': transaction.type,
+        'amount': transaction.amount,
+        'bankId': transaction.bankId,
+        'time': transaction.time,
+        'profileId': profileId,
+      }));
     }
 
     await batch.commit(noResult: true);
+
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: syncRecords,
+    );
   }
 
   Future<void> clearAll() async {
@@ -380,8 +405,8 @@ class TransactionRepository {
         whereArgs.add(accountNumber);
       }
 
-      await db.delete(
-        'transactions',
+      await _deleteTransactionsAndEnqueue(
+        db,
         where: whereParts.join(' AND '),
         whereArgs: whereArgs,
       );
@@ -405,8 +430,8 @@ class TransactionRepository {
       whereParts.add('bankId = ?');
       whereArgs.add(bank);
 
-      await db.delete(
-        'transactions',
+      await _deleteTransactionsAndEnqueue(
+        db,
         where: whereParts.join(' AND '),
         whereArgs: whereArgs,
       );
@@ -430,8 +455,8 @@ class TransactionRepository {
 
       // Delete transactions where bankId matches and accountNumber ends with the suffix
       // Using SQL LIKE pattern matching to match the suffix at the end
-      await db.delete(
-        'transactions',
+      await _deleteTransactionsAndEnqueue(
+        db,
         where: whereParts.join(' AND '),
         whereArgs: whereArgs,
       );
@@ -441,8 +466,8 @@ class TransactionRepository {
       whereArgs.add(bank);
       whereParts.add('accountNumber IS NOT NULL');
 
-      await db.delete(
-        'transactions',
+      await _deleteTransactionsAndEnqueue(
+        db,
         where: whereParts.join(' AND '),
         whereArgs: whereArgs,
       );
@@ -467,6 +492,55 @@ class TransactionRepository {
         'transactions',
         where: 'reference IN ($placeholders)',
         whereArgs: chunk,
+      );
+    }
+
+    for (final ref in refList) {
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.transactions,
+        entityRef: ref,
+        op: SyncOp.delete,
+        deleteSnapshot: {'reference': ref},
+      );
+    }
+  }
+
+  /// Deletes transactions matching [where]/[whereArgs] and, when Data Sync is
+  /// enabled, enqueues a delete for each removed reference. The reference
+  /// lookup is skipped entirely when sync is off so the delete path stays cheap.
+  Future<void> _deleteTransactionsAndEnqueue(
+    Database db, {
+    required String where,
+    required List<dynamic> whereArgs,
+  }) async {
+    List<String> refs = const [];
+    bool syncOn = false;
+    try {
+      syncOn = await DataSyncSettingsService.readEnabledFromPrefs();
+    } catch (_) {}
+    if (syncOn) {
+      try {
+        final rows = await db.query(
+          'transactions',
+          columns: ['reference'],
+          where: where,
+          whereArgs: whereArgs,
+        );
+        refs = rows
+            .map((r) => r['reference'] as String?)
+            .whereType<String>()
+            .toList(growable: false);
+      } catch (_) {}
+    }
+
+    await db.delete('transactions', where: where, whereArgs: whereArgs);
+
+    for (final ref in refs) {
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.transactions,
+        entityRef: ref,
+        op: SyncOp.delete,
+        deleteSnapshot: {'reference': ref},
       );
     }
   }

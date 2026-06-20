@@ -39,11 +39,12 @@
 - **Biometric Security**: Protect your financial data with fingerprint or face authentication
 - **Dark/Light Theme**: Beautiful Material Design 3 interface with theme support
 - **Local Web Server**: Built-in HTTP server to access your data from a web browser on the same network
+- **Data Sync (optional, advanced)**: Push selected data to a backend you configure, with per-rule filters, field mapping, HTTP method/path, and triggers (manual, periodic, on new transaction, on reconnect). Off by default, behind a consent screen; one-way export only — bring your own server
 
 ### 🔒 Privacy & Security
 
-- **100% Local Storage**: All data is stored locally on your device using SQLite
-- **No Cloud Sync**: Your financial data never leaves your device
+- **Local-First Storage**: All data is stored locally on your device using SQLite
+- **No Cloud Sync by Default**: Your financial data stays on your device unless you explicitly enable the optional, off-by-default Data Sync feature
 - **Biometric Authentication**: Secure access with fingerprint or face recognition
 - **Offline-First**: Works completely offline after initial setup
 

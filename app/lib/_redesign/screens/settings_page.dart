@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/screens/tools_page.dart';
+import 'package:totals/_redesign/screens/advanced_settings_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/categories_page.dart';
@@ -1399,6 +1400,20 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const RedesignToolsPage(),
+                  ),
+                ),
+              ),
+
+              _SettingTile(
+                icon: AppIcons.lock_outline_rounded,
+                iconColor: AppColors.slate500,
+                title: context.l10nText('Advanced'),
+                subtitle:
+                    context.l10nText('Data sync and other power-user settings'),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const RedesignAdvancedSettingsPage(),
                   ),
                 ),
               ),

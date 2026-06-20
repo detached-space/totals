@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:totals/_redesign/screens/data_sync/data_sync_home_page.dart';
+import 'package:totals/_redesign/screens/data_sync/data_sync_widgets.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -151,6 +153,19 @@ class _RedesignAdvancedSettingsPageState
                           size: 20,
                         ),
                       ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DataSyncTile(
+                  icon: AppIcons.cloud_download,
+                  title: context.l10nText('Data Sync'),
+                  subtitle: context
+                      .l10nText('Send your data to a backend you choose'),
+                  showChevron: true,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DataSyncHomePage(),
                     ),
                   ),
                 ),

@@ -7,6 +7,7 @@ import 'package:workmanager/workmanager.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/shared_expense_background_notification_service.dart';
+import 'package:totals/services/data_sync/sync_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/services/widget_data_provider.dart';
@@ -21,6 +22,8 @@ const String sharedExpenseNotificationCatchupTask =
     'sharedExpenseNotificationCatchup';
 const String sharedExpenseNotificationCatchupUniqueName =
     'sharedExpenseNotificationCatchupUnique';
+const String dataSyncDrainTask = 'dataSyncDrain';
+const String dataSyncDrainUniqueName = 'dataSyncDrainUnique';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -49,6 +52,12 @@ void callbackDispatcher() {
       if (task == sharedExpenseNotificationCatchupTask) {
         await SharedExpenseBackgroundNotificationService.instance
             .sendMissedActivityDigestIfNeeded();
+        return true;
+      }
+
+      if (task == dataSyncDrainTask) {
+        // requestDrain self-gates on the master flag (read from prefs here).
+        await SyncService.instance.requestDrain(reason: 'periodic');
         return true;
       }
 

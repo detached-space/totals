@@ -17,6 +17,9 @@ import 'package:totals/services/widget_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
+import 'package:totals/services/data_sync/data_sync_scheduler.dart';
+import 'package:totals/services/data_sync/data_sync_settings_service.dart';
+import 'package:totals/services/data_sync/sync_enqueuer.dart';
 import 'package:totals/_redesign/screens/onboarding_page.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/_redesign/theme/theme.dart';
@@ -100,6 +103,9 @@ Widget _buildUiScaledApp({
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Flag this as the main isolate so the Data Sync enqueuer drains inline here
+  // (background isolates defer to the periodic task / signal bridge instead).
+  SyncEnqueuer.isMainIsolate = true;
   SharedExpensePushNotificationService.registerBackgroundHandler();
   try {
     await dotenv.load(fileName: '.env', isOptional: true);
@@ -120,6 +126,9 @@ void main() async {
   await WidgetService.initialize();
   await WidgetLaunchIntentService.instance.initialize();
 
+  // Warm the Data Sync master-flag cache so the write hot-path stays cheap.
+  await DataSyncSettingsService.instance.ensureLoaded();
+
   // Read redesign flag from SharedPreferences (persists across restarts)
   final prefs = await SharedPreferences.getInstance();
   final useRedesign = true;
@@ -136,6 +145,7 @@ void main() async {
       await NotificationScheduler.syncSpendingSummarySchedule();
       await NotificationScheduler.syncSharedExpenseNotificationSchedule();
       await WidgetRefreshScheduler.syncWidgetRefreshSchedule();
+      await DataSyncScheduler.sync();
     } catch (e) {
       // Ignore if not supported on the current platform.
       if (kDebugMode) {

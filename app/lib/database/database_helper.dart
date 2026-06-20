@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 25,
+      version: 26,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -43,6 +43,7 @@ class DatabaseHelper {
     await _ensureAutoCategorizationSchema(db);
     await _ensureLoanDebtSchema(db);
     await _migrateLegacyReceiverMappingsToAutoRules(db);
+    await _ensureSyncSchema(db);
 
     return db;
   }
@@ -767,6 +768,10 @@ class DatabaseHelper {
     if (oldVersion < 25) {
       await _ensureLoanDebtSchema(db);
     }
+
+    if (oldVersion < 26) {
+      await _ensureSyncSchema(db);
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -1288,6 +1293,84 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_repayments_repayment ON loan_debt_repayments(repaymentTransactionReference)',
+    );
+  }
+
+  /// Data Sync feature tables (v26). Purely additive; created with
+  /// `IF NOT EXISTS` so a hot reload or version skew is safe. Secret values
+  /// for destinations live in FlutterSecureStorage (keyed by secretRef), never
+  /// in these tables.
+  Future<void> _ensureSyncSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_destinations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        baseUrl TEXT NOT NULL,
+        authType TEXT NOT NULL DEFAULT 'none',
+        authHeaderName TEXT,
+        authUsername TEXT,
+        secretRef TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        destinationId INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        entity TEXT NOT NULL,
+        filterJson TEXT,
+        method TEXT NOT NULL DEFAULT 'POST',
+        pathTemplate TEXT NOT NULL,
+        fieldMapJson TEXT,
+        sendUnmapped INTEGER NOT NULL DEFAULT 0,
+        batchMode TEXT NOT NULL DEFAULT 'per_record',
+        triggerManual INTEGER NOT NULL DEFAULT 1,
+        triggerPeriodic INTEGER NOT NULL DEFAULT 0,
+        triggerOnNewTxn INTEGER NOT NULL DEFAULT 0,
+        triggerOnConnectivity INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        backfillDone INTEGER NOT NULL DEFAULT 0,
+        lastStatus TEXT,
+        lastRunAt TEXT,
+        lastError TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_rules_entity ON sync_rules(entity)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_rules_enabled ON sync_rules(enabled)',
+    );
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ruleId INTEGER NOT NULL,
+        entity TEXT NOT NULL,
+        entityRef TEXT NOT NULL,
+        op TEXT NOT NULL DEFAULT 'upsert',
+        payloadJson TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        nextAttemptAt TEXT NOT NULL,
+        lastError TEXT,
+        lastStatusCode INTEGER,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE(ruleId, entityRef, op)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_outbox_due ON sync_outbox(status, nextAttemptAt)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_outbox_rule ON sync_outbox(ruleId)',
     );
   }
 

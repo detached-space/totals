@@ -38,6 +38,9 @@ import 'package:totals/services/shared_expense_notification_coordinator.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
 import 'package:totals/services/shared_expense_vault_service.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
+import 'package:totals/services/background_sync_signal_service.dart';
+import 'package:totals/services/connectivity_service.dart';
+import 'package:totals/services/data_sync/sync_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
@@ -83,6 +86,7 @@ class RedesignShellState extends State<RedesignShell>
   StreamSubscription<WidgetLaunchTarget>? _widgetLaunchIntentSub;
   StreamSubscription<NotificationIntent>? _notificationIntentSub;
   StreamSubscription<void>? _backgroundRefreshSub;
+  StreamSubscription<void>? _dataSyncSignalSub;
   final ProfileRepository _profileRepo = ProfileRepository();
   final AccountRepository _accountRepo = AccountRepository();
   final UserAccountRepository _userAccountRepo = UserAccountRepository();
@@ -103,6 +107,15 @@ class RedesignShellState extends State<RedesignShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     BackgroundRefreshSignalService.instance.ensureListening();
+    // Data Sync: listen for outbox nudges from background isolates, react to
+    // connectivity returning, and drain anything queued while we were away.
+    BackgroundSyncSignalService.instance.ensureListening();
+    _dataSyncSignalSub =
+        BackgroundSyncSignalService.instance.stream.listen((_) {
+      unawaited(SyncService.instance.requestDrain(reason: 'signal'));
+    });
+    unawaited(ConnectivityService.instance.start());
+    unawaited(SyncService.instance.requestDrain(reason: 'startup'));
     unawaited(SharedExpenseNotificationCoordinator.instance.start());
     unawaited(SharedExpensePushNotificationService.instance.start());
     unawaited(SharedExpenseVaultService.instance.ensureInitialized());
@@ -198,6 +211,7 @@ class RedesignShellState extends State<RedesignShell>
     _widgetLaunchIntentSub?.cancel();
     _notificationIntentSub?.cancel();
     _backgroundRefreshSub?.cancel();
+    _dataSyncSignalSub?.cancel();
     unawaited(SharedExpenseNotificationCoordinator.instance.stop());
     _homeToolsMenuOpenNotifier.dispose();
     _sharedExpenseFabController.dispose();
@@ -209,6 +223,7 @@ class RedesignShellState extends State<RedesignShell>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(SmsConfigService().syncRemoteConfig());
+      unawaited(SyncService.instance.requestDrain(reason: 'resume'));
     }
 
     if (state == AppLifecycleState.resumed && _isAuthenticated) {

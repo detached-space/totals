@@ -66,11 +66,12 @@
 - **Dark/Light Theme** — Material Design 3 with Google Fonts and custom font selection
 - **Local Web Server** — access your data from a browser on the same network
 - **Data Export/Import** — backup and restore your financial data
+- **Data Sync (optional, advanced)** — push selected data to a backend you configure, with per-rule filters, field mapping, HTTP method/path, and triggers (manual, periodic, on new transaction, on reconnect). Off by default, behind a consent screen; one-way export only — bring your own server
 
 ### Privacy & Security
 
-- **100% Local Storage** — all data stored on-device using sqflite
-- **No Cloud Sync** — financial data never leaves your device
+- **Local-First Storage** — all data stored on-device using sqflite
+- **No Cloud Sync by Default** — financial data stays on your device unless you explicitly enable the optional, off-by-default Data Sync feature
 - **Biometric Authentication** — secure access with fingerprint or face recognition
 - **Offline-First** — works completely offline after initial setup
 

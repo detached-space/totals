@@ -11,6 +11,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - Optional internet features include payment verification, shared expenses, and configuration updates.
 - Payment verification can send the image, payment reference, selected account number, and selected bank identifier you submit to our verification service.
 - Shared expenses can use the Totals Engine relay service to create groups, exchange encrypted group data, sync shared expenses, and deliver pending updates between approved group members.
+- Data Sync is an optional, off-by-default advanced feature that lets you push selected local records to a third-party server that you configure. When you enable it and create rules, the specific fields and records you choose are sent to the destination you specify; Totals does not control, operate, or secure that destination.
 - For Google Play Data Safety purposes, the user data Totals collects or shares off-device is disclosed as Financial info - Other financial info, used for app functionality.
 - The app may download updated SMS parsing patterns and bank configuration files from our servers during setup, refresh, or manual update actions. This does not upload your SMS contents.
 - User data collected by Totals is encrypted in transit.
@@ -40,6 +41,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - Local authentication prompts, if you use the app lock feature. Totals does not receive your raw fingerprint, face scan, or other biometric template; biometric verification is handled by your device operating system.
 - Exported or imported backup files that you choose to create or restore.
 - Optional local network access if you manually start the in-app local web dashboard or server.
+- Data Sync configuration you enter, such as destination names, server URLs, authentication type, and credentials, when you use the optional Data Sync feature.
 
 ## How We Use Data
 
@@ -54,6 +56,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - To secure access to the app if you use device authentication or app lock.
 - To export, import, or share data when you explicitly choose those actions.
 - To operate, secure, debug, and protect optional online services.
+- To send the records and fields you select to the external server you configure when you enable the optional Data Sync feature.
 
 ## When Data Leaves Your Device
 
@@ -66,6 +69,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - Configuration updates: When Totals downloads updated SMS parsing patterns or bank configuration files, it connects to our hosted configuration endpoints. The app may also perform basic connectivity checks to confirm internet access. These requests are used to download configuration, not to upload your SMS contents for normal tracking.
 - Support and external links: If you open external links from the app, such as support pages, Telegram, or bank links, those services receive information according to their own privacy policies.
 - Local network dashboard: If you manually start the optional local web dashboard or server, your financial data may be available to devices on the same local network using the URL shown in the app until you stop the server.
+- Data Sync (optional, off by default): If you enable Data Sync and create one or more rules, Totals sends the records and fields you select to the destination URL you configure, using the authentication you provide. Depending on your rules this may include transaction amounts, references, dates, counterparties, balances, account numbers, bank identifiers, budgets, and any other fields you map. This is a one-way export controlled by you; Totals never pulls data back, and Totals cannot see, verify, or secure the destination, which is operated by you or a third party of your choosing.
 
 ## Sharing
 
@@ -88,6 +92,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - QR scan results are processed locally unless the related feature explicitly uses an online service.
 - Payment verification submissions may be processed by the verification service and retained only for the period reasonably necessary to operate, secure, debug, and protect the service, or as required by law.
 - Downloaded SMS pattern files and bank configuration files may be cached on your device for future use.
+- Data Sync settings (destinations and rules) are stored locally in the app database, and any credentials you enter are stored using secure device storage. A local outbox queue records which selected records are pending, sent, or failed. Disabling Data Sync and choosing to wipe its data deletes these settings, credentials, and the queue from your device.
 
 ## Security
 

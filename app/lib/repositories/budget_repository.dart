@@ -1,5 +1,7 @@
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/budget.dart';
+import 'package:totals/services/data_sync/sync_enqueuer.dart';
+import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/utils/app_calendar_date_utils.dart';
 
@@ -106,19 +108,35 @@ class BudgetRepository {
     final data = budget.toDb();
     data.remove('id'); // Remove id for insert
     data['updatedAt'] = DateTime.now().toIso8601String();
-    return await db.insert('budgets', data);
+    final id = await db.insert('budgets', data);
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.budgets,
+      entityRef: 'budget:$id',
+      op: SyncOp.upsert,
+      row: {...data, 'id': id},
+    );
+    return id;
   }
 
   Future<int> updateBudget(Budget budget) async {
     final db = await DatabaseHelper.instance.database;
     final data = budget.toDb();
     data['updatedAt'] = DateTime.now().toIso8601String();
-    return await db.update(
+    final result = await db.update(
       'budgets',
       data,
       where: 'id = ?',
       whereArgs: [budget.id],
     );
+    if (budget.id != null) {
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.budgets,
+        entityRef: 'budget:${budget.id}',
+        op: SyncOp.upsert,
+        row: data,
+      );
+    }
+    return result;
   }
 
   /// Applies edits only to the given month while preserving original values
@@ -207,11 +225,18 @@ class BudgetRepository {
 
   Future<int> deleteBudget(int id) async {
     final db = await DatabaseHelper.instance.database;
-    return await db.delete(
+    final result = await db.delete(
       'budgets',
       where: 'id = ?',
       whereArgs: [id],
     );
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.budgets,
+      entityRef: 'budget:$id',
+      op: SyncOp.delete,
+      deleteSnapshot: {'id': id},
+    );
+    return result;
   }
 
   Future<void> deleteBudgetForMonth({

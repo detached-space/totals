@@ -4,6 +4,8 @@ import 'package:totals/models/account.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/services/data_sync/sync_enqueuer.dart';
+import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/constants/cash_constants.dart';
 
 class AccountRepository {
@@ -96,17 +98,29 @@ class AccountRepository {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.accounts,
+      entityRef: '${account.accountNumber}|${account.bank}',
+      op: SyncOp.upsert,
+      row: {
+        'accountNumber': account.accountNumber,
+        'bank': account.bank,
+        'profileId': profileId,
+      },
+    );
   }
 
   Future<void> saveAllAccounts(List<Account> accounts) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
     final batch = db.batch();
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
 
     for (var account in accounts) {
       // Use account's profileId if provided, otherwise use active profile
       final profileId = account.profileId ?? activeProfileId;
-      
+
       batch.insert(
         'accounts',
         {
@@ -120,9 +134,20 @@ class AccountRepository {
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+
+      syncRecords.add(MapEntry('${account.accountNumber}|${account.bank}', {
+        'accountNumber': account.accountNumber,
+        'bank': account.bank,
+        'profileId': profileId,
+      }));
     }
 
     await batch.commit(noResult: true);
+
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.accounts,
+      records: syncRecords,
+    );
   }
 
   Future<bool> accountExists(String accountNumber, int bank) async {
@@ -151,6 +176,13 @@ class AccountRepository {
   }
 
   Future<void> deleteAccount(String accountNumber, int bank) async {
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.accounts,
+      entityRef: '$accountNumber|$bank',
+      op: SyncOp.delete,
+      deleteSnapshot: {'accountNumber': accountNumber, 'bank': bank},
+    );
+
     final db = await DatabaseHelper.instance.database;
 
     if (bank == CashConstants.bankId) {
