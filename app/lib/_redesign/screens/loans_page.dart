@@ -487,19 +487,23 @@ class _LoansPageState extends State<LoansPage> {
                         ),
                       )
                     else
-                      for (final row in timelineRows)
-                        if (row.loanDebtItem != null)
-                          _LoanDebtTransactionTile(
-                            item: row.loanDebtItem!,
-                            onTap: () =>
-                                _openLoanDebtDetailsSheet(row.loanDebtItem!),
-                          )
-                        else
-                          _LoanDebtRepaymentTile(
-                            item: row.repaymentItem!,
-                            onTap: () =>
-                                _openRepaymentLinkSheet(row.repaymentItem!),
-                          ),
+                      for (final section
+                          in _loanDebtTimelineSections(timelineRows)) ...[
+                        _LoanDebtDayHeader(date: section.date),
+                        for (final row in section.rows)
+                          if (row.loanDebtItem != null)
+                            _LoanDebtTransactionTile(
+                              item: row.loanDebtItem!,
+                              onTap: () =>
+                                  _openLoanDebtDetailsSheet(row.loanDebtItem!),
+                            )
+                          else
+                            _LoanDebtRepaymentTile(
+                              item: row.repaymentItem!,
+                              onTap: () =>
+                                  _openRepaymentLinkSheet(row.repaymentItem!),
+                            ),
+                      ],
                     if (dashboard.unassignedItems.isNotEmpty &&
                         selectedPerson == null) ...[
                       const SizedBox(height: 18),
@@ -523,11 +527,20 @@ class _LoansPageState extends State<LoansPage> {
                           ),
                         )
                       else
-                        for (final item in filteredUnassignedItems)
-                          _UnassignedLoanDebtTile(
-                            item: item,
-                            onTap: () => _openLoanDebtDetailsSheet(item),
+                        for (final section in _loanDebtTimelineSections(
+                          _loanDebtTimelineRows(
+                            loanDebtItems: filteredUnassignedItems,
+                            repaymentItems: const <_LoanDebtRepaymentItem>[],
                           ),
+                        )) ...[
+                          _LoanDebtDayHeader(date: section.date),
+                          for (final row in section.rows)
+                            _UnassignedLoanDebtTile(
+                              item: row.loanDebtItem!,
+                              onTap: () =>
+                                  _openLoanDebtDetailsSheet(row.loanDebtItem!),
+                            ),
+                        ],
                     ],
                   ] else
                     _EmptyPanel(
@@ -1292,6 +1305,97 @@ class _TinyStatusPill extends StatelessWidget {
   }
 }
 
+class _LoanDebtChipData {
+  final String label;
+  final Color color;
+
+  const _LoanDebtChipData({
+    required this.label,
+    required this.color,
+  });
+}
+
+class _LoanDebtChipRow extends StatelessWidget {
+  final List<_LoanDebtChipData> chips;
+
+  const _LoanDebtChipRow({required this.chips});
+
+  @override
+  Widget build(BuildContext context) {
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 5,
+      children: [
+        for (final chip in chips)
+          _LoanDebtTypeChip(label: chip.label, color: chip.color),
+      ],
+    );
+  }
+}
+
+class _LoanDebtTypeChip extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _LoanDebtTypeChip({
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 104),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              height: 1.1,
+            ),
+      ),
+    );
+  }
+}
+
+class _LoanDebtDayHeader extends StatelessWidget {
+  final DateTime? date;
+
+  const _LoanDebtDayHeader({required this.date});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = date == null
+        ? context.l10nText('Unknown Date')
+        : AppDateFormat.monthDayYear(date!, context: context);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: AppColors.isDark(context)
+              ? AppColors.slate400
+              : AppColors.slate700,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _TransactionsHeader extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -1478,13 +1582,17 @@ class _LoanDebtBaseTile extends StatelessWidget {
     final borrowed = item.direction == LoanDebtDirection.borrowed;
     final directionColor = borrowed ? AppColors.red : AppColors.incomeSuccess;
     final color = _loanDebtStatusColor(item.status, directionColor);
+    final chips = _loanDebtTransactionChips(
+      context: context,
+      item: item,
+      directionColor: directionColor,
+      statusColor: color,
+    );
     final bankName = context.l10nText(
       provider.getBankShortName(item.transaction.bankId),
     );
     final details = [
-      if (!item.isActive) _loanDebtStatusLabel(context, item.status),
       bankName,
-      item.dateLabel(context),
       item.timeLabel(context),
     ].where((value) => value.trim().isNotEmpty).join(' · ');
 
@@ -1523,32 +1631,43 @@ class _LoanDebtBaseTile extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        details,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const SizedBox(height: 5),
+                      _LoanDebtChipRow(chips: chips),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 122),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      _formatEtb(item.originalAmount, context),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          _formatEtb(item.originalAmount, context),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: color,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                    ),
+                      if (details.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          details,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: AppColors.textSecondary(context),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1575,14 +1694,22 @@ class _LoanDebtRepaymentTile extends StatelessWidget {
     final theme = Theme.of(context);
     final provider = context.read<TransactionProvider>();
     final borrowed = item.direction == LoanDebtDirection.borrowed;
-    final color = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final directionColor = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final chips = [
+      _LoanDebtChipData(
+        label: context.l10nText('Repayment'),
+        color: AppColors.blue,
+      ),
+      _LoanDebtChipData(
+        label: _loanDebtDirectionLabel(context, item.direction),
+        color: directionColor,
+      ),
+    ];
     final bankName = context.l10nText(
       provider.getBankShortName(item.transaction.bankId),
     );
     final details = [
-      context.l10nText('Repayment'),
       bankName,
-      item.dateLabel(context),
       item.timeLabel(context),
     ].where((value) => value.trim().isNotEmpty).join(' · ');
 
@@ -1605,7 +1732,7 @@ class _LoanDebtRepaymentTile extends StatelessWidget {
                 Container(
                   width: 4,
                   height: 74,
-                  color: color,
+                  color: directionColor,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1621,32 +1748,43 @@ class _LoanDebtRepaymentTile extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        details,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const SizedBox(height: 5),
+                      _LoanDebtChipRow(chips: chips),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 122),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      _formatEtb(item.amount, context),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          _formatEtb(item.amount, context),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: directionColor,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                    ),
+                      if (details.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          details,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: AppColors.textSecondary(context),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -3707,17 +3845,21 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
                 ),
               )
             else
-              for (final row in timelineRows)
-                if (row.loanDebtItem != null)
-                  _LoanDebtTransactionTile(
-                    item: row.loanDebtItem!,
-                    onTap: () => _openLoanDebtDetailsSheet(row.loanDebtItem!),
-                  )
-                else
-                  _LoanDebtRepaymentTile(
-                    item: row.repaymentItem!,
-                    onTap: () => _openRepaymentLinkSheet(row.repaymentItem!),
-                  ),
+              for (final section
+                  in _loanDebtTimelineSections(timelineRows)) ...[
+                _LoanDebtDayHeader(date: section.date),
+                for (final row in section.rows)
+                  if (row.loanDebtItem != null)
+                    _LoanDebtTransactionTile(
+                      item: row.loanDebtItem!,
+                      onTap: () => _openLoanDebtDetailsSheet(row.loanDebtItem!),
+                    )
+                  else
+                    _LoanDebtRepaymentTile(
+                      item: row.repaymentItem!,
+                      onTap: () => _openRepaymentLinkSheet(row.repaymentItem!),
+                    ),
+              ],
           ],
         ),
       ),
@@ -4869,6 +5011,25 @@ class _LoanDebtTimelineRow {
         repaymentItem = item;
 
   int get sortTime => loanDebtItem?.sortTime ?? repaymentItem!.sortTime;
+
+  DateTime? get parsedLocalTime =>
+      loanDebtItem?.parsedLocalTime ?? repaymentItem!.parsedLocalTime;
+
+  DateTime? get localDate {
+    final parsed = parsedLocalTime;
+    if (parsed == null) return null;
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+}
+
+class _LoanDebtTimelineSection {
+  final DateTime? date;
+  final List<_LoanDebtTimelineRow> rows;
+
+  const _LoanDebtTimelineSection({
+    required this.date,
+    required this.rows,
+  });
 }
 
 class _LoanDebtPersonSummary {
@@ -4895,6 +5056,42 @@ String _formatEtb(double amount, BuildContext context) {
   final formatted = formatNumberWithComma(amount).replaceFirst('.00', '');
   final currency = context.l10nText('ETB');
   return '$currency $formatted';
+}
+
+String _loanDebtDirectionLabel(
+  BuildContext context,
+  LoanDebtDirection direction,
+) {
+  switch (direction) {
+    case LoanDebtDirection.lent:
+      return context.l10nText('Loan');
+    case LoanDebtDirection.borrowed:
+      return context.l10nText('Debt');
+  }
+}
+
+List<_LoanDebtChipData> _loanDebtTransactionChips({
+  required BuildContext context,
+  required _LoanDebtItem item,
+  required Color directionColor,
+  required Color statusColor,
+}) {
+  final directionChip = _LoanDebtChipData(
+    label: _loanDebtDirectionLabel(context, item.direction),
+    color: directionColor,
+  );
+
+  if (item.status == LoanDebtStatus.active) {
+    return [directionChip];
+  }
+
+  return [
+    _LoanDebtChipData(
+      label: _loanDebtStatusLabel(context, item.status),
+      color: statusColor,
+    ),
+    directionChip,
+  ];
 }
 
 List<_LoanDebtItem> _filteredLoanDebtItems(
@@ -5009,6 +5206,39 @@ List<_LoanDebtTimelineRow> _loanDebtTimelineRows({
   ];
   rows.sort((a, b) => b.sortTime.compareTo(a.sortTime));
   return rows;
+}
+
+List<_LoanDebtTimelineSection> _loanDebtTimelineSections(
+  List<_LoanDebtTimelineRow> rows,
+) {
+  final sections = <_LoanDebtTimelineSection>[];
+  var hasCurrentSection = false;
+  DateTime? currentDate;
+  var currentRows = <_LoanDebtTimelineRow>[];
+
+  void flushCurrentSection() {
+    if (!hasCurrentSection) return;
+    sections.add(
+      _LoanDebtTimelineSection(
+        date: currentDate,
+        rows: List.unmodifiable(currentRows),
+      ),
+    );
+  }
+
+  for (final row in rows) {
+    final rowDate = row.localDate;
+    if (!hasCurrentSection || rowDate != currentDate) {
+      flushCurrentSection();
+      hasCurrentSection = true;
+      currentDate = rowDate;
+      currentRows = <_LoanDebtTimelineRow>[];
+    }
+    currentRows.add(row);
+  }
+  flushCurrentSection();
+
+  return sections;
 }
 
 String _formatEtbCompact(double amount, BuildContext context) {
