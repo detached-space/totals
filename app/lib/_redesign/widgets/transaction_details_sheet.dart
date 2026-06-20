@@ -113,7 +113,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
-      !_currentCategories.any(isRepaymentCategory);
+      !_currentCategories.any(_isLoanDebtManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
 
@@ -295,12 +295,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     if (!_autoCategorizeFutureTransactions) return const [];
     final existingIds = _provider
         .autoCategorizationCategoryIdsForTransaction(transaction)
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toList(growable: false);
     if (existingIds.isNotEmpty) return existingIds;
 
     final selectedIds = transaction.selectedCategoryIds
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toList(growable: false);
     return selectedIds.isEmpty ? const [] : selectedIds;
   }
@@ -312,17 +312,17 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     if (!_autoCategorizeFutureTransactions) return const [];
 
     final previousSelectedIds = previous.selectedCategoryIds
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toSet();
     final nextSelectedIds = updated.selectedCategoryIds
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toList(growable: false);
 
     final rememberedIds = <int>[];
 
     void remember(int categoryId) {
       if (categoryId <= 0 || rememberedIds.contains(categoryId)) return;
-      if (_isSelfCategoryId(categoryId)) return;
+      if (!_canAutoCategorizeCategoryId(categoryId)) return;
       rememberedIds.add(categoryId);
     }
 
@@ -394,7 +394,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final nextEnabled = !previousEnabled;
     final nextDraftIds = nextEnabled
         ? _tx.selectedCategoryIds
-            .where((id) => !_isSelfCategoryId(id))
+            .where(_canAutoCategorizeCategoryId)
             .toList(growable: false)
         : const <int>[];
     final shouldEnable = nextEnabled && nextDraftIds.isNotEmpty;
@@ -500,10 +500,24 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return category.name.trim().toLowerCase() == 'self';
   }
 
+  bool _isLoanDebtManagedCategory(Category category) {
+    return isLoanDebtCategory(category) || isRepaymentCategory(category);
+  }
+
   bool _isSelfCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     if (category == null) return false;
     return _isSelfCategory(category);
+  }
+
+  bool _isLoanDebtManagedCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    if (category == null) return false;
+    return _isLoanDebtManagedCategory(category);
+  }
+
+  bool _canAutoCategorizeCategoryId(int id) {
+    return !_isSelfCategoryId(id) && !_isLoanDebtManagedCategoryId(id);
   }
 
   bool _transactionHasRepaymentCategory(Transaction transaction) {
@@ -569,7 +583,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final previousTransaction = _tx;
     final hadRepaymentCategory =
         _transactionHasRepaymentCategory(previousTransaction);
-    final hasRepaymentCategory = categoryIds.any(_isRepaymentCategoryId);
+    final hasLoanDebtManagedCategory =
+        categoryIds.any(_isLoanDebtManagedCategoryId);
     final hadExistingRules = _provider
         .autoCategorizationRulesForTransaction(previousTransaction)
         .isNotEmpty;
@@ -594,7 +609,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       );
       final shouldPersistAutoCategorization = shouldAutoCategorize &&
           nextAutoCategoryIds.isNotEmpty &&
-          !hasRepaymentCategory;
+          !hasLoanDebtManagedCategory;
       final removedRepaymentCategory =
           hadRepaymentCategory && !_transactionHasRepaymentCategory(updated);
       if (removedRepaymentCategory) {

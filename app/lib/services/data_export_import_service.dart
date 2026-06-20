@@ -16,12 +16,18 @@ import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
+import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 
 const int _dashenBankId = 4;
+
+bool _isLoanDebtManagedCategory(Category category) {
+  return isLoanDebtCategory(category) || isRepaymentCategory(category);
+}
 
 class DataExportImportService {
   static const int currentSchemaVersion = 8;
@@ -32,6 +38,7 @@ class DataExportImportService {
   final CategoryRepository _categoryRepo = CategoryRepository();
   final TransactionRepository _transactionRepo = TransactionRepository();
   final FailedParseRepository _failedParseRepo = FailedParseRepository();
+  final LoanDebtRepository _loanDebtRepo = LoanDebtRepository();
   final UserAccountRepository _userAccountRepo = UserAccountRepository();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
@@ -425,6 +432,7 @@ class DataExportImportService {
       // Import loan/debt state after transactions/categories exist. Row IDs are
       // intentionally ignored; transactionReference is the stable identity.
       final loanDebtRaw = _asMapList(data['loanDebtEntries']);
+      final loanDebtEntriesByReference = <String, LoanDebtEntry>{};
       if (loanDebtRaw.isNotEmpty) {
         final batch = db.batch();
         for (final rawEntry in loanDebtRaw) {
@@ -432,6 +440,7 @@ class DataExportImportService {
           final reference = entry.transactionReference.trim();
           final personName = entry.personName.trim();
           if (reference.isEmpty || personName.isEmpty) continue;
+          loanDebtEntriesByReference[reference] = entry;
           final entryData = entry.toDb()..remove('id');
           entryData['transactionReference'] = reference;
           entryData['personName'] = personName;
@@ -446,7 +455,8 @@ class DataExportImportService {
 
       final loanDebtRepaymentRaw = _asMapList(data['loanDebtRepayments']);
       if (loanDebtRepaymentRaw.isNotEmpty) {
-        final batch = db.batch();
+        final repaymentAllocationsByReference =
+            <String, List<LoanDebtRepaymentAllocation>>{};
         for (final rawRepayment in loanDebtRepaymentRaw) {
           final repayment = LoanDebtRepayment.fromJson(rawRepayment);
           final repaymentReference =
@@ -458,16 +468,36 @@ class DataExportImportService {
               repayment.appliedAmount <= 0) {
             continue;
           }
-          final repaymentData = repayment.toDb()..remove('id');
-          repaymentData['repaymentTransactionReference'] = repaymentReference;
-          repaymentData['loanDebtTransactionReference'] = loanDebtReference;
-          batch.insert(
-            'loan_debt_repayments',
-            repaymentData,
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+          repaymentAllocationsByReference
+              .putIfAbsent(
+                repaymentReference,
+                () => <LoanDebtRepaymentAllocation>[],
+              )
+              .add(
+                LoanDebtRepaymentAllocation(
+                  loanDebtTransactionReference: loanDebtReference,
+                  appliedAmount: repayment.appliedAmount,
+                ),
+              );
         }
-        await batch.commit(noResult: true);
+        for (final entry in repaymentAllocationsByReference.entries) {
+          final surplusEntry = loanDebtEntriesByReference[entry.key];
+          final isSurplusEntry =
+              surplusEntry?.source == LoanDebtEntrySource.repaymentSurplus ||
+                  surplusEntry?.principalAmount != null;
+          try {
+            await _loanDebtRepo.saveRepaymentFlow(
+              repaymentTransactionReference: entry.key,
+              allocations: entry.value,
+              surplusPersonName:
+                  isSurplusEntry ? surplusEntry?.personName : null,
+              surplusDirection: isSurplusEntry ? surplusEntry?.direction : null,
+              surplusPrincipalAmount:
+                  isSurplusEntry ? surplusEntry?.principalAmount : null,
+              allowResolvedTargets: true,
+            );
+          } catch (_) {}
+        }
       }
 
       // Import explicit auto-category rules.
@@ -476,6 +506,10 @@ class DataExportImportService {
         final rules = autoCategoryRulesRaw
             .map(AutoCategorizationRule.fromJson)
             .toList(growable: false);
+        final categoriesById = {
+          for (final category in await _categoryRepo.getCategories())
+            if (category.id != null) category.id!: category,
+        };
         final batch = db.batch();
         for (final rule in rules) {
           final categoryId = categoryIdMap[rule.categoryId] ?? rule.categoryId;
@@ -484,6 +518,10 @@ class DataExportImportService {
               categoryIdMap.isNotEmpty &&
               categoryId == rule.categoryId &&
               !categoryIdMap.containsKey(rule.categoryId)) {
+            continue;
+          }
+          final category = categoriesById[categoryId];
+          if (category == null || _isLoanDebtManagedCategory(category)) {
             continue;
           }
           batch.insert(
@@ -557,6 +595,7 @@ class DataExportImportService {
           if (resolvedCategoryId == null) continue;
           final category = categoriesById[resolvedCategoryId];
           if (category == null) continue;
+          if (_isLoanDebtManagedCategory(category)) continue;
           final rawCounterparty = mapping['accountNumber']?.toString().trim();
           if (rawCounterparty == null || rawCounterparty.isEmpty) continue;
           batch.insert(

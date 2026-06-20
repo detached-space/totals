@@ -175,27 +175,14 @@ class LoanDebtRepository {
     required String loanDebtTransactionReference,
     required double appliedAmount,
   }) async {
-    final normalizedRepaymentReference = repaymentTransactionReference.trim();
-    final normalizedLoanDebtReference = loanDebtTransactionReference.trim();
-    final normalizedAmount = appliedAmount.isFinite ? appliedAmount.abs() : 0;
-    if (normalizedRepaymentReference.isEmpty ||
-        normalizedLoanDebtReference.isEmpty ||
-        normalizedAmount <= 0) {
-      return;
-    }
-
-    final db = await DatabaseHelper.instance.database;
-    final now = DateTime.now().toIso8601String();
-    await db.insert(
-      'loan_debt_repayments',
-      {
-        'repaymentTransactionReference': normalizedRepaymentReference,
-        'loanDebtTransactionReference': normalizedLoanDebtReference,
-        'appliedAmount': normalizedAmount,
-        'createdAt': now,
-        'updatedAt': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+    await saveRepaymentFlow(
+      repaymentTransactionReference: repaymentTransactionReference,
+      allocations: [
+        LoanDebtRepaymentAllocation(
+          loanDebtTransactionReference: loanDebtTransactionReference,
+          appliedAmount: appliedAmount,
+        ),
+      ],
     );
   }
 
@@ -205,6 +192,7 @@ class LoanDebtRepository {
     String? surplusPersonName,
     LoanDebtDirection? surplusDirection,
     double? surplusPrincipalAmount,
+    bool allowResolvedTargets = false,
   }) async {
     final normalizedRepaymentReference = repaymentTransactionReference.trim();
     if (normalizedRepaymentReference.isEmpty) return;
@@ -241,6 +229,20 @@ class LoanDebtRepository {
     final nowIso = now.toIso8601String();
 
     await db.transaction((txn) async {
+      if (normalizedAllocations.isNotEmpty || shouldSaveSurplus) {
+        await _requireTransactionExists(
+          txn,
+          normalizedRepaymentReference,
+          role: 'Repayment',
+        );
+      }
+      await _validateRepaymentAllocations(
+        txn,
+        repaymentTransactionReference: normalizedRepaymentReference,
+        allocations: normalizedAllocations,
+        allowResolvedTargets: allowResolvedTargets,
+      );
+
       await txn.delete(
         'loan_debt_repayments',
         where: 'repaymentTransactionReference = ?',
@@ -352,15 +354,150 @@ class LoanDebtRepository {
       where: 'transactionReference = ?',
       whereArgs: [normalizedReference],
     );
-    await db.delete(
-      'loan_debt_repayments',
-      where:
-          'loanDebtTransactionReference = ? OR repaymentTransactionReference = ?',
-      whereArgs: [normalizedReference, normalizedReference],
+  }
+
+  Future<void> _requireTransactionExists(
+    DatabaseExecutor executor,
+    String reference, {
+    required String role,
+  }) async {
+    final rows = await executor.query(
+      'transactions',
+      columns: ['reference'],
+      where: 'reference = ?',
+      whereArgs: [reference],
+      limit: 1,
     );
+    if (rows.isEmpty) {
+      throw StateError('$role transaction does not exist.');
+    }
+  }
+
+  Future<void> _validateRepaymentAllocations(
+    DatabaseExecutor executor, {
+    required String repaymentTransactionReference,
+    required List<LoanDebtRepaymentAllocation> allocations,
+    required bool allowResolvedTargets,
+  }) async {
+    if (allocations.isEmpty) return;
+
+    final repaymentRows = await executor.query(
+      'transactions',
+      columns: ['type'],
+      where: 'reference = ?',
+      whereArgs: [repaymentTransactionReference],
+      limit: 1,
+    );
+    if (repaymentRows.isEmpty) {
+      throw StateError('Repayment transaction does not exist.');
+    }
+
+    final repaymentDirection = _repaymentDirectionForTransactionType(
+      repaymentRows.first['type'] as String?,
+    );
+    final existingRows = await executor.query(
+      'loan_debt_repayments',
+      columns: ['loanDebtTransactionReference'],
+      where: 'repaymentTransactionReference = ?',
+      whereArgs: [repaymentTransactionReference],
+    );
+    final existingTargetReferences = existingRows
+        .map((row) => (row['loanDebtTransactionReference'] as String?)?.trim())
+        .whereType<String>()
+        .where((reference) => reference.isNotEmpty)
+        .toSet();
+
+    for (final allocation in allocations) {
+      final loanDebtReference = allocation.loanDebtTransactionReference.trim();
+      if (loanDebtReference == repaymentTransactionReference) {
+        throw StateError('A repayment cannot be applied to itself.');
+      }
+
+      final entryRows = await executor.query(
+        'loan_debt_entries',
+        where: 'transactionReference = ?',
+        whereArgs: [loanDebtReference],
+        limit: 1,
+      );
+      if (entryRows.isEmpty) {
+        throw StateError('Loan or debt entry does not exist.');
+      }
+
+      final entry = LoanDebtEntry.fromDb(entryRows.first);
+      if (entry.personName.trim().isEmpty) {
+        throw StateError('Loan or debt entry needs a person.');
+      }
+      if (entry.direction != repaymentDirection) {
+        throw StateError('Repayment direction does not match loan or debt.');
+      }
+      final isExistingTarget = existingTargetReferences.contains(
+        loanDebtReference,
+      );
+      if (entry.status != LoanDebtStatus.active &&
+          !allowResolvedTargets &&
+          !isExistingTarget) {
+        throw StateError('Loan or debt entry is not active.');
+      }
+
+      final loanTransactionRows = await executor.query(
+        'transactions',
+        columns: ['amount'],
+        where: 'reference = ?',
+        whereArgs: [loanDebtReference],
+        limit: 1,
+      );
+      if (loanTransactionRows.isEmpty) {
+        throw StateError('Loan or debt transaction does not exist.');
+      }
+
+      final originalAmount = _originalAmountForEntry(
+        entry,
+        loanTransactionRows.first['amount'],
+      );
+      final alreadyApplied = await _appliedAmountForLoanDebtReference(
+        executor,
+        loanDebtReference: loanDebtReference,
+        excludingRepaymentReference: repaymentTransactionReference,
+      );
+      final remaining = originalAmount - alreadyApplied;
+      if (allocation.appliedAmount - remaining > 0.005) {
+        throw StateError('Repayment exceeds the remaining balance.');
+      }
+    }
+  }
+
+  Future<double> _appliedAmountForLoanDebtReference(
+    DatabaseExecutor executor, {
+    required String loanDebtReference,
+    required String excludingRepaymentReference,
+  }) async {
+    final rows = await executor.rawQuery(
+      '''
+      SELECT COALESCE(SUM(appliedAmount), 0) AS total
+      FROM loan_debt_repayments
+      WHERE loanDebtTransactionReference = ?
+        AND repaymentTransactionReference <> ?
+      ''',
+      [loanDebtReference, excludingRepaymentReference],
+    );
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
   }
 }
 
 String normalizeLoanDebtPersonName(String value) {
   return value.trim().replaceAll(RegExp(r'\s+'), ' ');
+}
+
+LoanDebtDirection _repaymentDirectionForTransactionType(String? type) {
+  return type?.trim().toUpperCase() == 'CREDIT'
+      ? LoanDebtDirection.lent
+      : LoanDebtDirection.borrowed;
+}
+
+double _originalAmountForEntry(LoanDebtEntry entry, Object? transactionAmount) {
+  final principalAmount = entry.principalAmount;
+  if (principalAmount != null && principalAmount.isFinite) {
+    return principalAmount.abs();
+  }
+  return ((transactionAmount as num?)?.toDouble() ?? 0).abs();
 }
