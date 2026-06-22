@@ -6,7 +6,6 @@ import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
-import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
@@ -58,8 +57,6 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   bool _showColorChoices = false;
   bool _isApplyingCategory = false;
   bool _autoCategorizeFutureTransactions = false;
-  bool _isCheckingRepaymentCandidates = true;
-  bool _hasRepaymentLinkCandidate = false;
   String _draftColorKey = _kCategoryColorOptions.first.key;
   List<int> _autoCategorizationDraftCategoryIds = const [];
   late Transaction _transaction;
@@ -82,21 +79,15 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
-      !_currentCategories.any(isRepaymentCategory);
-  bool get _canSelectRepaymentCategory =>
-      !_isCheckingRepaymentCandidates && _hasRepaymentLinkCandidate;
-  bool get _shouldShowRepaymentUnavailableHint =>
-      !_isCheckingRepaymentCandidates &&
-      !_hasRepaymentLinkCandidate &&
-      !_currentCategories.any(isRepaymentCategory) &&
-      _availableCategories.any(isRepaymentCategory);
+      !_currentCategories.any(_isLoanDebtManagedCategory);
+  bool get _canSelectRepaymentCategory => true;
+  bool get _shouldShowRepaymentUnavailableHint => false;
 
   @override
   void initState() {
     super.initState();
     _transaction = widget.transaction;
     _syncAutoCategorizationCheckbox();
-    _loadRepaymentCandidateAvailability();
   }
 
   List<Category> get _availableCategories {
@@ -128,12 +119,12 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     if (!_autoCategorizeFutureTransactions) return const [];
     final existingIds = _provider
         .autoCategorizationCategoryIdsForTransaction(transaction)
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toList(growable: false);
     if (existingIds.isNotEmpty) return existingIds;
 
     final selectedIds = transaction.selectedCategoryIds
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toList(growable: false);
     return selectedIds.isEmpty ? const [] : selectedIds;
   }
@@ -145,17 +136,17 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     if (!_autoCategorizeFutureTransactions) return const [];
 
     final previousSelectedIds = previous.selectedCategoryIds
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toSet();
     final nextSelectedIds = updated.selectedCategoryIds
-        .where((id) => !_isSelfCategoryId(id))
+        .where(_canAutoCategorizeCategoryId)
         .toList(growable: false);
 
     final rememberedIds = <int>[];
 
     void remember(int categoryId) {
       if (categoryId <= 0 || rememberedIds.contains(categoryId)) return;
-      if (_isSelfCategoryId(categoryId)) return;
+      if (!_canAutoCategorizeCategoryId(categoryId)) return;
       rememberedIds.add(categoryId);
     }
 
@@ -227,7 +218,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     final nextEnabled = !previousEnabled;
     final nextDraftIds = nextEnabled
         ? _tx.selectedCategoryIds
-            .where((id) => !_isSelfCategoryId(id))
+            .where(_canAutoCategorizeCategoryId)
             .toList(growable: false)
         : const <int>[];
     final shouldEnable = nextEnabled && nextDraftIds.isNotEmpty;
@@ -322,10 +313,24 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     return category.name.trim().toLowerCase() == 'self';
   }
 
+  bool _isLoanDebtManagedCategory(Category category) {
+    return isLoanDebtCategory(category) || isRepaymentCategory(category);
+  }
+
   bool _isSelfCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     if (category == null) return false;
     return _isSelfCategory(category);
+  }
+
+  bool _isLoanDebtManagedCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    if (category == null) return false;
+    return _isLoanDebtManagedCategory(category);
+  }
+
+  bool _canAutoCategorizeCategoryId(int id) {
+    return !_isSelfCategoryId(id) && !_isLoanDebtManagedCategoryId(id);
   }
 
   bool _transactionHasRepaymentCategory(Transaction transaction) {
@@ -355,46 +360,8 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     return categoryIds.first;
   }
 
-  Future<bool> _loadRepaymentCandidateAvailability() async {
-    try {
-      final repository = LoanDebtRepository();
-      final results = await Future.wait<Object>([
-        repository.getEntries(),
-        repository.getRepayments(),
-      ]);
-      final hasCandidate = hasEligibleRepaymentLinkCandidate(
-        repaymentTransaction: _tx,
-        transactions: _provider.allTransactions,
-        entries: results[0] as List<LoanDebtEntry>,
-        repayments: results[1] as List<LoanDebtRepayment>,
-      );
-      if (!mounted) return hasCandidate;
-      setState(() {
-        _hasRepaymentLinkCandidate = hasCandidate;
-        _isCheckingRepaymentCandidates = false;
-      });
-      return hasCandidate;
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _hasRepaymentLinkCandidate = false;
-          _isCheckingRepaymentCandidates = false;
-        });
-      }
-      return false;
-    }
-  }
-
-  Future<bool> _ensureRepaymentCandidateAvailable(String message) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final hasCandidate = _canSelectRepaymentCategory
-        ? true
-        : await _loadRepaymentCandidateAvailability();
-    if (hasCandidate) return true;
-    if (mounted) {
-      messenger?.showSnackBar(SnackBar(content: Text(message)));
-    }
-    return false;
+  Future<bool> _ensureRepaymentCandidateAvailable(String _) async {
+    return true;
   }
 
   Future<bool> _removeUnlinkedRepaymentCategory(
@@ -429,7 +396,8 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     final previousTransaction = _tx;
     final hadRepaymentCategory =
         _transactionHasRepaymentCategory(previousTransaction);
-    final hasRepaymentCategory = categoryIds.any(_isRepaymentCategoryId);
+    final hasLoanDebtManagedCategory =
+        categoryIds.any(_isLoanDebtManagedCategoryId);
     final updateErrorMessage = context.l10nTextRead(
       'Could not update category. Changes were reverted.',
     );
@@ -454,7 +422,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       );
       final shouldPersistAutoCategorization = shouldAutoCategorize &&
           nextAutoCategoryIds.isNotEmpty &&
-          !hasRepaymentCategory;
+          !hasLoanDebtManagedCategory;
       final removedRepaymentCategory =
           hadRepaymentCategory && !_transactionHasRepaymentCategory(updated);
       if (removedRepaymentCategory) {

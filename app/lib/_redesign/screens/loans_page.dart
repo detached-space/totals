@@ -487,19 +487,23 @@ class _LoansPageState extends State<LoansPage> {
                         ),
                       )
                     else
-                      for (final row in timelineRows)
-                        if (row.loanDebtItem != null)
-                          _LoanDebtTransactionTile(
-                            item: row.loanDebtItem!,
-                            onTap: () =>
-                                _openLoanDebtDetailsSheet(row.loanDebtItem!),
-                          )
-                        else
-                          _LoanDebtRepaymentTile(
-                            item: row.repaymentItem!,
-                            onTap: () =>
-                                _openRepaymentLinkSheet(row.repaymentItem!),
-                          ),
+                      for (final section
+                          in _loanDebtTimelineSections(timelineRows)) ...[
+                        _LoanDebtDayHeader(date: section.date),
+                        for (final row in section.rows)
+                          if (row.loanDebtItem != null)
+                            _LoanDebtTransactionTile(
+                              item: row.loanDebtItem!,
+                              onTap: () =>
+                                  _openLoanDebtDetailsSheet(row.loanDebtItem!),
+                            )
+                          else
+                            _LoanDebtRepaymentTile(
+                              item: row.repaymentItem!,
+                              onTap: () =>
+                                  _openRepaymentLinkSheet(row.repaymentItem!),
+                            ),
+                      ],
                     if (dashboard.unassignedItems.isNotEmpty &&
                         selectedPerson == null) ...[
                       const SizedBox(height: 18),
@@ -523,11 +527,20 @@ class _LoansPageState extends State<LoansPage> {
                           ),
                         )
                       else
-                        for (final item in filteredUnassignedItems)
-                          _UnassignedLoanDebtTile(
-                            item: item,
-                            onTap: () => _openLoanDebtDetailsSheet(item),
+                        for (final section in _loanDebtTimelineSections(
+                          _loanDebtTimelineRows(
+                            loanDebtItems: filteredUnassignedItems,
+                            repaymentItems: const <_LoanDebtRepaymentItem>[],
                           ),
+                        )) ...[
+                          _LoanDebtDayHeader(date: section.date),
+                          for (final row in section.rows)
+                            _UnassignedLoanDebtTile(
+                              item: row.loanDebtItem!,
+                              onTap: () =>
+                                  _openLoanDebtDetailsSheet(row.loanDebtItem!),
+                            ),
+                        ],
                     ],
                   ] else
                     _EmptyPanel(
@@ -1292,6 +1305,97 @@ class _TinyStatusPill extends StatelessWidget {
   }
 }
 
+class _LoanDebtChipData {
+  final String label;
+  final Color color;
+
+  const _LoanDebtChipData({
+    required this.label,
+    required this.color,
+  });
+}
+
+class _LoanDebtChipRow extends StatelessWidget {
+  final List<_LoanDebtChipData> chips;
+
+  const _LoanDebtChipRow({required this.chips});
+
+  @override
+  Widget build(BuildContext context) {
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 5,
+      children: [
+        for (final chip in chips)
+          _LoanDebtTypeChip(label: chip.label, color: chip.color),
+      ],
+    );
+  }
+}
+
+class _LoanDebtTypeChip extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _LoanDebtTypeChip({
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 104),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              height: 1.1,
+            ),
+      ),
+    );
+  }
+}
+
+class _LoanDebtDayHeader extends StatelessWidget {
+  final DateTime? date;
+
+  const _LoanDebtDayHeader({required this.date});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = date == null
+        ? context.l10nText('Unknown Date')
+        : AppDateFormat.monthDayYear(date!, context: context);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: AppColors.isDark(context)
+              ? AppColors.slate400
+              : AppColors.slate700,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _TransactionsHeader extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -1478,13 +1582,17 @@ class _LoanDebtBaseTile extends StatelessWidget {
     final borrowed = item.direction == LoanDebtDirection.borrowed;
     final directionColor = borrowed ? AppColors.red : AppColors.incomeSuccess;
     final color = _loanDebtStatusColor(item.status, directionColor);
+    final chips = _loanDebtTransactionChips(
+      context: context,
+      item: item,
+      directionColor: directionColor,
+      statusColor: color,
+    );
     final bankName = context.l10nText(
       provider.getBankShortName(item.transaction.bankId),
     );
     final details = [
-      if (!item.isActive) _loanDebtStatusLabel(context, item.status),
       bankName,
-      item.dateLabel(context),
       item.timeLabel(context),
     ].where((value) => value.trim().isNotEmpty).join(' · ');
 
@@ -1523,32 +1631,43 @@ class _LoanDebtBaseTile extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        details,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const SizedBox(height: 5),
+                      _LoanDebtChipRow(chips: chips),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 122),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      _formatEtb(item.originalAmount, context),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          _formatEtb(item.originalAmount, context),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: color,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                    ),
+                      if (details.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          details,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: AppColors.textSecondary(context),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1575,14 +1694,22 @@ class _LoanDebtRepaymentTile extends StatelessWidget {
     final theme = Theme.of(context);
     final provider = context.read<TransactionProvider>();
     final borrowed = item.direction == LoanDebtDirection.borrowed;
-    final color = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final directionColor = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final chips = [
+      _LoanDebtChipData(
+        label: context.l10nText('Repayment'),
+        color: AppColors.blue,
+      ),
+      _LoanDebtChipData(
+        label: _loanDebtDirectionLabel(context, item.direction),
+        color: directionColor,
+      ),
+    ];
     final bankName = context.l10nText(
       provider.getBankShortName(item.transaction.bankId),
     );
     final details = [
-      context.l10nText('Repayment'),
       bankName,
-      item.dateLabel(context),
       item.timeLabel(context),
     ].where((value) => value.trim().isNotEmpty).join(' · ');
 
@@ -1605,7 +1732,7 @@ class _LoanDebtRepaymentTile extends StatelessWidget {
                 Container(
                   width: 4,
                   height: 74,
-                  color: color,
+                  color: directionColor,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1621,32 +1748,43 @@ class _LoanDebtRepaymentTile extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        details,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      const SizedBox(height: 5),
+                      _LoanDebtChipRow(chips: chips),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 122),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      _formatEtb(item.amount, context),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          _formatEtb(item.amount, context),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: directionColor,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                    ),
+                      if (details.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          details,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: AppColors.textSecondary(context),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1673,12 +1811,20 @@ class _RepaymentLinkSheet extends StatefulWidget {
 }
 
 class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
+  final TextEditingController _surplusPersonController =
+      TextEditingController();
+  final FocusNode _surplusPersonFocus = FocusNode();
+
   bool _isLoading = true;
   bool _loadFailed = false;
   bool _isSaving = false;
   List<_LoanDebtItem> _candidates = const [];
+  List<String> _knownPeople = const [];
   String? _selectedPerson;
   _LoanDebtItem? _selectedItem;
+  final Set<String> _overflowTargetReferences = <String>{};
+  _SurplusResolution? _surplusResolution;
+  LoanDebtDirection? _surplusDirection;
 
   LoanDebtDirection get _repaymentDirection =>
       repaymentDirectionForTransaction(widget.transaction);
@@ -1704,15 +1850,35 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
       final results = await Future.wait<Object?>([
         widget.repository.getEntries(),
         widget.repository.getRepayments(),
-        widget.repository.getRepaymentForTransaction(
+        widget.repository.getRepaymentsForTransaction(
           widget.transaction.reference,
         ),
+        widget.repository.getEntryForTransaction(
+          widget.transaction.reference,
+        ),
+        widget.repository.getKnownPeople(),
       ]);
       if (!mounted) return;
 
       final entries = results[0] as List<LoanDebtEntry>;
       final repayments = results[1] as List<LoanDebtRepayment>;
-      final existing = results[2] as LoanDebtRepayment?;
+      final existingRepayments = results[2] as List<LoanDebtRepayment>;
+      final existingSurplusEntry = results[3] as LoanDebtEntry?;
+      final knownPeople = (results[4] as List<String>)
+          .where((name) => name.trim().isNotEmpty)
+          .toList(growable: true);
+      final existingSurplusName = existingSurplusEntry?.personName.trim();
+      if (existingSurplusName != null &&
+          existingSurplusName.isNotEmpty &&
+          !knownPeople.any(
+            (name) => name.toLowerCase() == existingSurplusName.toLowerCase(),
+          )) {
+        knownPeople.insert(0, existingSurplusName);
+      }
+      final existingLoanDebtReferences = existingRepayments
+          .map((repayment) => repayment.loanDebtTransactionReference.trim())
+          .where((reference) => reference.isNotEmpty)
+          .toSet();
       final transactionsByReference = <String, Transaction>{
         for (final transaction in provider.allTransactions)
           transaction.reference.trim(): transaction,
@@ -1745,8 +1911,7 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
           repayments: repaymentsByLoanReference[reference] ??
               const <LoanDebtRepayment>[],
         );
-        final isExistingLink =
-            existing?.loanDebtTransactionReference.trim() == reference;
+        final isExistingLink = existingLoanDebtReferences.contains(reference);
         if (!item.hasPerson || (!item.isActive && !isExistingLink)) continue;
         candidates.add(item);
       }
@@ -1759,8 +1924,9 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
       });
 
       _LoanDebtItem? existingItem;
-      if (existing != null) {
-        final existingReference = existing.loanDebtTransactionReference.trim();
+      if (existingRepayments.isNotEmpty) {
+        final existingReference =
+            existingRepayments.first.loanDebtTransactionReference.trim();
         for (final item in candidates) {
           if (item.transaction.reference.trim() == existingReference) {
             existingItem = item;
@@ -1774,12 +1940,39 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
       final selectedItems = selectedPerson == null
           ? const <_LoanDebtItem>[]
           : candidatesForPerson(candidates, selectedPerson);
+      final selectedItem = existingItem ??
+          (selectedItems.length == 1 ? selectedItems.first : null);
+      final selectedReference = selectedItem?.transaction.reference.trim();
+      final suggestedName = _suggestedLoanDebtPersonName(widget.transaction);
+      final surplusPersonName = existingSurplusName != null &&
+              existingSurplusName.isNotEmpty
+          ? existingSurplusName
+          : (selectedPerson ?? (suggestedName.isNotEmpty ? suggestedName : ''));
 
       setState(() {
         _candidates = candidates;
+        _knownPeople = knownPeople;
         _selectedPerson = selectedPerson;
-        _selectedItem = existingItem ??
-            (selectedItems.length == 1 ? selectedItems.first : null);
+        _selectedItem = selectedItem;
+        _overflowTargetReferences
+          ..clear()
+          ..addAll(
+            existingLoanDebtReferences.where(
+              (reference) =>
+                  reference.isNotEmpty && reference != selectedReference,
+            ),
+          );
+        _surplusResolution = existingSurplusEntry?.principalAmount == null
+            ? null
+            : _SurplusResolution.createBalance;
+        _surplusDirection = existingSurplusEntry?.principalAmount == null
+            ? null
+            : existingSurplusEntry?.direction;
+        _setLoanDebtNameFieldValue(
+          _surplusPersonController,
+          surplusPersonName,
+          selectAll: false,
+        );
         _isLoading = false;
         _loadFailed = false;
       });
@@ -1790,6 +1983,449 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
         _loadFailed = true;
       });
     }
+  }
+
+  _RepaymentFlowPlan _buildRepaymentFlowPlan({
+    required double repaymentAmount,
+    required _LoanDebtItem? selectedItem,
+    required List<_LoanDebtItem> visibleCandidates,
+  }) {
+    var available = repaymentAmount;
+    final allocations = <_RepaymentAllocationDraft>[];
+
+    if (selectedItem != null && available > 0) {
+      final appliedAmount = _boundedAppliedAmount(
+        available: available,
+        remaining: selectedItem.remainingAmount,
+      );
+      if (appliedAmount > 0) {
+        allocations.add(
+          _RepaymentAllocationDraft(
+            item: selectedItem,
+            appliedAmount: appliedAmount,
+            isPrimary: true,
+          ),
+        );
+        available -= appliedAmount;
+      }
+    }
+
+    final primaryOverflowAmount = available <= 0.005 ? 0.0 : available;
+    if (_overflowTargetReferences.isNotEmpty && available > 0.005) {
+      for (final item in visibleCandidates) {
+        final reference = item.transaction.reference.trim();
+        if (!_overflowTargetReferences.contains(reference)) continue;
+        if (selectedItem != null &&
+            reference == selectedItem.transaction.reference.trim()) {
+          continue;
+        }
+        final appliedAmount = _boundedAppliedAmount(
+          available: available,
+          remaining: item.remainingAmount,
+        );
+        if (appliedAmount <= 0) continue;
+        allocations.add(
+          _RepaymentAllocationDraft(
+            item: item,
+            appliedAmount: appliedAmount,
+            isPrimary: false,
+          ),
+        );
+        available -= appliedAmount;
+        if (available <= 0.005) break;
+      }
+    }
+
+    return _RepaymentFlowPlan(
+      allocations: allocations,
+      primaryOverflowAmount: primaryOverflowAmount,
+      remainingSurplusAmount: available <= 0.005 ? 0.0 : available,
+    );
+  }
+
+  double _boundedAppliedAmount({
+    required double available,
+    required double remaining,
+  }) {
+    if (available <= 0 || remaining <= 0) return 0;
+    return available > remaining ? remaining : available;
+  }
+
+  LoanDebtDirection get _naturalSurplusDirection =>
+      _repaymentDirection == LoanDebtDirection.borrowed
+          ? LoanDebtDirection.lent
+          : LoanDebtDirection.borrowed;
+
+  String _balanceDirectionTitle(
+    BuildContext context, {
+    required LoanDebtDirection direction,
+    required String personName,
+    required double amount,
+  }) {
+    final formattedAmount = _formatEtb(amount, context);
+    if (direction == LoanDebtDirection.lent) {
+      final name = personName.isEmpty ? context.l10nText('They') : personName;
+      return '$name ${context.l10nText('will owe you')} $formattedAmount';
+    }
+    if (personName.isEmpty) {
+      return '${context.l10nText('You will owe them')} $formattedAmount';
+    }
+    return '${context.l10nText('You will owe')} $personName $formattedAmount';
+  }
+
+  String _naturalSurplusTitle(
+    BuildContext context, {
+    required String personName,
+    required double amount,
+  }) {
+    return _balanceDirectionTitle(
+      context,
+      direction: _naturalSurplusDirection,
+      personName: personName,
+      amount: amount,
+    );
+  }
+
+  String _naturalSurplusSubtitle(BuildContext context, double amount) {
+    final formattedAmount = _formatEtb(amount, context);
+    return _naturalSurplusDirection == LoanDebtDirection.lent
+        ? '${context.l10nText('Track')} $formattedAmount ${context.l10nText('as a new debt they owe you.')}'
+        : '${context.l10nText('Track')} $formattedAmount ${context.l10nText('as a new debt you owe them.')}';
+  }
+
+  Widget _buildSurplusBalanceSection(
+    BuildContext context, {
+    required double amount,
+    required String title,
+    required String subtitle,
+    required String? lockedPersonName,
+    required bool showPersonField,
+    required bool allowForget,
+  }) {
+    final theme = Theme.of(context);
+    final personName = normalizeLoanDebtPersonName(
+      lockedPersonName ?? _surplusPersonController.text,
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  AppIcons.debts,
+                  color: AppColors.primaryLight,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '$subtitle ${_formatEtb(amount, context)}',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (showPersonField) ...[
+            const SizedBox(height: 14),
+            TextField(
+              controller: _surplusPersonController,
+              focusNode: _surplusPersonFocus,
+              textInputAction: TextInputAction.done,
+              textCapitalization: TextCapitalization.words,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: context.l10nText('Person'),
+                hintText: context.l10nText('Who is this with?'),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            if (_knownPeople.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 38,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _knownPeople.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final name = _knownPeople[index];
+                    final selected =
+                        personName.toLowerCase() == name.toLowerCase();
+                    return ChoiceChip(
+                      label: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 150),
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      selected: selected,
+                      onSelected: (_) {
+                        setState(() {
+                          _setLoanDebtNameFieldValue(
+                            _surplusPersonController,
+                            name,
+                            selectAll: false,
+                          );
+                        });
+                      },
+                      selectedColor:
+                          AppColors.primaryLight.withValues(alpha: 0.16),
+                      backgroundColor: AppColors.cardColor(context),
+                      side: BorderSide(
+                        color: selected
+                            ? AppColors.primaryLight
+                            : AppColors.borderColor(context),
+                      ),
+                      labelStyle: theme.textTheme.labelMedium?.copyWith(
+                        color: selected
+                            ? AppColors.primaryLight
+                            : AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ] else if (personName.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _TinyStatusPill(label: personName, color: AppColors.primaryLight),
+          ],
+          if (allowForget) ...[
+            const SizedBox(height: 14),
+            Text(
+              context.l10nText('What should happen to the extra?'),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _SurplusResolutionOption(
+              title: _naturalSurplusTitle(
+                context,
+                personName: personName,
+                amount: amount,
+              ),
+              subtitle: _naturalSurplusSubtitle(context, amount),
+              selected: _surplusResolution == _SurplusResolution.createBalance,
+              color: _naturalSurplusDirection == LoanDebtDirection.lent
+                  ? AppColors.incomeSuccess
+                  : AppColors.red,
+              onTap: () => setState(() {
+                _surplusResolution = _SurplusResolution.createBalance;
+                _surplusDirection = _naturalSurplusDirection;
+              }),
+            ),
+            const SizedBox(height: 8),
+            _SurplusResolutionOption(
+              title: context.l10nText('Do not track extra'),
+              subtitle: context.l10nText(
+                'Save the repayment without creating another loan or debt.',
+              ),
+              selected: _surplusResolution == _SurplusResolution.forget,
+              color: AppColors.textSecondary(context),
+              onTap: () => setState(() {
+                _surplusResolution = _SurplusResolution.forget;
+                _surplusDirection = null;
+              }),
+            ),
+          ] else ...[
+            const SizedBox(height: 14),
+            Text(
+              context.l10nText('What balance should this create?'),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _SurplusDirectionChip(
+                  label: _balanceDirectionTitle(
+                    context,
+                    direction: LoanDebtDirection.lent,
+                    personName: personName,
+                    amount: amount,
+                  ),
+                  selected: _surplusDirection == LoanDebtDirection.lent,
+                  color: AppColors.incomeSuccess,
+                  onTap: () => setState(
+                    () => _surplusDirection = LoanDebtDirection.lent,
+                  ),
+                ),
+                _SurplusDirectionChip(
+                  label: _balanceDirectionTitle(
+                    context,
+                    direction: LoanDebtDirection.borrowed,
+                    personName: personName,
+                    amount: amount,
+                  ),
+                  selected: _surplusDirection == LoanDebtDirection.borrowed,
+                  color: AppColors.red,
+                  onTap: () => setState(
+                    () => _surplusDirection = LoanDebtDirection.borrowed,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAppliedOverflowPreview(
+    BuildContext context,
+    List<_RepaymentAllocationDraft> allocations,
+  ) {
+    final theme = Theme.of(context);
+    if (allocations.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.primaryLight.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10nText('Extra will cover'),
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: AppColors.textPrimary(context),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final allocation in allocations) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    allocation.item.dateLabel(context),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: AppColors.textSecondary(context),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _formatEtb(allocation.appliedAmount, context),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: AppColors.primaryLight,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+            if (allocation != allocations.last) const SizedBox(height: 6),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRepaymentActions(
+    BuildContext context, {
+    required bool canSave,
+    required String saveLabel,
+    required String disabledLabel,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: FilledButton(
+            onPressed: canSave && !_isSaving ? _save : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primaryLight,
+              foregroundColor: AppColors.white,
+              disabledBackgroundColor:
+                  AppColors.primaryLight.withValues(alpha: 0.35),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: _isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
+                  )
+                : Text(canSave ? saveLabel : disabledLabel),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: TextButton(
+            onPressed: _isSaving ? null : () => Navigator.pop(context, false),
+            child: Text(context.l10nText('Cancel')),
+          ),
+        ),
+      ],
+    );
   }
 
   static List<String> _peopleForCandidates(List<_LoanDebtItem> candidates) {
@@ -1817,21 +2453,56 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
   }
 
   Future<void> _save() async {
-    final item = _selectedItem;
-    if (item == null || _isSaving) return;
+    if (_isSaving) return;
     final repaymentAmount = widget.transaction.amount.abs();
-    final remaining = item.remainingAmount;
-    final appliedAmount = remaining > 0 && repaymentAmount > remaining
-        ? remaining
-        : repaymentAmount;
-    if (appliedAmount <= 0) return;
+    final selectedPerson = _selectedPerson;
+    final visibleCandidates = selectedPerson == null
+        ? const <_LoanDebtItem>[]
+        : candidatesForPerson(_candidates, selectedPerson);
+    final plan = _buildRepaymentFlowPlan(
+      repaymentAmount: repaymentAmount,
+      selectedItem: _selectedItem,
+      visibleCandidates: visibleCandidates,
+    );
+    final hasRepaymentAllocation = plan.allocations.isNotEmpty;
+    final hasRemainingSurplus = plan.remainingSurplusAmount > 0.005;
+    final shouldCreateSurplus = hasRemainingSurplus &&
+        (_candidates.isEmpty ||
+            _surplusResolution == _SurplusResolution.createBalance);
+    final surplusDirection =
+        _candidates.isEmpty ? _surplusDirection : _naturalSurplusDirection;
+    final surplusPersonName = normalizeLoanDebtPersonName(
+      _selectedItem?.personName ?? _surplusPersonController.text,
+    );
+
+    if (!hasRepaymentAllocation && !hasRemainingSurplus) return;
+    if (hasRemainingSurplus &&
+        _candidates.isNotEmpty &&
+        _surplusResolution == null) {
+      return;
+    }
+    if (shouldCreateSurplus &&
+        (surplusPersonName.isEmpty || surplusDirection == null)) {
+      _surplusPersonFocus.requestFocus();
+      return;
+    }
 
     setState(() => _isSaving = true);
     try {
-      await widget.repository.linkRepayment(
+      await widget.repository.saveRepaymentFlow(
         repaymentTransactionReference: widget.transaction.reference,
-        loanDebtTransactionReference: item.transaction.reference,
-        appliedAmount: appliedAmount,
+        allocations: [
+          for (final allocation in plan.allocations)
+            LoanDebtRepaymentAllocation(
+              loanDebtTransactionReference:
+                  allocation.item.transaction.reference,
+              appliedAmount: allocation.appliedAmount,
+            ),
+        ],
+        surplusPersonName: shouldCreateSurplus ? surplusPersonName : null,
+        surplusDirection: shouldCreateSurplus ? surplusDirection : null,
+        surplusPrincipalAmount:
+            shouldCreateSurplus ? plan.remainingSurplusAmount : null,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -1845,6 +2516,13 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
       );
       setState(() => _isSaving = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _surplusPersonController.dispose();
+    _surplusPersonFocus.dispose();
+    super.dispose();
   }
 
   @override
@@ -1879,14 +2557,52 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
     final emptyTitle = _isRepayingBorrowedDebt
         ? context.l10nText('No active debts found')
         : context.l10nText('No active loans found');
-    final appliedAmount = selectedItem == null
-        ? 0.0
-        : (selectedItem.remainingAmount > 0 &&
-                repaymentAmount > selectedItem.remainingAmount)
-            ? selectedItem.remainingAmount
-            : repaymentAmount;
-    final unappliedAmount = repaymentAmount - appliedAmount;
-    final hasUnappliedAmount = selectedItem != null && unappliedAmount > 0.005;
+    final plan = _buildRepaymentFlowPlan(
+      repaymentAmount: repaymentAmount,
+      selectedItem: selectedItem,
+      visibleCandidates: visibleCandidates,
+    );
+    final extraAllocations = plan.extraAllocations;
+    final needsSurplusDecision = plan.remainingSurplusAmount > 0.005;
+    final shouldCreateSurplus = needsSurplusDecision &&
+        (_candidates.isEmpty ||
+            _surplusResolution == _SurplusResolution.createBalance);
+    final hasPrimaryOverflow =
+        selectedItem != null && plan.primaryOverflowAmount > 0.005;
+    final overflowCandidates = selectedItem == null
+        ? const <_LoanDebtItem>[]
+        : visibleCandidates
+            .where(
+              (item) =>
+                  item.transaction.reference.trim() !=
+                      selectedItem.transaction.reference.trim() &&
+                  item.remainingAmount > 0.005,
+            )
+            .toList(growable: false);
+    final otherBalanceCount = overflowCandidates.length;
+    final surplusPersonName = normalizeLoanDebtPersonName(
+      selectedItem?.personName ?? _surplusPersonController.text,
+    );
+    final surplusDirection =
+        _candidates.isEmpty ? _surplusDirection : _naturalSurplusDirection;
+    final canSave = !_isSaving &&
+        ((_candidates.isEmpty && needsSurplusDecision) ||
+            (selectedItem != null && plan.allocations.isNotEmpty)) &&
+        (!needsSurplusDecision ||
+            (_candidates.isNotEmpty && _surplusResolution != null) ||
+            (shouldCreateSurplus &&
+                surplusPersonName.isNotEmpty &&
+                surplusDirection != null));
+    final saveLabel = _candidates.isEmpty
+        ? context.l10nText('Save balance')
+        : (shouldCreateSurplus
+            ? context.l10nText('Save repayment and balance')
+            : context.l10nText('Link repayment'));
+    final disabledLabel = _candidates.isEmpty
+        ? context.l10nText('Choose who owes this')
+        : (selectedItem == null
+            ? chooseTargetButtonLabel
+            : context.l10nText('Choose what happens to extra'));
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 180),
@@ -1988,17 +2704,27 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
                         icon: AppIcons.debts,
                         title: emptyTitle,
                         subtitle: context.l10nText(
-                          'Create or link a loan/debt first, then attach repayments.',
+                          'There is no active balance to apply this payment to.',
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: Text(context.l10nText('Close')),
+                      const SizedBox(height: 14),
+                      _buildSurplusBalanceSection(
+                        context,
+                        amount: repaymentAmount,
+                        title: context.l10nText('Create a new balance'),
+                        subtitle: context.l10nText(
+                          'Choose what this payment means for',
                         ),
+                        lockedPersonName: null,
+                        showPersonField: true,
+                        allowForget: false,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildRepaymentActions(
+                        context,
+                        canSave: canSave,
+                        saveLabel: saveLabel,
+                        disabledLabel: disabledLabel,
                       ),
                     ],
                   )
@@ -2067,6 +2793,14 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
                               _selectedItem = candidatesForSelected.length == 1
                                   ? candidatesForSelected.first
                                   : null;
+                              _overflowTargetReferences.clear();
+                              _surplusResolution = null;
+                              _surplusDirection = null;
+                              _setLoanDebtNameFieldValue(
+                                _surplusPersonController,
+                                name,
+                                selectAll: false,
+                              );
                             });
                           },
                           selectedColor:
@@ -2112,9 +2846,19 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
                         item: item,
                         selected: _selectedItem?.transaction.reference ==
                             item.transaction.reference,
-                        onTap: () => setState(() => _selectedItem = item),
+                        onTap: () => setState(() {
+                          _selectedItem = item;
+                          _overflowTargetReferences.clear();
+                          _surplusResolution = null;
+                          _surplusDirection = null;
+                          _setLoanDebtNameFieldValue(
+                            _surplusPersonController,
+                            item.personName,
+                            selectAll: false,
+                          );
+                        }),
                       ),
-                  if (hasUnappliedAmount) ...[
+                  if (hasPrimaryOverflow) ...[
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -2132,67 +2876,376 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text(
-                              context.l10nText(
-                                'Only ${_formatEtb(appliedAmount, context)} will be applied because this repayment is larger than the remaining balance.',
-                              ),
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: AppColors.textSecondary(context),
-                                fontWeight: FontWeight.w700,
-                                height: 1.35,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  context.l10nText('Extra amount'),
+                                  style: theme.textTheme.labelLarge?.copyWith(
+                                    color: AppColors.textPrimary(context),
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '${_formatEtb(plan.primaryOverflowAmount, context)} ${context.l10nText('is left after the selected balance.')}',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: AppColors.textSecondary(context),
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: FilledButton(
-                      onPressed:
-                          _selectedItem != null && !_isSaving ? _save : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primaryLight,
-                        foregroundColor: AppColors.white,
-                        disabledBackgroundColor:
-                            AppColors.primaryLight.withValues(alpha: 0.35),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                    if (otherBalanceCount > 0) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceColor(context),
+                          borderRadius: BorderRadius.circular(12),
+                          border:
+                              Border.all(color: AppColors.borderColor(context)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              context.l10nText('Apply extra to other balances'),
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: AppColors.textPrimary(context),
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              context.l10nText(
+                                'Choose which balances can receive the extra first.',
+                              ),
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: AppColors.textSecondary(context),
+                                fontWeight: FontWeight.w600,
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            for (final item in overflowCandidates)
+                              _OverflowTargetOption(
+                                item: item,
+                                selected: _overflowTargetReferences.contains(
+                                    item.transaction.reference.trim()),
+                                onTap: () => setState(() {
+                                  final reference =
+                                      item.transaction.reference.trim();
+                                  if (_overflowTargetReferences
+                                      .contains(reference)) {
+                                    _overflowTargetReferences.remove(reference);
+                                  } else {
+                                    _overflowTargetReferences.add(reference);
+                                  }
+                                  _surplusResolution = null;
+                                  _surplusDirection = null;
+                                }),
+                              ),
+                          ],
                         ),
                       ),
-                      child: _isSaving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.white,
-                              ),
-                            )
-                          : Text(
-                              _selectedItem == null
-                                  ? chooseTargetButtonLabel
-                                  : context.l10nText('Link repayment'),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: TextButton(
-                      onPressed: _isSaving
-                          ? null
-                          : () => Navigator.pop(context, false),
-                      child: Text(context.l10nText('Cancel')),
-                    ),
+                    ],
+                    if (extraAllocations.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      _buildAppliedOverflowPreview(context, extraAllocations),
+                    ],
+                    if (needsSurplusDecision) ...[
+                      const SizedBox(height: 10),
+                      _buildSurplusBalanceSection(
+                        context,
+                        amount: plan.remainingSurplusAmount,
+                        title: context.l10nText('Handle remaining extra'),
+                        subtitle: context.l10nText(
+                          'Choose what should happen to',
+                        ),
+                        lockedPersonName: selectedItem.personName,
+                        showPersonField: false,
+                        allowForget: true,
+                      ),
+                    ],
+                  ],
+                  const SizedBox(height: 16),
+                  _buildRepaymentActions(
+                    context,
+                    canSave: canSave,
+                    saveLabel: saveLabel,
+                    disabledLabel: disabledLabel,
                   ),
                 ],
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RepaymentAllocationDraft {
+  final _LoanDebtItem item;
+  final double appliedAmount;
+  final bool isPrimary;
+
+  const _RepaymentAllocationDraft({
+    required this.item,
+    required this.appliedAmount,
+    required this.isPrimary,
+  });
+}
+
+class _RepaymentFlowPlan {
+  final List<_RepaymentAllocationDraft> allocations;
+  final double primaryOverflowAmount;
+  final double remainingSurplusAmount;
+
+  const _RepaymentFlowPlan({
+    required this.allocations,
+    required this.primaryOverflowAmount,
+    required this.remainingSurplusAmount,
+  });
+
+  List<_RepaymentAllocationDraft> get extraAllocations => allocations
+      .where((allocation) => !allocation.isPrimary)
+      .toList(growable: false);
+}
+
+enum _SurplusResolution {
+  createBalance,
+  forget,
+}
+
+class _SurplusResolutionOption extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _SurplusResolutionOption({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.1)
+              : AppColors.cardColor(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? color : AppColors.borderColor(context),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              margin: const EdgeInsets.only(top: 1),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? color : Colors.transparent,
+                border: Border.all(
+                  color: selected ? color : AppColors.borderColor(context),
+                  width: 1.5,
+                ),
+              ),
+              child: selected
+                  ? const Icon(
+                      Icons.check,
+                      size: 12,
+                      color: AppColors.white,
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: selected ? color : AppColors.textPrimary(context),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: AppColors.textSecondary(context),
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SurplusDirectionChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _SurplusDirectionChip({
+    required this.label,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.14)
+              : AppColors.cardColor(context),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? color : AppColors.borderColor(context),
+          ),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: selected ? color : AppColors.textPrimary(context),
+                fontWeight: FontWeight.w800,
+              ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OverflowTargetOption extends StatelessWidget {
+  final _LoanDebtItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _OverflowTargetOption({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borrowed = item.direction == LoanDebtDirection.borrowed;
+    final color = borrowed ? AppColors.red : AppColors.incomeSuccess;
+    final title = _loanDebtDirectionLabel(context, item.direction);
+    final subtitle = item.dateLabel(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: selected
+                ? color.withValues(alpha: 0.1)
+                : AppColors.cardColor(context),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? color : AppColors.borderColor(context),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: selected ? color : Colors.transparent,
+                  border: Border.all(
+                    color: selected ? color : AppColors.borderColor(context),
+                    width: 1.5,
+                  ),
+                ),
+                child: selected
+                    ? const Icon(
+                        Icons.check,
+                        size: 13,
+                        color: AppColors.white,
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color:
+                            selected ? color : AppColors.textPrimary(context),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _formatEtb(item.remainingAmount, context),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2440,6 +3493,8 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
             personName: personName,
             direction: _item.direction,
             status: LoanDebtStatus.active,
+            principalAmount: _item.entry?.principalAmount,
+            source: _item.entry?.source ?? LoanDebtEntrySource.transaction,
             createdAt: _item.entry?.createdAt ?? now,
             updatedAt: now,
           ),
@@ -3707,17 +4762,21 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
                 ),
               )
             else
-              for (final row in timelineRows)
-                if (row.loanDebtItem != null)
-                  _LoanDebtTransactionTile(
-                    item: row.loanDebtItem!,
-                    onTap: () => _openLoanDebtDetailsSheet(row.loanDebtItem!),
-                  )
-                else
-                  _LoanDebtRepaymentTile(
-                    item: row.repaymentItem!,
-                    onTap: () => _openRepaymentLinkSheet(row.repaymentItem!),
-                  ),
+              for (final section
+                  in _loanDebtTimelineSections(timelineRows)) ...[
+                _LoanDebtDayHeader(date: section.date),
+                for (final row in section.rows)
+                  if (row.loanDebtItem != null)
+                    _LoanDebtTransactionTile(
+                      item: row.loanDebtItem!,
+                      onTap: () => _openLoanDebtDetailsSheet(row.loanDebtItem!),
+                    )
+                  else
+                    _LoanDebtRepaymentTile(
+                      item: row.repaymentItem!,
+                      onTap: () => _openRepaymentLinkSheet(row.repaymentItem!),
+                    ),
+              ],
           ],
         ),
       ),
@@ -4616,15 +5675,19 @@ class _LoanDebtDashboard {
     double totalBorrowed = 0;
 
     for (final transaction in transactions) {
-      if (!transactionHasLoanDebtCategory(
+      final reference = transaction.reference.trim();
+      final entry = entriesByReference[reference];
+      final hasLoanDebtCategory = transactionHasLoanDebtCategory(
         transaction: transaction,
         categories: categories,
-      )) {
+      );
+      final isSurplusEntry =
+          entry?.source == LoanDebtEntrySource.repaymentSurplus ||
+              entry?.principalAmount != null;
+      if (!hasLoanDebtCategory && !isSurplusEntry) {
         continue;
       }
 
-      final reference = transaction.reference.trim();
-      final entry = entriesByReference[reference];
       final direction =
           entry?.direction ?? loanDebtDirectionForTransaction(transaction);
       final item = _LoanDebtItem(
@@ -4746,7 +5809,14 @@ class _LoanDebtItem {
     this.repayments = const <LoanDebtRepayment>[],
   });
 
-  double get originalAmount => transaction.amount.abs();
+  double get originalAmount {
+    final principalAmount = entry?.principalAmount;
+    if (principalAmount != null && principalAmount.isFinite) {
+      return principalAmount.abs();
+    }
+    return transaction.amount.abs();
+  }
+
   double get repaidAmount => repayments.fold<double>(
         0,
         (total, repayment) => total + repayment.appliedAmount,
@@ -4869,6 +5939,25 @@ class _LoanDebtTimelineRow {
         repaymentItem = item;
 
   int get sortTime => loanDebtItem?.sortTime ?? repaymentItem!.sortTime;
+
+  DateTime? get parsedLocalTime =>
+      loanDebtItem?.parsedLocalTime ?? repaymentItem!.parsedLocalTime;
+
+  DateTime? get localDate {
+    final parsed = parsedLocalTime;
+    if (parsed == null) return null;
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+}
+
+class _LoanDebtTimelineSection {
+  final DateTime? date;
+  final List<_LoanDebtTimelineRow> rows;
+
+  const _LoanDebtTimelineSection({
+    required this.date,
+    required this.rows,
+  });
 }
 
 class _LoanDebtPersonSummary {
@@ -4895,6 +5984,42 @@ String _formatEtb(double amount, BuildContext context) {
   final formatted = formatNumberWithComma(amount).replaceFirst('.00', '');
   final currency = context.l10nText('ETB');
   return '$currency $formatted';
+}
+
+String _loanDebtDirectionLabel(
+  BuildContext context,
+  LoanDebtDirection direction,
+) {
+  switch (direction) {
+    case LoanDebtDirection.lent:
+      return context.l10nText('Loan');
+    case LoanDebtDirection.borrowed:
+      return context.l10nText('Debt');
+  }
+}
+
+List<_LoanDebtChipData> _loanDebtTransactionChips({
+  required BuildContext context,
+  required _LoanDebtItem item,
+  required Color directionColor,
+  required Color statusColor,
+}) {
+  final directionChip = _LoanDebtChipData(
+    label: _loanDebtDirectionLabel(context, item.direction),
+    color: directionColor,
+  );
+
+  if (item.status == LoanDebtStatus.active) {
+    return [directionChip];
+  }
+
+  return [
+    _LoanDebtChipData(
+      label: _loanDebtStatusLabel(context, item.status),
+      color: statusColor,
+    ),
+    directionChip,
+  ];
 }
 
 List<_LoanDebtItem> _filteredLoanDebtItems(
@@ -5009,6 +6134,39 @@ List<_LoanDebtTimelineRow> _loanDebtTimelineRows({
   ];
   rows.sort((a, b) => b.sortTime.compareTo(a.sortTime));
   return rows;
+}
+
+List<_LoanDebtTimelineSection> _loanDebtTimelineSections(
+  List<_LoanDebtTimelineRow> rows,
+) {
+  final sections = <_LoanDebtTimelineSection>[];
+  var hasCurrentSection = false;
+  DateTime? currentDate;
+  var currentRows = <_LoanDebtTimelineRow>[];
+
+  void flushCurrentSection() {
+    if (!hasCurrentSection) return;
+    sections.add(
+      _LoanDebtTimelineSection(
+        date: currentDate,
+        rows: List.unmodifiable(currentRows),
+      ),
+    );
+  }
+
+  for (final row in rows) {
+    final rowDate = row.localDate;
+    if (!hasCurrentSection || rowDate != currentDate) {
+      flushCurrentSection();
+      hasCurrentSection = true;
+      currentDate = rowDate;
+      currentRows = <_LoanDebtTimelineRow>[];
+    }
+    currentRows.add(row);
+  }
+  flushCurrentSection();
+
+  return sections;
 }
 
 String _formatEtbCompact(double amount, BuildContext context) {

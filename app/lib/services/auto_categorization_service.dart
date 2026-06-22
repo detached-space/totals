@@ -1,8 +1,10 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/auto_categorization.dart';
+import 'package:totals/models/category.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/receiver_category_service.dart';
+import 'package:totals/utils/loan_debt_utils.dart';
 
 class AutoCategorizationService {
   AutoCategorizationService._();
@@ -55,8 +57,11 @@ class AutoCategorizationService {
       whereArgs: normalizedFlow == null ? null : [normalizedFlow],
       orderBy: 'counterparty COLLATE NOCASE ASC, isPrimary DESC, id ASC',
     );
-    final rules =
-        rows.map(AutoCategorizationRule.fromDb).toList(growable: false);
+    final managedCategoryIds = await _loanDebtManagedCategoryIds(db);
+    final rules = rows
+        .map(AutoCategorizationRule.fromDb)
+        .where((rule) => !managedCategoryIds.contains(rule.categoryId))
+        .toList(growable: false);
     return _sortRules(rules);
   }
 
@@ -90,8 +95,11 @@ class AutoCategorizationService {
       ],
       orderBy: 'isPrimary DESC, id ASC',
     );
-    final rules =
-        rows.map(AutoCategorizationRule.fromDb).toList(growable: false);
+    final managedCategoryIds = await _loanDebtManagedCategoryIds(db);
+    final rules = rows
+        .map(AutoCategorizationRule.fromDb)
+        .where((rule) => !managedCategoryIds.contains(rule.categoryId))
+        .toList(growable: false);
     return _sortRules(rules);
   }
 
@@ -133,12 +141,14 @@ class AutoCategorizationService {
           ' ',
         );
     final normalizedFlow = normalizeFlow(flow);
+    final managedCategoryIds = await _loanDebtManagedCategoryIds(db);
 
     final normalizedCategoryIds = <int>[];
     for (final categoryId in categoryIds) {
       if (categoryId <= 0 || normalizedCategoryIds.contains(categoryId)) {
         continue;
       }
+      if (managedCategoryIds.contains(categoryId)) continue;
       normalizedCategoryIds.add(categoryId);
     }
 
@@ -359,6 +369,8 @@ class AutoCategorizationService {
       creditor: creditor,
     );
     if (fallbackCategoryId == null || fallbackCategoryId <= 0) return null;
+    final managedCategoryIds = await _loanDebtManagedCategoryIds();
+    if (managedCategoryIds.contains(fallbackCategoryId)) return null;
 
     return AutoCategorizationSelection(
       primaryCategoryId: fallbackCategoryId,
@@ -377,5 +389,17 @@ class AutoCategorizationService {
       creditor: creditor,
     );
     return selection?.primaryCategoryId;
+  }
+
+  Future<Set<int>> _loanDebtManagedCategoryIds([Database? existingDb]) async {
+    final db = existingDb ?? await DatabaseHelper.instance.database;
+    final rows = await db.query('categories');
+    return rows
+        .map(Category.fromDb)
+        .where((category) =>
+            isLoanDebtCategory(category) || isRepaymentCategory(category))
+        .map((category) => category.id)
+        .whereType<int>()
+        .toSet();
   }
 }

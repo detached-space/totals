@@ -68,8 +68,12 @@ bool hasEligibleRepaymentLinkCandidate({
 
     final loanTransaction = transactionsByReference[loanReference];
     if (loanTransaction == null) continue;
-    final remainingAmount = loanTransaction.amount.abs() -
-        (repaidByLoanReference[loanReference] ?? 0);
+    final principalAmount = entry.principalAmount;
+    final originalAmount = principalAmount != null && principalAmount.isFinite
+        ? principalAmount.abs()
+        : loanTransaction.amount.abs();
+    final remainingAmount =
+        originalAmount - (repaidByLoanReference[loanReference] ?? 0);
     if (remainingAmount > 0.005) return true;
   }
 

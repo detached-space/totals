@@ -1902,6 +1902,7 @@ class TransactionProvider with ChangeNotifier {
     if (!_autoCategorizationEnabled) return null;
     final categoryId = category.id;
     if (categoryId == null) return null;
+    if (_isLoanDebtManagedCategory(category)) return null;
     if (transaction.categoryId == categoryId) return null;
     if (_isSelfTransfer(transaction)) return null;
 
@@ -1980,7 +1981,8 @@ class TransactionProvider with ChangeNotifier {
       if (categoryId <= 0 || normalizedCategoryIds.contains(categoryId)) {
         continue;
       }
-      if (!_categoryById.containsKey(categoryId)) continue;
+      final category = _categoryById[categoryId];
+      if (category == null || _isLoanDebtManagedCategory(category)) continue;
       normalizedCategoryIds.add(categoryId);
     }
 
@@ -2014,6 +2016,10 @@ class TransactionProvider with ChangeNotifier {
     await _reloadAutoCategorizationState();
     _dataVersion += 1;
     notifyListeners();
+  }
+
+  bool _isLoanDebtManagedCategory(Category category) {
+    return isLoanDebtCategory(category) || isRepaymentCategory(category);
   }
 
   Future<void> clearAutoCategorizationRuleForTransaction(

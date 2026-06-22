@@ -417,7 +417,7 @@ class _GroupCardBalanceBlock extends StatelessWidget {
         )
         .replaceFirst('{amount}', amount);
     final balanceColor = isOwed ? AppColors.incomeSuccess : AppColors.red;
-    final plan = settlementPlanFor(group);
+    final plan = originalDebtPlanFor(group);
     SettlementDebt? topDebt;
     for (final d in plan.debts) {
       if (d.from != myPublicKey && d.to != myPublicKey) continue;
