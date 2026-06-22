@@ -1696,7 +1696,7 @@ class SharedExpenseRepository {
     final ts = DateTime.now().millisecondsSinceEpoch;
     final debtorSet = debtorPks.toSet();
     final amountByDebtorPk = <String, double>{};
-    for (final debt in settlementPlanFor(group).debts) {
+    for (final debt in originalDebtPlanFor(group).debts) {
       if (debt.to != identity.publicKeyHex || !debtorSet.contains(debt.from)) {
         continue;
       }
@@ -3963,6 +3963,63 @@ SettlementPlan settlementPlanFor(SharedExpenseGroup group) {
     if (c.amount < 0.005) creditors.removeAt(0);
     if (d.amount < 0.005) debtors.removeAt(0);
   }
+  return SettlementPlan(balances: balances, debts: debts);
+}
+
+SettlementPlan originalDebtPlanFor(SharedExpenseGroup group) {
+  final balances = computeBalancesFor(group);
+  final obligations = <String, Map<String, double>>{};
+
+  void addObligation(String from, String to, double amount) {
+    if (from.isEmpty || to.isEmpty || from == to || amount.abs() < 0.005) {
+      return;
+    }
+    final byRecipient = obligations.putIfAbsent(
+      from,
+      () => <String, double>{},
+    );
+    byRecipient[to] = (byRecipient[to] ?? 0.0) + amount;
+  }
+
+  for (final ex in group.expenses) {
+    if (ex.deleted) continue;
+    if (ex.amount <= 0) continue;
+    if (ex.paidBy.isEmpty || ex.splitAmong.isEmpty) continue;
+    final share = ex.amount / ex.splitAmong.length;
+    final isSettlement = ex.kind.toLowerCase() == 'settlement';
+    for (final pk in ex.splitAmong) {
+      if (isSettlement) {
+        addObligation(ex.paidBy, pk, -share);
+      } else {
+        addObligation(pk, ex.paidBy, share);
+      }
+    }
+  }
+
+  final debts = <SettlementDebt>[];
+  final seenPairs = <String>{};
+  obligations.forEach((from, byRecipient) {
+    byRecipient.forEach((to, amount) {
+      final pairKey = from.compareTo(to) <= 0 ? '$from|$to' : '$to|$from';
+      if (!seenPairs.add(pairKey)) return;
+
+      final oppositeAmount = obligations[to]?[from] ?? 0.0;
+      final net = amount - oppositeAmount;
+      if (net > 0.005) {
+        debts.add(SettlementDebt(from: from, to: to, amount: net));
+      } else if (net < -0.005) {
+        debts.add(SettlementDebt(from: to, to: from, amount: -net));
+      }
+    });
+  });
+  debts.sort((a, b) {
+    final amountCompare = b.amount.compareTo(a.amount);
+    if (amountCompare != 0) return amountCompare;
+    final fromCompare = a.from.compareTo(b.from);
+    if (fromCompare != 0) return fromCompare;
+    return a.to.compareTo(b.to);
+  });
+
   return SettlementPlan(balances: balances, debts: debts);
 }
 
