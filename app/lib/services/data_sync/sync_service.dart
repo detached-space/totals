@@ -12,9 +12,27 @@ import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/data_sync/outbound_http_client.dart';
 import 'package:totals/services/data_sync/sync_auth.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
+import 'package:totals/services/notification_service.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('debug: SyncService: $message');
+}
+
+/// Snapshot of the latest (or in-progress) sync run, broadcast for the UI.
+class SyncRunStatus {
+  final bool running;
+  final int sent;
+  final int failed;
+  final DateTime? at;
+
+  const SyncRunStatus({
+    this.running = false,
+    this.sent = 0,
+    this.failed = 0,
+    this.at,
+  });
+
+  bool get hasResult => at != null;
 }
 
 /// Drains the durable outbox: builds requests from rules, sends them via
@@ -37,6 +55,12 @@ class SyncService {
   bool _draining = false;
   bool _drainRequested = false;
 
+  /// Live status of the most recent / ongoing drain, for the UI to observe.
+  final ValueNotifier<SyncRunStatus> status =
+      ValueNotifier<SyncRunStatus>(const SyncRunStatus());
+  int _runSent = 0;
+  int _runFailed = 0;
+
   /// Request an outbox drain. Safe to call from anywhere on the main isolate;
   /// concurrent calls coalesce into at most one extra pass.
   Future<void> requestDrain({String reason = 'manual'}) async {
@@ -46,11 +70,14 @@ class SyncService {
       return;
     }
     _draining = true;
+    _runSent = 0;
+    _runFailed = 0;
+    status.value = const SyncRunStatus(running: true);
     _log('drain start (reason=$reason)');
     try {
       do {
         _drainRequested = false;
-        final processed = await _drainOnce();
+        final processed = await _drainOnce(reason);
         if (processed > 0 && await _repo.hasDue()) {
           _drainRequested = true;
         }
@@ -61,13 +88,48 @@ class SyncService {
       if (kDebugMode) debugPrintStack(stackTrace: stack);
     } finally {
       _draining = false;
-      _log('drain end');
+      status.value =
+          SyncRunStatus(sent: _runSent, failed: _runFailed, at: DateTime.now());
+      await _maybeNotify();
+      _log('drain end (sent=$_runSent failed=$_runFailed)');
     }
   }
 
-  Future<int> _drainOnce() async {
+  /// Post a result notification when a run actually did something. It's a
+  /// single, self-replacing notification (failures alert; successes update
+  /// quietly), gated by the "Notify me about syncs" setting — so even
+  /// background/scheduled runs are visible without stacking up.
+  Future<void> _maybeNotify() async {
+    if (_runSent == 0 && _runFailed == 0) return;
+    try {
+      if (!await DataSyncSettingsService.readNotifyFromPrefs()) return;
+      await NotificationService.instance.showDataSyncResult(
+        sent: _runSent,
+        failed: _runFailed,
+      );
+    } catch (_) {}
+  }
+
+  Future<int> _drainOnce(String reason) async {
     await _repo.reclaimStaleSending();
-    final due = await _repo.claimDue(limit: _maxRowsPerDrain);
+    // Drop rows whose rule was disabled or deleted.
+    await _repo.purgeOutboxForDisabledRules();
+
+    final now = DateTime.now();
+    final rules = await _repo.getRules();
+    final rulesById = <int, SyncRule>{
+      for (final r in rules)
+        if (r.id != null) r.id!: r,
+    };
+    // Only rules whose trigger/schedule says "send now" for this reason.
+    final dueRuleIds = rules
+        .where((r) =>
+            r.enabled && r.id != null && syncRuleShouldSend(r, reason, now))
+        .map((r) => r.id!)
+        .toSet();
+    if (dueRuleIds.isEmpty) return 0;
+
+    final due = await _repo.claimDue(limit: _maxRowsPerDrain, ruleIds: dueRuleIds);
     if (due.isEmpty) return 0;
 
     final byRule = <int, List<SyncOutboxItem>>{};
@@ -76,9 +138,8 @@ class SyncService {
     }
 
     for (final entry in byRule.entries) {
-      final rule = await _repo.getRule(entry.key);
+      final rule = rulesById[entry.key];
       if (rule == null || !rule.enabled) {
-        // Rule deleted/disabled mid-flight: drop its rows (incl. claimed ones).
         await _repo.deleteOutboxByRule(entry.key);
         continue;
       }
@@ -89,13 +150,17 @@ class SyncService {
           await _repo.reschedule(
             item.id,
             attempts: item.attempts,
-            nextAttemptAt: DateTime.now().add(const Duration(minutes: 30)),
+            nextAttemptAt: now.add(const Duration(minutes: 30)),
             error: 'Destination disabled or missing.',
           );
         }
         continue;
       }
       await _sendRuleBatch(rule, dest, entry.value);
+      // Advance the schedule clock once a time-scheduled rule has fired.
+      if (rule.scheduleMode != SyncScheduleMode.off) {
+        await _repo.touchSchedule(rule.id!, now);
+      }
     }
     return due.length;
   }
@@ -243,6 +308,7 @@ class SyncService {
     final detail = error ?? body;
     if (refusedLocally) {
       await _repo.markDead(item.id, statusCode: statusCode, error: detail);
+      _runFailed++;
       return detail ?? 'Refused locally.';
     }
 
@@ -256,9 +322,11 @@ class SyncService {
     switch (transition.status) {
       case SyncOutboxStatus.sent:
         await _repo.markSent(item.id);
+        _runSent++;
         return null;
       case SyncOutboxStatus.dead:
         await _repo.markDead(item.id, statusCode: statusCode, error: detail);
+        _runFailed++;
         return detail ?? 'Failed (HTTP $statusCode).';
       default: // pending — schedule a retry
         final base = computeSyncBackoff(transition.attempts);

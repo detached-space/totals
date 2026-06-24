@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 26,
+      version: 27,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -772,6 +772,10 @@ class DatabaseHelper {
     if (oldVersion < 26) {
       await _ensureSyncSchema(db);
     }
+
+    if (oldVersion < 27) {
+      await _ensureSyncSchema(db);
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -1332,6 +1336,10 @@ class DatabaseHelper {
         triggerPeriodic INTEGER NOT NULL DEFAULT 0,
         triggerOnNewTxn INTEGER NOT NULL DEFAULT 0,
         triggerOnConnectivity INTEGER NOT NULL DEFAULT 0,
+        scheduleMode TEXT NOT NULL DEFAULT 'off',
+        scheduleIntervalMinutes INTEGER,
+        scheduleTimes TEXT,
+        lastScheduledAt TEXT,
         enabled INTEGER NOT NULL DEFAULT 0,
         backfillDone INTEGER NOT NULL DEFAULT 0,
         lastStatus TEXT,
@@ -1372,6 +1380,28 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_sync_outbox_rule ON sync_outbox(ruleId)',
     );
+
+    // Defensive: add the per-rule schedule columns (v27) to an existing
+    // sync_rules table created under v26.
+    final ruleCols = await db.rawQuery('PRAGMA table_info(sync_rules)');
+    final ruleColNames =
+        ruleCols.map((c) => c['name'] as String?).whereType<String>().toSet();
+    Future<void> addRuleColumn(String name, String ddl) async {
+      if (!ruleColNames.contains(name)) {
+        try {
+          await db.execute(ddl);
+        } catch (_) {}
+      }
+    }
+
+    await addRuleColumn('scheduleMode',
+        "ALTER TABLE sync_rules ADD COLUMN scheduleMode TEXT NOT NULL DEFAULT 'off'");
+    await addRuleColumn('scheduleIntervalMinutes',
+        'ALTER TABLE sync_rules ADD COLUMN scheduleIntervalMinutes INTEGER');
+    await addRuleColumn('scheduleTimes',
+        'ALTER TABLE sync_rules ADD COLUMN scheduleTimes TEXT');
+    await addRuleColumn('lastScheduledAt',
+        'ALTER TABLE sync_rules ADD COLUMN lastScheduledAt TEXT');
   }
 
   Future<void> _createAutoCategorizationRulesTable(

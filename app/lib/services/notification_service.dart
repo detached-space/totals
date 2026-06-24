@@ -33,6 +33,7 @@ class NotificationService {
   static const String _accountSyncCompleteChannelId = 'account_sync_complete';
   static const String _budgetChannelId = 'budgets';
   static const String _sharedExpensesChannelId = 'shared_expenses';
+  static const String _dataSyncChannelId = 'data_sync';
   static const String _historyPrefsKey = 'notification_history_v1';
   static const String _counterpartyActionPrefix = 'txname:';
   static const String _sharedExpensesPayload = 'shared_expenses';
@@ -45,6 +46,7 @@ class NotificationService {
   static const int monthlySpendingNotificationId = 9005;
   static const int monthlySpendingTestNotificationId = 9006;
   static const int sharedExpenseDigestNotificationId = 9007;
+  static const int dataSyncResultNotificationId = 9008;
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -123,6 +125,14 @@ class NotificationService {
         'Shared expenses',
         description: 'Nudges and reminders from shared expenses',
         importance: Importance.high,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _dataSyncChannelId,
+        'Data Sync',
+        description: 'Results of syncing your data to your backend',
+        importance: Importance.defaultImportance,
       ),
     );
 
@@ -879,6 +889,49 @@ class NotificationService {
       id: monthlySpendingTestNotificationId,
       ignoreEnabledCheck: true,
     );
+  }
+
+  /// Posts a single, self-replacing notification summarizing a Data Sync run.
+  /// A failure raises importance; a clean success updates quietly.
+  Future<void> showDataSyncResult({
+    required int sent,
+    required int failed,
+    String? destination,
+  }) async {
+    if (sent <= 0 && failed <= 0) return;
+    try {
+      await ensureInitialized();
+      final dest = (destination ?? '').trim();
+      final suffix = dest.isEmpty ? '' : ' → $dest';
+      final String title;
+      final String body;
+      if (failed > 0) {
+        title = 'Data Sync: $failed failed';
+        body = sent > 0
+            ? '$sent sent, $failed failed$suffix'
+            : "$failed record(s) couldn't be sent$suffix";
+      } else {
+        title = 'Data Sync complete';
+        body = '$sent record(s) synced$suffix';
+      }
+      await _plugin.show(
+        dataSyncResultNotificationId,
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _dataSyncChannelId,
+            'Data Sync',
+            channelDescription: 'Results of syncing your data to your backend',
+            importance:
+                failed > 0 ? Importance.high : Importance.defaultImportance,
+            priority: failed > 0 ? Priority.high : Priority.defaultPriority,
+            onlyAlertOnce: failed == 0,
+          ),
+          iOS: const DarwinNotificationDetails(),
+        ),
+      );
+    } catch (_) {}
   }
 
   Future<void> showAccountSyncProgress({

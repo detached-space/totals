@@ -169,6 +169,25 @@ class DataSyncRepository {
     return (result.first['c'] as int?) ?? 0;
   }
 
+  /// Enabled rules that need the background heartbeat (any time-based schedule).
+  Future<int> countRulesNeedingSchedule() async {
+    final db = await _db;
+    final result = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM sync_rules WHERE enabled = 1 AND scheduleMode != 'off'",
+    );
+    return (result.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> touchSchedule(int ruleId, DateTime at) async {
+    final db = await _db;
+    await db.update(
+      'sync_rules',
+      {'lastScheduledAt': at.toIso8601String(), 'updatedAt': _now()},
+      where: 'id = ?',
+      whereArgs: [ruleId],
+    );
+  }
+
   Future<int> insertRule(SyncRule rule) async {
     final db = await _db;
     final data = rule.toDb()..remove('id');
@@ -277,16 +296,25 @@ class DataSyncRepository {
 
   /// Atomically claim up to [limit] due rows by flipping them to `sending`,
   /// then return them. The transaction prevents two isolates from both
-  /// claiming the same rows.
-  Future<List<SyncOutboxItem>> claimDue({int limit = 200}) async {
+  /// claiming the same rows. When [ruleIds] is provided, only rows for those
+  /// rules are claimed (used to honor per-rule schedules); an empty set claims
+  /// nothing.
+  Future<List<SyncOutboxItem>> claimDue({int limit = 200, Set<int>? ruleIds}) async {
+    if (ruleIds != null && ruleIds.isEmpty) return const [];
     final db = await _db;
     final now = DateTime.now().toIso8601String();
     final claimed = <SyncOutboxItem>[];
+    final where = StringBuffer('status = ? AND nextAttemptAt <= ?');
+    final args = <Object?>[SyncOutboxStatus.pending, now];
+    if (ruleIds != null) {
+      where.write(' AND ruleId IN (${List.filled(ruleIds.length, '?').join(', ')})');
+      args.addAll(ruleIds);
+    }
     await db.transaction((txn) async {
       final rows = await txn.query(
         'sync_outbox',
-        where: 'status = ? AND nextAttemptAt <= ?',
-        whereArgs: [SyncOutboxStatus.pending, now],
+        where: where.toString(),
+        whereArgs: args,
         orderBy: 'createdAt ASC, id ASC',
         limit: limit,
       );
@@ -374,6 +402,15 @@ class DataSyncRepository {
     await db.delete('sync_outbox', where: 'ruleId = ?', whereArgs: [ruleId]);
   }
 
+  /// Drop outbox rows whose rule is disabled or deleted (housekeeping).
+  Future<void> purgeOutboxForDisabledRules() async {
+    final db = await _db;
+    await db.execute(
+      'DELETE FROM sync_outbox WHERE ruleId NOT IN '
+      '(SELECT id FROM sync_rules WHERE enabled = 1)',
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Outbox — log / maintenance
   // -------------------------------------------------------------------------
@@ -436,6 +473,24 @@ class DataSyncRepository {
   Future<int> clearSent() async {
     final db = await _db;
     return db.delete('sync_outbox', where: 'status = ?', whereArgs: [SyncOutboxStatus.sent]);
+  }
+
+  /// Debug helper: wipe the entire outbox (the store that tracks which records
+  /// have been synced) and re-arm every rule so it backfills and re-schedules
+  /// from scratch on the next drain. Lets you re-test sync against the same data.
+  Future<void> resetSyncStateForDebug() async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.delete('sync_outbox');
+      await txn.update('sync_rules', {
+        'backfillDone': 0,
+        'lastScheduledAt': null,
+        'lastStatus': null,
+        'lastError': null,
+        'lastRunAt': null,
+        'updatedAt': _now(),
+      });
+    });
   }
 
   // -------------------------------------------------------------------------

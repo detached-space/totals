@@ -173,6 +173,38 @@ extension SyncBatchModeX on SyncBatchMode {
       value == 'bulk_array' ? SyncBatchMode.bulkArray : SyncBatchMode.perRecord;
 }
 
+/// Per-rule time-based schedule. Event triggers (on-new-txn, on-connectivity,
+/// manual) are orthogonal and live on the rule as separate flags.
+enum SyncScheduleMode { off, interval, daily }
+
+extension SyncScheduleModeX on SyncScheduleMode {
+  String get storage {
+    switch (this) {
+      case SyncScheduleMode.off:
+        return 'off';
+      case SyncScheduleMode.interval:
+        return 'interval';
+      case SyncScheduleMode.daily:
+        return 'daily';
+    }
+  }
+
+  static SyncScheduleMode fromStorage(String? value) {
+    switch (value) {
+      case 'interval':
+        return SyncScheduleMode.interval;
+      case 'daily':
+        return SyncScheduleMode.daily;
+      default:
+        return SyncScheduleMode.off;
+    }
+  }
+}
+
+/// Background-reliable interval presets (minutes). Android won't run periodic
+/// background work more often than ~15 min, so we don't offer anything below it.
+const List<int> syncIntervalPresets = [15, 30, 60, 180, 360, 720];
+
 /// Outbox row lifecycle states (stored as TEXT).
 class SyncOutboxStatus {
   static const String pending = 'pending';
@@ -222,6 +254,23 @@ DateTime? _asDate(Object? value) {
 
 int _intCol(Object? value, [int fallback = 0]) => _asNum(value)?.toInt() ?? fallback;
 
+List<String> _decodeStringList(Object? raw) {
+  if (raw is List) {
+    return raw
+        .map((e) => e?.toString())
+        .whereType<String>()
+        .where((s) => s.isNotEmpty)
+        .toList(growable: false);
+  }
+  if (raw is String && raw.trim().isNotEmpty) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return _decodeStringList(decoded);
+    } catch (_) {}
+  }
+  return const [];
+}
+
 // ---------------------------------------------------------------------------
 // SyncFilter — decides whether a record matches a rule.
 // ---------------------------------------------------------------------------
@@ -235,7 +284,15 @@ class SyncFilter {
   final String? type;
   final double? minAmount;
   final double? maxAmount;
-  final int? bankId;
+
+  /// Banks to include (by bank id). Empty/null = all banks.
+  final List<int>? bankIds;
+
+  /// Accounts to include, each as "<accountNumber>|<bank>". Empty/null = all.
+  /// Transactions store only the account's last 4 digits, so transaction
+  /// matching is by suffix; accounts match exactly.
+  final List<String>? accountKeys;
+
   final DateTime? startDate;
   final DateTime? endDate;
 
@@ -249,7 +306,8 @@ class SyncFilter {
     this.type,
     this.minAmount,
     this.maxAmount,
-    this.bankId,
+    this.bankIds,
+    this.accountKeys,
     this.startDate,
     this.endDate,
     this.isActive,
@@ -260,7 +318,8 @@ class SyncFilter {
       type == null &&
       minAmount == null &&
       maxAmount == null &&
-      bankId == null &&
+      (bankIds == null || bankIds!.isEmpty) &&
+      (accountKeys == null || accountKeys!.isEmpty) &&
       startDate == null &&
       endDate == null &&
       isActive == null &&
@@ -280,10 +339,16 @@ class SyncFilter {
       if (maxAmount != null && magnitude > maxAmount!) return false;
     }
 
-    if (bankId != null) {
-      // Accounts use the `bank` column; transactions use `bankId`.
-      final rowBank = _asNum(row['bankId'] ?? row['bank'])?.toInt();
-      if (rowBank != bankId) return false;
+    // Accounts use the `bank` column; transactions use `bankId`.
+    final rowBank = _asNum(row['bankId'] ?? row['bank'])?.toInt();
+    final hasBankSel = bankIds != null && bankIds!.isNotEmpty;
+    final hasAcctSel = accountKeys != null && accountKeys!.isNotEmpty;
+    if (hasBankSel || hasAcctSel) {
+      // A record passes if it belongs to a selected bank OR a selected account.
+      final bankMatch =
+          hasBankSel && rowBank != null && bankIds!.contains(rowBank);
+      final acctMatch = hasAcctSel && _matchesAnyAccount(row, rowBank);
+      if (!bankMatch && !acctMatch) return false;
     }
 
     if (startDate != null || endDate != null) {
@@ -307,11 +372,30 @@ class SyncFilter {
     return true;
   }
 
+  bool _matchesAnyAccount(Map<String, dynamic> row, int? rowBank) {
+    final rowAcct = (row['accountNumber'] as String?)?.trim();
+    if (rowAcct == null || rowAcct.isEmpty) return false;
+    for (final key in accountKeys!) {
+      final sep = key.lastIndexOf('|');
+      if (sep <= 0) continue;
+      final keyNum = key.substring(0, sep);
+      final keyBank = int.tryParse(key.substring(sep + 1));
+      if (keyBank != null && rowBank != null && keyBank != rowBank) continue;
+      // An accounts row holds the full number (exact match); a transaction row
+      // holds only the last 4 digits, so fall back to a suffix match.
+      if (keyNum == rowAcct) return true;
+      if (rowAcct.length >= 3 && keyNum.endsWith(rowAcct)) return true;
+    }
+    return false;
+  }
+
   Map<String, dynamic> toJson() => {
         if (type != null) 'type': type,
         if (minAmount != null) 'minAmount': minAmount,
         if (maxAmount != null) 'maxAmount': maxAmount,
-        if (bankId != null) 'bankId': bankId,
+        if (bankIds != null && bankIds!.isNotEmpty) 'bankIds': bankIds,
+        if (accountKeys != null && accountKeys!.isNotEmpty)
+          'accountKeys': accountKeys,
         if (startDate != null) 'startDate': startDate!.toIso8601String(),
         if (endDate != null) 'endDate': endDate!.toIso8601String(),
         if (isActive != null) 'isActive': isActive,
@@ -319,11 +403,32 @@ class SyncFilter {
       };
 
   factory SyncFilter.fromJson(Map<String, dynamic> json) {
+    List<int>? bankIds;
+    final rawBankIds = json['bankIds'];
+    if (rawBankIds is List) {
+      bankIds =
+          rawBankIds.map((e) => _asNum(e)?.toInt()).whereType<int>().toList();
+    } else if (json['bankId'] != null) {
+      // Back-compat: legacy single bankId.
+      final single = _asNum(json['bankId'])?.toInt();
+      if (single != null) bankIds = [single];
+    }
+    List<String>? accountKeys;
+    final rawKeys = json['accountKeys'];
+    if (rawKeys is List) {
+      accountKeys = rawKeys
+          .map((e) => e?.toString())
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .toList();
+    }
     return SyncFilter(
       type: json['type'] as String?,
       minAmount: _asNum(json['minAmount'])?.toDouble(),
       maxAmount: _asNum(json['maxAmount'])?.toDouble(),
-      bankId: _asNum(json['bankId'])?.toInt(),
+      bankIds: (bankIds == null || bankIds.isEmpty) ? null : bankIds,
+      accountKeys:
+          (accountKeys == null || accountKeys.isEmpty) ? null : accountKeys,
       startDate: _asDate(json['startDate']),
       endDate: _asDate(json['endDate']),
       isActive: _asBool(json['isActive']),
@@ -552,6 +657,49 @@ SyncOutboxTransition nextOutboxTransition({
   }
 }
 
+/// Whether a rule's time-based schedule is due to fire at [now], given the last
+/// time it fired ([SyncRule.lastScheduledAt]).
+bool syncScheduleDue(SyncRule rule, DateTime now) {
+  switch (rule.scheduleMode) {
+    case SyncScheduleMode.off:
+      return false;
+    case SyncScheduleMode.interval:
+      final mins = rule.scheduleIntervalMinutes ?? 15;
+      final last = rule.lastScheduledAt;
+      return last == null || now.difference(last).inMinutes >= mins;
+    case SyncScheduleMode.daily:
+      final last = rule.lastScheduledAt;
+      for (final hhmm in rule.scheduleTimes) {
+        final parts = hhmm.split(':');
+        if (parts.length != 2) continue;
+        final h = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        if (h == null || m == null) continue;
+        final slot = DateTime(now.year, now.month, now.day, h, m);
+        // Past today's slot and we haven't fired since it.
+        if (!now.isBefore(slot) && (last == null || last.isBefore(slot))) {
+          return true;
+        }
+      }
+      return false;
+  }
+}
+
+/// Whether a rule's pending rows should be flushed now, given the drain
+/// [reason]. Explicit user actions flush immediately; event-triggered drains
+/// only flush rules opted into that event; otherwise the rule's time schedule
+/// decides.
+bool syncRuleShouldSend(SyncRule rule, String reason, DateTime now) {
+  const flushReasons = {'manual', 'backfill', 'rule-on', 'enabled'};
+  if (flushReasons.contains(reason)) return true;
+
+  const realtimeReasons = {'write', 'signal', 'resume', 'startup', 'foreground'};
+  if (rule.triggerOnNewTxn && realtimeReasons.contains(reason)) return true;
+  if (rule.triggerOnConnectivity && reason == 'connectivity') return true;
+
+  return syncScheduleDue(rule, now);
+}
+
 // ---------------------------------------------------------------------------
 // Persistable models
 // ---------------------------------------------------------------------------
@@ -654,6 +802,13 @@ class SyncRule {
   final bool triggerPeriodic;
   final bool triggerOnNewTxn;
   final bool triggerOnConnectivity;
+
+  /// Time-based schedule (orthogonal to the event triggers above).
+  final SyncScheduleMode scheduleMode;
+  final int? scheduleIntervalMinutes;
+  final List<String> scheduleTimes; // 'HH:mm' entries for daily mode
+  final DateTime? lastScheduledAt;
+
   final bool enabled;
   final bool backfillDone;
   final String? lastStatus;
@@ -677,6 +832,10 @@ class SyncRule {
     this.triggerPeriodic = false,
     this.triggerOnNewTxn = false,
     this.triggerOnConnectivity = false,
+    this.scheduleMode = SyncScheduleMode.off,
+    this.scheduleIntervalMinutes,
+    this.scheduleTimes = const [],
+    this.lastScheduledAt,
     this.enabled = false,
     this.backfillDone = false,
     this.lastStatus,
@@ -703,6 +862,11 @@ class SyncRule {
       triggerPeriodic: _asBool(row['triggerPeriodic']) ?? false,
       triggerOnNewTxn: _asBool(row['triggerOnNewTxn']) ?? false,
       triggerOnConnectivity: _asBool(row['triggerOnConnectivity']) ?? false,
+      scheduleMode:
+          SyncScheduleModeX.fromStorage(row['scheduleMode'] as String?),
+      scheduleIntervalMinutes: _asNum(row['scheduleIntervalMinutes'])?.toInt(),
+      scheduleTimes: _decodeStringList(row['scheduleTimes']),
+      lastScheduledAt: _asDate(row['lastScheduledAt']),
       enabled: _asBool(row['enabled']) ?? false,
       backfillDone: _asBool(row['backfillDone']) ?? false,
       lastStatus: row['lastStatus'] as String?,
@@ -728,6 +892,11 @@ class SyncRule {
         'triggerPeriodic': triggerPeriodic ? 1 : 0,
         'triggerOnNewTxn': triggerOnNewTxn ? 1 : 0,
         'triggerOnConnectivity': triggerOnConnectivity ? 1 : 0,
+        'scheduleMode': scheduleMode.storage,
+        'scheduleIntervalMinutes': scheduleIntervalMinutes,
+        'scheduleTimes':
+            scheduleTimes.isEmpty ? null : jsonEncode(scheduleTimes),
+        'lastScheduledAt': lastScheduledAt?.toIso8601String(),
         'enabled': enabled ? 1 : 0,
         'backfillDone': backfillDone ? 1 : 0,
         'lastStatus': lastStatus,
@@ -753,6 +922,10 @@ class SyncRule {
     bool? triggerPeriodic,
     bool? triggerOnNewTxn,
     bool? triggerOnConnectivity,
+    SyncScheduleMode? scheduleMode,
+    int? scheduleIntervalMinutes,
+    List<String>? scheduleTimes,
+    DateTime? lastScheduledAt,
     bool? enabled,
     bool? backfillDone,
     String? lastStatus,
@@ -776,6 +949,11 @@ class SyncRule {
       triggerOnNewTxn: triggerOnNewTxn ?? this.triggerOnNewTxn,
       triggerOnConnectivity:
           triggerOnConnectivity ?? this.triggerOnConnectivity,
+      scheduleMode: scheduleMode ?? this.scheduleMode,
+      scheduleIntervalMinutes:
+          scheduleIntervalMinutes ?? this.scheduleIntervalMinutes,
+      scheduleTimes: scheduleTimes ?? this.scheduleTimes,
+      lastScheduledAt: lastScheduledAt ?? this.lastScheduledAt,
       enabled: enabled ?? this.enabled,
       backfillDone: backfillDone ?? this.backfillDone,
       lastStatus: lastStatus ?? this.lastStatus,

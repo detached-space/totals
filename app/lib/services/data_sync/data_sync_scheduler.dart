@@ -19,16 +19,21 @@ class DataSyncScheduler {
     try {
       await DataSyncSettingsService.instance.ensureLoaded();
       final enabled = DataSyncSettingsService.instance.masterEnabled.value;
-      final periodicRules =
-          enabled ? await DataSyncRepository().countRulesWithPeriodicTrigger() : 0;
+      final scheduledRules =
+          enabled ? await DataSyncRepository().countRulesNeedingSchedule() : 0;
 
-      if (enabled && periodicRules > 0) {
+      if (enabled && scheduledRules > 0) {
         await Workmanager().registerPeriodicTask(
           dataSyncDrainUniqueName,
           dataSyncDrainTask,
           existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
           frequency: _frequency,
-          initialDelay: _frequency,
+          // Zero, not _frequency: sync() runs on every app launch and rule
+          // edit, and `replace` re-registers the task each time. A non-zero
+          // initial delay would push the first run 15 min out on every launch,
+          // so frequent app opens would defer the scheduled drain forever.
+          // Mirrors NotificationScheduler / WidgetRefreshScheduler.
+          initialDelay: Duration.zero,
         );
       } else {
         await Workmanager().cancelByUniqueName(dataSyncDrainUniqueName);

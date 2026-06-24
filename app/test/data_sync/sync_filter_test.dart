@@ -32,11 +32,27 @@ void main() {
       expect(range.matches({'amount': null}), isFalse);
     });
 
-    test('bankId matches transactions (bankId) and accounts (bank)', () {
-      const filter = SyncFilter(bankId: 1);
+    test('bankIds match transactions (bankId) and accounts (bank)', () {
+      const filter = SyncFilter(bankIds: [1, 3]);
       expect(filter.matches({'bankId': 1}), isTrue);
-      expect(filter.matches({'bank': 1}), isTrue);
+      expect(filter.matches({'bank': 3}), isTrue);
       expect(filter.matches({'bankId': 2}), isFalse);
+      expect(filter.matches(const {}), isFalse);
+    });
+
+    test('accountKeys match exact (accounts) and by last-4 suffix (txns)', () {
+      const filter = SyncFilter(accountKeys: ['1000001234|1']);
+      expect(filter.matches({'accountNumber': '1000001234', 'bank': 1}), isTrue);
+      expect(filter.matches({'accountNumber': '1234', 'bankId': 1}), isTrue);
+      expect(filter.matches({'accountNumber': '1234', 'bankId': 2}), isFalse);
+      expect(filter.matches({'accountNumber': '9999', 'bankId': 1}), isFalse);
+    });
+
+    test('bank vs account selection is ORed', () {
+      const filter = SyncFilter(bankIds: [1], accountKeys: ['5555|2']);
+      expect(filter.matches({'bankId': 1, 'accountNumber': '0001'}), isTrue);
+      expect(filter.matches({'bankId': 2, 'accountNumber': '5555'}), isTrue);
+      expect(filter.matches({'bankId': 3, 'accountNumber': '0002'}), isFalse);
     });
 
     test('date range matches against time/createdAt/startDate', () {
@@ -66,7 +82,7 @@ void main() {
     });
 
     test('multiple fields are ANDed', () {
-      const filter = SyncFilter(type: 'DEBIT', minAmount: 100, bankId: 1);
+      const filter = SyncFilter(type: 'DEBIT', minAmount: 100, bankIds: [1]);
       expect(
         filter.matches({'type': 'DEBIT', 'amount': -200, 'bankId': 1}),
         isTrue,
@@ -90,7 +106,8 @@ void main() {
       final filter = SyncFilter(
         type: 'CREDIT',
         minAmount: 10,
-        bankId: 2,
+        bankIds: [2, 4],
+        accountKeys: ['1234|2'],
         startDate: DateTime.parse('2024-01-01T00:00:00.000Z'),
         isActive: false,
         profileId: 7,
@@ -99,10 +116,17 @@ void main() {
       expect(decoded, isNotNull);
       expect(decoded!.type, 'CREDIT');
       expect(decoded.minAmount, 10);
-      expect(decoded.bankId, 2);
+      expect(decoded.bankIds, [2, 4]);
+      expect(decoded.accountKeys, ['1234|2']);
       expect(decoded.isActive, isFalse);
       expect(decoded.profileId, 7);
       expect(decoded.startDate, DateTime.parse('2024-01-01T00:00:00.000Z'));
+    });
+
+    test('decodes legacy single bankId into bankIds', () {
+      final decoded = SyncFilter.decode('{"bankId":5}');
+      expect(decoded, isNotNull);
+      expect(decoded!.bankIds, [5]);
     });
   });
 
