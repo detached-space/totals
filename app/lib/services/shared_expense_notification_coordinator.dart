@@ -744,7 +744,7 @@ class SharedExpenseNotificationCoordinator {
     final explicitAmount = amountByDebtorPk[recipientPk];
     if (explicitAmount != null && explicitAmount > 0) return explicitAmount;
 
-    for (final debt in settlementPlanFor(group).debts) {
+    for (final debt in originalDebtPlanFor(group).debts) {
       if (debt.from == recipientPk && debt.to == actorPk && debt.amount > 0) {
         return debt.amount;
       }

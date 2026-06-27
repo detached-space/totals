@@ -939,7 +939,7 @@ class _SharedBalanceSummaryCard extends StatelessWidget {
     };
     final amountByCounterparty = <String, double>{};
     if (isReady && !settled) {
-      for (final debt in settlementPlanFor(group).debts) {
+      for (final debt in originalDebtPlanFor(group).debts) {
         final String? counterpartyPk;
         if (myBalance > 0 && debt.to == myPublicKey) {
           counterpartyPk = debt.from;
@@ -1276,7 +1276,7 @@ class _SharedGroupHomeTab extends StatelessWidget {
         .toList(growable: false)
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final recent = active.take(6).toList(growable: false);
-    final plan = settlementPlanFor(group);
+    final plan = originalDebtPlanFor(group);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

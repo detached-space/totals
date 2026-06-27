@@ -1488,7 +1488,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
   }
 
   Future<void> _sendNudge(SharedExpenseGroup group) async {
-    final debtsOwedToMe = settlementPlanFor(group)
+    final debtsOwedToMe = originalDebtPlanFor(group)
         .debts
         .where((debt) => debt.to == _myPublicKey)
         .toList(growable: false);
