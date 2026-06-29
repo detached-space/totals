@@ -1299,6 +1299,7 @@ class DatabaseHelper {
         status TEXT NOT NULL DEFAULT 'active',
         principalAmount REAL,
         source TEXT NOT NULL DEFAULT 'transaction',
+        returnDate TEXT,
         resolvedAt TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
@@ -1346,6 +1347,10 @@ class DatabaseHelper {
         where: 'principalAmount IS NOT NULL',
       );
     }
+    if (!names.contains('returnDate')) {
+      await addColumn(
+          'ALTER TABLE loan_debt_entries ADD COLUMN returnDate TEXT');
+    }
     await _ensureLoanDebtRepaymentSplitSchema(db);
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_personName ON loan_debt_entries(personName COLLATE NOCASE)",
@@ -1355,6 +1360,9 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_status ON loan_debt_entries(status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_returnDate ON loan_debt_entries(returnDate)',
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_repayments_loan ON loan_debt_repayments(loanDebtTransactionReference)',

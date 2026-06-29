@@ -590,6 +590,81 @@ void _setLoanDebtNameFieldValue(
   );
 }
 
+DateTime? _normalizeLoanDebtReturnDate(DateTime? value) {
+  if (value == null) return null;
+  final local = value.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+String _formatLoanDebtReturnDate(BuildContext context, DateTime date) {
+  return AppDateFormat.monthDayMaybeYear(date, context: context);
+}
+
+bool _isSameLoanDebtDate(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+bool _isLoanDebtReturnDateOverdue(DateTime date) {
+  final today = _normalizeLoanDebtReturnDate(DateTime.now())!;
+  return _normalizeLoanDebtReturnDate(date)!.isBefore(today);
+}
+
+bool _isLoanDebtReturnDateToday(DateTime date) {
+  return _isSameLoanDebtDate(
+    _normalizeLoanDebtReturnDate(date)!,
+    _normalizeLoanDebtReturnDate(DateTime.now())!,
+  );
+}
+
+Color _loanDebtReturnDateColor(DateTime date) {
+  if (_isLoanDebtReturnDateOverdue(date)) return AppColors.red;
+  if (_isLoanDebtReturnDateToday(date)) return AppColors.amber;
+  return AppColors.primaryLight;
+}
+
+Future<DateTime?> _pickLoanDebtReturnDate(
+  BuildContext context,
+  DateTime? current,
+) async {
+  final now = DateTime.now();
+  final firstDate = DateTime(2020);
+  final lastDate = DateTime(now.year + 10, now.month, now.day);
+  final fallback = _normalizeLoanDebtReturnDate(current) ??
+      _normalizeLoanDebtReturnDate(now)!;
+  final initialDate = fallback.isBefore(firstDate)
+      ? firstDate
+      : (fallback.isAfter(lastDate) ? lastDate : fallback);
+
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: initialDate,
+    firstDate: firstDate,
+    lastDate: lastDate,
+    builder: (ctx, child) {
+      final dark = AppColors.isDark(ctx);
+      return Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: dark
+              ? const ColorScheme.dark(
+                  primary: AppColors.primaryLight,
+                  onPrimary: AppColors.white,
+                  surface: AppColors.darkCard,
+                  onSurface: AppColors.white,
+                )
+              : const ColorScheme.light(
+                  primary: AppColors.primaryDark,
+                  onPrimary: AppColors.white,
+                  surface: AppColors.white,
+                  onSurface: AppColors.slate900,
+                ),
+        ),
+        child: child!,
+      );
+    },
+  );
+  return _normalizeLoanDebtReturnDate(picked);
+}
+
 class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
   final TextEditingController _nameController = TextEditingController();
   final FocusNode _nameFocus = FocusNode();
@@ -597,6 +672,7 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
   bool _isLoading = true;
   bool _isSaving = false;
   String? _selectedName;
+  DateTime? _returnDate;
 
   LoanDebtDirection get _direction =>
       loanDebtDirectionForTransaction(widget.transaction);
@@ -670,6 +746,7 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
     setState(() {
       _knownPeople = people;
       _selectedName = selectedName;
+      _returnDate = _normalizeLoanDebtReturnDate(entry?.returnDate);
       _setLoanDebtNameFieldValue(
         _nameController,
         _selectedName ?? '',
@@ -695,6 +772,8 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
         transactionReference: widget.transaction.reference,
         personName: personName,
         direction: _direction,
+        returnDate: _returnDate,
+        replaceReturnDate: true,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -708,6 +787,16 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
       );
       setState(() => _isSaving = false);
     }
+  }
+
+  Future<void> _pickReturnDate() async {
+    final picked = await _pickLoanDebtReturnDate(context, _returnDate);
+    if (!mounted || picked == null) return;
+    setState(() => _returnDate = picked);
+  }
+
+  void _clearReturnDate() {
+    setState(() => _returnDate = null);
   }
 
   @override
@@ -908,6 +997,23 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
                           const BorderSide(color: AppColors.primaryLight),
                     ),
                   ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  context.l10nText('Return date'),
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: AppColors.textPrimary(context),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _LoanDebtDatePickerField(
+                  hint: 'Optional return date',
+                  value: _returnDate == null
+                      ? null
+                      : _formatLoanDebtReturnDate(context, _returnDate!),
+                  onTap: _pickReturnDate,
+                  onClear: _returnDate == null ? null : _clearReturnDate,
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -3386,10 +3492,12 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
   List<String> _knownPeople = const [];
   bool _isLoadingPeople = true;
   bool _isSavingPerson = false;
+  bool _isSavingReturnDate = false;
   Timer? _actionDisarmTimer;
   String? _armedAction;
   String? _pendingAction;
   String? _selectedName;
+  DateTime? _returnDate;
   late _LoanDebtItem _currentItem;
 
   _LoanDebtItem get _item => _currentItem;
@@ -3404,6 +3512,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
   void initState() {
     super.initState();
     _currentItem = widget.item;
+    _returnDate = _item.returnDate;
     if (_needsPerson) {
       _loadKnownPeople();
     } else {
@@ -3481,6 +3590,9 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
         transactionReference: _transaction.reference,
         personName: personName,
         direction: _item.direction,
+        principalAmount: _item.entry?.principalAmount,
+        returnDate: _returnDate,
+        replaceReturnDate: true,
       );
       if (!mounted) return;
       final now = DateTime.now();
@@ -3495,6 +3607,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
             status: LoanDebtStatus.active,
             principalAmount: _item.entry?.principalAmount,
             source: _item.entry?.source ?? LoanDebtEntrySource.transaction,
+            returnDate: _returnDate,
             createdAt: _item.entry?.createdAt ?? now,
             updatedAt: now,
           ),
@@ -3512,6 +3625,78 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
         ),
       );
       setState(() => _isSavingPerson = false);
+    }
+  }
+
+  Future<void> _pickDetailsReturnDate() async {
+    final picked = await _pickLoanDebtReturnDate(context, _returnDate);
+    if (!mounted || picked == null) return;
+    await _saveReturnDate(picked);
+  }
+
+  Future<void> _clearDetailsReturnDate() async {
+    await _saveReturnDate(null);
+  }
+
+  Future<void> _saveReturnDate(DateTime? returnDate) async {
+    if (_isSavingReturnDate || _isActionBusy) return;
+
+    final normalizedDate = _normalizeLoanDebtReturnDate(returnDate);
+    if (_returnDate == null && normalizedDate == null) return;
+    if (_returnDate != null &&
+        normalizedDate != null &&
+        _isSameLoanDebtDate(_returnDate!, normalizedDate)) {
+      return;
+    }
+
+    if (_needsPerson) {
+      setState(() => _returnDate = normalizedDate);
+      return;
+    }
+
+    setState(() => _isSavingReturnDate = true);
+    try {
+      await widget.repository.upsertTransactionPerson(
+        transactionReference: _transaction.reference,
+        personName: _item.personName,
+        direction: _item.direction,
+        principalAmount: _item.entry?.principalAmount,
+        returnDate: normalizedDate,
+        replaceReturnDate: true,
+      );
+      if (!mounted) return;
+      final entry = _item.entry;
+      final now = DateTime.now();
+      setState(() {
+        _returnDate = normalizedDate;
+        if (entry != null) {
+          _currentItem = _item.copyWith(
+            entry: LoanDebtEntry(
+              id: entry.id,
+              transactionReference: entry.transactionReference,
+              personName: entry.personName,
+              direction: entry.direction,
+              status: entry.status,
+              principalAmount: entry.principalAmount,
+              source: entry.source,
+              returnDate: normalizedDate,
+              resolvedAt: entry.resolvedAt,
+              createdAt: entry.createdAt,
+              updatedAt: now,
+            ),
+          );
+        }
+        _isSavingReturnDate = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(context.l10nTextRead('Could not save return date')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      setState(() => _isSavingReturnDate = false);
     }
   }
 
@@ -3740,6 +3925,57 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     );
   }
 
+  Widget _buildReturnDateSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final value = _returnDate == null
+        ? null
+        : _formatLoanDebtReturnDate(context, _returnDate!);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                AppIcons.calendar_today_outlined,
+                size: 18,
+                color: AppColors.textSecondary(context),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                context.l10nText('Return date'),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _LoanDebtDatePickerField(
+            hint: 'Optional return date',
+            value: value,
+            onTap: _isSavingReturnDate ? () {} : _pickDetailsReturnDate,
+            onClear: _returnDate == null || _isSavingReturnDate
+                ? null
+                : _clearDetailsReturnDate,
+          ),
+          if (_isSavingReturnDate) ...[
+            const SizedBox(height: 10),
+            const LinearProgressIndicator(minHeight: 2),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildPersonAssignmentSection(BuildContext context) {
     final theme = Theme.of(context);
     final title = _isBorrowed
@@ -3890,6 +4126,23 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
             ),
           ),
           const SizedBox(height: 12),
+          Text(
+            context.l10nText('Return date'),
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: AppColors.textPrimary(context),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _LoanDebtDatePickerField(
+            hint: 'Optional return date',
+            value: _returnDate == null
+                ? null
+                : _formatLoanDebtReturnDate(context, _returnDate!),
+            onTap: _pickDetailsReturnDate,
+            onClear: _returnDate == null ? null : _clearDetailsReturnDate,
+          ),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             height: 48,
@@ -3970,6 +4223,11 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
       icon: AppIcons.calendar_today_outlined,
       label: context.l10nText('Date & Time'),
       value: _dateTimeLabel(context),
+    );
+    addRow(
+      icon: AppIcons.calendar_today_outlined,
+      label: context.l10nText('Return date'),
+      value: _item.returnDateLabel(context),
     );
     addRow(
       icon: AppIcons.category,
@@ -4166,6 +4424,10 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                   _buildPersonAssignmentSection(context)
                 else
                   _buildLinkedPersonPanel(context),
+                if (!_needsPerson) ...[
+                  const SizedBox(height: 14),
+                  _buildReturnDateSection(context),
+                ],
                 const SizedBox(height: 14),
                 _buildDetailRows(context, provider),
                 if (!_needsPerson) ...[
@@ -5829,6 +6091,7 @@ class _LoanDebtItem {
   double get amount => isActive ? remainingAmount : originalAmount;
   bool get hasPerson => personName.trim().isNotEmpty;
   String get personName => entry?.personName.trim() ?? '';
+  DateTime? get returnDate => _normalizeLoanDebtReturnDate(entry?.returnDate);
   LoanDebtStatus get status {
     final storedStatus = entry?.status ?? LoanDebtStatus.active;
     if (storedStatus == LoanDebtStatus.active && remainingAmount <= 0.005) {
@@ -5866,6 +6129,12 @@ class _LoanDebtItem {
     final parsed = parsedLocalTime;
     if (parsed == null) return context.l10nText('Unknown date');
     return AppDateFormat.monthDayMaybeYear(parsed);
+  }
+
+  String? returnDateLabel(BuildContext context) {
+    final date = returnDate;
+    if (date == null) return null;
+    return _formatLoanDebtReturnDate(context, date);
   }
 
   String timeLabel(BuildContext context) {
@@ -6008,9 +6277,20 @@ List<_LoanDebtChipData> _loanDebtTransactionChips({
     label: _loanDebtDirectionLabel(context, item.direction),
     color: directionColor,
   );
+  final returnDate = item.returnDate;
+  final returnDateChip = returnDate == null
+      ? null
+      : _LoanDebtChipData(
+          label:
+              '${context.l10nText('Due')} ${_formatLoanDebtReturnDate(context, returnDate)}',
+          color: _loanDebtReturnDateColor(returnDate),
+        );
 
   if (item.status == LoanDebtStatus.active) {
-    return [directionChip];
+    return [
+      directionChip,
+      if (returnDateChip != null) returnDateChip,
+    ];
   }
 
   return [
