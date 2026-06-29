@@ -59,6 +59,9 @@ extension SyncEntityX on SyncEntity {
           'profileId',
           'serviceCharge',
           'vat',
+          'sourceType',
+          'sourceMessageId',
+          'sourceFingerprint',
         ];
       case SyncEntity.accounts:
         return const [
@@ -220,7 +223,8 @@ DateTime? _asDate(Object? value) {
   return null;
 }
 
-int _intCol(Object? value, [int fallback = 0]) => _asNum(value)?.toInt() ?? fallback;
+int _intCol(Object? value, [int fallback = 0]) =>
+    _asNum(value)?.toInt() ?? fallback;
 
 // ---------------------------------------------------------------------------
 // SyncFilter — decides whether a record matches a rule.
@@ -287,8 +291,7 @@ class SyncFilter {
     }
 
     if (startDate != null || endDate != null) {
-      final date =
-          _asDate(row['time'] ?? row['createdAt'] ?? row['startDate']);
+      final date = _asDate(row['time'] ?? row['createdAt'] ?? row['startDate']);
       if (date == null) return false;
       if (startDate != null && date.isBefore(startDate!)) return false;
       if (endDate != null && date.isAfter(endDate!)) return false;

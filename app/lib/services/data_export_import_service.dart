@@ -305,12 +305,22 @@ class DataExportImportService {
       final transactionsRaw = _asMapList(data['transactions']);
       if (transactionsRaw.isNotEmpty) {
         final existingReferences = await _getExistingTransactionReferences(db);
+        final existingSourceMessageIds =
+            await _getExistingTransactionSourceValues(db, 'sourceMessageId');
+        final existingSourceFingerprints =
+            await _getExistingTransactionSourceValues(db, 'sourceFingerprint');
         final transactionsList = <Transaction>[];
 
         for (final rawTransaction in transactionsRaw) {
           var transaction = Transaction.fromJson(rawTransaction);
           final reference = transaction.reference.trim();
-          if (reference.isEmpty || existingReferences.contains(reference)) {
+          if (reference.isEmpty ||
+              existingReferences.contains(reference) ||
+              _transactionSourceExists(
+                transaction,
+                sourceMessageIds: existingSourceMessageIds,
+                sourceFingerprints: existingSourceFingerprints,
+              )) {
             continue;
           }
 
@@ -356,6 +366,11 @@ class DataExportImportService {
 
           transactionsList.add(transaction);
           existingReferences.add(reference);
+          _trackTransactionSource(
+            transaction,
+            sourceMessageIds: existingSourceMessageIds,
+            sourceFingerprints: existingSourceFingerprints,
+          );
         }
 
         // Use saveAllTransactions which will auto-associate with active profile
@@ -834,6 +849,63 @@ class DataExportImportService {
       references.add(reference);
     }
     return references;
+  }
+
+  Future<Set<String>> _getExistingTransactionSourceValues(
+    Database db,
+    String column,
+  ) async {
+    final rows = await db.query(
+      'transactions',
+      columns: [column],
+    );
+    final values = <String>{};
+    for (final row in rows) {
+      final value = row[column]?.toString().trim();
+      if (value == null || value.isEmpty) continue;
+      values.add(value);
+    }
+    return values;
+  }
+
+  bool _transactionSourceExists(
+    Transaction transaction, {
+    required Set<String> sourceMessageIds,
+    required Set<String> sourceFingerprints,
+  }) {
+    final sourceFingerprint = transaction.sourceFingerprint?.trim();
+    if (sourceFingerprint != null &&
+        sourceFingerprint.isNotEmpty &&
+        sourceFingerprints.contains(sourceFingerprint)) {
+      return true;
+    }
+
+    final sourceMessageId = transaction.sourceMessageId?.trim();
+    if (sourceMessageId == null ||
+        sourceMessageId.isEmpty ||
+        !sourceMessageIds.contains(sourceMessageId)) {
+      return false;
+    }
+
+    return sourceFingerprint == null ||
+        sourceFingerprint.isEmpty ||
+        sourceFingerprints.contains(sourceFingerprint);
+  }
+
+  void _trackTransactionSource(
+    Transaction transaction, {
+    required Set<String> sourceMessageIds,
+    required Set<String> sourceFingerprints,
+  }) {
+    final sourceMessageId = transaction.sourceMessageId?.trim();
+    if (sourceMessageId != null && sourceMessageId.isNotEmpty) {
+      sourceMessageIds.add(sourceMessageId);
+    }
+
+    final sourceFingerprint = transaction.sourceFingerprint?.trim();
+    if (sourceFingerprint != null && sourceFingerprint.isNotEmpty) {
+      sourceFingerprints.add(sourceFingerprint);
+    }
   }
 
   Future<List<Bank>> _getBanksFromDb() async {

@@ -18,6 +18,9 @@ class Transaction {
   final int? profileId;
   final double? serviceCharge;
   final double? vat;
+  final String? sourceType;
+  final String? sourceMessageId;
+  final String? sourceFingerprint;
 
   Transaction({
     required this.amount,
@@ -37,6 +40,9 @@ class Transaction {
     this.profileId,
     this.serviceCharge,
     this.vat,
+    this.sourceType,
+    this.sourceMessageId,
+    this.sourceFingerprint,
   })  : categoryId = _resolvePrimaryCategoryId(categoryId, categoryIds),
         categoryIds = _normalizeCategoryIds(
           categoryIds,
@@ -153,6 +159,9 @@ class Transaction {
       profileId: toInt(json['profileId']),
       serviceCharge: toDouble(json['serviceCharge']),
       vat: toDouble(json['vat']),
+      sourceType: json['sourceType']?.toString(),
+      sourceMessageId: json['sourceMessageId']?.toString(),
+      sourceFingerprint: json['sourceFingerprint']?.toString(),
     );
   }
 
@@ -174,6 +183,9 @@ class Transaction {
         if (profileId != null) 'profileId': profileId,
         if (serviceCharge != null) 'serviceCharge': serviceCharge,
         if (vat != null) 'vat': vat,
+        if (sourceType != null) 'sourceType': sourceType,
+        if (sourceMessageId != null) 'sourceMessageId': sourceMessageId,
+        if (sourceFingerprint != null) 'sourceFingerprint': sourceFingerprint,
       };
 
   Transaction copyWith({
@@ -194,6 +206,9 @@ class Transaction {
     int? profileId,
     double? serviceCharge,
     double? vat,
+    String? sourceType,
+    String? sourceMessageId,
+    String? sourceFingerprint,
     bool clearCategoryId = false, // Flag to explicitly clear categoryId
     bool clearCategoryIds = false,
     bool clearNote = false,
@@ -248,6 +263,9 @@ class Transaction {
       profileId: profileId ?? this.profileId,
       serviceCharge: serviceCharge ?? this.serviceCharge,
       vat: vat ?? this.vat,
+      sourceType: sourceType ?? this.sourceType,
+      sourceMessageId: sourceMessageId ?? this.sourceMessageId,
+      sourceFingerprint: sourceFingerprint ?? this.sourceFingerprint,
     );
   }
 }

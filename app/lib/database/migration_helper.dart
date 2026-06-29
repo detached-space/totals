@@ -84,6 +84,9 @@ class MigrationHelper {
             'accountNumber': transaction.accountNumber,
             'categoryId': transaction.categoryId,
             'profileId': transaction.profileId,
+            'sourceType': transaction.sourceType,
+            'sourceMessageId': transaction.sourceMessageId,
+            'sourceFingerprint': transaction.sourceFingerprint,
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
         );

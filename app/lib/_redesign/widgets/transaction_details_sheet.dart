@@ -830,6 +830,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       profileId: _tx.profileId,
       serviceCharge: _tx.serviceCharge,
       vat: _tx.vat,
+      sourceType: _tx.sourceType,
+      sourceMessageId: _tx.sourceMessageId,
+      sourceFingerprint: _tx.sourceFingerprint,
     );
   }
 

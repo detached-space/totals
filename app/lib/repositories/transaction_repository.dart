@@ -89,6 +89,9 @@ class TransactionRepository {
       'categoryId': map['categoryId'],
       'categoryIds': map['categoryIds'],
       'profileId': map['profileId'],
+      'sourceType': map['sourceType'],
+      'sourceMessageId': map['sourceMessageId'],
+      'sourceFingerprint': map['sourceFingerprint'],
     });
   }
 
@@ -158,6 +161,9 @@ class TransactionRepository {
       'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
           ? null
           : jsonEncode(transactionToSave.selectedCategoryIds),
+      'sourceType': transactionToSave.sourceType,
+      'sourceMessageId': transactionToSave.sourceMessageId,
+      'sourceFingerprint': transactionToSave.sourceFingerprint,
       'year': year,
       'month': month,
       'day': day,
@@ -187,21 +193,40 @@ class TransactionRepository {
     );
   }
 
-  Future<void> saveAllTransactions(List<Transaction> transactions) async {
+  Future<void> saveAllTransactions(
+    List<Transaction> transactions, {
+    bool skipAutoCategorization = true,
+  }) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
     final batch = db.batch();
     final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
 
     for (var transaction in transactions) {
+      var transactionToSave = transaction;
+      if (!skipAutoCategorization && transaction.categoryId == null) {
+        final selection =
+            await _autoCategorizationService.getCategorySelectionForTransaction(
+          type: transaction.type,
+          receiver: transaction.receiver,
+          creditor: transaction.creditor,
+        );
+        if (selection != null && !selection.isEmpty) {
+          transactionToSave = transaction.copyWith(
+            categoryId: selection.primaryCategoryId,
+            categoryIds: selection.categoryIds,
+          );
+        }
+      }
+
       // Use transaction's profileId if provided, otherwise use active profile
-      final profileId = transaction.profileId ?? activeProfileId;
+      final profileId = transactionToSave.profileId ?? activeProfileId;
 
       // Parse and extract date components for faster queries
       int? year, month, day, week;
-      if (transaction.time != null) {
+      if (transactionToSave.time != null) {
         try {
-          final date = DateTime.parse(transaction.time!);
+          final date = DateTime.parse(transactionToSave.time!);
           year = date.year;
           month = date.month;
           day = date.day;
@@ -214,25 +239,28 @@ class TransactionRepository {
       batch.insert(
         'transactions',
         {
-          'amount': transaction.amount,
-          'reference': transaction.reference,
-          'creditor': transaction.creditor,
-          'receiver': transaction.receiver,
-          'note': transaction.note,
-          'time': transaction.time,
-          'status': transaction.status,
-          'currentBalance': transaction.currentBalance,
-          'serviceCharge': transaction.serviceCharge,
-          'vat': transaction.vat,
-          'bankId': transaction.bankId,
-          'type': transaction.type,
-          'transactionLink': transaction.transactionLink,
-          'accountNumber': transaction.accountNumber,
-          'categoryId': transaction.categoryId,
-          'categoryIds': transaction.selectedCategoryIds.isEmpty
+          'amount': transactionToSave.amount,
+          'reference': transactionToSave.reference,
+          'creditor': transactionToSave.creditor,
+          'receiver': transactionToSave.receiver,
+          'note': transactionToSave.note,
+          'time': transactionToSave.time,
+          'status': transactionToSave.status,
+          'currentBalance': transactionToSave.currentBalance,
+          'serviceCharge': transactionToSave.serviceCharge,
+          'vat': transactionToSave.vat,
+          'bankId': transactionToSave.bankId,
+          'type': transactionToSave.type,
+          'transactionLink': transactionToSave.transactionLink,
+          'accountNumber': transactionToSave.accountNumber,
+          'categoryId': transactionToSave.categoryId,
+          'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
               ? null
-              : jsonEncode(transaction.selectedCategoryIds),
+              : jsonEncode(transactionToSave.selectedCategoryIds),
           'profileId': profileId,
+          'sourceType': transactionToSave.sourceType,
+          'sourceMessageId': transactionToSave.sourceMessageId,
+          'sourceFingerprint': transactionToSave.sourceFingerprint,
           'year': year,
           'month': month,
           'day': day,
@@ -241,13 +269,16 @@ class TransactionRepository {
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
 
-      syncRecords.add(MapEntry(transaction.reference, {
-        'reference': transaction.reference,
-        'type': transaction.type,
-        'amount': transaction.amount,
-        'bankId': transaction.bankId,
-        'time': transaction.time,
+      syncRecords.add(MapEntry(transactionToSave.reference, {
+        'reference': transactionToSave.reference,
+        'type': transactionToSave.type,
+        'amount': transactionToSave.amount,
+        'bankId': transactionToSave.bankId,
+        'time': transactionToSave.time,
         'profileId': profileId,
+        'sourceType': transactionToSave.sourceType,
+        'sourceMessageId': transactionToSave.sourceMessageId,
+        'sourceFingerprint': transactionToSave.sourceFingerprint,
       }));
     }
 

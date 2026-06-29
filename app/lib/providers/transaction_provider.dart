@@ -730,8 +730,7 @@ class TransactionProvider with ChangeNotifier {
       double cashBalance = 0.0;
       for (var t in accountTransactions) {
         double amount = t.amount;
-        final skip = _isSelfTransfer(t) ||
-            _categoryById[t.categoryId]?.uncategorized == true;
+        final skip = _categoryById[t.categoryId]?.uncategorized == true;
         if (t.type == "DEBIT") {
           cashBalance -= amount;
           if (!skip) {
@@ -786,8 +785,7 @@ class TransactionProvider with ChangeNotifier {
 
       for (var t in bankTransactions) {
         double amount = t.amount;
-        final skip = _isSelfTransfer(t) ||
-            _categoryById[t.categoryId]?.uncategorized == true;
+        final skip = _categoryById[t.categoryId]?.uncategorized == true;
         if (t.type == "DEBIT") {
           cashBalance -= amount;
           if (!skip) {
@@ -1638,6 +1636,9 @@ class TransactionProvider with ChangeNotifier {
       profileId: transaction.profileId,
       serviceCharge: transaction.serviceCharge,
       vat: transaction.vat,
+      sourceType: transaction.sourceType,
+      sourceMessageId: transaction.sourceMessageId,
+      sourceFingerprint: transaction.sourceFingerprint,
     );
 
     final previous = _replaceTransactionLocally(updated);

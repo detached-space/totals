@@ -20,6 +20,7 @@ import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/sms_handler/telephony.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/pattern_parser.dart';
+import 'package:totals/utils/sms_transaction_source.dart';
 
 typedef _ReparseProgressCallback = Future<void> Function(
   String stage,
@@ -360,6 +361,10 @@ class AccountTransactionReparseService {
       hintedTransactions: transactions,
       bankAccounts: bankAccounts,
     );
+    final existingSourceMessageIds =
+        _sourceMessageIds(existingByReference.values);
+    final existingSourceFingerprints =
+        _sourceFingerprints(existingByReference.values);
 
     await onProgress?.call('Fetching bank messages...', 0.2);
     final normalizedStartDate = _normalizeStartDate(startDate);
@@ -398,6 +403,7 @@ class AccountTransactionReparseService {
               address,
               messageDate,
               relevantPatterns,
+              banks: _cachedBanks,
             );
       details ??= await FallbackSmsParser.extractTransactionDetails(
         messageBody: cleanedBody,
@@ -406,6 +412,12 @@ class AccountTransactionReparseService {
         bank: bank,
       );
       if (details == null) continue;
+      final parsedBankId = (details['bankId'] as num?)?.toInt() ?? bank.id;
+      final source = SmsTransactionSource.fromMessage(
+        message: message,
+        bankId: parsedBankId,
+      );
+      details.addAll(source.toJson());
       parsedMessages++;
 
       if (!_parsedMessageBelongsToTargetAccount(
@@ -463,6 +475,11 @@ class AccountTransactionReparseService {
           skipAutoCategorization: true,
         );
         existingByReference[referenceKey] = transactionToSave;
+        _trackSource(
+          transactionToSave,
+          sourceMessageIds: existingSourceMessageIds,
+          sourceFingerprints: existingSourceFingerprints,
+        );
         if (didUpdate && !importedReferences.contains(referenceKey)) {
           updatedReferences.add(referenceKey);
         }
@@ -480,10 +497,19 @@ class AccountTransactionReparseService {
         continue;
       }
 
+      if (_sourceAlreadyImported(
+        details,
+        sourceMessageIds: existingSourceMessageIds,
+        sourceFingerprints: existingSourceFingerprints,
+      )) {
+        continue;
+      }
+
       final importResult = await SmsService.retryFailedParse(
         body,
         address,
         messageDate: messageDate,
+        sourceMessageId: message.id,
         skipDashenExpenseDuplicates: true,
         skipAutoCategorization: !applyAutoCategorization,
       );
@@ -497,6 +523,11 @@ class AccountTransactionReparseService {
       if (importedReferenceKey != null) {
         existingByReference[importedReferenceKey] = imported;
         importedReferences.add(importedReferenceKey);
+        _trackSource(
+          imported,
+          sourceMessageIds: existingSourceMessageIds,
+          sourceFingerprints: existingSourceFingerprints,
+        );
         if (imported.categoryId != null) {
           categorizedReferences.add(importedReferenceKey);
         }
@@ -604,6 +635,7 @@ class AccountTransactionReparseService {
         await _telephony.getInboxSms(
           columns: const [
             SmsColumn.ADDRESS,
+            SmsColumn.ID,
             SmsColumn.BODY,
             SmsColumn.DATE,
           ],
@@ -628,6 +660,7 @@ class AccountTransactionReparseService {
         final batch = await _telephony.getInboxSms(
           columns: const [
             SmsColumn.ADDRESS,
+            SmsColumn.ID,
             SmsColumn.BODY,
             SmsColumn.DATE,
           ],
@@ -648,7 +681,9 @@ class AccountTransactionReparseService {
       final body = message.body;
       if (address == null || body == null) continue;
       if (!_matchesBankAddress(bank, address)) continue;
-      final key = '${message.date}_${address.trim()}_${body.trim()}';
+      final key = message.id == null
+          ? '${message.date}_${address.trim()}_${body.trim()}'
+          : 'id:${message.id}';
       byKey.putIfAbsent(key, () => message);
     }
 
@@ -718,6 +753,66 @@ class AccountTransactionReparseService {
       address,
       allBanks: _cachedBanks,
     );
+  }
+
+  Set<String> _sourceMessageIds(Iterable<Transaction> transactions) {
+    return transactions
+        .map((transaction) => transaction.sourceMessageId)
+        .whereType<String>()
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet();
+  }
+
+  Set<String> _sourceFingerprints(Iterable<Transaction> transactions) {
+    return transactions
+        .map((transaction) => transaction.sourceFingerprint)
+        .whereType<String>()
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet();
+  }
+
+  bool _sourceAlreadyImported(
+    Map<String, dynamic> details, {
+    required Set<String> sourceMessageIds,
+    required Set<String> sourceFingerprints,
+  }) {
+    if (details['sourceType'] != SmsTransactionSource.smsType) return false;
+
+    final sourceFingerprint = details['sourceFingerprint']?.toString().trim();
+    if (sourceFingerprint != null &&
+        sourceFingerprint.isNotEmpty &&
+        sourceFingerprints.contains(sourceFingerprint)) {
+      return true;
+    }
+
+    final sourceMessageId = details['sourceMessageId']?.toString().trim();
+    if (sourceMessageId == null ||
+        sourceMessageId.isEmpty ||
+        !sourceMessageIds.contains(sourceMessageId)) {
+      return false;
+    }
+
+    return sourceFingerprint == null ||
+        sourceFingerprint.isEmpty ||
+        sourceFingerprints.contains(sourceFingerprint);
+  }
+
+  void _trackSource(
+    Transaction transaction, {
+    required Set<String> sourceMessageIds,
+    required Set<String> sourceFingerprints,
+  }) {
+    final sourceMessageId = transaction.sourceMessageId?.trim();
+    if (sourceMessageId != null && sourceMessageId.isNotEmpty) {
+      sourceMessageIds.add(sourceMessageId);
+    }
+
+    final sourceFingerprint = transaction.sourceFingerprint?.trim();
+    if (sourceFingerprint != null && sourceFingerprint.isNotEmpty) {
+      sourceFingerprints.add(sourceFingerprint);
+    }
   }
 
   bool _matchesAccount(
@@ -843,6 +938,11 @@ class AccountTransactionReparseService {
       serviceCharge:
           _pickAmount(existing.serviceCharge, reparsed.serviceCharge),
       vat: _pickAmount(existing.vat, reparsed.vat),
+      sourceType: _pickText(existing.sourceType, reparsed.sourceType),
+      sourceMessageId:
+          _pickText(existing.sourceMessageId, reparsed.sourceMessageId),
+      sourceFingerprint:
+          _pickText(existing.sourceFingerprint, reparsed.sourceFingerprint),
     );
 
     if (_isSameTransaction(existing, updated)) {
@@ -887,7 +987,10 @@ class AccountTransactionReparseService {
         listEquals(a.selectedCategoryIds, b.selectedCategoryIds) &&
         a.profileId == b.profileId &&
         a.serviceCharge == b.serviceCharge &&
-        a.vat == b.vat;
+        a.vat == b.vat &&
+        a.sourceType == b.sourceType &&
+        a.sourceMessageId == b.sourceMessageId &&
+        a.sourceFingerprint == b.sourceFingerprint;
   }
 
   String? _pickText(String? existing, String? reparsed) {

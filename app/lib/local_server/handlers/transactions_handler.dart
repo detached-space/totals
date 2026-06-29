@@ -315,6 +315,9 @@ class TransactionsHandler {
       'categoryIds': transaction.selectedCategoryIds.isEmpty
           ? null
           : transaction.selectedCategoryIds,
+      'sourceType': transaction.sourceType,
+      'sourceMessageId': transaction.sourceMessageId,
+      'sourceFingerprint': transaction.sourceFingerprint,
     };
   }
 
