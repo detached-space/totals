@@ -316,10 +316,17 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
 
       if (result.updatedTransactions > 0 ||
           result.importedTransactions > 0 ||
-          result.categorizedTransactions > 0) {
+          result.categorizedTransactions > 0 ||
+          result.removedDuplicateTransactions > 0) {
         await provider.loadData();
       }
       if (!mounted) return;
+
+      String formatActionSummary(List<String> parts) {
+        if (parts.length == 1) return parts.first;
+        if (parts.length == 2) return '${parts[0]} and ${parts[1]}';
+        return '${parts.take(parts.length - 1).join(", ")}, and ${parts.last}';
+      }
 
       final actionParts = <String>[
         if (result.updatedTransactions > 0)
@@ -328,14 +335,12 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
           'imported ${result.importedTransactions}',
         if (result.categorizedTransactions > 0)
           'auto-categorized ${result.categorizedTransactions}',
+        if (result.removedDuplicateTransactions > 0)
+          'removed ${result.removedDuplicateTransactions} duplicate'
+              '${result.removedDuplicateTransactions == 1 ? '' : 's'}',
       ];
-      final actionSummary = actionParts.isEmpty
-          ? null
-          : actionParts.length == 1
-              ? actionParts.first
-              : actionParts.length == 2
-                  ? '${actionParts[0]} and ${actionParts[1]}'
-                  : '${actionParts[0]}, ${actionParts[1]}, and ${actionParts[2]}';
+      final actionSummary =
+          actionParts.isEmpty ? null : formatActionSummary(actionParts);
       final message = result.errorMessage ??
           (result.unsupported
               ? 'Reparse is available only for SMS-backed bank accounts.'

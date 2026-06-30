@@ -40,6 +40,8 @@ class NotificationService {
   static const String _counterpartyActionPrefix = 'txname:';
   static const String _sharedExpensesPayload = 'shared_expenses';
   static const String _sharedExpensesPayloadPrefix = 'shared_expenses:';
+  static const String _accountReparseResultPayloadPrefix =
+      'account_reparse_result:';
   static const int _maxHistoryEntries = 200;
   static const int dailySpendingNotificationId = 9001;
   static const int dailySpendingTestNotificationId = 9002;
@@ -55,6 +57,10 @@ class NotificationService {
 
   bool _initialized = false;
   bool _permissionRequestInProgress = false;
+
+  static String accountReparseResultPayload(String resultId) {
+    return '$_accountReparseResultPayloadPrefix${Uri.encodeComponent(resultId)}';
+  }
 
   Future<void> ensureInitialized() async {
     if (_initialized) return;
@@ -363,6 +369,14 @@ class NotificationService {
       return OpenSharedExpensesIntent(
         groupId: groupId.isEmpty ? null : groupId,
       );
+    }
+
+    if (raw.startsWith(_accountReparseResultPayloadPrefix)) {
+      final resultId = Uri.decodeComponent(
+        raw.substring(_accountReparseResultPayloadPrefix.length),
+      ).trim();
+      if (resultId.isEmpty) return null;
+      return OpenAccountReparseResultIntent(resultId);
     }
 
     return null;
@@ -952,6 +966,7 @@ class NotificationService {
     required int bankId,
     String? bankLabel,
     String? message,
+    String? payload,
   }) async {
     try {
       await ensureInitialized();
@@ -981,6 +996,7 @@ class NotificationService {
           ),
           iOS: DarwinNotificationDetails(),
         ),
+        payload: payload,
       );
       await _recordHistory(
         channel: _accountSyncCompleteChannelId,

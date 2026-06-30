@@ -46,3 +46,9 @@ class OpenSharedExpensesIntent extends NotificationIntent {
     this.openActivities = false,
   });
 }
+
+class OpenAccountReparseResultIntent extends NotificationIntent {
+  final String resultId;
+
+  const OpenAccountReparseResultIntent(this.resultId);
+}
