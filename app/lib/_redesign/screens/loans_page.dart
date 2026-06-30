@@ -665,6 +665,24 @@ Future<DateTime?> _pickLoanDebtReturnDate(
   return _normalizeLoanDebtReturnDate(picked);
 }
 
+String _loanDebtPersonSortKey(String value) => value.trim().toLowerCase();
+
+int _compareLoanDebtPersonNames(String a, String b) {
+  final keyComparison =
+      _loanDebtPersonSortKey(a).compareTo(_loanDebtPersonSortKey(b));
+  if (keyComparison != 0) return keyComparison;
+  return a.trim().compareTo(b.trim());
+}
+
+List<String> _sortedLoanDebtPersonNames(Iterable<String> names) {
+  final sorted = names
+      .map((name) => name.trim())
+      .where((name) => name.isNotEmpty)
+      .toList(growable: true);
+  sorted.sort(_compareLoanDebtPersonNames);
+  return sorted;
+}
+
 class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
   final TextEditingController _nameController = TextEditingController();
   final FocusNode _nameFocus = FocusNode();
@@ -724,9 +742,7 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
     }
     if (!mounted) return;
 
-    final people = (results[0] as List<String>)
-        .where((name) => name.trim().isNotEmpty)
-        .toList(growable: true);
+    final people = _sortedLoanDebtPersonNames(results[0] as List<String>);
     final entry = results[1] as LoanDebtEntry?;
     final existingName = entry?.personName.trim();
     if (existingName != null &&
@@ -735,6 +751,7 @@ class _LoanDebtPersonSheetState extends State<_LoanDebtPersonSheet> {
             .any((name) => name.toLowerCase() == existingName.toLowerCase())) {
       people.insert(0, existingName);
     }
+    people.sort(_compareLoanDebtPersonNames);
     final suggestedName = _suggestedLoanDebtPersonName(widget.transaction);
     final selectedName = existingName != null && existingName.isNotEmpty
         ? existingName
@@ -1970,9 +1987,8 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
       final repayments = results[1] as List<LoanDebtRepayment>;
       final existingRepayments = results[2] as List<LoanDebtRepayment>;
       final existingSurplusEntry = results[3] as LoanDebtEntry?;
-      final knownPeople = (results[4] as List<String>)
-          .where((name) => name.trim().isNotEmpty)
-          .toList(growable: true);
+      final knownPeople =
+          _sortedLoanDebtPersonNames(results[4] as List<String>);
       final existingSurplusName = existingSurplusEntry?.personName.trim();
       if (existingSurplusName != null &&
           existingSurplusName.isNotEmpty &&
@@ -1981,6 +1997,7 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
           )) {
         knownPeople.insert(0, existingSurplusName);
       }
+      knownPeople.sort(_compareLoanDebtPersonNames);
       final existingLoanDebtReferences = existingRepayments
           .map((repayment) => repayment.loanDebtTransactionReference.trim())
           .where((reference) => reference.isNotEmpty)
@@ -2545,7 +2562,7 @@ class _RepaymentLinkSheetState extends State<_RepaymentLinkSheet> {
       }
       people.add(name);
     }
-    return people;
+    return _sortedLoanDebtPersonNames(people);
   }
 
   static List<_LoanDebtItem> candidatesForPerson(
@@ -3538,9 +3555,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
       if (!mounted) return;
       var shouldHighlightSuggestion = false;
       setState(() {
-        _knownPeople = people
-            .where((name) => name.trim().isNotEmpty)
-            .toList(growable: false);
+        _knownPeople = _sortedLoanDebtPersonNames(people);
         if (suggestedName.isNotEmpty && _nameController.text.trim().isEmpty) {
           _selectedName = suggestedName;
           _setLoanDebtNameFieldValue(

@@ -308,6 +308,46 @@ class TransactionProvider with ChangeNotifier {
     return _bankShortNamesById[bankId] ?? 'Bank $bankId';
   }
 
+  String _normalizedSortText(String value) => value.trim().toLowerCase();
+
+  int _compareCashFirst(int aBankId, int bBankId) {
+    final aIsCash = aBankId == CashConstants.bankId;
+    final bIsCash = bBankId == CashConstants.bankId;
+    if (aIsCash == bIsCash) return 0;
+    return aIsCash ? -1 : 1;
+  }
+
+  int _compareBankSummaries(BankSummary a, BankSummary b) {
+    final cashComparison = _compareCashFirst(a.bankId, b.bankId);
+    if (cashComparison != 0) return cashComparison;
+
+    final nameComparison = _normalizedSortText(
+      getBankName(a.bankId),
+    ).compareTo(_normalizedSortText(getBankName(b.bankId)));
+    if (nameComparison != 0) return nameComparison;
+
+    return a.bankId.compareTo(b.bankId);
+  }
+
+  int _compareAccountSummaries(AccountSummary a, AccountSummary b) {
+    final cashComparison = _compareCashFirst(a.bankId, b.bankId);
+    if (cashComparison != 0) return cashComparison;
+
+    final holderComparison = _normalizedSortText(
+      a.accountHolderName,
+    ).compareTo(_normalizedSortText(b.accountHolderName));
+    if (holderComparison != 0) return holderComparison;
+
+    final bankComparison = _normalizedSortText(
+      getBankName(a.bankId),
+    ).compareTo(_normalizedSortText(getBankName(b.bankId)));
+    if (bankComparison != 0) return bankComparison;
+
+    return _normalizedSortText(
+      a.accountNumber,
+    ).compareTo(_normalizedSortText(b.accountNumber));
+  }
+
   Category? getCategoryById(int? id) {
     if (id == null) return null;
     return _categoryById[id];
@@ -769,6 +809,7 @@ class TransactionProvider with ChangeNotifier {
         pendingCredit: account.pendingCredit ?? 0.0,
       );
     }).toList();
+    _accountSummaries.sort(_compareAccountSummaries);
 
     // Calculate Bank Summaries
     _bankSummaries = groupedAccounts.entries.map((entry) {
@@ -823,6 +864,7 @@ class TransactionProvider with ChangeNotifier {
         accountCount: accounts.length,
       );
     }).toList();
+    _bankSummaries.sort(_compareBankSummaries);
 
     // Calculate AllSummary
     double grandTotalCredit =

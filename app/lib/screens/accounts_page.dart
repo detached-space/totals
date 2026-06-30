@@ -9,6 +9,7 @@ import 'package:totals/widgets/add_user_account_form.dart';
 import 'package:totals/screens/account_share_qr_page.dart';
 import 'package:totals/screens/account_share_scan_page.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/constants/cash_constants.dart';
 
 class AccountsPage extends StatefulWidget {
   const AccountsPage({super.key});
@@ -60,11 +61,13 @@ class _AccountsPageState extends State<AccountsPage> {
 
       // Load user accounts
       final accounts = await _userAccountRepo.getUserAccounts();
+      final sortedAccounts = List<UserAccount>.from(accounts)
+        ..sort(_compareUserAccounts);
 
       if (mounted) {
         setState(() {
-          _userAccounts = accounts;
-          final accountKeys = accounts.map(_accountKey).toSet();
+          _userAccounts = sortedAccounts;
+          final accountKeys = sortedAccounts.map(_accountKey).toSet();
           _selectedKeys = _selectedKeys.intersection(accountKeys);
           _isLoading = false;
         });
@@ -89,6 +92,39 @@ class _AccountsPageState extends State<AccountsPage> {
 
   String _accountKey(UserAccount account) {
     return '${account.bankId}:${account.accountNumber}';
+  }
+
+  String _normalizedSortText(String value) => value.trim().toLowerCase();
+
+  bool _isCashWallet(UserAccount account) {
+    return account.bankId == CashConstants.bankId ||
+        _normalizedSortText(account.accountHolderName) ==
+            _normalizedSortText(CashConstants.defaultAccountHolderName);
+  }
+
+  int _compareUserAccounts(UserAccount a, UserAccount b) {
+    final aIsCash = _isCashWallet(a);
+    final bIsCash = _isCashWallet(b);
+    if (aIsCash != bIsCash) return aIsCash ? -1 : 1;
+
+    final holderComparison = _normalizedSortText(
+      a.accountHolderName,
+    ).compareTo(_normalizedSortText(b.accountHolderName));
+    if (holderComparison != 0) return holderComparison;
+
+    final aBank = _getBankInfo(a.bankId);
+    final bBank = _getBankInfo(b.bankId);
+    final bankComparison = _normalizedSortText(
+      aBank?.name ?? aBank?.shortName ?? 'Bank ${a.bankId}',
+    ).compareTo(
+      _normalizedSortText(
+          bBank?.name ?? bBank?.shortName ?? 'Bank ${b.bankId}'),
+    );
+    if (bankComparison != 0) return bankComparison;
+
+    return _normalizedSortText(
+      a.accountNumber,
+    ).compareTo(_normalizedSortText(b.accountNumber));
   }
 
   List<UserAccount> _filterAccounts(List<UserAccount> accounts) {
