@@ -14,6 +14,8 @@ class NotificationSettingsService {
   static const _kBudgetEnabled = 'notifications_budget_enabled';
   static const _kSharedExpensesEnabled =
       'notifications_shared_expenses_enabled';
+  static const _kLoanDebtReturnRemindersEnabled =
+      'notifications_loan_debt_return_reminders_enabled';
   static const _kDailyEnabled = 'notifications_daily_enabled';
   static const _kDailyHour = 'notifications_daily_hour';
   static const _kDailyMinute = 'notifications_daily_minute';
@@ -78,6 +80,16 @@ class NotificationSettingsService {
   Future<void> setSharedExpenseNotificationsEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kSharedExpensesEnabled, enabled);
+  }
+
+  Future<bool> isLoanDebtReturnRemindersEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kLoanDebtReturnRemindersEnabled) ?? true;
+  }
+
+  Future<void> setLoanDebtReturnRemindersEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLoanDebtReturnRemindersEnabled, enabled);
   }
 
   Future<bool> isDailySummaryEnabled() async {

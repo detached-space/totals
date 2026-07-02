@@ -64,6 +64,7 @@ dependencies:
   pretty_qr_code: ^3.6.0
   phosphor_flutter: ^2.1.0
   kenat: ^1.0.1
+  timezone: ^0.9.4
   cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.2
   uuid: ^4.5.1

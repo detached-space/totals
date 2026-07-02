@@ -12,6 +12,7 @@ import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/_redesign/screens/home_page.dart';
 import 'package:totals/_redesign/screens/lock_screen.dart';
+import 'package:totals/_redesign/screens/account_reparse_result_page.dart';
 import 'package:totals/_redesign/screens/money/money_page.dart';
 import 'package:totals/_redesign/screens/budget_page.dart';
 import 'package:totals/_redesign/screens/settings_page.dart';
@@ -28,6 +29,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/app_update_service.dart';
+import 'package:totals/services/account_reparse_result_service.dart';
 import 'package:totals/services/bank_detection_startup_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -85,6 +87,7 @@ class RedesignShellState extends State<RedesignShell>
   int? _activeProfileId;
   StreamSubscription<WidgetLaunchTarget>? _widgetLaunchIntentSub;
   StreamSubscription<NotificationIntent>? _notificationIntentSub;
+  StreamSubscription<AccountReparseDebugResult>? _reparseResultSub;
   StreamSubscription<void>? _backgroundRefreshSub;
   StreamSubscription<void>? _dataSyncSignalSub;
   final ProfileRepository _profileRepo = ProfileRepository();
@@ -101,6 +104,7 @@ class RedesignShellState extends State<RedesignShell>
   bool _hasCheckedNotificationPermissions = false;
   String? _pendingNotificationReference;
   OpenSharedExpensesIntent? _pendingSharedExpensesIntent;
+  OpenAccountReparseResultIntent? _pendingReparseResultIntent;
 
   @override
   void initState() {
@@ -135,7 +139,16 @@ class RedesignShellState extends State<RedesignShell>
           unawaited(_handleNotificationCategorize(intent.reference));
         } else if (intent is OpenSharedExpensesIntent) {
           unawaited(_handleSharedExpensesNotification(intent));
+        } else if (intent is OpenAccountReparseResultIntent) {
+          unawaited(_handleAccountReparseResultNotification(intent));
         }
+      },
+    );
+
+    _reparseResultSub = AccountReparseResultService.instance.stream.listen(
+      (result) {
+        if (!mounted) return;
+        _showReparseResultSnackBar(result);
       },
     );
 
@@ -210,6 +223,7 @@ class RedesignShellState extends State<RedesignShell>
     WidgetsBinding.instance.removeObserver(this);
     _widgetLaunchIntentSub?.cancel();
     _notificationIntentSub?.cancel();
+    _reparseResultSub?.cancel();
     _backgroundRefreshSub?.cancel();
     _dataSyncSignalSub?.cancel();
     unawaited(SharedExpenseNotificationCoordinator.instance.stop());
@@ -344,6 +358,12 @@ class RedesignShellState extends State<RedesignShell>
       if (pendingSharedExpensesIntent != null) {
         _pendingSharedExpensesIntent = null;
         _openSharedExpensesFromNotification(pendingSharedExpensesIntent);
+      }
+
+      final pendingReparseResultIntent = _pendingReparseResultIntent;
+      if (pendingReparseResultIntent != null) {
+        _pendingReparseResultIntent = null;
+        await _openAccountReparseResult(pendingReparseResultIntent.resultId);
       }
 
       if (mounted) {
@@ -586,6 +606,66 @@ class RedesignShellState extends State<RedesignShell>
     }
 
     _openSharedExpensesFromNotification(intent);
+  }
+
+  Future<void> _handleAccountReparseResultNotification(
+    OpenAccountReparseResultIntent intent,
+  ) async {
+    if (!_isAuthenticated) {
+      _pendingReparseResultIntent = intent;
+      await _authenticateIfAvailable();
+      return;
+    }
+
+    await _openAccountReparseResult(intent.resultId);
+  }
+
+  void _showReparseResultSnackBar(AccountReparseDebugResult result) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(result.completionMessage),
+        duration: const Duration(seconds: 8),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Show',
+          onPressed: () {
+            unawaited(
+              _handleAccountReparseResultNotification(
+                OpenAccountReparseResultIntent(result.id),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAccountReparseResult(String resultId) async {
+    if (!mounted) return;
+
+    final result =
+        await AccountReparseResultService.instance.getResult(resultId);
+    if (!mounted) return;
+
+    if (result == null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('Reparse details are no longer available.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AccountReparseResultPage(result: result),
+      ),
+    );
   }
 
   void _openSharedExpensesFromNotification(OpenSharedExpensesIntent intent) {

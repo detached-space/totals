@@ -3,6 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
 import 'package:totals/services/notification_settings_service.dart';
@@ -28,6 +29,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   bool _failedParseReviewEnabled = true;
   bool _budgetEnabled = true;
   bool _sharedExpensesEnabled = true;
+  bool _loanDebtReturnRemindersEnabled = true;
   bool _dailyEnabled = true;
   bool _weeklyEnabled = false;
   bool _monthlyEnabled = false;
@@ -50,6 +52,8 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         await settings.isFailedParseReviewNotificationsEnabled();
     final budget = await settings.isBudgetAlertsEnabled();
     final sharedExpenses = await settings.isSharedExpenseNotificationsEnabled();
+    final loanDebtReturnReminders =
+        await settings.isLoanDebtReturnRemindersEnabled();
     final daily = await settings.isDailySummaryEnabled();
     final weekly = await settings.isWeeklySummaryEnabled();
     final monthly = await settings.isMonthlySummaryEnabled();
@@ -65,6 +69,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       _failedParseReviewEnabled = failedParseReview;
       _budgetEnabled = budget;
       _sharedExpensesEnabled = sharedExpenses;
+      _loanDebtReturnRemindersEnabled = loanDebtReturnReminders;
       _dailyEnabled = daily;
       _weeklyEnabled = weekly;
       _monthlyEnabled = monthly;
@@ -102,6 +107,13 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         .setSharedExpenseNotificationsEnabled(value);
     await NotificationScheduler.syncSharedExpenseNotificationSchedule();
     await SharedExpensePushNotificationService.instance.syncRegistration();
+  }
+
+  Future<void> _setLoanDebtReturnRemindersEnabled(bool value) async {
+    setState(() => _loanDebtReturnRemindersEnabled = value);
+    await NotificationSettingsService.instance
+        .setLoanDebtReturnRemindersEnabled(value);
+    await LoanDebtRepository().syncReturnReminders();
   }
 
   Future<void> _setDailyEnabled(bool value) async {
@@ -208,6 +220,46 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
             ? context.l10nTextRead('Test monthly summary notification sent')
             : context.l10nTextRead('Unable to send notification'),
       );
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack(context.l10nTextRead('Failed to send test notification'));
+    }
+  }
+
+  Future<void> _sendTestLoanDebtReturnReminders() async {
+    try {
+      final permissionGranted =
+          await NotificationService.instance.requestPermissionsIfNeeded();
+      if (!mounted) return;
+      if (!permissionGranted) {
+        _showSnack(
+          context.l10nTextRead(
+            'Notifications are blocked; enable them in Settings',
+          ),
+        );
+        return;
+      }
+
+      final shownCount = await LoanDebtRepository()
+          .showActiveFutureReturnReminderTestNotifications();
+      if (!mounted) return;
+      if (shownCount == 0) {
+        _showSnack(
+          context.l10nTextRead(
+            'No active loan or debt return dates to notify',
+          ),
+        );
+      } else if (shownCount == 1) {
+        _showSnack(
+          context.l10nTextRead('Test loan/debt notification sent'),
+        );
+      } else {
+        _showSnack(
+          context.l10nTextRead(
+            'Test loan/debt notifications sent',
+          ),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       _showSnack(context.l10nTextRead('Failed to send test notification'));
@@ -692,6 +744,34 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                       onChanged: _setBudgetEnabled,
                       activeColor: AppColors.primaryLight,
                     ),
+                  ),
+
+                  _SettingTile(
+                    icon: Icons.event_available_outlined,
+                    iconColor: AppColors.blue,
+                    title: context.l10nText('Loan and debt reminders'),
+                    subtitle: context.l10nText(
+                      'Notify on return dates for active loans and debts',
+                    ),
+                    trailing: Switch(
+                      value: _loanDebtReturnRemindersEnabled,
+                      onChanged: _setLoanDebtReturnRemindersEnabled,
+                      activeThumbColor: AppColors.primaryLight,
+                    ),
+                  ),
+
+                  _SettingTile(
+                    icon: Icons.notification_add_rounded,
+                    iconColor: AppColors.blue,
+                    title: context.l10nText('Test loan/debt reminders'),
+                    subtitle: context.l10nText(
+                      'Show active loans and debts due today or later',
+                    ),
+                    enabled: _loanDebtReturnRemindersEnabled,
+                    showChevron: false,
+                    onTap: _loanDebtReturnRemindersEnabled
+                        ? _sendTestLoanDebtReturnReminders
+                        : null,
                   ),
 
                   _SettingTile(

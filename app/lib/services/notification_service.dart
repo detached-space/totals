@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/data/consts.dart';
 import 'package:totals/models/category.dart' as models;
+import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
@@ -20,6 +21,7 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 class NotificationService {
   NotificationService._();
@@ -33,10 +35,13 @@ class NotificationService {
   static const String _accountSyncCompleteChannelId = 'account_sync_complete';
   static const String _budgetChannelId = 'budgets';
   static const String _sharedExpensesChannelId = 'shared_expenses';
+  static const String _loanDebtRemindersChannelId = 'loan_debt_reminders';
   static const String _historyPrefsKey = 'notification_history_v1';
   static const String _counterpartyActionPrefix = 'txname:';
   static const String _sharedExpensesPayload = 'shared_expenses';
   static const String _sharedExpensesPayloadPrefix = 'shared_expenses:';
+  static const String _accountReparseResultPayloadPrefix =
+      'account_reparse_result:';
   static const int _maxHistoryEntries = 200;
   static const int dailySpendingNotificationId = 9001;
   static const int dailySpendingTestNotificationId = 9002;
@@ -52,6 +57,10 @@ class NotificationService {
 
   bool _initialized = false;
   bool _permissionRequestInProgress = false;
+
+  static String accountReparseResultPayload(String resultId) {
+    return '$_accountReparseResultPayloadPrefix${Uri.encodeComponent(resultId)}';
+  }
 
   Future<void> ensureInitialized() async {
     if (_initialized) return;
@@ -122,6 +131,14 @@ class NotificationService {
         _sharedExpensesChannelId,
         'Shared expenses',
         description: 'Nudges and reminders from shared expenses',
+        importance: Importance.high,
+      ),
+    );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _loanDebtRemindersChannelId,
+        'Loan and debt reminders',
+        description: 'Return date reminders for loans and debts',
         importance: Importance.high,
       ),
     );
@@ -352,6 +369,14 @@ class NotificationService {
       return OpenSharedExpensesIntent(
         groupId: groupId.isEmpty ? null : groupId,
       );
+    }
+
+    if (raw.startsWith(_accountReparseResultPayloadPrefix)) {
+      final resultId = Uri.decodeComponent(
+        raw.substring(_accountReparseResultPayloadPrefix.length),
+      ).trim();
+      if (resultId.isEmpty) return null;
+      return OpenAccountReparseResultIntent(resultId);
     }
 
     return null;
@@ -941,6 +966,7 @@ class NotificationService {
     required int bankId,
     String? bankLabel,
     String? message,
+    String? payload,
   }) async {
     try {
       await ensureInitialized();
@@ -970,6 +996,7 @@ class NotificationService {
           ),
           iOS: DarwinNotificationDetails(),
         ),
+        payload: payload,
       );
       await _recordHistory(
         channel: _accountSyncCompleteChannelId,
@@ -1032,6 +1059,140 @@ class NotificationService {
     } catch (e) {
       if (kDebugMode) {
         print('debug: Failed to show budget alert notification: $e');
+      }
+    }
+  }
+
+  Future<void> scheduleLoanDebtReturnReminder({
+    required String transactionReference,
+    required String personName,
+    required LoanDebtDirection direction,
+    required DateTime returnDate,
+    double? amount,
+  }) async {
+    try {
+      final reference = transactionReference.trim();
+      if (reference.isEmpty) return;
+
+      final scheduledDate = _loanDebtReminderScheduledDate(returnDate);
+      final id = _loanDebtReturnReminderNotificationId(reference);
+      if (scheduledDate == null) {
+        await cancelLoanDebtReturnReminder(reference);
+        return;
+      }
+
+      final enabled = await NotificationSettingsService.instance
+          .isLoanDebtReturnRemindersEnabled();
+      if (!enabled) {
+        await cancelLoanDebtReturnReminder(reference);
+        return;
+      }
+
+      await ensureInitialized();
+
+      final content = _buildLoanDebtReminderContent(
+        personName: personName,
+        direction: direction,
+        amount: amount,
+      );
+
+      await _plugin.zonedSchedule(
+        id,
+        content.title,
+        content.body,
+        scheduledDate,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _loanDebtRemindersChannelId,
+            'Loan and debt reminders',
+            channelDescription: 'Return date reminders for loans and debts',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        payload: 'loan_debt:${Uri.encodeComponent(reference)}',
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to schedule loan/debt reminder: $e');
+      }
+    }
+  }
+
+  Future<bool> showLoanDebtReturnReminderNow({
+    required String transactionReference,
+    required String personName,
+    required LoanDebtDirection direction,
+    double? amount,
+    bool useTestId = false,
+    bool ignoreEnabledCheck = false,
+  }) async {
+    try {
+      final reference = transactionReference.trim();
+      if (reference.isEmpty) return false;
+
+      if (!ignoreEnabledCheck) {
+        final enabled = await NotificationSettingsService.instance
+            .isLoanDebtReturnRemindersEnabled();
+        if (!enabled) return false;
+      }
+
+      await ensureInitialized();
+
+      final content = _buildLoanDebtReminderContent(
+        personName: personName,
+        direction: direction,
+        amount: amount,
+      );
+      final id = useTestId
+          ? _loanDebtReturnReminderTestNotificationId(reference)
+          : _loanDebtReturnReminderNotificationId(reference);
+
+      await _plugin.show(
+        id,
+        content.title,
+        content.body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _loanDebtRemindersChannelId,
+            'Loan and debt reminders',
+            channelDescription: 'Return date reminders for loans and debts',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        payload: 'loan_debt:${Uri.encodeComponent(reference)}',
+      );
+      await _recordHistory(
+        channel: _loanDebtRemindersChannelId,
+        title: content.title,
+        body: content.body,
+      );
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to show loan/debt reminder: $e');
+      }
+      return false;
+    }
+  }
+
+  Future<void> cancelLoanDebtReturnReminder(
+    String transactionReference,
+  ) async {
+    try {
+      final reference = transactionReference.trim();
+      if (reference.isEmpty) return;
+      await ensureInitialized();
+      await _plugin.cancel(_loanDebtReturnReminderNotificationId(reference));
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to cancel loan/debt reminder: $e');
       }
     }
   }
@@ -1227,6 +1388,99 @@ class NotificationService {
 
   static int _sharedExpenseNudgeNotificationId(String nudgeId) {
     return 300000 + (nudgeId.hashCode & 0x0fffffff);
+  }
+
+  static int _loanDebtReturnReminderNotificationId(String reference) {
+    return 700000 + _stableNotificationHash(reference);
+  }
+
+  static int _loanDebtReturnReminderTestNotificationId(String reference) {
+    return 1000000000 + _stableNotificationHash(reference);
+  }
+
+  static int _stableNotificationHash(String value) {
+    var hash = 0;
+    for (final unit in value.codeUnits) {
+      hash = ((hash * 31) + unit) & 0x0fffffff;
+    }
+    return hash;
+  }
+
+  static tz.TZDateTime? _loanDebtReminderScheduledDate(DateTime returnDate) {
+    _configureLocalTimeZone();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final localReturnDate = returnDate.toLocal();
+    final dueDay = DateTime(
+      localReturnDate.year,
+      localReturnDate.month,
+      localReturnDate.day,
+    );
+    if (dueDay.isBefore(today)) return null;
+
+    var scheduled = DateTime(
+      dueDay.year,
+      dueDay.month,
+      dueDay.day,
+      9,
+    );
+    if (!scheduled.isAfter(now)) {
+      scheduled = now.add(const Duration(minutes: 1));
+    }
+
+    return tz.TZDateTime(
+      tz.local,
+      scheduled.year,
+      scheduled.month,
+      scheduled.day,
+      scheduled.hour,
+      scheduled.minute,
+      scheduled.second,
+    );
+  }
+
+  static void _configureLocalTimeZone() {
+    final now = DateTime.now();
+    final offset = now.timeZoneOffset.inMilliseconds;
+    final abbreviation =
+        now.timeZoneName.trim().isEmpty ? 'LOCAL' : now.timeZoneName.trim();
+    tz.setLocalLocation(
+      tz.Location(
+        'device_local_$offset',
+        [tz.minTime],
+        [0],
+        [
+          tz.TimeZone(
+            offset,
+            isDst: false,
+            abbreviation: abbreviation,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String? _formatLoanDebtReminderAmount(double? amount) {
+    if (amount == null || !amount.isFinite || amount <= 0) return null;
+    return 'ETB ${formatNumberWithComma(amount.abs())}';
+  }
+
+  static ({String title, String body}) _buildLoanDebtReminderContent({
+    required String personName,
+    required LoanDebtDirection direction,
+    required double? amount,
+  }) {
+    final cleanName =
+        personName.trim().isEmpty ? 'this person' : personName.trim();
+    final amountText = _formatLoanDebtReminderAmount(amount);
+    final borrowed = direction == LoanDebtDirection.borrowed;
+    final amountPhrase = amountText == null ? '' : ' $amountText';
+    return (
+      title: borrowed ? 'Debt due today' : 'Loan due today',
+      body: borrowed
+          ? "You're due to pay $cleanName$amountPhrase today."
+          : '$cleanName is due to pay you$amountPhrase today.',
+    );
   }
 
   static String _buildTitle(Bank? bank, Transaction transaction) {

@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 26,
+      version: 27,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -40,6 +40,7 @@ class DatabaseHelper {
     await _ensureTransactionFeesSchema(db);
     await _ensureTransactionNotesSchema(db);
     await _ensureTransactionCategoryIdsSchema(db);
+    await _ensureTransactionSourceSchema(db);
     await _ensureAutoCategorizationSchema(db);
     await _ensureLoanDebtSchema(db);
     await _migrateLegacyReceiverMappingsToAutoRules(db);
@@ -96,7 +97,10 @@ class DatabaseHelper {
         month INTEGER,
         day INTEGER,
         week INTEGER,
-        profileId INTEGER
+        profileId INTEGER,
+        sourceType TEXT,
+        sourceMessageId TEXT,
+        sourceFingerprint TEXT
       )
     ''');
 
@@ -265,6 +269,10 @@ class DatabaseHelper {
         .execute('CREATE INDEX idx_accounts_profileId ON accounts(profileId)');
     await db.execute(
         'CREATE INDEX idx_transactions_profileId ON transactions(profileId)');
+    await db.execute(
+        'CREATE INDEX idx_transactions_sourceMessageId ON transactions(sourceType, sourceMessageId)');
+    await db.execute(
+        'CREATE INDEX idx_transactions_sourceFingerprint ON transactions(sourceType, sourceFingerprint)');
     await db.execute(
         'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)');
     await db.execute(
@@ -772,6 +780,10 @@ class DatabaseHelper {
     if (oldVersion < 26) {
       await _ensureSyncSchema(db);
     }
+
+    if (oldVersion < 27) {
+      await _ensureTransactionSourceSchema(db);
+    }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
@@ -1194,6 +1206,44 @@ class DatabaseHelper {
     await batch.commit(noResult: true);
   }
 
+  Future<void> _ensureTransactionSourceSchema(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'",
+    );
+    if (tables.isEmpty) return;
+
+    final cols = await db.rawQuery('PRAGMA table_info(transactions)');
+    final names = cols
+        .map((r) => (r['name'] as String?)?.trim())
+        .whereType<String>()
+        .toSet();
+
+    Future<void> addColumn(String ddl) async {
+      try {
+        await db.execute(ddl);
+      } catch (_) {}
+    }
+
+    if (!names.contains('sourceType')) {
+      await addColumn('ALTER TABLE transactions ADD COLUMN sourceType TEXT');
+    }
+    if (!names.contains('sourceMessageId')) {
+      await addColumn(
+          'ALTER TABLE transactions ADD COLUMN sourceMessageId TEXT');
+    }
+    if (!names.contains('sourceFingerprint')) {
+      await addColumn(
+          'ALTER TABLE transactions ADD COLUMN sourceFingerprint TEXT');
+    }
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_transactions_sourceMessageId ON transactions(sourceType, sourceMessageId)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_transactions_sourceFingerprint ON transactions(sourceType, sourceFingerprint)',
+    );
+  }
+
   Future<void> _ensureAutoCategorizationSchema(Database db) async {
     final tables = await db.rawQuery(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='auto_category_rules'",
@@ -1249,6 +1299,7 @@ class DatabaseHelper {
         status TEXT NOT NULL DEFAULT 'active',
         principalAmount REAL,
         source TEXT NOT NULL DEFAULT 'transaction',
+        returnDate TEXT,
         resolvedAt TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
@@ -1296,6 +1347,10 @@ class DatabaseHelper {
         where: 'principalAmount IS NOT NULL',
       );
     }
+    if (!names.contains('returnDate')) {
+      await addColumn(
+          'ALTER TABLE loan_debt_entries ADD COLUMN returnDate TEXT');
+    }
     await _ensureLoanDebtRepaymentSplitSchema(db);
     await db.execute(
       "CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_personName ON loan_debt_entries(personName COLLATE NOCASE)",
@@ -1305,6 +1360,9 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_status ON loan_debt_entries(status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_loan_debt_entries_returnDate ON loan_debt_entries(returnDate)',
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_loan_debt_repayments_loan ON loan_debt_repayments(loanDebtTransactionReference)',

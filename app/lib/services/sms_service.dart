@@ -26,6 +26,7 @@ import 'package:totals/repositories/profile_repository.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
+import 'package:totals/utils/sms_transaction_source.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 
 enum ParseStatus {
@@ -287,6 +288,7 @@ class SmsService {
           body,
           address,
           messageDate: messageDate,
+          sourceMessageId: message.id,
           notifyUser: false,
           recordFailure: false,
         );
@@ -563,6 +565,7 @@ class SmsService {
 
     final messages = await Telephony.instance.getInboxSms(
       columns: const [
+        SmsColumn.ID,
         SmsColumn.ADDRESS,
         SmsColumn.BODY,
         SmsColumn.DATE,
@@ -629,6 +632,7 @@ class SmsService {
         inboxMessage.body!,
         inboxMessage.address!,
         messageDate: inboxDate,
+        sourceMessageId: inboxMessage.id,
         notifyUser: false,
         skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
         skipAutoCategorization: skipAutoCategorization,
@@ -894,6 +898,44 @@ class SmsService {
     );
   }
 
+  static bool _hasSmsSourceDuplicate(
+    Map<String, dynamic> details,
+    List<Transaction> existingTransactions,
+  ) {
+    final sourceType = details['sourceType']?.toString().trim();
+    if (sourceType != SmsTransactionSource.smsType) return false;
+
+    final sourceMessageId = details['sourceMessageId']?.toString().trim();
+    final sourceFingerprint = details['sourceFingerprint']?.toString().trim();
+    final hasMessageId = sourceMessageId != null && sourceMessageId.isNotEmpty;
+    final hasFingerprint =
+        sourceFingerprint != null && sourceFingerprint.isNotEmpty;
+    if (!hasMessageId && !hasFingerprint) return false;
+
+    for (final transaction in existingTransactions) {
+      if (transaction.sourceType != SmsTransactionSource.smsType) continue;
+
+      if (hasFingerprint &&
+          transaction.sourceFingerprint == sourceFingerprint) {
+        return true;
+      }
+
+      if (!hasMessageId || transaction.sourceMessageId != sourceMessageId) {
+        continue;
+      }
+
+      final existingFingerprint = transaction.sourceFingerprint?.trim();
+      if (!hasFingerprint ||
+          existingFingerprint == null ||
+          existingFingerprint.isEmpty ||
+          existingFingerprint == sourceFingerprint) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   // Static processing logic so it can be used by background handler too.
   static Future<Transaction?> processMessage(
     String messageBody,
@@ -904,11 +946,13 @@ class SmsService {
     bool skipAutoCategorization = false,
     bool allowRemoteBankFetch = true,
     bool allowRemotePatternFetch = false,
+    int? sourceMessageId,
   }) async {
     final result = await _processMessageInternal(
       messageBody,
       senderAddress,
       messageDate: messageDate,
+      sourceMessageId: sourceMessageId,
       notifyUser: notifyUser,
       skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
       skipAutoCategorization: skipAutoCategorization,
@@ -925,11 +969,13 @@ class SmsService {
     DateTime? messageDate,
     bool skipDashenExpenseDuplicates = true,
     bool skipAutoCategorization = false,
+    int? sourceMessageId,
   }) async {
     return _processMessageInternal(
       messageBody,
       senderAddress,
       messageDate: messageDate,
+      sourceMessageId: sourceMessageId,
       notifyUser: false,
       skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
       skipAutoCategorization: skipAutoCategorization,
@@ -947,6 +993,7 @@ class SmsService {
     bool allowRemoteBankFetch = true,
     bool allowRemotePatternFetch = false,
     bool recordFailure = true,
+    int? sourceMessageId,
   }) async {
     print("debug: Processing message: $messageBody");
 
@@ -988,7 +1035,12 @@ class SmsService {
     configService.debugSms(messageBody);
     final cleanedMessageBody = configService.cleanSmsText(messageBody);
     var details = await PatternParser.extractTransactionDetails(
-        cleanedMessageBody, senderAddress, messageDate, relevantPatterns);
+      cleanedMessageBody,
+      senderAddress,
+      messageDate,
+      relevantPatterns,
+      banks: _cachedBanks,
+    );
 
     if (details == null && FallbackSmsParser.isEnabled) {
       print("debug: Trying fallback SMS parser for ${bank.name}");
@@ -1085,10 +1137,26 @@ class SmsService {
     }
 
     final parsedBankId = (details['bankId'] as num?)?.toInt() ?? bank.id;
+    final smsSource = SmsTransactionSource.fromParts(
+      bankId: parsedBankId,
+      messageId: sourceMessageId,
+      senderAddress: senderAddress,
+      body: messageBody,
+      dateMillis: messageDate?.millisecondsSinceEpoch,
+    );
+    details.addAll(smsSource.toJson());
 
     // 3. Check duplicate transaction
     TransactionRepository txRepo = TransactionRepository();
     List<Transaction> existingTx = await txRepo.getTransactions();
+
+    if (_hasSmsSourceDuplicate(details, existingTx)) {
+      print("debug: Duplicate SMS source skipped");
+      return const ParseResult(
+        status: ParseStatus.duplicate,
+        reason: "Duplicate SMS source",
+      );
+    }
 
     String? newRef = details['reference'];
     if (newRef != null && existingTx.any((t) => t.reference == newRef)) {

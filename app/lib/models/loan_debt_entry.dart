@@ -81,6 +81,7 @@ class LoanDebtEntry {
   final LoanDebtStatus status;
   final double? principalAmount;
   final LoanDebtEntrySource source;
+  final DateTime? returnDate;
   final DateTime? resolvedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -93,6 +94,7 @@ class LoanDebtEntry {
     this.status = LoanDebtStatus.active,
     this.principalAmount,
     this.source = LoanDebtEntrySource.transaction,
+    this.returnDate,
     this.resolvedAt,
     required this.createdAt,
     required this.updatedAt,
@@ -112,6 +114,7 @@ class LoanDebtEntry {
       status: loanDebtStatusFromStorage(row['status'] as String?),
       principalAmount: (row['principalAmount'] as num?)?.toDouble(),
       source: loanDebtEntrySourceFromStorage(row['source'] as String?),
+      returnDate: DateTime.tryParse(row['returnDate'] as String? ?? ''),
       resolvedAt: DateTime.tryParse(row['resolvedAt'] as String? ?? ''),
       createdAt: createdAt ?? now,
       updatedAt: updatedAt ?? createdAt ?? now,
@@ -127,6 +130,7 @@ class LoanDebtEntry {
       'status': status.storageValue,
       'principalAmount': principalAmount,
       'source': source.storageValue,
+      'returnDate': returnDate?.toIso8601String(),
       'resolvedAt': resolvedAt?.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -139,6 +143,7 @@ class LoanDebtEntry {
     final createdAt = DateTime.tryParse(json['createdAt'] as String? ?? '');
     final updatedAt = DateTime.tryParse(json['updatedAt'] as String? ?? '');
     final resolvedAt = DateTime.tryParse(json['resolvedAt'] as String? ?? '');
+    final returnDate = DateTime.tryParse(json['returnDate'] as String? ?? '');
     final now = DateTime.now();
     double? toNullableDouble(Object? value) {
       if (value is num) return value.toDouble();
@@ -154,6 +159,7 @@ class LoanDebtEntry {
       status: loanDebtStatusFromStorage(json['status'] as String?),
       principalAmount: toNullableDouble(json['principalAmount']),
       source: loanDebtEntrySourceFromStorage(json['source'] as String?),
+      returnDate: returnDate,
       resolvedAt: resolvedAt,
       createdAt: createdAt ?? now,
       updatedAt: updatedAt ?? createdAt ?? now,

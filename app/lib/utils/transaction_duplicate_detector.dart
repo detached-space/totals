@@ -327,6 +327,11 @@ Transaction _mergeTransactions(
       serviceCharge:
           _pickBetterNumber(merged.serviceCharge, transaction.serviceCharge),
       vat: _pickBetterNumber(merged.vat, transaction.vat),
+      sourceType: _pickBetterText(merged.sourceType, transaction.sourceType),
+      sourceMessageId:
+          _pickBetterText(merged.sourceMessageId, transaction.sourceMessageId),
+      sourceFingerprint: _pickBetterText(
+          merged.sourceFingerprint, transaction.sourceFingerprint),
     );
   }
   return merged;

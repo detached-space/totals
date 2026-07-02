@@ -1,5 +1,6 @@
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
+import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/sms_config_service.dart';
@@ -11,9 +12,18 @@ import 'package:totals/sms_handler/telephony.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/utils/sms_transaction_source.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 
 const int _dashenBankId = 4;
+
+class _ParsedSmsImportResult {
+  final Map<String, dynamic>? details;
+
+  const _ParsedSmsImportResult({this.details});
+
+  bool get isParsed => details != null;
+}
 
 class AccountRegistrationService {
   final AccountRepository _accountRepo = AccountRepository();
@@ -127,6 +137,7 @@ class AccountRegistrationService {
         if (trimmedCode.isEmpty) continue;
         final batch = await telephony.getInboxSms(
           columns: const [
+            SmsColumn.ID,
             SmsColumn.ADDRESS,
             SmsColumn.BODY,
             SmsColumn.DATE,
@@ -156,7 +167,9 @@ class AccountRegistrationService {
     // Remove duplicates based on body and address
     final uniqueMessages = <String, SmsMessage>{};
     for (var msg in allMessages) {
-      final key = '${msg.address}_${msg.body}';
+      final key = msg.id == null
+          ? '${msg.date}_${msg.address}_${msg.body}'
+          : 'id:${msg.id}';
       if (!uniqueMessages.containsKey(key)) {
         uniqueMessages[key] = msg;
       }
@@ -207,6 +220,21 @@ class AccountRegistrationService {
     int duplicatesRemovedCount = 0;
     final totalMessages = messages.length;
     const int batchSize = 10; // Process 10 messages concurrently
+    final existingTransactions = await _transactionRepo.getTransactions();
+    final importedReferences = existingTransactions
+        .map((transaction) => transaction.reference)
+        .toSet();
+    final importedSourceMessageIds = existingTransactions
+        .map((transaction) => transaction.sourceMessageId)
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toSet();
+    final importedSourceFingerprints = existingTransactions
+        .map((transaction) => transaction.sourceFingerprint)
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toSet();
+    final transactionsToImport = <Transaction>[];
 
     // Track the latest message with balance for account update
     Map<String, dynamic>? latestBalanceDetails;
@@ -221,11 +249,12 @@ class AccountRegistrationService {
           : messages.length;
       final batch = messages.sublist(batchStart, batchEnd);
 
-      // Process batch concurrently
+      // Parse batch concurrently. Saving happens after parsing so duplicate
+      // checks use one in-memory reference set instead of reloading the DB.
       final results = await Future.wait(
         batch.map((message) async {
           if (message.body == null || message.address == null) {
-            return {'status': 'skipped', 'details': null};
+            return const _ParsedSmsImportResult();
           }
 
           try {
@@ -241,6 +270,7 @@ class AccountRegistrationService {
                     message.address!,
                     messageDate,
                     relevantPatterns,
+                    banks: _cachedBanks,
                   );
             details ??= await FallbackSmsParser.extractTransactionDetails(
               messageBody: cleanedBody,
@@ -250,31 +280,27 @@ class AccountRegistrationService {
             );
 
             if (details != null) {
-              // Process the message using the existing SmsService logic with message date
-              final transaction = await SmsService.processMessage(
-                message.body!,
-                message.address!,
-                messageDate: messageDate,
-                skipDashenExpenseDuplicates: false,
+              final parsedBankId =
+                  (details['bankId'] as num?)?.toInt() ?? bank.id;
+              final source = SmsTransactionSource.fromMessage(
+                message: message,
+                bankId: parsedBankId,
               );
-
-              return {
-                'status': transaction == null ? 'skipped' : 'processed',
-                'details': details,
-              };
-            } else {
-              return {'status': 'skipped', 'details': null};
+              details.addAll(source.toJson());
+              _applyMessageDate(details, messageDate);
+              return _ParsedSmsImportResult(details: details);
             }
+            return const _ParsedSmsImportResult();
           } catch (e) {
             print("debug: Error processing message: $e");
-            return {'status': 'skipped', 'details': null};
+            return const _ParsedSmsImportResult();
           }
         }),
       );
 
       // Count results and track latest balance
       for (var result in results) {
-        final details = result['details'] as Map<String, dynamic>?;
+        final details = result.details;
         if (details != null &&
             details['currentBalance'] != null &&
             latestBalanceDetails == null) {
@@ -282,17 +308,45 @@ class AccountRegistrationService {
           latestAccountNumber = details['accountNumber'];
         }
 
-        if (result['status'] == 'processed') {
-          importedCount++;
-        } else {
+        if (!result.isParsed) {
           skippedCount++;
+          continue;
         }
+
+        final transaction = _transactionFromDetails(details!);
+        if (transaction == null ||
+            importedReferences.contains(transaction.reference) ||
+            _sourceAlreadyImported(
+              transaction,
+              sourceMessageIds: importedSourceMessageIds,
+              sourceFingerprints: importedSourceFingerprints,
+            )) {
+          skippedCount++;
+          continue;
+        }
+
+        importedReferences.add(transaction.reference);
+        _trackImportedSource(
+          transaction,
+          sourceMessageIds: importedSourceMessageIds,
+          sourceFingerprints: importedSourceFingerprints,
+        );
+        transactionsToImport.add(transaction);
+        importedCount++;
       }
 
       // Report parsing progress after this batch finishes.
       final parsingProgress = batchEnd / totalMessages;
       final status = "Parsing $batchEnd/$totalMessages messages...";
       await reportProgress(status, progress: parsingProgress);
+    }
+
+    if (transactionsToImport.isNotEmpty) {
+      await reportProgress("Saving imported transactions...", progress: 1.0);
+      await _transactionRepo.saveAllTransactions(
+        transactionsToImport,
+        skipAutoCategorization: false,
+      );
     }
 
     // Update account balance from the latest message
@@ -332,6 +386,61 @@ class AccountRegistrationService {
   }
 
   AccountSyncStatusService get syncStatusService => _syncStatusService;
+
+  void _applyMessageDate(
+    Map<String, dynamic> details,
+    DateTime? messageDate,
+  ) {
+    if (messageDate == null) return;
+    details['time'] = messageDate.toIso8601String();
+  }
+
+  Transaction? _transactionFromDetails(Map<String, dynamic> details) {
+    final reference = details['reference']?.toString();
+    if (reference == null || reference.trim().isEmpty) return null;
+
+    return Transaction.fromJson(details);
+  }
+
+  bool _sourceAlreadyImported(
+    Transaction transaction, {
+    required Set<String> sourceMessageIds,
+    required Set<String> sourceFingerprints,
+  }) {
+    final sourceFingerprint = transaction.sourceFingerprint?.trim();
+    if (sourceFingerprint != null &&
+        sourceFingerprint.isNotEmpty &&
+        sourceFingerprints.contains(sourceFingerprint)) {
+      return true;
+    }
+
+    final sourceMessageId = transaction.sourceMessageId?.trim();
+    if (sourceMessageId == null ||
+        sourceMessageId.isEmpty ||
+        !sourceMessageIds.contains(sourceMessageId)) {
+      return false;
+    }
+
+    return sourceFingerprint == null ||
+        sourceFingerprint.isEmpty ||
+        sourceFingerprints.contains(sourceFingerprint);
+  }
+
+  void _trackImportedSource(
+    Transaction transaction, {
+    required Set<String> sourceMessageIds,
+    required Set<String> sourceFingerprints,
+  }) {
+    final sourceMessageId = transaction.sourceMessageId?.trim();
+    if (sourceMessageId != null && sourceMessageId.isNotEmpty) {
+      sourceMessageIds.add(sourceMessageId);
+    }
+
+    final sourceFingerprint = transaction.sourceFingerprint?.trim();
+    if (sourceFingerprint != null && sourceFingerprint.isNotEmpty) {
+      sourceFingerprints.add(sourceFingerprint);
+    }
+  }
 
   Future<int> _removeImportedDuplicates({
     required Bank bank,

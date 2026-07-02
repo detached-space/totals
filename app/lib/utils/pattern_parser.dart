@@ -1,3 +1,4 @@
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/sms_pattern.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
@@ -9,7 +10,8 @@ class PatternParser {
       String messageBody,
       String senderAddress,
       DateTime? messageDate,
-      List<SmsPattern> patterns) async {
+      List<SmsPattern> patterns,
+      {List<Bank>? banks}) async {
     String cleanBody = messageBody.trim();
 
     for (var pattern in patterns) {
@@ -52,9 +54,10 @@ class PatternParser {
             print("debug: Raw account value: '$raw'");
 
             if (raw != null) {
-              final BankConfigService bankConfigService = BankConfigService();
-              final banks = await bankConfigService.getBanks();
-              final bank = banks.firstWhere((b) => b.id == pattern.bankId);
+              final availableBanks =
+                  banks ?? await BankConfigService().getBanks();
+              final bank =
+                  availableBanks.firstWhere((b) => b.id == pattern.bankId);
 
               // Use bank configuration for account extraction
               if (bank.uniformMasking == true && bank.maskPattern != null) {

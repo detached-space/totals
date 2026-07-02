@@ -87,12 +87,22 @@ const List<String> _kBudgetWidgetFallbackColorKeys = [
 
 String _compactAmount(double value) {
   final abs = value.abs();
+  final sign = value < 0 ? '-' : '';
+
+  String formatUnit(double scaled, String suffix) {
+    final rounded = (scaled * 10).round() / 10.0;
+    final formatted = rounded == rounded.roundToDouble()
+        ? rounded.toInt().toString()
+        : rounded.toStringAsFixed(1);
+    return '$sign$formatted$suffix';
+  }
+
+  if (abs >= 999950) {
+    return formatUnit(abs / 1000000, 'M');
+  }
+
   if (abs >= 1000) {
-    final k = abs / 1000;
-    // Show one decimal if fractional, none if whole
-    final s =
-        k == k.roundToDouble() ? '${k.toInt()}.0K' : '${k.toStringAsFixed(1)}K';
-    return value < 0 ? '-$s' : s;
+    return formatUnit(abs / 1000, 'K');
   }
   return value.toStringAsFixed(value == value.roundToDouble() ? 0 : 1);
 }
