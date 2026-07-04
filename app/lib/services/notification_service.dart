@@ -36,6 +36,7 @@ class NotificationService {
   static const String _budgetChannelId = 'budgets';
   static const String _sharedExpensesChannelId = 'shared_expenses';
   static const String _loanDebtRemindersChannelId = 'loan_debt_reminders';
+  static const String _dataSyncChannelId = 'data_sync';
   static const String _historyPrefsKey = 'notification_history_v1';
   static const String _counterpartyActionPrefix = 'txname:';
   static const String _sharedExpensesPayload = 'shared_expenses';
@@ -50,6 +51,7 @@ class NotificationService {
   static const int monthlySpendingNotificationId = 9005;
   static const int monthlySpendingTestNotificationId = 9006;
   static const int sharedExpenseDigestNotificationId = 9007;
+  static const int dataSyncResultNotificationId = 9008;
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -76,8 +78,10 @@ class NotificationService {
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
-    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         _transactionChannelId,
@@ -142,6 +146,14 @@ class NotificationService {
         importance: Importance.high,
       ),
     );
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _dataSyncChannelId,
+        'Data Sync',
+        description: 'Results of syncing your data to your backend',
+        importance: Importance.defaultImportance,
+      ),
+    );
 
     _initialized = true;
   }
@@ -151,7 +163,8 @@ class NotificationService {
   }
 
   Future<void> _handleNotificationResponse(
-      NotificationResponse response) async {
+    NotificationResponse response,
+  ) async {
     try {
       if (response.notificationResponseType ==
           NotificationResponseType.selectedNotificationAction) {
@@ -177,7 +190,8 @@ class NotificationService {
       }
 
       // For regular taps, use the intent bus
-      final payload = response.notificationResponseType ==
+      final payload =
+          response.notificationResponseType ==
               NotificationResponseType.selectedNotificationAction
           ? response.actionId
           : response.payload;
@@ -194,15 +208,18 @@ class NotificationService {
   }
 
   Future<void> _handleQuickCategorizeAction(
-      String actionId, int? notificationId) async {
+    String actionId,
+    int? notificationId,
+  ) async {
     try {
       await ensureInitialized();
       // Parse: tx:<reference>|cat:<categoryId>
       final parts = actionId.split('|cat:');
       if (parts.length != 2) return;
 
-      final reference =
-          Uri.decodeComponent(parts[0].substring(3)); // Remove 'tx:'
+      final reference = Uri.decodeComponent(
+        parts[0].substring(3),
+      ); // Remove 'tx:'
       final categoryId = int.tryParse(parts[1]);
       if (categoryId == null) return;
 
@@ -289,10 +306,7 @@ class NotificationService {
           ? transaction.copyWith(creditor: submittedName)
           : transaction.copyWith(receiver: submittedName);
 
-      await txRepo.saveTransaction(
-        updated,
-        skipAutoCategorization: true,
-      );
+      await txRepo.saveTransaction(updated, skipAutoCategorization: true);
 
       await WidgetService.refreshWidget();
       BackgroundRefreshSignalService.notifyDataChanged();
@@ -433,15 +447,19 @@ class NotificationService {
       if (kIsWeb) return true;
 
       if (defaultTargetPlatform == TargetPlatform.android) {
-        final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+        final androidPlugin = _plugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
         final granted = await androidPlugin?.requestNotificationsPermission();
         if (granted != null) return granted;
         final status = await Permission.notification.request();
         return status.isGranted;
       } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-        final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin>();
+        final iosPlugin = _plugin
+            .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin
+            >();
         final granted = await iosPlugin?.requestPermissions(
           alert: true,
           badge: true,
@@ -475,7 +493,8 @@ class NotificationService {
         if (!enabled) {
           if (kDebugMode) {
             print(
-                'debug: Transaction notification skipped — disabled in settings');
+              'debug: Transaction notification skipped — disabled in settings',
+            );
           }
           return;
         }
@@ -484,10 +503,7 @@ class NotificationService {
       final bank = _findBank(bankId);
       final title = _buildTitle(bank, transaction);
       final categoryLabel = await _categoryLabelForTransaction(transaction);
-      final body = _buildBody(
-        transaction,
-        categoryLabel: categoryLabel,
-      );
+      final body = _buildBody(transaction, categoryLabel: categoryLabel);
 
       final id = _notificationId(transaction);
       final payload = 'tx:${Uri.encodeComponent(transaction.reference)}';
@@ -641,11 +657,13 @@ class NotificationService {
         if (actions.length >= maxCount) break;
         final actionPayload =
             'tx:${Uri.encodeComponent(transaction.reference)}|cat:${cat.id}';
-        actions.add(AndroidNotificationAction(
-          actionPayload,
-          cat.name,
-          showsUserInterface: false,
-        ));
+        actions.add(
+          AndroidNotificationAction(
+            actionPayload,
+            cat.name,
+            showsUserInterface: false,
+          ),
+        );
       }
       return actions;
     } catch (e) {
@@ -718,9 +736,7 @@ class NotificationService {
       showsUserInterface: false,
       cancelNotification: false,
       inputs: <AndroidNotificationActionInput>[
-        AndroidNotificationActionInput(
-          label: 'Enter $role name',
-        ),
+        AndroidNotificationActionInput(label: 'Enter $role name'),
       ],
     );
   }
@@ -906,6 +922,50 @@ class NotificationService {
     );
   }
 
+  /// Posts a single, self-replacing notification summarizing a Data Sync run.
+  /// A failure raises importance; a clean success updates quietly.
+  Future<void> showDataSyncResult({
+    required int sent,
+    required int failed,
+    String? destination,
+  }) async {
+    if (sent <= 0 && failed <= 0) return;
+    try {
+      await ensureInitialized();
+      final dest = (destination ?? '').trim();
+      final suffix = dest.isEmpty ? '' : ' → $dest';
+      final String title;
+      final String body;
+      if (failed > 0) {
+        title = 'Data Sync: $failed failed';
+        body = sent > 0
+            ? '$sent sent, $failed failed$suffix'
+            : "$failed record(s) couldn't be sent$suffix";
+      } else {
+        title = 'Data Sync complete';
+        body = '$sent record(s) synced$suffix';
+      }
+      await _plugin.show(
+        dataSyncResultNotificationId,
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _dataSyncChannelId,
+            'Data Sync',
+            channelDescription: 'Results of syncing your data to your backend',
+            importance: failed > 0
+                ? Importance.high
+                : Importance.defaultImportance,
+            priority: failed > 0 ? Priority.high : Priority.defaultPriority,
+            onlyAlertOnce: failed == 0,
+          ),
+          iOS: const DarwinNotificationDetails(),
+        ),
+      );
+    } catch (_) {}
+  }
+
   Future<void> showAccountSyncProgress({
     required String accountNumber,
     required int bankId,
@@ -1051,11 +1111,7 @@ class NotificationService {
           iOS: DarwinNotificationDetails(),
         ),
       );
-      await _recordHistory(
-        channel: _budgetChannelId,
-        title: title,
-        body: body,
-      );
+      await _recordHistory(channel: _budgetChannelId, title: title, body: body);
     } catch (e) {
       if (kDebugMode) {
         print('debug: Failed to show budget alert notification: $e');
@@ -1182,9 +1238,7 @@ class NotificationService {
     }
   }
 
-  Future<void> cancelLoanDebtReturnReminder(
-    String transactionReference,
-  ) async {
+  Future<void> cancelLoanDebtReturnReminder(String transactionReference) async {
     try {
       final reference = transactionReference.trim();
       if (reference.isEmpty) return;
@@ -1220,7 +1274,7 @@ class NotificationService {
       final body = cleanPayee.isEmpty
           ? 'Pay $amountText${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.'
           : 'Pay $amountText to $cleanPayee'
-              '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
+                '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
 
       await _plugin.show(
         _sharedExpenseNudgeNotificationId(nudgeId),
@@ -1308,11 +1362,11 @@ class NotificationService {
       const title = 'Shared Expenses has a new update';
       final body = hasSingleGroup
           ? updateCount == 1
-              ? '$cleanGroupName has a new shared expense update to review.'
-              : '$cleanGroupName has $updateCount new shared expense updates to review.'
+                ? '$cleanGroupName has a new shared expense update to review.'
+                : '$cleanGroupName has $updateCount new shared expense updates to review.'
           : 'You have $updateCount new shared expense '
-              '${updateCount == 1 ? 'update' : 'updates'}'
-              '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
+                '${updateCount == 1 ? 'update' : 'updates'}'
+                '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
 
       await _plugin.show(
         sharedExpenseDigestNotificationId,
@@ -1418,12 +1472,7 @@ class NotificationService {
     );
     if (dueDay.isBefore(today)) return null;
 
-    var scheduled = DateTime(
-      dueDay.year,
-      dueDay.month,
-      dueDay.day,
-      9,
-    );
+    var scheduled = DateTime(dueDay.year, dueDay.month, dueDay.day, 9);
     if (!scheduled.isAfter(now)) {
       scheduled = now.add(const Duration(minutes: 1));
     }
@@ -1442,21 +1491,13 @@ class NotificationService {
   static void _configureLocalTimeZone() {
     final now = DateTime.now();
     final offset = now.timeZoneOffset.inMilliseconds;
-    final abbreviation =
-        now.timeZoneName.trim().isEmpty ? 'LOCAL' : now.timeZoneName.trim();
+    final abbreviation = now.timeZoneName.trim().isEmpty
+        ? 'LOCAL'
+        : now.timeZoneName.trim();
     tz.setLocalLocation(
-      tz.Location(
-        'device_local_$offset',
-        [tz.minTime],
-        [0],
-        [
-          tz.TimeZone(
-            offset,
-            isDst: false,
-            abbreviation: abbreviation,
-          ),
-        ],
-      ),
+      tz.Location('device_local_$offset', [tz.minTime], [0], [
+        tz.TimeZone(offset, isDst: false, abbreviation: abbreviation),
+      ]),
     );
   }
 
@@ -1470,8 +1511,9 @@ class NotificationService {
     required LoanDebtDirection direction,
     required double? amount,
   }) {
-    final cleanName =
-        personName.trim().isEmpty ? 'this person' : personName.trim();
+    final cleanName = personName.trim().isEmpty
+        ? 'this person'
+        : personName.trim();
     final amountText = _formatLoanDebtReminderAmount(amount);
     final borrowed = direction == LoanDebtDirection.borrowed;
     final amountPhrase = amountText == null ? '' : ' $amountText';
@@ -1493,10 +1535,7 @@ class NotificationService {
     return '$bankLabel • $kind';
   }
 
-  String _buildBody(
-    Transaction transaction, {
-    String? categoryLabel,
-  }) {
+  String _buildBody(Transaction transaction, {String? categoryLabel}) {
     final sign = switch (transaction.type) {
       'CREDIT' => '+',
       'DEBIT' => '-',
@@ -1543,8 +1582,10 @@ class NotificationService {
   static String _formatSyncProgressStage(String stage, int percent) {
     final trimmed = stage.trim();
     final normalizedStage = trimmed.replaceFirst(
-      RegExp(r'^Parsing\s+\d+\s*/\s*\d+\s+messages\.\.\.$',
-          caseSensitive: false),
+      RegExp(
+        r'^Parsing\s+\d+\s*/\s*\d+\s+messages\.\.\.$',
+        caseSensitive: false,
+      ),
       'Parsing messages...',
     );
     if (normalizedStage.isEmpty) {

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_consent_page.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_destination_sheet.dart';
@@ -71,9 +72,12 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
     setState(() => _syncing = false);
     await _load();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sync run complete.')),
-    );
+    final st = SyncService.instance.status.value;
+    final msg = st.failed > 0
+        ? '${st.sent} sent · ${st.failed} failed'
+        : (st.sent > 0 ? '${st.sent} synced' : 'Nothing to sync');
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _addOrEditDestination([SyncDestination? existing]) async {
@@ -147,6 +151,32 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
     await _load();
   }
 
+  Future<void> _resetSyncStateForDebug() async {
+    final confirmed = await _confirm(
+      'Reset sync state?',
+      'Debug only. Clears the synced-records store (the outbox) and re-arms '
+          'every rule so it backfills and re-schedules from scratch. Your '
+          'transactions are untouched.',
+    );
+    if (confirmed != true) return;
+    await _repo.resetSyncStateForDebug();
+    // Re-queue matching records for each enabled rule as *pending* (backfill
+    // enqueues but does not send), so "Sync now" and the schedule both have
+    // something to push.
+    final rules = await _repo.getRules();
+    var queued = 0;
+    for (final rule in rules) {
+      if (rule.enabled) {
+        queued += await SyncService.instance.backfillRule(rule);
+      }
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Sync store cleared — $queued record(s) re-queued.')),
+    );
+    await _load();
+  }
+
   Future<bool?> _confirm(String title, String body) {
     return showDialog<bool>(
       context: context,
@@ -186,6 +216,8 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
                     loading: _syncing,
                     onPressed: _rules.any((r) => r.enabled) ? _syncNow : null,
                   ),
+                  const SizedBox(height: 12),
+                  _statusCard(),
                   const SizedBox(height: 20),
                   _destinationsSection(),
                   const SizedBox(height: 20),
@@ -201,6 +233,8 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
                           builder: (_) => const DataSyncLogPage()),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  _notifyToggle(),
                 ],
                 if (_destinations.isNotEmpty || _rules.isNotEmpty) ...[
                   const SizedBox(height: 24),
@@ -210,8 +244,129 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
                         style: TextStyle(color: AppColors.red)),
                   ),
                 ],
+                if (kDebugMode && _enabled) ...[
+                  const SizedBox(height: 4),
+                  OutlinedButton.icon(
+                    onPressed: _resetSyncStateForDebug,
+                    icon: const Icon(Icons.bug_report_outlined, size: 18),
+                    label: const Text('Clear sync store (debug)'),
+                  ),
+                ],
               ],
             ),
+    );
+  }
+
+  Widget _statusCard() {
+    return ValueListenableBuilder<SyncRunStatus>(
+      valueListenable: SyncService.instance.status,
+      builder: (context, st, _) {
+        final IconData icon;
+        final Color color;
+        final String text;
+        if (st.running) {
+          icon = Icons.sync_rounded;
+          color = AppColors.primaryLight;
+          text = 'Syncing…';
+        } else if (!st.hasResult) {
+          icon = Icons.info_outline_rounded;
+          color = AppColors.slate400;
+          text = 'No sync yet';
+        } else if (st.failed > 0) {
+          icon = Icons.error_outline_rounded;
+          color = AppColors.red;
+          text = '${st.sent} sent · ${st.failed} failed';
+        } else if (st.sent > 0) {
+          icon = Icons.check_circle_outline_rounded;
+          color = AppColors.incomeSuccess;
+          text = '${st.sent} synced';
+        } else {
+          icon = Icons.check_circle_outline_rounded;
+          color = AppColors.slate400;
+          text = 'Up to date';
+        }
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const DataSyncLogPage()),
+          ),
+          child: DataSyncCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                if (st.running)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  )
+                else
+                  Icon(icon, color: color, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (st.hasResult && !st.running)
+                  Text(
+                    _relativeTime(st.at!),
+                    style: TextStyle(
+                      color: AppColors.textTertiary(context),
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _relativeTime(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inSeconds < 60) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    return '${d.inDays}d ago';
+  }
+
+  Widget _notifyToggle() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _settings.notify,
+      builder: (context, value, _) {
+        return DataSyncCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: value,
+            activeColor: AppColors.primaryLight,
+            onChanged: (v) => _settings.setNotify(v),
+            title: Text(
+              'Notify me about syncs',
+              style: TextStyle(
+                color: AppColors.textPrimary(context),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: Text(
+              'A quiet notification when a sync finishes; failures alert.',
+              style: TextStyle(
+                  color: AppColors.textTertiary(context), fontSize: 12),
+            ),
+          ),
+        );
+      },
     );
   }
 

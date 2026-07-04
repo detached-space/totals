@@ -238,45 +238,63 @@ class DatabaseHelper {
 
     // Create indexes for better query performance
     await db.execute(
-        'CREATE INDEX idx_transactions_reference ON transactions(reference)');
+      'CREATE INDEX idx_transactions_reference ON transactions(reference)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_bankId ON transactions(bankId)');
-    await db
-        .execute('CREATE INDEX idx_transactions_time ON transactions(time)');
+      'CREATE INDEX idx_transactions_bankId ON transactions(bankId)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_categoryId ON transactions(categoryId)');
+      'CREATE INDEX idx_transactions_time ON transactions(time)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_year_month ON transactions(year, month)');
+      'CREATE INDEX idx_transactions_categoryId ON transactions(categoryId)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_year_month_day ON transactions(year, month, day)');
+      'CREATE INDEX idx_transactions_year_month ON transactions(year, month)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_bank_year_month ON transactions(bankId, year, month)');
+      'CREATE INDEX idx_transactions_year_month_day ON transactions(year, month, day)',
+    );
     await db.execute(
-        'CREATE INDEX idx_failed_parses_timestamp ON failed_parses(timestamp)');
+      'CREATE INDEX idx_transactions_bank_year_month ON transactions(bankId, year, month)',
+    );
     await db.execute(
-        'CREATE INDEX idx_sms_patterns_bankId ON sms_patterns(bankId)');
+      'CREATE INDEX idx_failed_parses_timestamp ON failed_parses(timestamp)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_sms_patterns_bankId ON sms_patterns(bankId)',
+    );
     await db.execute('CREATE INDEX idx_accounts_bank ON accounts(bank)');
     await db.execute(
-        'CREATE INDEX idx_accounts_accountNumber ON accounts(accountNumber)');
+      'CREATE INDEX idx_accounts_accountNumber ON accounts(accountNumber)',
+    );
     await db.execute('CREATE INDEX idx_budgets_type ON budgets(type)');
-    await db
-        .execute('CREATE INDEX idx_budgets_categoryId ON budgets(categoryId)');
+    await db.execute(
+      'CREATE INDEX idx_budgets_categoryId ON budgets(categoryId)',
+    );
     await db.execute('CREATE INDEX idx_budgets_isActive ON budgets(isActive)');
     await db.execute('CREATE INDEX idx_budgets_calendar ON budgets(calendar)');
-    await db
-        .execute('CREATE INDEX idx_budgets_startDate ON budgets(startDate)');
-    await db
-        .execute('CREATE INDEX idx_accounts_profileId ON accounts(profileId)');
     await db.execute(
-        'CREATE INDEX idx_transactions_profileId ON transactions(profileId)');
+      'CREATE INDEX idx_budgets_startDate ON budgets(startDate)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_sourceMessageId ON transactions(sourceType, sourceMessageId)');
+      'CREATE INDEX idx_accounts_profileId ON accounts(profileId)',
+    );
     await db.execute(
-        'CREATE INDEX idx_transactions_sourceFingerprint ON transactions(sourceType, sourceFingerprint)');
+      'CREATE INDEX idx_transactions_profileId ON transactions(profileId)',
+    );
     await db.execute(
-        'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)');
+      'CREATE INDEX idx_transactions_sourceMessageId ON transactions(sourceType, sourceMessageId)',
+    );
     await db.execute(
-        'CREATE INDEX idx_user_accounts_accountNumber ON user_accounts(accountNumber)');
+      'CREATE INDEX idx_transactions_sourceFingerprint ON transactions(sourceType, sourceFingerprint)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_user_accounts_accountNumber ON user_accounts(accountNumber)',
+    );
 
     await _ensureLoanDebtSchema(db);
 
@@ -301,9 +319,11 @@ class DatabaseHelper {
 
       // Create indexes
       await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_accounts_bank ON accounts(bank)');
+        'CREATE INDEX IF NOT EXISTS idx_accounts_bank ON accounts(bank)',
+      );
       await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_accounts_accountNumber ON accounts(accountNumber)');
+        'CREATE INDEX IF NOT EXISTS idx_accounts_accountNumber ON accounts(accountNumber)',
+      );
     }
 
     if (oldVersion < 3) {
@@ -318,11 +338,13 @@ class DatabaseHelper {
 
     if (oldVersion < 16) {
       try {
-        await db
-            .execute('ALTER TABLE transactions ADD COLUMN serviceCharge REAL');
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN serviceCharge REAL',
+        );
       } catch (e) {
         print(
-            "debug: Error adding serviceCharge column (might already exist): $e");
+          "debug: Error adding serviceCharge column (might already exist): $e",
+        );
       }
       try {
         await db.execute('ALTER TABLE transactions ADD COLUMN vat REAL');
@@ -341,19 +363,25 @@ class DatabaseHelper {
 
         // Create indexes for date queries
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_transactions_time ON transactions(time)');
+          'CREATE INDEX IF NOT EXISTS idx_transactions_time ON transactions(time)',
+        );
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_transactions_year_month ON transactions(year, month)');
+          'CREATE INDEX IF NOT EXISTS idx_transactions_year_month ON transactions(year, month)',
+        );
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_transactions_year_month_day ON transactions(year, month, day)');
+          'CREATE INDEX IF NOT EXISTS idx_transactions_year_month_day ON transactions(year, month, day)',
+        );
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_transactions_bank_year_month ON transactions(bankId, year, month)');
+          'CREATE INDEX IF NOT EXISTS idx_transactions_bank_year_month ON transactions(bankId, year, month)',
+        );
 
         print("debug: Added date columns and indexes to transactions table");
 
         // Populate date columns for existing transactions
-        final transactions =
-            await db.query('transactions', columns: ['id', 'time']);
+        final transactions = await db.query(
+          'transactions',
+          columns: ['id', 'time'],
+        );
         final batch = db.batch();
 
         for (var tx in transactions) {
@@ -373,7 +401,8 @@ class DatabaseHelper {
               );
             } catch (e) {
               print(
-                  "debug: Error parsing date for transaction ${tx['id']}: $e");
+                "debug: Error parsing date for transaction ${tx['id']}: $e",
+              );
             }
           }
         }
@@ -402,26 +431,31 @@ class DatabaseHelper {
       ''');
 
       try {
-        await db
-            .execute('ALTER TABLE transactions ADD COLUMN categoryId INTEGER');
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN categoryId INTEGER',
+        );
       } catch (e) {
         print(
-            "debug: Error adding categoryId column (might already exist): $e");
+          "debug: Error adding categoryId column (might already exist): $e",
+        );
       }
 
       await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_transactions_categoryId ON transactions(categoryId)');
+        'CREATE INDEX IF NOT EXISTS idx_transactions_categoryId ON transactions(categoryId)',
+      );
 
       await _seedBuiltInCategories(db);
 
       // sms_patterns refRequired column (from dynamic branch)
       try {
-        await db
-            .execute('ALTER TABLE sms_patterns ADD COLUMN refRequired INTEGER');
+        await db.execute(
+          'ALTER TABLE sms_patterns ADD COLUMN refRequired INTEGER',
+        );
         print("debug: Added refRequired column to sms_patterns table");
       } catch (e) {
         print(
-            "debug: Error adding refRequired column (might already exist): $e");
+          "debug: Error adding refRequired column (might already exist): $e",
+        );
       }
     }
 
@@ -436,12 +470,14 @@ class DatabaseHelper {
 
       // sms_patterns hasAccount column (from dynamic branch)
       try {
-        await db
-            .execute('ALTER TABLE sms_patterns ADD COLUMN hasAccount INTEGER');
+        await db.execute(
+          'ALTER TABLE sms_patterns ADD COLUMN hasAccount INTEGER',
+        );
         print("debug: Added hasAccount column to sms_patterns table");
       } catch (e) {
         print(
-            "debug: Error adding hasAccount column (might already exist): $e");
+          "debug: Error adding hasAccount column (might already exist): $e",
+        );
       }
     }
 
@@ -451,7 +487,8 @@ class DatabaseHelper {
         await db.execute('ALTER TABLE categories ADD COLUMN description TEXT');
       } catch (e) {
         print(
-            "debug: Error adding description column (might already exist): $e");
+          "debug: Error adding description column (might already exist): $e",
+        );
       }
       await _seedBuiltInCategories(db);
 
@@ -521,16 +558,14 @@ class DatabaseHelper {
       ''');
 
       // Initialize default "Personal" profile if no profiles exist
-      final profileCount =
-          await db.rawQuery('SELECT COUNT(*) as count FROM profiles');
+      final profileCount = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM profiles',
+      );
       if ((profileCount.first['count'] as int) == 0) {
-        await db.insert(
-          'profiles',
-          {
-            'name': 'Personal',
-            'createdAt': DateTime.now().toIso8601String(),
-          },
-        );
+        await db.insert('profiles', {
+          'name': 'Personal',
+          'createdAt': DateTime.now().toIso8601String(),
+        });
       }
     }
 
@@ -565,13 +600,17 @@ class DatabaseHelper {
           )
         ''');
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_budgets_type ON budgets(type)');
+          'CREATE INDEX IF NOT EXISTS idx_budgets_type ON budgets(type)',
+        );
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_budgets_categoryId ON budgets(categoryId)');
+          'CREATE INDEX IF NOT EXISTS idx_budgets_categoryId ON budgets(categoryId)',
+        );
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_budgets_isActive ON budgets(isActive)');
+          'CREATE INDEX IF NOT EXISTS idx_budgets_isActive ON budgets(isActive)',
+        );
         await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_budgets_startDate ON budgets(startDate)');
+          'CREATE INDEX IF NOT EXISTS idx_budgets_startDate ON budgets(startDate)',
+        );
         print("debug: Added budgets table");
       } catch (e) {
         print("debug: Error adding budgets table (might already exist): $e");
@@ -598,7 +637,8 @@ class DatabaseHelper {
         print("debug: Added receiver_category_mappings table");
       } catch (e) {
         print(
-            "debug: Error adding receiver_category_mappings table (might already exist): $e");
+          "debug: Error adding receiver_category_mappings table (might already exist): $e",
+        );
       }
     }
 
@@ -624,7 +664,8 @@ class DatabaseHelper {
         print("debug: Added user_accounts table");
       } catch (e) {
         print(
-            "debug: Error adding user_accounts table (might already exist): $e");
+          "debug: Error adding user_accounts table (might already exist): $e",
+        );
       }
     }
 
@@ -636,8 +677,9 @@ class DatabaseHelper {
         print("debug: Added profileId column to accounts table");
 
         // Add profileId to transactions table
-        await db
-            .execute('ALTER TABLE transactions ADD COLUMN profileId INTEGER');
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN profileId INTEGER',
+        );
         print("debug: Added profileId column to transactions table");
 
         // Create indexes for better query performance
@@ -670,37 +712,32 @@ class DatabaseHelper {
             }
           } else {
             // Create default profile
-            final defaultProfileId = await db.insert(
-              'profiles',
-              {
-                'name': 'Personal',
-                'createdAt': DateTime.now().toIso8601String(),
-              },
-            );
+            final defaultProfileId = await db.insert('profiles', {
+              'name': 'Personal',
+              'createdAt': DateTime.now().toIso8601String(),
+            });
             activeProfileId = defaultProfileId;
             await prefs.setInt('active_profile_id', activeProfileId);
           }
         }
 
         // Update all existing accounts to use active profile
-        await db.update(
-          'accounts',
-          {'profileId': activeProfileId},
-          where: 'profileId IS NULL',
-        );
+        await db.update('accounts', {
+          'profileId': activeProfileId,
+        }, where: 'profileId IS NULL');
         print("debug: Migrated existing accounts to profile $activeProfileId");
 
         // Update all existing transactions to use active profile
-        await db.update(
-          'transactions',
-          {'profileId': activeProfileId},
-          where: 'profileId IS NULL',
-        );
+        await db.update('transactions', {
+          'profileId': activeProfileId,
+        }, where: 'profileId IS NULL');
         print(
-            "debug: Migrated existing transactions to profile $activeProfileId");
+          "debug: Migrated existing transactions to profile $activeProfileId",
+        );
       } catch (e) {
         print(
-            "debug: Error adding profileId columns (might already exist): $e");
+          "debug: Error adding profileId columns (might already exist): $e",
+        );
       }
     }
 
@@ -721,7 +758,8 @@ class DatabaseHelper {
         print("debug: Added categoryIds column to budgets table");
       } catch (e) {
         print(
-            "debug: Error adding categoryIds column (might already exist): $e");
+          "debug: Error adding categoryIds column (might already exist): $e",
+        );
       }
     }
 
@@ -783,57 +821,46 @@ class DatabaseHelper {
 
     if (oldVersion < 27) {
       await _ensureTransactionSourceSchema(db);
+      await _ensureSyncSchema(db);
     }
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
     final batch = db.batch();
     for (final category in models.BuiltInCategories.all) {
-      batch.insert(
-        'categories',
-        {
-          'name': category.name,
-          'essential': category.essential ? 1 : 0,
-          'uncategorized': category.uncategorized ? 1 : 0,
-          'iconKey': category.iconKey,
-          'colorKey': category.colorKey,
-          'description': category.description,
-          'flow': category.flow,
-          'recurring': category.recurring ? 1 : 0,
-          'builtIn': category.builtIn ? 1 : 0,
-          'builtInKey': category.builtInKey,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert('categories', {
+        'name': category.name,
+        'essential': category.essential ? 1 : 0,
+        'uncategorized': category.uncategorized ? 1 : 0,
+        'iconKey': category.iconKey,
+        'colorKey': category.colorKey,
+        'description': category.description,
+        'flow': category.flow,
+        'recurring': category.recurring ? 1 : 0,
+        'builtIn': category.builtIn ? 1 : 0,
+        'builtInKey': category.builtInKey,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
       batch.update(
         'categories',
-        {
-          'iconKey': category.iconKey,
-        },
+        {'iconKey': category.iconKey},
         where: "builtInKey = ? AND (iconKey IS NULL OR iconKey = '')",
         whereArgs: [category.builtInKey],
       );
       batch.update(
         'categories',
-        {
-          'description': category.description,
-        },
+        {'description': category.description},
         where: "builtInKey = ? AND (description IS NULL OR description = '')",
         whereArgs: [category.builtInKey],
       );
       batch.update(
         'categories',
-        {
-          'builtIn': 1,
-        },
+        {'builtIn': 1},
         where: "builtInKey = ?",
         whereArgs: [category.builtInKey],
       );
       batch.update(
         'categories',
-        {
-          'uncategorized': category.uncategorized ? 1 : 0,
-        },
+        {'uncategorized': category.uncategorized ? 1 : 0},
         where: "builtInKey = ?",
         whereArgs: [category.builtInKey],
       );
@@ -906,7 +933,8 @@ class DatabaseHelper {
 
   Future<void> _ensureCategoriesSchema(Database db) async {
     final tables = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='categories'");
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='categories'",
+    );
     if (tables.isEmpty) return;
 
     final cols = await db.rawQuery('PRAGMA table_info(categories)');
@@ -932,7 +960,8 @@ class DatabaseHelper {
     }
     if (!names.contains('uncategorized')) {
       await addColumn(
-          'ALTER TABLE categories ADD COLUMN uncategorized INTEGER NOT NULL DEFAULT 0');
+        'ALTER TABLE categories ADD COLUMN uncategorized INTEGER NOT NULL DEFAULT 0',
+      );
     }
     if (!names.contains('flow')) {
       await addColumn('ALTER TABLE categories ADD COLUMN flow TEXT');
@@ -942,7 +971,8 @@ class DatabaseHelper {
     }
     if (!names.contains('builtIn')) {
       await addColumn(
-          'ALTER TABLE categories ADD COLUMN builtIn INTEGER NOT NULL DEFAULT 0');
+        'ALTER TABLE categories ADD COLUMN builtIn INTEGER NOT NULL DEFAULT 0',
+      );
     }
     if (!names.contains('builtInKey')) {
       await addColumn('ALTER TABLE categories ADD COLUMN builtInKey TEXT');
@@ -1048,8 +1078,9 @@ class DatabaseHelper {
     if (tableNames.contains('transactions')) {
       final names = await columnNames('transactions');
       if (!names.contains('profileId')) {
-        await db
-            .execute('ALTER TABLE transactions ADD COLUMN profileId INTEGER');
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN profileId INTEGER',
+        );
       }
       await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_transactions_profileId ON transactions(profileId)",
@@ -1085,32 +1116,25 @@ class DatabaseHelper {
       }
 
       if (activeProfileId == null) {
-        activeProfileId = await db.insert(
-          'profiles',
-          {
-            'name': 'Personal',
-            'createdAt': DateTime.now().toIso8601String(),
-          },
-        );
+        activeProfileId = await db.insert('profiles', {
+          'name': 'Personal',
+          'createdAt': DateTime.now().toIso8601String(),
+        });
       }
 
       await prefs.setInt('active_profile_id', activeProfileId);
     }
 
     if (tableNames.contains('accounts')) {
-      await db.update(
-        'accounts',
-        {'profileId': activeProfileId},
-        where: 'profileId IS NULL',
-      );
+      await db.update('accounts', {
+        'profileId': activeProfileId,
+      }, where: 'profileId IS NULL');
     }
 
     if (tableNames.contains('transactions')) {
-      await db.update(
-        'transactions',
-        {'profileId': activeProfileId},
-        where: 'profileId IS NULL',
-      );
+      await db.update('transactions', {
+        'profileId': activeProfileId,
+      }, where: 'profileId IS NULL');
     }
   }
 
@@ -1197,7 +1221,7 @@ class DatabaseHelper {
       batch.update(
         'transactions',
         {
-          'categoryIds': jsonEncode(<int>[categoryId])
+          'categoryIds': jsonEncode(<int>[categoryId]),
         },
         where: 'id = ?',
         whereArgs: [id],
@@ -1229,11 +1253,13 @@ class DatabaseHelper {
     }
     if (!names.contains('sourceMessageId')) {
       await addColumn(
-          'ALTER TABLE transactions ADD COLUMN sourceMessageId TEXT');
+        'ALTER TABLE transactions ADD COLUMN sourceMessageId TEXT',
+      );
     }
     if (!names.contains('sourceFingerprint')) {
       await addColumn(
-          'ALTER TABLE transactions ADD COLUMN sourceFingerprint TEXT');
+        'ALTER TABLE transactions ADD COLUMN sourceFingerprint TEXT',
+      );
     }
 
     await db.execute(
@@ -1249,10 +1275,7 @@ class DatabaseHelper {
       "SELECT name FROM sqlite_master WHERE type='table' AND name='auto_category_rules'",
     );
     if (tables.isEmpty) {
-      await _createAutoCategorizationRulesTable(
-        db,
-        ifNotExists: true,
-      );
+      await _createAutoCategorizationRulesTable(db, ifNotExists: true);
     } else {
       final cols = await db.rawQuery('PRAGMA table_info(auto_category_rules)');
       final names = cols
@@ -1331,25 +1354,26 @@ class DatabaseHelper {
     }
     if (!names.contains('resolvedAt')) {
       await addColumn(
-          'ALTER TABLE loan_debt_entries ADD COLUMN resolvedAt TEXT');
+        'ALTER TABLE loan_debt_entries ADD COLUMN resolvedAt TEXT',
+      );
     }
     if (!names.contains('principalAmount')) {
       await addColumn(
-          'ALTER TABLE loan_debt_entries ADD COLUMN principalAmount REAL');
+        'ALTER TABLE loan_debt_entries ADD COLUMN principalAmount REAL',
+      );
     }
     if (!names.contains('source')) {
       await addColumn(
         "ALTER TABLE loan_debt_entries ADD COLUMN source TEXT NOT NULL DEFAULT 'transaction'",
       );
-      await db.update(
-        'loan_debt_entries',
-        {'source': 'repayment_surplus'},
-        where: 'principalAmount IS NOT NULL',
-      );
+      await db.update('loan_debt_entries', {
+        'source': 'repayment_surplus',
+      }, where: 'principalAmount IS NOT NULL');
     }
     if (!names.contains('returnDate')) {
       await addColumn(
-          'ALTER TABLE loan_debt_entries ADD COLUMN returnDate TEXT');
+        'ALTER TABLE loan_debt_entries ADD COLUMN returnDate TEXT',
+      );
     }
     await _ensureLoanDebtRepaymentSplitSchema(db);
     await db.execute(
@@ -1379,8 +1403,9 @@ class DatabaseHelper {
     if (rows.isEmpty) return;
 
     final createSql = ((rows.first['sql'] as String?) ?? '').toLowerCase();
-    final hasSingleRepaymentUnique = createSql
-        .contains('repaymenttransactionreference text not null unique');
+    final hasSingleRepaymentUnique = createSql.contains(
+      'repaymenttransactionreference text not null unique',
+    );
     if (hasSingleRepaymentUnique) {
       await db.transaction((txn) async {
         await txn.execute(
@@ -1463,6 +1488,10 @@ class DatabaseHelper {
         triggerPeriodic INTEGER NOT NULL DEFAULT 0,
         triggerOnNewTxn INTEGER NOT NULL DEFAULT 0,
         triggerOnConnectivity INTEGER NOT NULL DEFAULT 0,
+        scheduleMode TEXT NOT NULL DEFAULT 'off',
+        scheduleIntervalMinutes INTEGER,
+        scheduleTimes TEXT,
+        lastScheduledAt TEXT,
         enabled INTEGER NOT NULL DEFAULT 0,
         backfillDone INTEGER NOT NULL DEFAULT 0,
         lastStatus TEXT,
@@ -1502,6 +1531,38 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_sync_outbox_rule ON sync_outbox(ruleId)',
+    );
+
+    // Defensive: add the per-rule schedule columns (v27) to an existing
+    // sync_rules table created under v26.
+    final ruleCols = await db.rawQuery('PRAGMA table_info(sync_rules)');
+    final ruleColNames = ruleCols
+        .map((c) => c['name'] as String?)
+        .whereType<String>()
+        .toSet();
+    Future<void> addRuleColumn(String name, String ddl) async {
+      if (!ruleColNames.contains(name)) {
+        try {
+          await db.execute(ddl);
+        } catch (_) {}
+      }
+    }
+
+    await addRuleColumn(
+      'scheduleMode',
+      "ALTER TABLE sync_rules ADD COLUMN scheduleMode TEXT NOT NULL DEFAULT 'off'",
+    );
+    await addRuleColumn(
+      'scheduleIntervalMinutes',
+      'ALTER TABLE sync_rules ADD COLUMN scheduleIntervalMinutes INTEGER',
+    );
+    await addRuleColumn(
+      'scheduleTimes',
+      'ALTER TABLE sync_rules ADD COLUMN scheduleTimes TEXT',
+    );
+    await addRuleColumn(
+      'lastScheduledAt',
+      'ALTER TABLE sync_rules ADD COLUMN lastScheduledAt TEXT',
     );
   }
 
@@ -1556,18 +1617,14 @@ class DatabaseHelper {
 
       final groupKey = '$normalizedCounterparty|$flow';
       final isPrimary = promotedGroups.add(groupKey);
-      batch.insert(
-        'auto_category_rules',
-        {
-          'counterparty': row['counterparty'],
-          'normalizedCounterparty': normalizedCounterparty,
-          'flow': flow,
-          'categoryId': categoryId,
-          'isPrimary': isPrimary ? 1 : 0,
-          'createdAt': row['createdAt'] ?? DateTime.now().toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      batch.insert('auto_category_rules', {
+        'counterparty': row['counterparty'],
+        'normalizedCounterparty': normalizedCounterparty,
+        'flow': flow,
+        'categoryId': categoryId,
+        'isPrimary': isPrimary ? 1 : 0,
+        'createdAt': row['createdAt'] ?? DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
     await db.execute('DROP TABLE IF EXISTS auto_category_rules_legacy');
@@ -1610,20 +1667,16 @@ class DatabaseHelper {
         continue;
       }
       final flow = ((row['flow'] as String?) ?? 'expense').trim().toLowerCase();
-      batch.insert(
-        'auto_category_rules',
-        {
-          'counterparty': counterparty.replaceAll(RegExp(r'\s+'), ' '),
-          'normalizedCounterparty': normalizeCounterparty(counterparty),
-          'flow': flow == 'income' ? 'income' : 'expense',
-          'categoryId': categoryId,
-          'isPrimary': 1,
-          'createdAt': (row['createdAt'] as String?)?.trim().isNotEmpty == true
-              ? row['createdAt']
-              : DateTime.now().toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      batch.insert('auto_category_rules', {
+        'counterparty': counterparty.replaceAll(RegExp(r'\s+'), ' '),
+        'normalizedCounterparty': normalizeCounterparty(counterparty),
+        'flow': flow == 'income' ? 'income' : 'expense',
+        'categoryId': categoryId,
+        'isPrimary': 1,
+        'createdAt': (row['createdAt'] as String?)?.trim().isNotEmpty == true
+            ? row['createdAt']
+            : DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
     await db.delete('receiver_category_mappings');
@@ -1660,9 +1713,7 @@ class DatabaseHelper {
       // if there is a single clear candidate with no builtInKey set.
       final candidates = await db.query(
         'categories',
-        columns: [
-          'id',
-        ],
+        columns: ['id'],
         where: '''
           (builtInKey IS NULL OR TRIM(builtInKey) = '')
           AND flow = ?
@@ -1718,11 +1769,11 @@ class DatabaseHelper {
 
       final looksBuiltIn =
           (iconKey == null || iconKey.isEmpty || iconKey == 'gift') &&
-              (flow == null || flow.isEmpty || flow == 'expense') &&
-              (desc == null ||
-                  desc.isEmpty ||
-                  desc == 'Gifts and donations' ||
-                  desc == 'Gifts received or given');
+          (flow == null || flow.isEmpty || flow == 'expense') &&
+          (desc == null ||
+              desc.isEmpty ||
+              desc == 'Gifts and donations' ||
+              desc == 'Gifts received or given');
 
       if (looksBuiltIn) {
         await db.update(
@@ -1741,37 +1792,29 @@ class DatabaseHelper {
     }
 
     if (!hasGiftsGiven) {
-      await db.insert(
-        'categories',
-        {
-          'name': 'Gifts given',
-          'essential': 0,
-          'iconKey': 'gift',
-          'description': 'Gifts you give to others',
-          'flow': 'expense',
-          'recurring': 0,
-          'builtIn': 1,
-          'builtInKey': 'expense_gifts_given',
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await db.insert('categories', {
+        'name': 'Gifts given',
+        'essential': 0,
+        'iconKey': 'gift',
+        'description': 'Gifts you give to others',
+        'flow': 'expense',
+        'recurring': 0,
+        'builtIn': 1,
+        'builtInKey': 'expense_gifts_given',
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
 
     if (!hasGiftsReceived) {
-      await db.insert(
-        'categories',
-        {
-          'name': 'Gifts received',
-          'essential': 0,
-          'iconKey': 'gift',
-          'description': 'Gifts you receive from others',
-          'flow': 'income',
-          'recurring': 0,
-          'builtIn': 1,
-          'builtInKey': 'income_gifts_received',
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await db.insert('categories', {
+        'name': 'Gifts received',
+        'essential': 0,
+        'iconKey': 'gift',
+        'description': 'Gifts you receive from others',
+        'flow': 'income',
+        'recurring': 0,
+        'builtIn': 1,
+        'builtInKey': 'income_gifts_received',
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
   }
 

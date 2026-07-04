@@ -15,6 +15,7 @@ class DataSyncSettingsService {
 
   static const String _masterEnabledKey = 'data_sync_master_enabled';
   static const String _consentVersionKey = 'data_sync_consent_version';
+  static const String _notifyKey = 'data_sync_notify';
 
   /// Bump when the consent copy materially changes to force re-consent.
   static const int currentConsentVersion = 1;
@@ -24,6 +25,7 @@ class DataSyncSettingsService {
 
   final ValueNotifier<bool> masterEnabled = ValueNotifier<bool>(false);
   final ValueNotifier<int> consentVersion = ValueNotifier<int>(0);
+  final ValueNotifier<bool> notify = ValueNotifier<bool>(true);
 
   bool _loaded = false;
 
@@ -34,7 +36,22 @@ class DataSyncSettingsService {
     masterEnabled.value = enabled;
     cachedEnabled = enabled;
     consentVersion.value = prefs.getInt(_consentVersionKey) ?? 0;
+    notify.value = prefs.getBool(_notifyKey) ?? true;
     _loaded = true;
+  }
+
+  Future<void> setNotify(bool value) async {
+    await ensureLoaded();
+    notify.value = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_notifyKey, value);
+  }
+
+  /// Read the notify flag without the in-memory notifier (used by isolates
+  /// that don't run [ensureLoaded]).
+  static Future<bool> readNotifyFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_notifyKey) ?? true;
   }
 
   bool get hasConsent => consentVersion.value >= currentConsentVersion;

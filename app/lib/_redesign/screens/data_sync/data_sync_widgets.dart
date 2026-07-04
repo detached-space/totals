@@ -201,15 +201,17 @@ class DataSyncTextField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: AppColors.textSecondary(context),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+        if (label.isNotEmpty) ...[
+          Text(
+            label,
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
+          const SizedBox(height: 6),
+        ],
         TextFormField(
           controller: controller,
           obscureText: obscure,
