@@ -877,14 +877,14 @@ class SmsService {
         "debug: Removed ${staleReferences.length} historical ATM cash transfer(s) before cutoff");
   }
 
-  static bool _isDashenExpenseDuplicate(
+  static bool _isDashenExactDuplicate(
     Map<String, dynamic> details,
     List<Transaction> existingTransactions,
   ) {
     final bankId = details['bankId'];
     final type = (details['type'] ?? '').toString().toUpperCase();
     final amount = details['amount'];
-    if (bankId != _dashenBankId || type != 'DEBIT' || amount is! num) {
+    if (bankId != _dashenBankId || amount is! num) {
       return false;
     }
 
@@ -1186,20 +1186,21 @@ class SmsService {
     }
 
     if (skipDashenExpenseDuplicates &&
-        _isDashenExpenseDuplicate(details, existingTx)) {
-      print("debug: Duplicate Dashen debit skipped by amount and balance");
+        _isDashenExactDuplicate(details, existingTx)) {
+      print(
+          "debug: Duplicate Dashen transaction skipped by amount and balance");
       if (recordFailure) {
         await _recordFailedParse(
           address: senderAddress,
           body: messageBody,
-          reason: "Duplicate Dashen debit by amount and balance",
+          reason: "Duplicate Dashen transaction by amount and balance",
           timestamp: messageDate,
           bankId: parsedBankId,
         );
       }
       return const ParseResult(
         status: ParseStatus.duplicate,
-        reason: "Duplicate Dashen debit by amount and balance",
+        reason: "Duplicate Dashen transaction by amount and balance",
       );
     }
 

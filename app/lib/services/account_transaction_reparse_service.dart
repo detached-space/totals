@@ -775,9 +775,15 @@ class AccountTransactionReparseService {
     required List<Account> bankAccounts,
   }) {
     final transactionSourceKey = _sourceKeyFromTransaction(transaction);
-    if (transactionSourceKey != null) {
-      return transactionSourceKey == parsed.sourceKey;
+    if (transactionSourceKey == parsed.sourceKey) {
+      return true;
     }
+    if (_sameSourceMessageId(transaction, parsed.transaction)) {
+      return true;
+    }
+    // Legacy SMS fingerprints included provider timestamps. If a stored
+    // fingerprint does not match the newly parsed source, keep checking the
+    // stricter transaction fields below before deciding it is unrelated.
 
     final transactionReferenceKey = _referenceKey(transaction.reference);
     if (parsed.referenceKey != null &&
@@ -809,6 +815,18 @@ class AccountTransactionReparseService {
     }
 
     return _transactionIsNearParsedSmsDate(transaction, parsed.messageDate);
+  }
+
+  bool _sameSourceMessageId(Transaction transaction, Transaction parsed) {
+    if (transaction.sourceType != SmsTransactionSource.smsType ||
+        parsed.sourceType != SmsTransactionSource.smsType) {
+      return false;
+    }
+    final transactionMessageId = transaction.sourceMessageId?.trim();
+    final parsedMessageId = parsed.sourceMessageId?.trim();
+    return transactionMessageId != null &&
+        transactionMessageId.isNotEmpty &&
+        transactionMessageId == parsedMessageId;
   }
 
   List<Transaction> _dedupeTransactionsByReference(
