@@ -214,6 +214,23 @@ String _formatBudgetEtbFull(BuildContext context, double value) {
   return '${context.l10nText('ETB')} ${formatNumberWithComma(value)}';
 }
 
+int _remainingWeeksInRange({
+  required DateTime rangeStart,
+  required DateTime rangeEnd,
+  DateTime? now,
+}) {
+  final current = now ?? DateTime.now();
+  final todayStart = DateTime(current.year, current.month, current.day);
+  final start = todayStart.isBefore(rangeStart)
+      ? rangeStart
+      : todayStart.isBefore(rangeEnd)
+          ? todayStart
+          : rangeEnd;
+  final daysLeft = rangeEnd.difference(start).inDays;
+  if (daysLeft <= 0) return 0;
+  return (daysLeft / 7).ceil();
+}
+
 String _formatBudgetTransactionCount(BuildContext context, int count) {
   final unit = context.l10nText(count == 1 ? 'transaction' : 'transactions');
   return '$count $unit';
@@ -629,6 +646,8 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                         onWidgetBadgeTap: () =>
                             _openBudgetWidgetStyleSheet(b, tp),
                         isRecurring: _isRecurringBudgetInSelectedMonth(b),
+                        periodStart: _monthStart,
+                        periodEnd: _monthEnd,
                         onTap: () => setState(() => _detailBudget = b),
                       ))
                   .toList(),
@@ -651,6 +670,8 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                         onWidgetBadgeTap: () =>
                             _openBudgetWidgetStyleSheet(b, tp),
                         isRecurring: _isRecurringBudgetInSelectedMonth(b),
+                        periodStart: _monthStart,
+                        periodEnd: _monthEnd,
                         onTap: () => setState(() => _detailBudget = b),
                       ))
                   .toList(),
@@ -1137,6 +1158,8 @@ class _BudgetItemRow extends StatelessWidget {
   final Color widgetBadgeColor;
   final VoidCallback onWidgetBadgeTap;
   final bool isRecurring;
+  final DateTime periodStart;
+  final DateTime periodEnd;
   final VoidCallback onTap;
 
   const _BudgetItemRow({
@@ -1147,6 +1170,8 @@ class _BudgetItemRow extends StatelessWidget {
     required this.widgetBadgeColor,
     required this.onWidgetBadgeTap,
     required this.isRecurring,
+    required this.periodStart,
+    required this.periodEnd,
     required this.onTap,
   });
 
@@ -1159,6 +1184,15 @@ class _BudgetItemRow extends StatelessWidget {
     final progressColor = _progressColorForUsage(
       usagePercent: usagePercent,
     );
+    final available = budget.amount - spent;
+    final weeksLeft = _remainingWeeksInRange(
+      rangeStart: periodStart,
+      rangeEnd: periodEnd,
+    );
+    final weeklyAmount =
+        available > 0 && weeksLeft > 0 ? available / weeksLeft : 0.0;
+    final weeklyRateText =
+        '${_formatBudgetEtb(context, weeklyAmount)}/${context.l10nText('week')} ${context.l10nText('left')}';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -1241,28 +1275,40 @@ class _BudgetItemRow extends StatelessWidget {
               const SizedBox(height: 10),
               // Spent + assigned
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    '${context.l10nText('Spent')} ${_formatBudgetEtb(context, spent)}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary(context),
+                  Flexible(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _BudgetFooterBadge(
+                        label: _formatBudgetEtb(context, spent),
+                        backgroundColor: progressColor.withValues(alpha: 0.1),
+                        foregroundColor: progressColor,
+                      ),
                     ),
                   ),
-                  const Spacer(),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.mutedFill(context),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 3,
                     child: Text(
-                      _formatBudgetEtb(context, budget.amount),
+                      weeklyRateText,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary(context),
+                        color: AppColors.textSecondary(context),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: _BudgetFooterBadge(
+                        label: _formatBudgetEtb(context, budget.amount),
                       ),
                     ),
                   ),
@@ -1270,6 +1316,39 @@ class _BudgetItemRow extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BudgetFooterBadge extends StatelessWidget {
+  final String label;
+  final Color? backgroundColor;
+  final Color? foregroundColor;
+
+  const _BudgetFooterBadge({
+    required this.label,
+    this.backgroundColor,
+    this.foregroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: backgroundColor ?? AppColors.mutedFill(context),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: foregroundColor ?? AppColors.textPrimary(context),
         ),
       ),
     );

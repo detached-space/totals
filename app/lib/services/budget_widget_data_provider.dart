@@ -4,15 +4,29 @@ import 'package:totals/models/category.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/services/budget_service.dart';
 
-class BudgetWidgetBudgetSnapshot {
-  final int budgetId;
-  final String name;
+class BudgetWidgetMetricSnapshot {
   final double spentRaw;
   final double amountRaw;
   final double percentUsed;
   final double ringPercent;
   final String compactValueLabel;
   final String expandedValueLabel;
+
+  const BudgetWidgetMetricSnapshot({
+    required this.spentRaw,
+    required this.amountRaw,
+    required this.percentUsed,
+    required this.ringPercent,
+    required this.compactValueLabel,
+    required this.expandedValueLabel,
+  });
+}
+
+class BudgetWidgetBudgetSnapshot {
+  final int budgetId;
+  final String name;
+  final BudgetWidgetMetricSnapshot monthly;
+  final BudgetWidgetMetricSnapshot weekly;
   final String defaultIconKey;
   final String defaultColorKey;
   final String colorHex;
@@ -20,16 +34,14 @@ class BudgetWidgetBudgetSnapshot {
   const BudgetWidgetBudgetSnapshot({
     required this.budgetId,
     required this.name,
-    required this.spentRaw,
-    required this.amountRaw,
-    required this.percentUsed,
-    required this.ringPercent,
-    required this.compactValueLabel,
-    required this.expandedValueLabel,
+    required this.monthly,
+    required this.weekly,
     required this.defaultIconKey,
     required this.defaultColorKey,
     required this.colorHex,
   });
+
+  double get amountRaw => monthly.amountRaw;
 }
 
 class BudgetWidgetPayload {
@@ -79,7 +91,7 @@ class BudgetWidgetDataProvider {
     for (final status in visibleStatuses) {
       final budgetId = status.budget.id;
       if (budgetId == null) continue;
-      budgetsById[budgetId] = _buildBudgetSnapshot(
+      budgetsById[budgetId] = await _buildBudgetSnapshot(
         status: status,
         categoryById: categoryById,
       );
@@ -97,10 +109,10 @@ class BudgetWidgetDataProvider {
     );
   }
 
-  BudgetWidgetBudgetSnapshot _buildBudgetSnapshot({
+  Future<BudgetWidgetBudgetSnapshot> _buildBudgetSnapshot({
     required BudgetStatus status,
     required Map<int, Category> categoryById,
-  }) {
+  }) async {
     final budget = status.budget;
     final defaultColorKey = _resolveBudgetColorKey(
       budget: budget,
@@ -113,22 +125,90 @@ class BudgetWidgetDataProvider {
     );
     final budgetName =
         budget.name.trim().isEmpty ? 'Budget' : budget.name.trim();
-    final spentLabel = _formatMetricNumber(status.spent);
-    final amountLabel = _formatMetricNumber(budget.amount);
+    final monthlyMetric = _buildMetricSnapshot(
+      spent: status.spent,
+      amount: budget.amount,
+    );
+    final weeklyMetric = await _buildWeeklyMetricSnapshot(status);
 
     return BudgetWidgetBudgetSnapshot(
       budgetId: budget.id!,
       name: budgetName,
-      spentRaw: status.spent,
-      amountRaw: budget.amount,
-      percentUsed: status.percentageUsed,
-      ringPercent: status.percentageUsed.clamp(0.0, 100.0).toDouble(),
-      compactValueLabel: spentLabel,
-      expandedValueLabel: '$spentLabel /$amountLabel ETB',
+      monthly: monthlyMetric,
+      weekly: weeklyMetric,
       defaultIconKey: defaultIconKey,
       defaultColorKey: defaultColorKey,
       colorHex: _colorToHex(color),
     );
+  }
+
+  BudgetWidgetMetricSnapshot _buildMetricSnapshot({
+    required double spent,
+    required double amount,
+  }) {
+    final spentLabel = _formatMetricNumber(spent);
+    final amountLabel = _formatMetricNumber(amount);
+    final percentUsed = amount > 0 ? (spent / amount) * 100 : 0.0;
+
+    return BudgetWidgetMetricSnapshot(
+      spentRaw: spent,
+      amountRaw: amount,
+      percentUsed: percentUsed,
+      ringPercent: percentUsed.clamp(0.0, 100.0).toDouble(),
+      compactValueLabel: spentLabel,
+      expandedValueLabel: '$spentLabel /$amountLabel ETB',
+    );
+  }
+
+  Future<BudgetWidgetMetricSnapshot> _buildWeeklyMetricSnapshot(
+    BudgetStatus status,
+  ) async {
+    final budget = status.budget;
+    final weekRange = _currentWeekRangeWithinStatus(status);
+    final spent = await _budgetService.calculateSpending(
+      startDate: weekRange.start,
+      endDate: weekRange.end,
+      categoryId: budget.categoryId,
+      categoryIds: budget.categoryIds,
+    );
+    final weeksInPeriod = _weeksInRange(status.periodStart, status.periodEnd);
+    final amount = weeksInPeriod > 0 ? budget.amount / weeksInPeriod : 0.0;
+    return _buildMetricSnapshot(spent: spent, amount: amount);
+  }
+
+  _BudgetWidgetDateRange _currentWeekRangeWithinStatus(BudgetStatus status) {
+    final now = DateTime.now();
+    final periodStart = _startOfDay(status.periodStart);
+    final periodEnd = status.periodEnd;
+    var start = _startOfWeek(now);
+    if (start.isBefore(periodStart)) start = periodStart;
+
+    var end = _endOfDay(start.add(const Duration(days: 6)));
+    if (end.isAfter(periodEnd)) end = periodEnd;
+    if (end.isBefore(start)) end = _endOfDay(start);
+
+    return _BudgetWidgetDateRange(start: start, end: end);
+  }
+
+  DateTime _startOfDay(DateTime date) {
+    return DateTime(date.year, date.month, date.day);
+  }
+
+  DateTime _endOfDay(DateTime date) {
+    return DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+  }
+
+  DateTime _startOfWeek(DateTime date) {
+    final day = _startOfDay(date);
+    return day.subtract(Duration(days: date.weekday - DateTime.monday));
+  }
+
+  int _weeksInRange(DateTime start, DateTime end) {
+    final startDay = _startOfDay(start);
+    final endDay = _startOfDay(end);
+    final days = endDay.difference(startDay).inDays + 1;
+    if (days <= 0) return 1;
+    return (days + 6) ~/ 7;
   }
 
   String _resolveBudgetIconKey({
@@ -255,6 +335,16 @@ class BudgetWidgetDataProvider {
     final day = now.day.toString().padLeft(2, '0');
     return '$month/$day, $hour:$minute';
   }
+}
+
+class _BudgetWidgetDateRange {
+  final DateTime start;
+  final DateTime end;
+
+  const _BudgetWidgetDateRange({
+    required this.start,
+    required this.end,
+  });
 }
 
 const Map<String, Color> _kBudgetWidgetColors = {

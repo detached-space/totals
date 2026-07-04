@@ -175,29 +175,39 @@ class WidgetService {
               '${prefix}_name',
               snapshot.name,
             );
+            await _saveBudgetWidgetMetricData(
+              prefix: prefix,
+              period: 'monthly',
+              metric: snapshot.monthly,
+            );
+            await _saveBudgetWidgetMetricData(
+              prefix: prefix,
+              period: 'weekly',
+              metric: snapshot.weekly,
+            );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_compact_value',
-              snapshot.compactValueLabel,
+              snapshot.monthly.compactValueLabel,
             );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_expanded_value',
-              snapshot.expandedValueLabel,
+              snapshot.monthly.expandedValueLabel,
             );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_spent_raw',
-              snapshot.spentRaw.toString(),
+              snapshot.monthly.spentRaw.toString(),
             );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_amount_raw',
-              snapshot.amountRaw.toString(),
+              snapshot.monthly.amountRaw.toString(),
             );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_percent',
-              snapshot.percentUsed.toString(),
+              snapshot.monthly.percentUsed.toString(),
             );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_ring_percent',
-              snapshot.ringPercent.toString(),
+              snapshot.monthly.ringPercent.toString(),
             );
             await HomeWidget.saveWidgetData<String>(
               '${prefix}_icon_key',
@@ -214,6 +224,8 @@ class WidgetService {
 
         await HomeWidget.saveWidgetData<String>('${prefix}_budget_id', '');
         await HomeWidget.saveWidgetData<String>('${prefix}_name', '');
+        await _clearBudgetWidgetMetricData(prefix: prefix, period: 'monthly');
+        await _clearBudgetWidgetMetricData(prefix: prefix, period: 'weekly');
         await HomeWidget.saveWidgetData<String>('${prefix}_compact_value', '');
         await HomeWidget.saveWidgetData<String>('${prefix}_expanded_value', '');
         await HomeWidget.saveWidgetData<String>('${prefix}_spent_raw', '0');
@@ -237,6 +249,67 @@ class WidgetService {
     } catch (e) {
       print('Error updating budget widget: $e');
     }
+  }
+
+  static Future<void> _saveBudgetWidgetMetricData({
+    required String prefix,
+    required String period,
+    required BudgetWidgetMetricSnapshot metric,
+  }) async {
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_compact_value',
+      metric.compactValueLabel,
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_expanded_value',
+      metric.expandedValueLabel,
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_spent_raw',
+      metric.spentRaw.toString(),
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_amount_raw',
+      metric.amountRaw.toString(),
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_percent',
+      metric.percentUsed.toString(),
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_ring_percent',
+      metric.ringPercent.toString(),
+    );
+  }
+
+  static Future<void> _clearBudgetWidgetMetricData({
+    required String prefix,
+    required String period,
+  }) async {
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_compact_value',
+      '',
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_expanded_value',
+      '',
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_spent_raw',
+      '0',
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_amount_raw',
+      '0',
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_percent',
+      '0',
+    );
+    await HomeWidget.saveWidgetData<String>(
+      '${prefix}_${period}_ring_percent',
+      '0',
+    );
   }
 
   static Future<void> _saveCategoryData({

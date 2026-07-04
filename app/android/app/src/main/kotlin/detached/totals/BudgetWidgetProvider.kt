@@ -30,9 +30,23 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
     companion object {
         private const val MAX_BUDGETS = 3
         private const val MATERIAL_ICONS_FONT_ASSET = "flutter_assets/fonts/MaterialIcons-Regular.otf"
+        private const val ACTION_TOGGLE_BUDGET_PERIOD =
+            "detached.totals.action.TOGGLE_BUDGET_PERIOD"
+        private const val BUDGET_PERIOD_PREF_PREFIX = "budget_widget_period_"
 
         @Volatile
         private var materialIconsTypeface: Typeface? = null
+    }
+
+    private enum class BudgetPeriod(val storageValue: String) {
+        MONTHLY("monthly"),
+        WEEKLY("weekly");
+
+        companion object {
+            fun fromStorage(value: String?): BudgetPeriod {
+                return values().firstOrNull { it.storageValue == value } ?: MONTHLY
+            }
+        }
     }
 
     private data class BudgetWidgetItem(
@@ -48,10 +62,33 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
         val widthDp: Int,
         val heightDp: Int,
         val legendVisible: Boolean,
-        val fractionVisible: Boolean
+        val fractionVisible: Boolean,
+        val periodToggleEnabled: Boolean
     )
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_TOGGLE_BUDGET_PERIOD) {
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val widgetId = intent.getIntExtra(
+                AppWidgetManager.EXTRA_APPWIDGET_ID,
+                AppWidgetManager.INVALID_APPWIDGET_ID
+            )
+            if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) return
+
+            val prefs = HomeWidgetPlugin.getData(context)
+            val key = periodPreferenceKey(widgetId)
+            val selectedPeriod = BudgetPeriod.fromStorage(prefs.getString(key, null))
+            val nextPeriod = if (selectedPeriod == BudgetPeriod.MONTHLY) {
+                BudgetPeriod.WEEKLY
+            } else {
+                BudgetPeriod.MONTHLY
+            }
+
+            prefs.edit().putString(key, nextPeriod.storageValue).apply()
+            onUpdate(context, appWidgetManager, intArrayOf(widgetId), prefs)
+            return
+        }
+
         if (intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val widgetIds = intent.getIntArrayExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS)
@@ -89,7 +126,12 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
         appWidgetIds.forEach { widgetId ->
             val views = RemoteViews(context.packageName, R.layout.widget_budget_layout)
             val mode = resolveWidgetMode(appWidgetManager, widgetId)
-            val items = loadItems(widgetData)
+            val selectedPeriod = if (mode.periodToggleEnabled) {
+                loadSelectedPeriod(widgetData, widgetId)
+            } else {
+                BudgetPeriod.MONTHLY
+            }
+            val items = loadItems(widgetData, selectedPeriod)
             val emptyMessage = widgetData.getString(
                 "budget_widget_empty_message",
                 "Choose up to 3 budgets in Totals."
@@ -97,6 +139,7 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
 
             bindClickAction(context, views, widgetId)
             applyResponsiveLayout(context, views, mode)
+            bindPeriodToggle(context, views, widgetId, mode, selectedPeriod)
 
             if (items.isEmpty()) {
                 views.setViewVisibility(R.id.budget_content_group, View.GONE)
@@ -111,7 +154,7 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
 
             bindLegendRows(context, views, items, mode)
 
-            createRingBitmap(context, mode, items)?.let { bitmap ->
+            createRingBitmap(context, mode, items, selectedPeriod)?.let { bitmap ->
                 views.setImageViewBitmap(R.id.budget_ring_image, bitmap)
             }
 
@@ -136,16 +179,21 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
 
         val legendVisible = widthDp >= 176 && heightDp >= 58
         val fractionVisible = widthDp >= 300
+        val periodToggleEnabled = true
 
         return WidgetMode(
             widthDp = widthDp,
             heightDp = heightDp,
             legendVisible = legendVisible,
-            fractionVisible = fractionVisible
+            fractionVisible = fractionVisible,
+            periodToggleEnabled = periodToggleEnabled
         )
     }
 
-    private fun loadItems(widgetData: SharedPreferences): List<BudgetWidgetItem> {
+    private fun loadItems(
+        widgetData: SharedPreferences,
+        selectedPeriod: BudgetPeriod
+    ): List<BudgetWidgetItem> {
         val items = mutableListOf<BudgetWidgetItem>()
 
         for (index in 0 until MAX_BUDGETS) {
@@ -154,10 +202,18 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
             if (budgetId.isEmpty()) continue
 
             val name = widgetData.getString("${prefix}_name", "Budget") ?: "Budget"
-            val compactValue = widgetData.getString("${prefix}_compact_value", "0") ?: "0"
-            val expandedValue = widgetData.getString("${prefix}_expanded_value", compactValue)
-                ?: compactValue
-            val ringPercent = widgetData.getString("${prefix}_ring_percent", "0")
+            val compactValue = widgetData.getString(
+                "${prefix}_${selectedPeriod.storageValue}_compact_value",
+                null
+            ) ?: widgetData.getString("${prefix}_compact_value", "0") ?: "0"
+            val expandedValue = widgetData.getString(
+                "${prefix}_${selectedPeriod.storageValue}_expanded_value",
+                null
+            ) ?: widgetData.getString("${prefix}_expanded_value", compactValue) ?: compactValue
+            val ringPercent = (widgetData.getString(
+                "${prefix}_${selectedPeriod.storageValue}_ring_percent",
+                null
+            ) ?: widgetData.getString("${prefix}_ring_percent", "0"))
                 ?.toDoubleOrNull()
                 ?.coerceIn(0.0, 100.0)
                 ?: 0.0
@@ -178,6 +234,22 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
         }
 
         return items
+    }
+
+    private fun loadSelectedPeriod(
+        widgetData: SharedPreferences,
+        widgetId: Int
+    ): BudgetPeriod {
+        return BudgetPeriod.fromStorage(
+            widgetData.getString(
+                periodPreferenceKey(widgetId),
+                BudgetPeriod.MONTHLY.storageValue
+            )
+        )
+    }
+
+    private fun periodPreferenceKey(widgetId: Int): String {
+        return "$BUDGET_PERIOD_PREF_PREFIX$widgetId"
     }
 
     private fun bindLegendRows(
@@ -257,6 +329,35 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
         }
     }
 
+    private fun bindPeriodToggle(
+        context: Context,
+        views: RemoteViews,
+        widgetId: Int,
+        mode: WidgetMode,
+        selectedPeriod: BudgetPeriod
+    ) {
+        if (!mode.periodToggleEnabled) return
+
+        val contentDescription =
+            if (selectedPeriod == BudgetPeriod.MONTHLY) {
+                "Monthly budget rings. Tap for weekly."
+            } else {
+                "Weekly budget rings. Tap for monthly."
+            }
+        views.setContentDescription(R.id.budget_ring_frame, contentDescription)
+        views.setContentDescription(R.id.budget_ring_image, contentDescription)
+
+        val periodTogglePendingIntent = createPeriodTogglePendingIntent(context, widgetId)
+        views.setOnClickPendingIntent(
+            R.id.budget_ring_frame,
+            periodTogglePendingIntent
+        )
+        views.setOnClickPendingIntent(
+            R.id.budget_ring_image,
+            periodTogglePendingIntent
+        )
+    }
+
     private fun applyResponsiveLayout(
         context: Context,
         views: RemoteViews,
@@ -301,10 +402,34 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
         views.setOnClickPendingIntent(R.id.budget_empty_group, openAppPendingIntent)
     }
 
+    private fun createPeriodTogglePendingIntent(
+        context: Context,
+        widgetId: Int
+    ): PendingIntent {
+        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        val intent = Intent(context, BudgetWidgetProvider::class.java).apply {
+            action = ACTION_TOGGLE_BUDGET_PERIOD
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+        }
+
+        return PendingIntent.getBroadcast(
+            context,
+            widgetId + 9400,
+            intent,
+            pendingFlags
+        )
+    }
+
     private fun createRingBitmap(
         context: Context,
         mode: WidgetMode,
-        items: List<BudgetWidgetItem>
+        items: List<BudgetWidgetItem>,
+        selectedPeriod: BudgetPeriod
     ): Bitmap? {
         if (items.isEmpty()) return null
 
@@ -357,6 +482,19 @@ class BudgetWidgetProvider : HomeWidgetProvider() {
             }
 
             radius -= ringStrokeWidth + gap
+        }
+
+        if (mode.periodToggleEnabled) {
+            val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = ContextCompat.getColor(context, R.color.budget_widget_subtle)
+                textAlign = Paint.Align.CENTER
+                textSize = sizePx * 0.16f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                style = Paint.Style.FILL
+            }
+            val label = if (selectedPeriod == BudgetPeriod.MONTHLY) "M" else "W"
+            val baseline = center - ((labelPaint.descent() + labelPaint.ascent()) / 2f)
+            canvas.drawText(label, center, baseline, labelPaint)
         }
 
         return bitmap
