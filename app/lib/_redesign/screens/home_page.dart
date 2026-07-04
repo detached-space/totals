@@ -12,12 +12,14 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
+import 'package:totals/_redesign/screens/data_sync/data_sync_home_page.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
 import 'package:totals/screens/web_page.dart';
+import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/utils/app_date_format.dart';
@@ -62,6 +64,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   bool _isBootstrapping = true;
   bool _isImportingBackup = false;
   bool _isToolsMenuOpen = false;
+  Set<ToolsFabItem> _visibleToolsFabItems =
+      AdvancedSettingsService.defaultToolsFabItems;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
 
@@ -91,6 +95,14 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     final notifier = widget.toolsMenuOpenNotifier;
     if (notifier == null || notifier.value == _isToolsMenuOpen) return;
     setState(() => _isToolsMenuOpen = notifier.value);
+  }
+
+  void _handleToolsFabItemsChanged() {
+    if (!mounted) return;
+    setState(() {
+      _visibleToolsFabItems =
+          AdvancedSettingsService.instance.toolsFabItems.value;
+    });
   }
 
   Future<void> _refreshTodaySms(TransactionProvider provider) async {
@@ -176,6 +188,11 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   void initState() {
     super.initState();
     widget.toolsMenuOpenNotifier?.addListener(_handleToolsMenuNotifierChanged);
+    AdvancedSettingsService.instance.toolsFabItems
+        .addListener(_handleToolsFabItemsChanged);
+    AdvancedSettingsService.instance.ensureLoaded().then((_) {
+      _handleToolsFabItemsChanged();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = Provider.of<TransactionProvider>(context, listen: false);
       if (provider.dataVersion == 0) {
@@ -203,6 +220,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
   void dispose() {
     widget.toolsMenuOpenNotifier
         ?.removeListener(_handleToolsMenuNotifierChanged);
+    AdvancedSettingsService.instance.toolsFabItems
+        .removeListener(_handleToolsFabItemsChanged);
     super.dispose();
   }
 
@@ -447,11 +466,13 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                   bottom: 8,
                   child: _HomeToolsFabMenu(
                     isOpen: _isToolsMenuOpen,
+                    visibleItems: _visibleToolsFabItems,
                     onOpenChanged: _setToolsMenuOpen,
                     onWebDashboardTap: _openWebDashboard,
                     onQuickAccountsTap: _openQuickAccountsPage,
                     onVerifyPaymentsTap: _openVerifyPayments,
                     onFailedParsingsTap: _openFailedParsings,
+                    onDataSyncTap: _openDataSync,
                     onLoansTap: _openLoansPlaceholder,
                   ),
                 ),
@@ -509,6 +530,15 @@ class _RedesignHomePageState extends State<RedesignHomePage>
       context,
       MaterialPageRoute<void>(
         builder: (_) => const FailedParsesPage(),
+      ),
+    );
+  }
+
+  void _openDataSync() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const DataSyncHomePage(),
       ),
     );
   }
@@ -1098,20 +1128,24 @@ String _formatDelta(double value) {
 
 class _HomeToolsFabMenu extends StatefulWidget {
   final bool isOpen;
+  final Set<ToolsFabItem> visibleItems;
   final ValueChanged<bool> onOpenChanged;
   final VoidCallback onWebDashboardTap;
   final VoidCallback onQuickAccountsTap;
   final VoidCallback onVerifyPaymentsTap;
   final VoidCallback onFailedParsingsTap;
+  final VoidCallback onDataSyncTap;
   final VoidCallback onLoansTap;
 
   const _HomeToolsFabMenu({
     required this.isOpen,
+    required this.visibleItems,
     required this.onOpenChanged,
     required this.onWebDashboardTap,
     required this.onQuickAccountsTap,
     required this.onVerifyPaymentsTap,
     required this.onFailedParsingsTap,
+    required this.onDataSyncTap,
     required this.onLoansTap,
   });
 
@@ -1137,38 +1171,54 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
     const itemHeight = 48.0;
     const itemGap = 8.0;
     const menuGap = 8.0;
+    const actionColor = AppColors.primaryLight;
+    final visibleItems = widget.visibleItems.isEmpty
+        ? AdvancedSettingsService.defaultToolsFabItems
+        : widget.visibleItems;
     final actions = <_HomeToolsFabAction>[
       _HomeToolsFabAction(
+        item: ToolsFabItem.quickAccounts,
         icon: AppIcons.account_balance_outlined,
-        color: AppColors.blue,
+        color: actionColor,
         label: context.l10nText('Quick Accounts'),
         onTap: widget.onQuickAccountsTap,
       ),
       _HomeToolsFabAction(
+        item: ToolsFabItem.verifyPayments,
         icon: AppIcons.qr_code_scanner_rounded,
-        color: AppColors.incomeSuccess,
+        color: actionColor,
         label: context.l10nText('Verify Payments'),
         onTap: widget.onVerifyPaymentsTap,
       ),
       _HomeToolsFabAction(
+        item: ToolsFabItem.loans,
         icon: AppIcons.debts,
-        color: AppColors.red,
+        color: actionColor,
         label: context.l10nText('Loans'),
         onTap: widget.onLoansTap,
       ),
       _HomeToolsFabAction(
+        item: ToolsFabItem.failedParsings,
         icon: AppIcons.sms_outlined,
-        color: AppColors.amber,
+        color: actionColor,
         label: context.l10nText('Failed Parsings'),
         onTap: widget.onFailedParsingsTap,
       ),
       _HomeToolsFabAction(
+        item: ToolsFabItem.dataSync,
+        icon: AppIcons.cloud_download,
+        color: actionColor,
+        label: context.l10nText('Data Sync'),
+        onTap: widget.onDataSyncTap,
+      ),
+      _HomeToolsFabAction(
+        item: ToolsFabItem.webDashboard,
         icon: AppIcons.dashboard_outlined,
-        color: AppColors.primaryLight,
+        color: actionColor,
         label: context.l10nText('Web Dashboard'),
         onTap: widget.onWebDashboardTap,
       ),
-    ];
+    ].where((action) => visibleItems.contains(action.item)).toList();
     final openHeight = fabSize +
         menuGap +
         actions.length * itemHeight +
@@ -1242,12 +1292,14 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
 }
 
 class _HomeToolsFabAction {
+  final ToolsFabItem item;
   final IconData icon;
   final Color color;
   final String label;
   final VoidCallback? onTap;
 
   const _HomeToolsFabAction({
+    required this.item,
     required this.icon,
     required this.color,
     required this.label,
