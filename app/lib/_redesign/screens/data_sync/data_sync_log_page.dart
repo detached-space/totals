@@ -25,6 +25,8 @@ enum _LogAttemptFilter { untried, retried }
 
 enum _LogHttpFilter { anyCode, success, error, noCode }
 
+const _uncategorizedTransactionCategory = 'Uncategorized';
+
 class _LogFilter {
   final Set<SyncEntity> entities;
   final Set<SyncOp> ops;
@@ -188,14 +190,14 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
   }
 
   Future<void> _openFilterSheet() async {
-    final bankIds = _bankIdsForFilter();
     final result = await showModalBottomSheet<_LogFilter>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _LogFilterSheet(
         currentFilter: _filter,
-        bankIds: bankIds,
+        transactionBankIds: _transactionBankIdsForFilter(),
+        accountBankIds: _accountBankIdsForFilter(),
         transactionCategoryNames: _transactionCategoryNamesForFilter(),
         budgetCategoryNames: _budgetCategoryNamesForFilter(),
         bankLabelForId: _bankLabelForId,
@@ -528,8 +530,11 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
 
   bool _matchesTransactionCategoryFilter(SyncOutboxItem item) {
     if (item.entity != SyncEntity.transactions) return false;
-    final names =
-        _transactionDetails[item.entityRef]?.categoryNames ?? const [];
+    final names = _transactionCategoryNamesForItem(item);
+    if (names.isEmpty) {
+      return _filter.transactionCategoryNames
+          .contains(_uncategorizedTransactionCategory);
+    }
     return names.any(_filter.transactionCategoryNames.contains);
   }
 
@@ -621,12 +626,27 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
   bool _isFailedStatus(String status) =>
       status == SyncOutboxStatus.dead || status == SyncOutboxStatus.failed;
 
-  List<int> _bankIdsForFilter() {
+  List<int> _transactionBankIdsForFilter() {
     final ids = <int>{};
     for (final item in _allItems) {
+      if (item.entity != SyncEntity.transactions) continue;
       final bankId = _bankIdForItem(item);
       if (bankId != null) ids.add(bankId);
     }
+    return _sortedBankIds(ids);
+  }
+
+  List<int> _accountBankIdsForFilter() {
+    final ids = <int>{};
+    for (final item in _allItems) {
+      if (item.entity != SyncEntity.accounts) continue;
+      final bankId = _bankIdForItem(item);
+      if (bankId != null) ids.add(bankId);
+    }
+    return _sortedBankIds(ids);
+  }
+
+  List<int> _sortedBankIds(Set<int> ids) {
     final sorted = ids.toList(growable: false)
       ..sort((a, b) => _bankLabelForId(a).compareTo(_bankLabelForId(b)));
     return sorted;
@@ -634,12 +654,34 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
 
   List<String> _transactionCategoryNamesForFilter() {
     final names = <String>{};
-    for (final detail in _transactionDetails.values) {
-      names
-          .addAll(detail.categoryNames.where((name) => name.trim().isNotEmpty));
+    var hasUncategorized = false;
+    for (final item in _allItems) {
+      if (item.entity != SyncEntity.transactions) continue;
+      final itemNames = _transactionCategoryNamesForItem(item);
+      if (itemNames.isEmpty) {
+        hasUncategorized = true;
+      } else {
+        names.addAll(itemNames);
+      }
     }
     final sorted = names.toList(growable: false)..sort();
+    if (hasUncategorized) sorted.insert(0, _uncategorizedTransactionCategory);
     return sorted;
+  }
+
+  List<String> _transactionCategoryNamesForItem(SyncOutboxItem item) {
+    final detailNames = _transactionDetails[item.entityRef]?.categoryNames;
+    if (detailNames != null && detailNames.isNotEmpty) {
+      return [
+        for (final name in detailNames)
+          if (name.trim().isNotEmpty) name.trim(),
+      ];
+    }
+    final snapshot = _payloadSnapshot(item);
+    final names = _stringList(snapshot['categoryNames']).toSet();
+    final single = _trimmed(snapshot['categoryName']);
+    if (single != null) names.add(single);
+    return names.toList(growable: false)..sort();
   }
 
   List<String> _budgetCategoryNamesForFilter() {
@@ -660,7 +702,9 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
 
   int? _bankIdForItem(SyncOutboxItem item) {
     if (item.entity == SyncEntity.transactions) {
-      return _transactionDetails[item.entityRef]?.bankId;
+      return _transactionDetails[item.entityRef]?.bankId ??
+          _asInt(_payloadSnapshot(item)['bankId']) ??
+          _asInt(_payloadSnapshot(item)['bank']);
     }
     if (item.entity == SyncEntity.accounts) {
       return _accountDetails[item.entityRef]?.bankId ??
@@ -1109,14 +1153,16 @@ class _LogStatusChip extends StatelessWidget {
 
 class _LogFilterSheet extends StatefulWidget {
   final _LogFilter currentFilter;
-  final List<int> bankIds;
+  final List<int> transactionBankIds;
+  final List<int> accountBankIds;
   final List<String> transactionCategoryNames;
   final List<String> budgetCategoryNames;
   final String Function(int bankId) bankLabelForId;
 
   const _LogFilterSheet({
     required this.currentFilter,
-    required this.bankIds,
+    required this.transactionBankIds,
+    required this.accountBankIds,
     required this.transactionCategoryNames,
     required this.budgetCategoryNames,
     required this.bankLabelForId,
@@ -1244,6 +1290,53 @@ class _LogFilterSheetState extends State<_LogFilterSheet> {
   bool get _showsBankFilter => _showsTransactions || _showsAccounts;
   bool get _showsAmountFilter =>
       _showsTransactions || _showsAccounts || _showsBudgets;
+  bool get _hasEntityScopedFilters =>
+      _showsTransactions ||
+      _showsBudgets ||
+      _showsBankFilter ||
+      _showsAmountFilter;
+  bool get _hasDraftFilters => _draftActiveCount > 0;
+
+  int get _draftActiveCount {
+    var count = 0;
+    if (_entities.isNotEmpty) count++;
+    if (_ops.isNotEmpty) count++;
+    if (_bankIds.isNotEmpty) count++;
+    if (_attempts.isNotEmpty) count++;
+    if (_http.isNotEmpty) count++;
+    if (_transactionTypes.isNotEmpty) count++;
+    if (_transactionCategoryNames.isNotEmpty) count++;
+    if (_budgetCategoryNames.isNotEmpty) count++;
+    if (_budgetActiveStates.isNotEmpty) count++;
+    if (_minAmountController.text.trim().isNotEmpty ||
+        _maxAmountController.text.trim().isNotEmpty) {
+      count++;
+    }
+    if (_startDate != null || _endDate != null) count++;
+    if (_transactionStartDate != null || _transactionEndDate != null) count++;
+    return count;
+  }
+
+  Set<int> get _visibleBankIdSet {
+    final ids = <int>{};
+    if (_showsTransactions) ids.addAll(widget.transactionBankIds);
+    if (_showsAccounts) ids.addAll(widget.accountBankIds);
+    return ids;
+  }
+
+  List<int> get _visibleBankIds {
+    final ids = _visibleBankIdSet.toList(growable: false)
+      ..sort((a, b) => widget.bankLabelForId(a).compareTo(
+            widget.bankLabelForId(b),
+          ));
+    return ids;
+  }
+
+  String get _bankSectionLabel {
+    if (_showsTransactions && !_showsAccounts) return 'TRANSACTION BANK';
+    if (_showsAccounts && !_showsTransactions) return 'ACCOUNT BANK';
+    return 'BANK';
+  }
 
   void _toggleEntity(SyncEntity entity) {
     setState(() {
@@ -1263,7 +1356,12 @@ class _LogFilterSheetState extends State<_LogFilterSheet> {
       _budgetCategoryNames.clear();
       _budgetActiveStates.clear();
     }
-    if (!_showsBankFilter) _bankIds.clear();
+    if (!_showsBankFilter) {
+      _bankIds.clear();
+    } else {
+      final visibleBankIds = _visibleBankIdSet;
+      _bankIds.removeWhere((bankId) => !visibleBankIds.contains(bankId));
+    }
     if (!_showsAmountFilter) {
       _minAmountController.clear();
       _maxAmountController.clear();
@@ -1308,25 +1406,30 @@ class _LogFilterSheetState extends State<_LogFilterSheet> {
   String _formatAmountInput(double? amount) {
     if (amount == null) return '';
     if (amount == amount.roundToDouble()) return amount.toStringAsFixed(0);
-    return amount
-        .toStringAsFixed(2)
-        .replaceFirst(RegExp(r'0+$'), '')
-        .replaceFirst(RegExp(r'\.$'), '');
+    var formatted = amount.toStringAsFixed(2);
+    while (formatted.contains('.') && formatted.endsWith('0')) {
+      formatted = formatted.substring(0, formatted.length - 1);
+    }
+    if (formatted.endsWith('.')) {
+      formatted = formatted.substring(0, formatted.length - 1);
+    }
+    return formatted;
   }
 
   void _handleAmountChanged(String _) {
-    if (_amountErrorText == null) return;
     final minRaw = _minAmountController.text;
     final maxRaw = _maxAmountController.text;
     final minAmount = _parseAmountInput(minRaw);
     final maxAmount = _parseAmountInput(maxRaw);
     setState(() {
-      _amountErrorText = _buildAmountValidationMessage(
-        minRaw: minRaw,
-        maxRaw: maxRaw,
-        minAmount: minAmount,
-        maxAmount: maxAmount,
-      );
+      _amountErrorText = _amountErrorText == null
+          ? null
+          : _buildAmountValidationMessage(
+              minRaw: minRaw,
+              maxRaw: maxRaw,
+              minAmount: minAmount,
+              maxAmount: maxAmount,
+            );
     });
   }
 
@@ -1383,117 +1486,80 @@ class _LogFilterSheetState extends State<_LogFilterSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+    final keyboardPadding = MediaQuery.of(context).viewInsets.bottom;
     final navBarPadding = MediaQuery.of(context).padding.bottom;
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.85,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.cardColor(context),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            margin: const EdgeInsets.only(top: 10),
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.slate400,
-              borderRadius: BorderRadius.circular(2),
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: keyboardPadding),
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.cardColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.slate400,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Filter sync logs',
-                    style: TextStyle(
-                      color: AppColors.textPrimary(context),
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'Filter sync logs',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.textPrimary(context),
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (_hasDraftFilters) ...[
+                          const SizedBox(width: 10),
+                          _activeCountBadge(),
+                        ],
+                      ],
                     ),
                   ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: Icon(
-                    AppIcons.close,
-                    color: AppColors.textSecondary(context),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: Icon(
+                      AppIcons.close,
+                      color: AppColors.textSecondary(context),
+                    ),
+                    splashRadius: 20,
                   ),
-                  splashRadius: 20,
-                ),
-              ],
-            ),
-          ),
-          Flexible(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                12,
-                20,
-                16 + bottomPadding + navBarPadding,
+                ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _sectionLabel('ENTITY'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _LogFilterChoice(
-                        label: 'All',
-                        selected: _entities.isEmpty,
-                        onTap: () => setState(() {
-                          _entities.clear();
-                          _pruneEntityScopedFilters();
-                        }),
-                      ),
-                      for (final entity in SyncEntity.values)
-                        _LogFilterChoice(
-                          label: entity.label,
-                          selected: _entities.contains(entity),
-                          onTap: () => _toggleEntity(entity),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _sectionLabel('OPERATION'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _LogFilterChoice(
-                        label: 'All',
-                        selected: _ops.isEmpty,
-                        onTap: () => setState(() => _ops.clear()),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Upsert',
-                        selected: _ops.contains(SyncOp.upsert),
-                        onTap: () => setState(
-                          () => _toggleInSet(_ops, SyncOp.upsert),
-                        ),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Delete',
-                        selected: _ops.contains(SyncOp.delete),
-                        onTap: () => setState(
-                          () => _toggleInSet(_ops, SyncOp.delete),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_showsTransactions) ...[
-                    const SizedBox(height: 20),
-                    _sectionLabel('TRANSACTION TYPE'),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  20,
+                  12,
+                  20,
+                  20,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sectionLabel('ENTITY'),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -1501,373 +1567,536 @@ class _LogFilterSheetState extends State<_LogFilterSheet> {
                       children: [
                         _LogFilterChoice(
                           label: 'All',
-                          selected: _transactionTypes.isEmpty,
-                          onTap: () =>
-                              setState(() => _transactionTypes.clear()),
+                          selected: _entities.isEmpty,
+                          onTap: () => setState(() {
+                            _entities.clear();
+                            _pruneEntityScopedFilters();
+                          }),
+                        ),
+                        for (final entity in SyncEntity.values)
+                          _LogFilterChoice(
+                            label: entity.label,
+                            selected: _entities.contains(entity),
+                            onTap: () => _toggleEntity(entity),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _sectionLabel('OPERATION'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _LogFilterChoice(
+                          label: 'All',
+                          selected: _ops.isEmpty,
+                          onTap: () => setState(() => _ops.clear()),
                         ),
                         _LogFilterChoice(
-                          label: 'Expense',
-                          selected: _transactionTypes.contains('DEBIT'),
+                          label: 'Upsert',
+                          selected: _ops.contains(SyncOp.upsert),
                           onTap: () => setState(
-                            () => _toggleInSet(_transactionTypes, 'DEBIT'),
+                            () => _toggleInSet(_ops, SyncOp.upsert),
                           ),
                         ),
                         _LogFilterChoice(
-                          label: 'Income',
-                          selected: _transactionTypes.contains('CREDIT'),
+                          label: 'Delete',
+                          selected: _ops.contains(SyncOp.delete),
                           onTap: () => setState(
-                            () => _toggleInSet(_transactionTypes, 'CREDIT'),
+                            () => _toggleInSet(_ops, SyncOp.delete),
                           ),
                         ),
                       ],
                     ),
-                    if (widget.transactionCategoryNames.isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      _sectionLabel('TRANSACTION CATEGORY'),
-                      const SizedBox(height: 8),
-                      _horizontalChoices(
-                        [
-                          _LogFilterChoice(
-                            label: 'All',
-                            selected: _transactionCategoryNames.isEmpty,
-                            onTap: () => setState(
-                              () => _transactionCategoryNames.clear(),
+                    const SizedBox(height: 20),
+                    _filterDivider(),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      alignment: Alignment.topCenter,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_showsTransactions) ...[
+                            const SizedBox(height: 20),
+                            _sectionLabel('TRANSACTION TYPE'),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _LogFilterChoice(
+                                  label: 'All',
+                                  selected: _transactionTypes.isEmpty,
+                                  onTap: () =>
+                                      setState(() => _transactionTypes.clear()),
+                                ),
+                                _LogFilterChoice(
+                                  label: 'Expense',
+                                  selected: _transactionTypes.contains('DEBIT'),
+                                  onTap: () => setState(
+                                    () => _toggleInSet(
+                                        _transactionTypes, 'DEBIT'),
+                                  ),
+                                ),
+                                _LogFilterChoice(
+                                  label: 'Income',
+                                  selected:
+                                      _transactionTypes.contains('CREDIT'),
+                                  onTap: () => setState(
+                                    () => _toggleInSet(
+                                        _transactionTypes, 'CREDIT'),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                          for (final name in widget.transactionCategoryNames)
-                            _LogFilterChoice(
-                              label: name,
-                              selected:
-                                  _transactionCategoryNames.contains(name),
-                              onTap: () => setState(
-                                () => _toggleInSet(
-                                  _transactionCategoryNames,
-                                  name,
+                            if (widget.transactionCategoryNames.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              _sectionLabel('TRANSACTION CATEGORIES'),
+                              const SizedBox(height: 8),
+                              _horizontalChoices(
+                                [
+                                  _LogFilterChoice(
+                                    label: 'All',
+                                    selected: _transactionCategoryNames.isEmpty,
+                                    onTap: () => setState(
+                                      () => _transactionCategoryNames.clear(),
+                                    ),
+                                  ),
+                                  for (final name
+                                      in widget.transactionCategoryNames)
+                                    _LogFilterChoice(
+                                      label: name,
+                                      selected:
+                                          _transactionCategoryNames.contains(
+                                        name,
+                                      ),
+                                      onTap: () => setState(
+                                        () => _toggleInSet(
+                                          _transactionCategoryNames,
+                                          name,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                            if (_visibleBankIds.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              _bankFilterSection(
+                                _bankSectionLabel,
+                                _visibleBankIds,
+                              ),
+                            ],
+                            const SizedBox(height: 20),
+                            _sectionLabel('TRANSACTION DATE'),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _LogDateField(
+                                    hint: 'Start date',
+                                    value: _transactionStartDate == null
+                                        ? null
+                                        : _formatDate(_transactionStartDate!),
+                                    onTap: () => _pickDate(
+                                      isStart: true,
+                                      transactionDate: true,
+                                    ),
+                                    onClear: _transactionStartDate == null
+                                        ? null
+                                        : () => setState(
+                                              () =>
+                                                  _transactionStartDate = null,
+                                            ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _LogDateField(
+                                    hint: 'End date',
+                                    value: _transactionEndDate == null
+                                        ? null
+                                        : _formatDate(_transactionEndDate!),
+                                    onTap: () => _pickDate(
+                                      isStart: false,
+                                      transactionDate: true,
+                                    ),
+                                    onClear: _transactionEndDate == null
+                                        ? null
+                                        : () => setState(
+                                              () => _transactionEndDate = null,
+                                            ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (_showsBudgets) ...[
+                            const SizedBox(height: 20),
+                            _sectionLabel('BUDGET STATUS'),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _LogFilterChoice(
+                                  label: 'All',
+                                  selected: _budgetActiveStates.isEmpty,
+                                  onTap: () => setState(
+                                      () => _budgetActiveStates.clear()),
+                                ),
+                                _LogFilterChoice(
+                                  label: 'Active',
+                                  selected: _budgetActiveStates.contains(true),
+                                  onTap: () => setState(
+                                    () =>
+                                        _toggleInSet(_budgetActiveStates, true),
+                                  ),
+                                ),
+                                _LogFilterChoice(
+                                  label: 'Inactive',
+                                  selected: _budgetActiveStates.contains(false),
+                                  onTap: () => setState(
+                                    () => _toggleInSet(
+                                        _budgetActiveStates, false),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (widget.budgetCategoryNames.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              _sectionLabel('BUDGET CATEGORY'),
+                              const SizedBox(height: 8),
+                              _horizontalChoices(
+                                [
+                                  _LogFilterChoice(
+                                    label: 'All',
+                                    selected: _budgetCategoryNames.isEmpty,
+                                    onTap: () => setState(
+                                      () => _budgetCategoryNames.clear(),
+                                    ),
+                                  ),
+                                  for (final name in widget.budgetCategoryNames)
+                                    _LogFilterChoice(
+                                      label: name,
+                                      selected:
+                                          _budgetCategoryNames.contains(name),
+                                      onTap: () => setState(
+                                        () => _toggleInSet(
+                                          _budgetCategoryNames,
+                                          name,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ],
+                          if (!_showsTransactions &&
+                              _showsAccounts &&
+                              _visibleBankIds.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            _bankFilterSection(
+                              _bankSectionLabel,
+                              _visibleBankIds,
+                            ),
+                          ],
+                          if (_showsAmountFilter) ...[
+                            const SizedBox(height: 20),
+                            _sectionLabel(_amountSectionLabel()),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _LogAmountField(
+                                    controller: _minAmountController,
+                                    hint: 'Min',
+                                    hasError: _amountErrorText != null,
+                                    onChanged: _handleAmountChanged,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _LogAmountField(
+                                    controller: _maxAmountController,
+                                    hint: 'Max',
+                                    hasError: _amountErrorText != null,
+                                    onChanged: _handleAmountChanged,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_amountErrorText != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                _amountErrorText!,
+                                style: const TextStyle(
+                                  color: AppColors.red,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ),
+                            ],
+                          ],
                         ],
                       ),
+                    ),
+                    if (_hasEntityScopedFilters) ...[
+                      const SizedBox(height: 20),
+                      _filterDivider(),
                     ],
                     const SizedBox(height: 20),
-                    _sectionLabel('TRANSACTION DATE'),
+                    _sectionLabel('ATTEMPTS'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _LogFilterChoice(
+                          label: 'All',
+                          selected: _attempts.isEmpty,
+                          onTap: () => setState(() => _attempts.clear()),
+                        ),
+                        _LogFilterChoice(
+                          label: 'Not retried',
+                          selected:
+                              _attempts.contains(_LogAttemptFilter.untried),
+                          onTap: () => setState(
+                            () => _toggleInSet(
+                              _attempts,
+                              _LogAttemptFilter.untried,
+                            ),
+                          ),
+                        ),
+                        _LogFilterChoice(
+                          label: 'Retried',
+                          selected:
+                              _attempts.contains(_LogAttemptFilter.retried),
+                          onTap: () => setState(
+                            () => _toggleInSet(
+                              _attempts,
+                              _LogAttemptFilter.retried,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _sectionLabel('HTTP RESULT'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _LogFilterChoice(
+                          label: 'All',
+                          selected: _http.isEmpty,
+                          onTap: () => setState(() => _http.clear()),
+                        ),
+                        _LogFilterChoice(
+                          label: 'Any HTTP',
+                          selected: _http.contains(_LogHttpFilter.anyCode),
+                          onTap: () => setState(
+                            () => _toggleInSet(_http, _LogHttpFilter.anyCode),
+                          ),
+                        ),
+                        _LogFilterChoice(
+                          label: 'Success',
+                          selected: _http.contains(_LogHttpFilter.success),
+                          onTap: () => setState(
+                            () => _toggleInSet(_http, _LogHttpFilter.success),
+                          ),
+                        ),
+                        _LogFilterChoice(
+                          label: 'Error',
+                          selected: _http.contains(_LogHttpFilter.error),
+                          onTap: () => setState(
+                            () => _toggleInSet(_http, _LogHttpFilter.error),
+                          ),
+                        ),
+                        _LogFilterChoice(
+                          label: 'No HTTP',
+                          selected: _http.contains(_LogHttpFilter.noCode),
+                          onTap: () => setState(
+                            () => _toggleInSet(_http, _LogHttpFilter.noCode),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _filterDivider(),
+                    const SizedBox(height: 20),
+                    _sectionLabel('UPDATED DATE'),
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(
                           child: _LogDateField(
                             hint: 'Start date',
-                            value: _transactionStartDate == null
+                            value: _startDate == null
                                 ? null
-                                : _formatDate(_transactionStartDate!),
-                            onTap: () => _pickDate(
-                              isStart: true,
-                              transactionDate: true,
-                            ),
-                            onClear: _transactionStartDate == null
+                                : _formatDate(_startDate!),
+                            onTap: () => _pickDate(isStart: true),
+                            onClear: _startDate == null
                                 ? null
-                                : () => setState(
-                                      () => _transactionStartDate = null,
-                                    ),
+                                : () => setState(() => _startDate = null),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: _LogDateField(
                             hint: 'End date',
-                            value: _transactionEndDate == null
+                            value: _endDate == null
                                 ? null
-                                : _formatDate(_transactionEndDate!),
-                            onTap: () => _pickDate(
-                              isStart: false,
-                              transactionDate: true,
-                            ),
-                            onClear: _transactionEndDate == null
+                                : _formatDate(_endDate!),
+                            onTap: () => _pickDate(isStart: false),
+                            onClear: _endDate == null
                                 ? null
-                                : () => setState(
-                                      () => _transactionEndDate = null,
-                                    ),
+                                : () => setState(() => _endDate = null),
                           ),
                         ),
                       ],
                     ),
                   ],
-                  if (_showsBudgets) ...[
-                    const SizedBox(height: 20),
-                    _sectionLabel('BUDGET STATUS'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _LogFilterChoice(
-                          label: 'All',
-                          selected: _budgetActiveStates.isEmpty,
-                          onTap: () =>
-                              setState(() => _budgetActiveStates.clear()),
-                        ),
-                        _LogFilterChoice(
-                          label: 'Active',
-                          selected: _budgetActiveStates.contains(true),
-                          onTap: () => setState(
-                            () => _toggleInSet(_budgetActiveStates, true),
-                          ),
-                        ),
-                        _LogFilterChoice(
-                          label: 'Inactive',
-                          selected: _budgetActiveStates.contains(false),
-                          onTap: () => setState(
-                            () => _toggleInSet(_budgetActiveStates, false),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (widget.budgetCategoryNames.isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      _sectionLabel('BUDGET CATEGORY'),
-                      const SizedBox(height: 8),
-                      _horizontalChoices(
-                        [
-                          _LogFilterChoice(
-                            label: 'All',
-                            selected: _budgetCategoryNames.isEmpty,
-                            onTap: () =>
-                                setState(() => _budgetCategoryNames.clear()),
-                          ),
-                          for (final name in widget.budgetCategoryNames)
-                            _LogFilterChoice(
-                              label: name,
-                              selected: _budgetCategoryNames.contains(name),
-                              onTap: () => setState(
-                                () => _toggleInSet(_budgetCategoryNames, name),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ],
-                  if (_showsBankFilter && widget.bankIds.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    _sectionLabel('BANK'),
-                    const SizedBox(height: 8),
-                    _horizontalChoices(
-                      [
-                        _LogFilterChoice(
-                          label: 'All Banks',
-                          selected: _bankIds.isEmpty,
-                          onTap: () => setState(() => _bankIds.clear()),
-                        ),
-                        for (final bankId in widget.bankIds)
-                          _LogFilterChoice(
-                            label: widget.bankLabelForId(bankId),
-                            selected: _bankIds.contains(bankId),
-                            onTap: () => setState(
-                              () => _toggleInSet(_bankIds, bankId),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                  if (_showsAmountFilter) ...[
-                    const SizedBox(height: 20),
-                    _sectionLabel(_amountSectionLabel()),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _LogAmountField(
-                            controller: _minAmountController,
-                            hint: 'Min',
-                            hasError: _amountErrorText != null,
-                            onChanged: _handleAmountChanged,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _LogAmountField(
-                            controller: _maxAmountController,
-                            hint: 'Max',
-                            hasError: _amountErrorText != null,
-                            onChanged: _handleAmountChanged,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_amountErrorText != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _amountErrorText!,
-                        style: const TextStyle(
-                          color: AppColors.red,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
-                  const SizedBox(height: 20),
-                  _sectionLabel('ATTEMPTS'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _LogFilterChoice(
-                        label: 'All',
-                        selected: _attempts.isEmpty,
-                        onTap: () => setState(() => _attempts.clear()),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Not retried',
-                        selected: _attempts.contains(_LogAttemptFilter.untried),
-                        onTap: () => setState(
-                          () => _toggleInSet(
-                            _attempts,
-                            _LogAttemptFilter.untried,
-                          ),
-                        ),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Retried',
-                        selected: _attempts.contains(_LogAttemptFilter.retried),
-                        onTap: () => setState(
-                          () => _toggleInSet(
-                            _attempts,
-                            _LogAttemptFilter.retried,
-                          ),
-                        ),
-                      ),
-                    ],
+                ),
+              ),
+            ),
+            _actionBar(navBarPadding),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _activeCountBadge() {
+    final foreground = AppColors.isDark(context)
+        ? AppColors.primaryLight
+        : AppColors.primaryDark;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 140),
+      child: Container(
+        key: ValueKey(_draftActiveCount),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: foreground.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: foreground.withValues(alpha: 0.18)),
+        ),
+        child: Text(
+          '$_draftActiveCount active',
+          style: TextStyle(
+            color: foreground,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _actionBar(double navBarPadding) {
+    final activeCount = _draftActiveCount;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        border: Border(
+          top: BorderSide(
+            color: AppColors.borderColor(context),
+          ),
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + navBarPadding),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _hasDraftFilters ? _clearAll : null,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textSecondary(context),
+                disabledForegroundColor:
+                    AppColors.textTertiary(context).withValues(alpha: 0.7),
+                side: BorderSide(color: AppColors.borderColor(context)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'Clear',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed: _apply,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryDark,
+                foregroundColor: AppColors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 140),
+                child: Text(
+                  activeCount == 0 ? 'Apply' : 'Apply ($activeCount)',
+                  key: ValueKey(activeCount),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
                   ),
-                  const SizedBox(height: 20),
-                  _sectionLabel('HTTP RESULT'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _LogFilterChoice(
-                        label: 'All',
-                        selected: _http.isEmpty,
-                        onTap: () => setState(() => _http.clear()),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Any HTTP',
-                        selected: _http.contains(_LogHttpFilter.anyCode),
-                        onTap: () => setState(
-                          () => _toggleInSet(_http, _LogHttpFilter.anyCode),
-                        ),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Success',
-                        selected: _http.contains(_LogHttpFilter.success),
-                        onTap: () => setState(
-                          () => _toggleInSet(_http, _LogHttpFilter.success),
-                        ),
-                      ),
-                      _LogFilterChoice(
-                        label: 'Error',
-                        selected: _http.contains(_LogHttpFilter.error),
-                        onTap: () => setState(
-                          () => _toggleInSet(_http, _LogHttpFilter.error),
-                        ),
-                      ),
-                      _LogFilterChoice(
-                        label: 'No HTTP',
-                        selected: _http.contains(_LogHttpFilter.noCode),
-                        onTap: () => setState(
-                          () => _toggleInSet(_http, _LogHttpFilter.noCode),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _sectionLabel('UPDATED DATE'),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _LogDateField(
-                          hint: 'Start date',
-                          value: _startDate == null
-                              ? null
-                              : _formatDate(_startDate!),
-                          onTap: () => _pickDate(isStart: true),
-                          onClear: _startDate == null
-                              ? null
-                              : () => setState(() => _startDate = null),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _LogDateField(
-                          hint: 'End date',
-                          value:
-                              _endDate == null ? null : _formatDate(_endDate!),
-                          onTap: () => _pickDate(isStart: false),
-                          onClear: _endDate == null
-                              ? null
-                              : () => setState(() => _endDate = null),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _clearAll,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.textSecondary(context),
-                            side: BorderSide(
-                              color: AppColors.borderColor(context),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          child: const Text(
-                            'Clear All',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton(
-                          onPressed: _apply,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primaryDark,
-                            foregroundColor: AppColors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          child: const Text(
-                            'Apply Filters',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _filterDivider() {
+    return Container(
+      height: 1,
+      color: AppColors.borderColor(context).withValues(
+        alpha: AppColors.isDark(context) ? 0.55 : 0.8,
+      ),
+    );
+  }
+
+  Widget _bankFilterSection(String label, List<int> bankIds) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionLabel(label),
+        const SizedBox(height: 8),
+        _horizontalChoices(
+          [
+            _LogFilterChoice(
+              label: 'All Banks',
+              selected: _bankIds.isEmpty,
+              onTap: () => setState(() => _bankIds.clear()),
+            ),
+            for (final bankId in bankIds)
+              _LogFilterChoice(
+                label: widget.bankLabelForId(bankId),
+                selected: _bankIds.contains(bankId),
+                onTap: () => setState(
+                  () => _toggleInSet(_bankIds, bankId),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -1930,33 +2159,76 @@ class _LogFilterChoice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primaryDark
-              : AppColors.surfaceColor(context),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
+    final radius = BorderRadius.circular(20);
+    final maxLabelWidth = MediaQuery.of(context).size.width - 108;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: radius,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          constraints: BoxConstraints(maxWidth: maxLabelWidth + 42),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
             color: selected
                 ? AppColors.primaryDark
-                : AppColors.borderColor(context),
+                : AppColors.surfaceColor(context),
+            borderRadius: radius,
+            border: Border.all(
+              color: selected
+                  ? AppColors.primaryDark
+                  : AppColors.borderColor(context),
+            ),
           ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color:
-                selected ? AppColors.white : AppColors.textSecondary(context),
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                const Icon(
+                  AppIcons.check_rounded,
+                  size: 13,
+                  color: AppColors.white,
+                ),
+                const SizedBox(width: 5),
+              ],
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxLabelWidth),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected
+                        ? AppColors.white
+                        : AppColors.textSecondary(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
+  }
+}
+
+class _AmountInputFormatter extends TextInputFormatter {
+  const _AmountInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    for (final codeUnit in newValue.text.codeUnits) {
+      final isDigit = codeUnit >= 48 && codeUnit <= 57;
+      final isSeparator = codeUnit == 44 || codeUnit == 46;
+      if (!isDigit && !isSeparator) return oldValue;
+    }
+    return newValue;
   }
 }
 
@@ -1979,9 +2251,7 @@ class _LogAmountField extends StatelessWidget {
       controller: controller,
       onChanged: onChanged,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [
-        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-      ],
+      inputFormatters: const [_AmountInputFormatter()],
       style: TextStyle(
         color: AppColors.textPrimary(context),
         fontSize: 13,

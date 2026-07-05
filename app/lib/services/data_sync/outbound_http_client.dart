@@ -47,7 +47,7 @@ class OutboundResponse {
 class OutboundHttpClient {
   OutboundHttpClient({http.Client? client}) : _client = client ?? http.Client();
 
-  final http.Client _client;
+  http.Client _client;
 
   static const Duration _timeout = Duration(seconds: 15);
   static const int maxBodyBytes = 1 * 1024 * 1024; // 1 MB
@@ -94,7 +94,8 @@ class OutboundHttpClient {
   /// Returns the status code, or null if the host is unreachable.
   Future<int?> probe(Uri uri, Map<String, String> headers) async {
     try {
-      final response = await _client.head(uri, headers: headers).timeout(_timeout);
+      final response =
+          await _client.head(uri, headers: headers).timeout(_timeout);
       return response.statusCode;
     } on TimeoutException {
       return null;
@@ -104,6 +105,11 @@ class OutboundHttpClient {
       if (kDebugMode) debugPrint('OutboundHttpClient.probe failed: $error');
       return null;
     }
+  }
+
+  void cancelInFlight() {
+    _client.close();
+    _client = http.Client();
   }
 
   void close() => _client.close();

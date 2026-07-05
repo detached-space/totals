@@ -28,6 +28,9 @@ class SyncRunStatus {
   final int processed;
   final int total;
   final DateTime? at;
+  final Set<int> activeRuleIds;
+  final Set<int> stoppingRuleIds;
+  final bool stopRequested;
 
   const SyncRunStatus({
     this.running = false,
@@ -36,6 +39,9 @@ class SyncRunStatus {
     this.processed = 0,
     this.total = 0,
     this.at,
+    this.activeRuleIds = const <int>{},
+    this.stoppingRuleIds = const <int>{},
+    this.stopRequested = false,
   });
 
   bool get hasResult => at != null;
@@ -64,6 +70,16 @@ class _BudgetUsagePayload {
     required this.periodStart,
     required this.periodEnd,
   });
+}
+
+class _SendResult {
+  final String? error;
+  final bool stopped;
+
+  const _SendResult({this.error, this.stopped = false});
+
+  static const ok = _SendResult();
+  static const stoppedByUser = _SendResult(stopped: true);
 }
 
 /// Drains the durable outbox: builds requests from rules, sends them via
@@ -99,6 +115,10 @@ class SyncService {
   int _lastProgressNotificationProcessed = -1;
   DateTime? _lastProgressNotificationAt;
   bool _runProgressNotificationVisible = false;
+  bool _stopAllRequested = false;
+  final Set<int> _stoppedRuleIds = <int>{};
+  final Set<int> _activeRuleIds = <int>{};
+  final Set<int> _stoppingRuleIds = <int>{};
 
   Future<void> primeProgress({
     required String reason,
@@ -122,6 +142,26 @@ class SyncService {
     await _repo.reclaimStaleSending();
     await _repo.purgeOutboxForDisabledRules();
     return _countDueForReason(reason);
+  }
+
+  Future<void> stopAll() async {
+    _stopAllRequested = true;
+    _drainRequested = false;
+    _stoppingRuleIds.addAll(_activeRuleIds);
+    _http.cancelInFlight();
+    await _repo.releaseSending();
+    _emitStatus(running: _draining);
+  }
+
+  Future<void> stopRule(int ruleId) async {
+    if (ruleId <= 0) return;
+    _stoppedRuleIds.add(ruleId);
+    _stoppingRuleIds.add(ruleId);
+    if (_activeRuleIds.contains(ruleId)) {
+      _http.cancelInFlight();
+    }
+    await _repo.releaseSending(ruleId: ruleId);
+    _emitStatus(running: _draining);
   }
 
   /// Request an outbox drain. Safe to call from anywhere on the main isolate;
@@ -154,6 +194,10 @@ class SyncService {
     _lastProgressNotificationProcessed = -1;
     _lastProgressNotificationAt = null;
     _runProgressNotificationVisible = false;
+    _stopAllRequested = false;
+    _stoppedRuleIds.clear();
+    _activeRuleIds.clear();
+    _stoppingRuleIds.clear();
     _emitStatus(running: true);
     _log('drain start (reason=$reason)');
     try {
@@ -164,6 +208,7 @@ class SyncService {
       await _maybeNotifyProgress(force: true);
       do {
         _drainRequested = false;
+        if (await _shouldStopDrain()) break;
         final processed = await _drainOnce(reason);
         if (processed > 0 && await _repo.hasDue()) {
           final remaining = await _countDueForReason(reason);
@@ -190,6 +235,10 @@ class SyncService {
       } catch (_) {}
       _drainLockOwner = null;
       _lastDrainLockRefreshAt = null;
+      _stopAllRequested = false;
+      _stoppedRuleIds.clear();
+      _activeRuleIds.clear();
+      _stoppingRuleIds.clear();
     }
   }
 
@@ -289,7 +338,32 @@ class SyncService {
       processed: _runProcessed,
       total: _runTotal,
       at: at,
+      activeRuleIds: Set<int>.unmodifiable(_activeRuleIds),
+      stoppingRuleIds: Set<int>.unmodifiable(_stoppingRuleIds),
+      stopRequested: _stopAllRequested,
     );
+  }
+
+  Future<bool> _shouldStopDrain() async {
+    if (_stopAllRequested) return true;
+    final enabled = await DataSyncSettingsService.readEnabledFromPrefs();
+    if (!enabled) {
+      _stopAllRequested = true;
+      _stoppingRuleIds.addAll(_activeRuleIds);
+      return true;
+    }
+    return false;
+  }
+
+  Future<bool> _shouldStopRule(int ruleId) async {
+    if (_stoppedRuleIds.contains(ruleId)) return true;
+    return _shouldStopDrain();
+  }
+
+  Future<void> _releaseItems(Iterable<SyncOutboxItem> items) async {
+    final ids = [for (final item in items) item.id];
+    if (ids.isEmpty) return;
+    await _repo.releaseSending(outboxIds: ids);
   }
 
   Future<int> _countDueForReason(String reason) async {
@@ -308,9 +382,12 @@ class SyncService {
   }
 
   Future<int> _drainOnce(String reason) async {
+    if (await _shouldStopDrain()) return 0;
+    final processedBefore = _runProcessed;
     await _repo.reclaimStaleSending();
     // Drop rows whose rule was disabled or deleted.
     await _repo.purgeOutboxForDisabledRules();
+    if (await _shouldStopDrain()) return 0;
 
     final now = DateTime.now();
     final rules = await _repo.getRules();
@@ -325,6 +402,10 @@ class SyncService {
     final due =
         await _repo.claimDue(limit: _maxRowsPerDrain, ruleIds: dueRuleIds);
     if (due.isEmpty) return 0;
+    if (await _shouldStopDrain()) {
+      await _releaseItems(due);
+      return 0;
+    }
 
     final byRule = <int, List<SyncOutboxItem>>{};
     for (final item in due) {
@@ -332,6 +413,14 @@ class SyncService {
     }
 
     for (final entry in byRule.entries) {
+      if (await _shouldStopDrain()) {
+        await _releaseItems(entry.value);
+        continue;
+      }
+      if (_stoppedRuleIds.contains(entry.key)) {
+        await _releaseItems(entry.value);
+        continue;
+      }
       final rule = rulesById[entry.key];
       if (rule == null || !rule.enabled) {
         await _repo.deleteOutboxByRule(entry.key);
@@ -351,46 +440,86 @@ class SyncService {
         }
         continue;
       }
-      await _sendRuleBatch(rule, dest, entry.value);
-      // Advance the schedule clock once a time-scheduled rule has fired.
-      if (rule.scheduleMode != SyncScheduleMode.off) {
-        await _repo.touchSchedule(rule.id!, now);
+      _activeRuleIds.add(entry.key);
+      _emitStatus(running: true);
+      try {
+        final result = await _sendRuleBatch(rule, dest, entry.value);
+        await _repo.setRuleRunStatus(
+          rule.id!,
+          status: result.stopped
+              ? 'stopped'
+              : (result.error == null ? 'ok' : 'error'),
+          error: result.error,
+        );
+        // Advance the schedule clock once a time-scheduled rule has fired.
+        if (!result.stopped && rule.scheduleMode != SyncScheduleMode.off) {
+          await _repo.touchSchedule(rule.id!, now);
+        }
+      } finally {
+        _activeRuleIds.remove(entry.key);
+        _stoppingRuleIds.remove(entry.key);
+        _emitStatus(running: true);
       }
     }
-    return due.length;
+    return max(0, _runProcessed - processedBefore);
   }
 
-  Future<void> _sendRuleBatch(
+  Future<_SendResult> _sendRuleBatch(
     SyncRule rule,
     SyncDestination dest,
     List<SyncOutboxItem> items,
   ) async {
     final headers = await _auth.headersFor(dest);
     String? lastError;
+    final ruleId = rule.id;
+    if (ruleId == null) return _SendResult.ok;
     if (rule.batchMode == SyncBatchMode.bulkArray) {
       for (var i = 0; i < items.length; i += _bulkChunkSize) {
+        if (await _shouldStopRule(ruleId)) {
+          await _releaseItems(items.sublist(i));
+          return _SendResult.stoppedByUser;
+        }
         final slice = items.sublist(i, min(i + _bulkChunkSize, items.length));
-        lastError = await _sendBulk(rule, dest, slice, headers) ?? lastError;
+        final result = await _sendBulk(rule, dest, slice, headers);
+        if (result.stopped) {
+          if (i + slice.length < items.length) {
+            await _releaseItems(items.sublist(i + slice.length));
+          }
+          return result;
+        }
+        lastError = result.error ?? lastError;
       }
     } else {
-      for (final item in items) {
-        lastError = await _sendOne(rule, dest, item, headers) ?? lastError;
+      for (var i = 0; i < items.length; i++) {
+        if (await _shouldStopRule(ruleId)) {
+          await _releaseItems(items.sublist(i));
+          return _SendResult.stoppedByUser;
+        }
+        final result = await _sendOne(rule, dest, items[i], headers);
+        if (result.stopped) {
+          if (i + 1 < items.length) {
+            await _releaseItems(items.sublist(i + 1));
+          }
+          return result;
+        }
+        lastError = result.error ?? lastError;
       }
     }
-    await _repo.setRuleRunStatus(
-      rule.id!,
-      status: lastError == null ? 'ok' : 'error',
-      error: lastError,
-    );
+    return _SendResult(error: lastError);
   }
 
   /// Returns an error message if the send did not succeed, else null.
-  Future<String?> _sendOne(
+  Future<_SendResult> _sendOne(
     SyncRule rule,
     SyncDestination dest,
     SyncOutboxItem item,
     Map<String, String> headers,
   ) async {
+    final ruleId = rule.id;
+    if (ruleId != null && await _shouldStopRule(ruleId)) {
+      await _releaseItems([item]);
+      return _SendResult.stoppedByUser;
+    }
     try {
       final payload = await _resolvePayload(item);
       if (payload == null) {
@@ -398,7 +527,11 @@ class SyncService {
         await _repo.markSent(item.id);
         _runSent++;
         await _noteProcessed();
-        return null;
+        return _SendResult.ok;
+      }
+      if (ruleId != null && await _shouldStopRule(ruleId)) {
+        await _releaseItems([item]);
+        return _SendResult.stoppedByUser;
       }
       final mapped = SyncFieldMapper.apply(
         payload,
@@ -413,34 +546,57 @@ class SyncService {
         headers: headers,
         jsonBody: mapped,
       );
-      return _applyOutcome(
+      final detail = await _applyOutcome(
         item,
         statusCode: res.statusCode,
         refusedLocally: res.refusedLocally,
         retryAfter: res.retryAfter,
         body: res.bodySnippet(),
       );
+      return _SendResult(error: detail);
     } on SyncTemplateException catch (error) {
       await _repo.markDead(item.id, error: error.message);
       _runFailed++;
       await _noteProcessed();
-      return error.message;
+      return _SendResult(error: error.message);
     } on OutboundNetworkException catch (error) {
-      return _applyOutcome(item, networkError: true, error: error.message);
+      if (ruleId != null && await _shouldStopRule(ruleId)) {
+        await _releaseItems([item]);
+        return _SendResult.stoppedByUser;
+      }
+      final detail =
+          await _applyOutcome(item, networkError: true, error: error.message);
+      return _SendResult(error: detail);
     } catch (error) {
-      return _applyOutcome(item, networkError: true, error: error.toString());
+      if (ruleId != null && await _shouldStopRule(ruleId)) {
+        await _releaseItems([item]);
+        return _SendResult.stoppedByUser;
+      }
+      final detail = await _applyOutcome(item,
+          networkError: true, error: error.toString());
+      return _SendResult(error: detail);
     }
   }
 
-  Future<String?> _sendBulk(
+  Future<_SendResult> _sendBulk(
     SyncRule rule,
     SyncDestination dest,
     List<SyncOutboxItem> items,
     Map<String, String> headers,
   ) async {
+    final ruleId = rule.id;
+    if (ruleId != null && await _shouldStopRule(ruleId)) {
+      await _releaseItems(items);
+      return _SendResult.stoppedByUser;
+    }
     final payloads = <Map<String, dynamic>>[];
     final live = <SyncOutboxItem>[];
-    for (final item in items) {
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (ruleId != null && await _shouldStopRule(ruleId)) {
+        await _releaseItems(items.sublist(i));
+        return _SendResult.stoppedByUser;
+      }
       final payload = await _resolvePayload(item);
       if (payload == null) {
         await _repo.markSent(item.id);
@@ -455,7 +611,11 @@ class SyncService {
       ));
       live.add(item);
     }
-    if (live.isEmpty) return null;
+    if (live.isEmpty) return _SendResult.ok;
+    if (ruleId != null && await _shouldStopRule(ruleId)) {
+      await _releaseItems(live);
+      return _SendResult.stoppedByUser;
+    }
 
     final Uri uri;
     try {
@@ -468,7 +628,7 @@ class SyncService {
         _runFailed++;
         await _noteProcessed();
       }
-      return msg;
+      return const _SendResult(error: msg);
     }
 
     try {
@@ -489,15 +649,19 @@ class SyncService {
             ) ??
             lastError;
       }
-      return lastError;
+      return _SendResult(error: lastError);
     } on OutboundNetworkException catch (error) {
+      if (ruleId != null && await _shouldStopRule(ruleId)) {
+        await _releaseItems(live);
+        return _SendResult.stoppedByUser;
+      }
       String? lastError;
       for (final item in live) {
         lastError = await _applyOutcome(item,
                 networkError: true, error: error.message) ??
             lastError;
       }
-      return lastError;
+      return _SendResult(error: lastError);
     }
   }
 

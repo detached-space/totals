@@ -159,7 +159,8 @@ class DataSyncRepository {
 
   Future<List<SyncDestination>> getDestinations() async {
     final db = await _db;
-    final rows = await db.query('sync_destinations', orderBy: 'name COLLATE NOCASE ASC');
+    final rows =
+        await db.query('sync_destinations', orderBy: 'name COLLATE NOCASE ASC');
     return rows.map(SyncDestination.fromDb).toList(growable: false);
   }
 
@@ -241,9 +242,11 @@ class DataSyncRepository {
 
     await db.transaction((txn) async {
       for (final ruleId in ruleIds) {
-        await txn.delete('sync_outbox', where: 'ruleId = ?', whereArgs: [ruleId]);
+        await txn
+            .delete('sync_outbox', where: 'ruleId = ?', whereArgs: [ruleId]);
       }
-      await txn.delete('sync_rules', where: 'destinationId = ?', whereArgs: [id]);
+      await txn
+          .delete('sync_rules', where: 'destinationId = ?', whereArgs: [id]);
       await txn.delete('sync_destinations', where: 'id = ?', whereArgs: [id]);
     });
 
@@ -262,7 +265,8 @@ class DataSyncRepository {
 
   Future<List<SyncRule>> getRules() async {
     final db = await _db;
-    final rows = await db.query('sync_rules', orderBy: 'name COLLATE NOCASE ASC');
+    final rows =
+        await db.query('sync_rules', orderBy: 'name COLLATE NOCASE ASC');
     return rows.map(SyncRule.fromDb).toList(growable: false);
   }
 
@@ -456,7 +460,8 @@ class DataSyncRepository {
   /// claiming the same rows. When [ruleIds] is provided, only rows for those
   /// rules are claimed (used to honor per-rule schedules); an empty set claims
   /// nothing.
-  Future<List<SyncOutboxItem>> claimDue({int limit = 200, Set<int>? ruleIds}) async {
+  Future<List<SyncOutboxItem>> claimDue(
+      {int limit = 200, Set<int>? ruleIds}) async {
     if (ruleIds != null && ruleIds.isEmpty) return const [];
     final db = await _db;
     final now = DateTime.now().toIso8601String();
@@ -464,7 +469,8 @@ class DataSyncRepository {
     final where = StringBuffer('status = ? AND nextAttemptAt <= ?');
     final args = <Object?>[SyncOutboxStatus.pending, now];
     if (ruleIds != null) {
-      where.write(' AND ruleId IN (${List.filled(ruleIds.length, '?').join(', ')})');
+      where.write(
+          ' AND ruleId IN (${List.filled(ruleIds.length, '?').join(', ')})');
       args.addAll(ruleIds);
     }
     await db.transaction((txn) async {
@@ -483,7 +489,8 @@ class DataSyncRepository {
           where: 'id = ?',
           whereArgs: [id],
         );
-        claimed.add(SyncOutboxItem.fromDb({...row, 'status': SyncOutboxStatus.sending}));
+        claimed.add(SyncOutboxItem.fromDb(
+            {...row, 'status': SyncOutboxStatus.sending}));
       }
     });
     return claimed;
@@ -569,6 +576,37 @@ class DataSyncRepository {
       },
       where: 'id = ?',
       whereArgs: [outboxId],
+    );
+  }
+
+  Future<int> releaseSending({
+    int? ruleId,
+    Iterable<int>? outboxIds,
+  }) async {
+    final ids = outboxIds?.toSet().toList(growable: false);
+    if (ids != null && ids.isEmpty) return 0;
+
+    final db = await _db;
+    final where = StringBuffer('status = ?');
+    final args = <Object?>[SyncOutboxStatus.sending];
+    if (ruleId != null) {
+      where.write(' AND ruleId = ?');
+      args.add(ruleId);
+    }
+    if (ids != null) {
+      where.write(' AND id IN (${List.filled(ids.length, '?').join(', ')})');
+      args.addAll(ids);
+    }
+    final now = _now();
+    return db.update(
+      'sync_outbox',
+      {
+        'status': SyncOutboxStatus.pending,
+        'nextAttemptAt': now,
+        'updatedAt': now,
+      },
+      where: where.toString(),
+      whereArgs: args,
     );
   }
 
@@ -945,7 +983,8 @@ class DataSyncRepository {
 
   Future<int> clearSent() async {
     final db = await _db;
-    return db.delete('sync_outbox', where: 'status = ?', whereArgs: [SyncOutboxStatus.sent]);
+    return db.delete('sync_outbox',
+        where: 'status = ?', whereArgs: [SyncOutboxStatus.sent]);
   }
 
   /// Debug helper: wipe the entire outbox (the store that tracks which records

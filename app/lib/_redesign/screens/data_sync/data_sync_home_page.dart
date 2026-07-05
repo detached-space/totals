@@ -29,13 +29,30 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
   bool _loading = true;
   bool _enabled = false;
   bool _syncing = false;
+  bool _lastSyncRunning = false;
   List<SyncDestination> _destinations = const [];
   List<SyncRule> _rules = const [];
 
   @override
   void initState() {
     super.initState();
+    _lastSyncRunning = SyncService.instance.status.value.running;
+    SyncService.instance.status.addListener(_handleSyncStatusChanged);
     _load();
+  }
+
+  @override
+  void dispose() {
+    SyncService.instance.status.removeListener(_handleSyncStatusChanged);
+    super.dispose();
+  }
+
+  void _handleSyncStatusChanged() {
+    final running = SyncService.instance.status.value.running;
+    if (_lastSyncRunning && !running) {
+      unawaited(_load());
+    }
+    _lastSyncRunning = running;
   }
 
   Future<void> _load() async {
@@ -58,11 +75,20 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
       );
       if (accepted != true) return;
     }
+    if (!value) {
+      if (mounted) setState(() => _enabled = false);
+      await _settings.setMasterEnabled(false);
+      await SyncService.instance.stopAll();
+      await DataSyncScheduler.sync();
+      if (!mounted) return;
+      await _load();
+      return;
+    }
     await _settings.setMasterEnabled(value);
     await DataSyncScheduler.sync();
     if (!mounted) return;
     setState(() => _enabled = value);
-    if (value) unawaited(SyncService.instance.requestDrain(reason: 'enabled'));
+    unawaited(SyncService.instance.requestDrain(reason: 'enabled'));
   }
 
   Future<void> _syncNow() async {
@@ -134,6 +160,9 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
   }
 
   Future<void> _toggleRule(SyncRule rule, bool value) async {
+    if (!value && rule.id != null) {
+      await SyncService.instance.stopRule(rule.id!);
+    }
     await _repo.updateRule(rule.copyWith(enabled: value));
     await DataSyncScheduler.sync();
     if (value) unawaited(SyncService.instance.requestDrain(reason: 'rule-on'));
@@ -519,26 +548,32 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
             title: rule.name,
             subtitle: '${rule.entity.label} → ${_destName(rule.destinationId)}',
             onTap: () => _addOrEditRule(rule),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (rule.lastStatus != null)
-                  DataSyncStatusPill(rule.lastStatus!),
-                Switch.adaptive(
-                  value: rule.enabled,
-                  activeThumbColor: AppColors.primaryLight,
-                  onChanged: (v) => _toggleRule(rule, v),
-                ),
-                IconButton(
-                  onPressed: () => _deleteRule(rule),
-                  icon: const Icon(AppIcons.delete_outline_rounded,
-                      color: AppColors.red, size: 20),
-                ),
-              ],
-            ),
+            trailing: _ruleTrailing(rule),
           ),
           const SizedBox(height: 8),
         ],
+      ],
+    );
+  }
+
+  Widget _ruleTrailing(SyncRule rule) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (rule.lastStatus != null) DataSyncStatusPill(rule.lastStatus!),
+        Switch.adaptive(
+          value: rule.enabled,
+          activeThumbColor: AppColors.primaryLight,
+          onChanged: (v) => _toggleRule(rule, v),
+        ),
+        IconButton(
+          onPressed: () => _deleteRule(rule),
+          icon: const Icon(
+            AppIcons.delete_outline_rounded,
+            color: AppColors.red,
+            size: 20,
+          ),
+        ),
       ],
     );
   }

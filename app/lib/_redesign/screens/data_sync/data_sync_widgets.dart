@@ -164,6 +164,8 @@ class DataSyncStatusPill extends StatelessWidget {
         return (AppColors.amber, 'Pending');
       case SyncOutboxStatus.sending:
         return (AppColors.primaryLight, 'Sending');
+      case 'stopped':
+        return (AppColors.slate500, 'Stopped');
       case SyncOutboxStatus.dead:
       case SyncOutboxStatus.failed:
       case 'error':
