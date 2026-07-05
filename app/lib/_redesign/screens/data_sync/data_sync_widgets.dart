@@ -234,7 +234,7 @@ class DataSyncTextField extends StatelessWidget {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: AppColors.primaryLight),
+              borderSide: const BorderSide(color: AppColors.primaryLight),
             ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -311,61 +311,100 @@ Future<T?> showDataSyncSheet<T>(
   BuildContext context, {
   required String title,
   required Widget child,
+  bool scrollable = true,
 }) {
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (ctx) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(ctx).size.height * 0.9,
-          ),
-          decoration: BoxDecoration(
-            color: AppColors.cardColor(ctx),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: EdgeInsets.fromLTRB(
-              20, 12, 20, 20 + MediaQuery.of(ctx).padding.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
+      final mediaQuery = MediaQuery.of(ctx);
+      final keyboardInset = mediaQuery.viewInsets.bottom;
+      final bottomSafeArea = mediaQuery.viewPadding.bottom;
+      final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+      final contentBottomPadding =
+          scrollable ? bottomSafeArea + (keyboardInset > 0 ? 16.0 : 20.0) : 0.0;
+
+      return AnimatedPadding(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
+        child: SafeArea(
+          top: false,
+          bottom: false,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final availableHeight = constraints.hasBoundedHeight
+                  ? constraints.maxHeight
+                  : mediaQuery.size.height;
+              final sheetHeightLimit = mediaQuery.size.height * 0.9;
+              final maxHeight = availableHeight < sheetHeightLimit
+                  ? availableHeight
+                  : sheetHeightLimit;
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
                 child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
                   decoration: BoxDecoration(
-                    color: AppColors.slate400,
-                    borderRadius: BorderRadius.circular(99),
+                    color: AppColors.cardColor(ctx),
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.slate400,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: TextStyle(
+                                color: AppColors.textPrimary(ctx),
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            icon: Icon(
+                              AppIcons.close_rounded,
+                              color: AppColors.textTertiary(ctx),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (scrollable)
+                        Flexible(
+                          child: SingleChildScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding:
+                                EdgeInsets.only(bottom: contentBottomPadding),
+                            child: child,
+                          ),
+                        )
+                      else
+                        Flexible(child: child),
+                    ],
                   ),
                 ),
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        color: AppColors.textPrimary(ctx),
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    icon: Icon(AppIcons.close_rounded,
-                        color: AppColors.textTertiary(ctx)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Flexible(child: SingleChildScrollView(child: child)),
-            ],
+              );
+            },
           ),
         ),
       );

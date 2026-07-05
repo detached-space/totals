@@ -18,6 +18,7 @@ Future<bool?> showDataSyncDestinationSheet(
     context,
     title: existing == null ? 'Add destination' : 'Edit destination',
     child: _DestinationForm(existing: existing),
+    scrollable: false,
   );
 }
 
@@ -45,8 +46,7 @@ class _DestinationFormState extends State<_DestinationForm> {
   String? _testResult;
 
   bool get _isEditing => widget.existing != null;
-  bool get _hasExistingSecret =>
-      (widget.existing?.secretRef ?? '').isNotEmpty;
+  bool get _hasExistingSecret => (widget.existing?.secretRef ?? '').isNotEmpty;
 
   @override
   void initState() {
@@ -81,7 +81,8 @@ class _DestinationFormState extends State<_DestinationForm> {
       case SyncAuthType.bearer:
         return secret.isEmpty ? const {} : {'Authorization': 'Bearer $secret'};
       case SyncAuthType.basic:
-        final token = base64Encode(utf8.encode('${_usernameCtrl.text}:$secret'));
+        final token =
+            base64Encode(utf8.encode('${_usernameCtrl.text}:$secret'));
         return {'Authorization': 'Basic $token'};
     }
   }
@@ -153,101 +154,127 @@ class _DestinationFormState extends State<_DestinationForm> {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final formBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
+
     return Form(
       key: _formKey,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DataSyncTextField(
-            controller: _nameCtrl,
-            label: 'Name',
-            hint: 'My backend',
-            validator: (v) =>
-                (v ?? '').trim().isEmpty ? 'Required' : null,
-          ),
-          const SizedBox(height: 14),
-          DataSyncTextField(
-            controller: _urlCtrl,
-            label: 'Base URL',
-            hint: 'https://api.example.com',
-            keyboardType: TextInputType.url,
-            validator: SyncUrl.validate,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Authentication',
-            style: TextStyle(
-              color: AppColors.textSecondary(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final type in SyncAuthType.values)
-                ChoiceChip(
-                  label: Text(type.label),
-                  selected: _authType == type,
-                  onSelected: (_) => setState(() => _authType = type),
-                ),
-            ],
-          ),
-          if (_authType == SyncAuthType.apiKey) ...[
-            const SizedBox(height: 14),
-            DataSyncTextField(
-              controller: _headerCtrl,
-              label: 'Header name',
-              hint: 'X-API-Key',
-            ),
-          ],
-          if (_authType == SyncAuthType.basic) ...[
-            const SizedBox(height: 14),
-            DataSyncTextField(
-              controller: _usernameCtrl,
-              label: 'Username',
-            ),
-          ],
-          if (_authType.needsSecret) ...[
-            const SizedBox(height: 14),
-            DataSyncTextField(
-              controller: _secretCtrl,
-              label: _authType == SyncAuthType.basic ? 'Password' : 'Secret',
-              hint: _isEditing && _hasExistingSecret
-                  ? 'Leave blank to keep current'
-                  : null,
-              obscure: true,
-            ),
-          ],
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _testing ? null : _testConnection,
-            icon: _testing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.wifi_tethering_rounded, size: 18),
-            label: const Text('Test connection'),
-          ),
-          if (_testResult != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _testResult!,
-              style: TextStyle(
-                color: AppColors.textSecondary(context),
-                fontSize: 12,
+          Flexible(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.only(bottom: formBottomPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DataSyncTextField(
+                    controller: _nameCtrl,
+                    label: 'Name',
+                    hint: 'My backend',
+                    validator: (v) =>
+                        (v ?? '').trim().isEmpty ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 14),
+                  DataSyncTextField(
+                    controller: _urlCtrl,
+                    label: 'Base URL',
+                    hint: 'https://api.example.com',
+                    keyboardType: TextInputType.url,
+                    validator: SyncUrl.validate,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Authentication',
+                    style: TextStyle(
+                      color: AppColors.textSecondary(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final type in SyncAuthType.values)
+                        ChoiceChip(
+                          label: Text(type.label),
+                          selected: _authType == type,
+                          onSelected: (_) => setState(() => _authType = type),
+                        ),
+                    ],
+                  ),
+                  if (_authType == SyncAuthType.apiKey) ...[
+                    const SizedBox(height: 14),
+                    DataSyncTextField(
+                      controller: _headerCtrl,
+                      label: 'Header name',
+                      hint: 'X-API-Key',
+                    ),
+                  ],
+                  if (_authType == SyncAuthType.basic) ...[
+                    const SizedBox(height: 14),
+                    DataSyncTextField(
+                      controller: _usernameCtrl,
+                      label: 'Username',
+                    ),
+                  ],
+                  if (_authType.needsSecret) ...[
+                    const SizedBox(height: 14),
+                    DataSyncTextField(
+                      controller: _secretCtrl,
+                      label: _authType == SyncAuthType.basic
+                          ? 'Password'
+                          : 'Secret',
+                      hint: _isEditing && _hasExistingSecret
+                          ? 'Leave blank to keep current'
+                          : null,
+                      obscure: true,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: _testing ? null : _testConnection,
+                    icon: _testing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.wifi_tethering_rounded, size: 18),
+                    label: const Text('Test connection'),
+                  ),
+                  if (_testResult != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _testResult!,
+                      style: TextStyle(
+                        color: AppColors.textSecondary(context),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-          ],
-          const SizedBox(height: 20),
-          DataSyncPrimaryButton(
-            label: _isEditing ? 'Save changes' : 'Add destination',
-            loading: _saving,
-            onPressed: _save,
+          ),
+          SizedBox(height: actionTopGap),
+          Padding(
+            padding: EdgeInsets.only(bottom: bottomSafeArea + actionBottomGap),
+            child: DataSyncPrimaryButton(
+              label: _isEditing ? 'Save changes' : 'Add destination',
+              loading: _saving,
+              onPressed: _save,
+            ),
           ),
         ],
       ),

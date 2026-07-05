@@ -360,7 +360,13 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
     }
 
     final isLast = _step == _stepTitles.length - 1;
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final formBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
+
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: AppColors.background(context),
       appBar: AppBar(
         title: Text(_isEditing ? 'Edit rule' : 'Add rule'),
@@ -370,48 +376,67 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
             value: (_step + 1) / _stepTitles.length,
             minHeight: 3,
             backgroundColor: AppColors.borderColor(context),
-            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryLight),
+            valueColor:
+                const AlwaysStoppedAnimation<Color>(AppColors.primaryLight),
           ),
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-              children: [
-                Text(
-                  'Step ${_step + 1} of ${_stepTitles.length}',
-                  style: TextStyle(
-                    color: AppColors.textTertiary(context),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+      body: AnimatedPadding(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(20, 16, 20, formBottomPadding),
+                children: [
+                  Text(
+                    'Step ${_step + 1} of ${_stepTitles.length}',
+                    style: TextStyle(
+                      color: AppColors.textTertiary(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _stepTitles[_step],
-                  style: TextStyle(
-                    color: AppColors.textPrimary(context),
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
+                  const SizedBox(height: 2),
+                  Text(
+                    _stepTitles[_step],
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                ..._currentStep(),
-              ],
+                  const SizedBox(height: 18),
+                  ..._currentStep(),
+                ],
+              ),
             ),
-          ),
-          _bottomBar(isLast),
-        ],
+            _bottomBar(isLast),
+          ],
+        ),
       ),
     );
   }
 
   Widget _bottomBar(bool isLast) {
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+
     return Container(
       padding: EdgeInsets.fromLTRB(
-          20, 10, 20, 12 + MediaQuery.of(context).padding.bottom),
+        20,
+        10,
+        20,
+        bottomSafeArea + actionBottomGap,
+      ),
       decoration: BoxDecoration(
         color: AppColors.cardColor(context),
         border: Border(top: BorderSide(color: AppColors.borderColor(context))),
@@ -432,7 +457,8 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
           const SizedBox(width: 12),
           Expanded(
             child: DataSyncPrimaryButton(
-              label: isLast ? (_isEditing ? 'Save changes' : 'Add rule') : 'Next',
+              label:
+                  isLast ? (_isEditing ? 'Save changes' : 'Add rule') : 'Next',
               loading: _saving,
               onPressed: _next,
             ),
@@ -637,7 +663,9 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
           title: _bankLabel(bankId),
           value: _selectedBankIds.contains(bankId),
           onChanged: (sel) => setState(() {
-            sel ? _selectedBankIds.add(bankId) : _selectedBankIds.remove(bankId);
+            sel
+                ? _selectedBankIds.add(bankId)
+                : _selectedBankIds.remove(bankId);
           }),
         ),
       const SizedBox(height: 14),
@@ -744,8 +772,11 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
             onPressed: () => setState(() {
               _mappings.removeAt(index).backend.dispose();
             }),
-            icon: Icon(AppIcons.delete_outline_rounded,
-                color: AppColors.red, size: 20),
+            icon: const Icon(
+              AppIcons.delete_outline_rounded,
+              color: AppColors.red,
+              size: 20,
+            ),
           ),
         ],
       ),
@@ -785,7 +816,8 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
                 items: [
                   for (final mins in syncIntervalPresets)
                     DropdownMenuItem(
-                        value: mins, child: Text('Every ${_intervalLabel(mins)}')),
+                        value: mins,
+                        child: Text('Every ${_intervalLabel(mins)}')),
                 ],
                 onChanged: (v) =>
                     setState(() => _scheduleInterval = v ?? _scheduleInterval),
@@ -823,8 +855,11 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
                         visualDensity: VisualDensity.compact,
                         onPressed: () =>
                             setState(() => _scheduleTimes.remove(t)),
-                        icon: Icon(AppIcons.delete_outline_rounded,
-                            size: 18, color: AppColors.red),
+                        icon: const Icon(
+                          AppIcons.delete_outline_rounded,
+                          size: 18,
+                          color: AppColors.red,
+                        ),
                       ),
                     ],
                   ),
@@ -944,8 +979,9 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
               selected
                   ? Icons.radio_button_checked_rounded
                   : Icons.radio_button_off_rounded,
-              color:
-                  selected ? AppColors.primaryLight : AppColors.textTertiary(context),
+              color: selected
+                  ? AppColors.primaryLight
+                  : AppColors.textTertiary(context),
               size: 20,
             ),
             const SizedBox(width: 12),
@@ -990,8 +1026,9 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
               value
                   ? Icons.check_box_rounded
                   : Icons.check_box_outline_blank_rounded,
-              color:
-                  value ? AppColors.primaryLight : AppColors.textTertiary(context),
+              color: value
+                  ? AppColors.primaryLight
+                  : AppColors.textTertiary(context),
               size: 20,
             ),
             const SizedBox(width: 12),
@@ -1011,10 +1048,11 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
       value: value,
-      activeColor: AppColors.primaryLight,
+      activeThumbColor: AppColors.primaryLight,
       onChanged: onChanged,
       title: Text(title,
-          style: TextStyle(color: AppColors.textPrimary(context), fontSize: 14)),
+          style:
+              TextStyle(color: AppColors.textPrimary(context), fontSize: 14)),
       subtitle: subtitle == null
           ? null
           : Text(subtitle,
@@ -1036,7 +1074,8 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
         padding: const EdgeInsets.only(top: 2),
         child: Text(
           text,
-          style: TextStyle(color: AppColors.textTertiary(context), fontSize: 12),
+          style:
+              TextStyle(color: AppColors.textTertiary(context), fontSize: 12),
         ),
       );
 }
