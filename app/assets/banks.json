@@ -125,7 +125,7 @@
       "id": 19,
       "name": "Hibret Bank",
       "shortName": "Hibret",
-      "codes": ["Hibret Bank", "Hibir Mobile"],
+      "codes": ["Hibret Bank", "Hibir Mobile", "HibretBank"],
       "image": "assets/images/hibret.png",
       "maskPattern": 3,
       "uniformMasking": true,
