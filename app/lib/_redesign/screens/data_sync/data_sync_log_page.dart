@@ -217,9 +217,8 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
     final transactionTime = transactionDetails == null
         ? null
         : _formatTime(transactionDetails.time);
-    final transactionParty = transactionDetails == null
-        ? null
-        : _partyLabel(transactionDetails);
+    final transactionParty =
+        transactionDetails == null ? null : _partyLabel(transactionDetails);
     final subtitleParts = <String>[
       if (transactionDetails == null) item.entity.label,
       if (transactionDetails != null) ...[
@@ -337,8 +336,6 @@ class _DataSyncLogPageState extends State<DataSyncLogPage> {
   String? _partyLabel(SyncTransactionLogDetails details) {
     final party = details.party;
     if (party == null) return null;
-    if (details.isCredit) return 'Sender: $party';
-    if (details.isDebit) return 'Receiver: $party';
     return party;
   }
 

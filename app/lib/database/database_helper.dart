@@ -1533,6 +1533,15 @@ class DatabaseHelper {
       'CREATE INDEX IF NOT EXISTS idx_sync_outbox_rule ON sync_outbox(ruleId)',
     );
 
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_runtime_locks (
+        name TEXT PRIMARY KEY,
+        owner TEXT NOT NULL,
+        acquiredAt TEXT NOT NULL,
+        expiresAt TEXT NOT NULL
+      )
+    ''');
+
     // Defensive: add the per-rule schedule columns (v27) to an existing
     // sync_rules table created under v26.
     final ruleCols = await db.rawQuery('PRAGMA table_info(sync_rules)');

@@ -565,6 +565,56 @@ class DataSyncRepository {
     };
   }
 
+  Future<String?> acquireDrainLock({
+    Duration ttl = const Duration(minutes: 10),
+  }) async {
+    final db = await _db;
+    final now = DateTime.now();
+    final owner = '${now.microsecondsSinceEpoch}-${identityHashCode(this)}';
+    final nowIso = now.toIso8601String();
+    final expiresIso = now.add(ttl).toIso8601String();
+    return db.transaction<String?>((txn) async {
+      await txn.delete(
+        'sync_runtime_locks',
+        where: 'name = ? AND expiresAt <= ?',
+        whereArgs: ['drain', nowIso],
+      );
+      try {
+        await txn.insert('sync_runtime_locks', {
+          'name': 'drain',
+          'owner': owner,
+          'acquiredAt': nowIso,
+          'expiresAt': expiresIso,
+        });
+        return owner;
+      } on DatabaseException {
+        return null;
+      }
+    });
+  }
+
+  Future<void> extendDrainLock(
+    String owner, {
+    Duration ttl = const Duration(minutes: 10),
+  }) async {
+    final db = await _db;
+    await db.update(
+      'sync_runtime_locks',
+      {'expiresAt': DateTime.now().add(ttl).toIso8601String()},
+      where: 'name = ? AND owner = ?',
+      whereArgs: ['drain', owner],
+    );
+  }
+
+  Future<void> releaseDrainLock(String owner) async {
+    final db = await _db;
+    await db.delete(
+      'sync_runtime_locks',
+      where: 'name = ? AND owner = ?',
+      whereArgs: ['drain', owner],
+    );
+  }
+
   Future<Map<String, SyncTransactionLogDetails>> getTransactionLogDetails(
     Iterable<String> references,
   ) async {

@@ -172,10 +172,11 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
 
   void _pruneBankAccountSelections() {
     final visibleBanks = {for (final account in _accounts) account.bank};
-    final visibleAccounts = {
-      for (final account in _accounts) _accountKey(account),
-    };
     _selectedBankIds.removeWhere((bankId) => !visibleBanks.contains(bankId));
+    final visibleAccounts = {
+      for (final account in _accounts)
+        if (_accountSelectable(account)) _accountKey(account),
+    };
     _selectedAccountKeys.removeWhere((key) => !visibleAccounts.contains(key));
   }
 
@@ -256,22 +257,43 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
     final maxAmt = double.tryParse(_maxAmtCtrl.text.trim());
     final supportsAccounts = _entity != SyncEntity.budgets;
     final supportsProfiles = _entity != SyncEntity.budgets;
+    final selectedBankIds = _scopedSelectedBankIds();
+    final selectedAccountKeys = _scopedSelectedAccountKeys();
     final filter = SyncFilter(
       type: _entity == SyncEntity.transactions && _typeFilter != 'any'
           ? _typeFilter
           : null,
       minAmount: _entity == SyncEntity.transactions ? minAmt : null,
       maxAmount: _entity == SyncEntity.transactions ? maxAmt : null,
-      bankIds: supportsAccounts && _selectedBankIds.isNotEmpty
-          ? _selectedBankIds.toList()
+      bankIds: supportsAccounts && selectedBankIds.isNotEmpty
+          ? selectedBankIds
           : null,
-      accountKeys: supportsAccounts && _selectedAccountKeys.isNotEmpty
-          ? _selectedAccountKeys.toList()
+      accountKeys: supportsAccounts && selectedAccountKeys.isNotEmpty
+          ? selectedAccountKeys
           : null,
       isActive: _entity == SyncEntity.budgets && _activeOnly ? true : null,
       profileId: supportsProfiles ? _selectedProfileId : null,
     );
     return filter.isEmpty ? null : filter;
+  }
+
+  List<int> _scopedSelectedBankIds() {
+    if (_loadingAccounts) return _selectedBankIds.toList(growable: false);
+    final visibleBankIds = {for (final account in _accounts) account.bank};
+    return _selectedBankIds
+        .where(visibleBankIds.contains)
+        .toList(growable: false);
+  }
+
+  List<String> _scopedSelectedAccountKeys() {
+    if (_loadingAccounts) return _selectedAccountKeys.toList(growable: false);
+    final visibleAccountKeys = {
+      for (final account in _accounts)
+        if (_accountSelectable(account)) _accountKey(account),
+    };
+    return _selectedAccountKeys
+        .where(visibleAccountKeys.contains)
+        .toList(growable: false);
   }
 
   Map<String, String> _buildFieldMap() {
@@ -367,8 +389,11 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
         total: count,
       );
       await SyncService.instance.backfillRule(rule);
-      unawaited(DataSyncScheduler.requestImmediateDrain(reason: 'backfill'));
       unawaited(SyncService.instance.requestDrain(reason: 'backfill'));
+      unawaited(DataSyncScheduler.requestImmediateDrain(
+        reason: 'backfill',
+        initialDelay: const Duration(seconds: 30),
+      ));
     } else {
       await _repo.markRuleBackfilled(rule.id!);
     }
@@ -748,20 +773,18 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
       return [_hint('Loading your accounts…')];
     }
     if (_accounts.isEmpty) {
-      final profileText = _selectedProfileId == null
-          ? ''
-          : ' for ${_profileLabel(_selectedProfileId)}';
-      final scopeText = _selectedProfileId == null
-          ? 'every account'
-          : 'every account in this profile';
       return [
-        _hint('No accounts found$profileText — $scopeText is included.'),
+        _hint(_selectedProfileId == null
+            ? 'No accounts found. Bank and account filters are unavailable.'
+            : '${_profileLabel(_selectedProfileId)} has no accounts yet. Bank and account filters are unavailable.'),
       ];
     }
     final bankIds = <int>{for (final a in _accounts) a.bank}.toList()..sort();
     return [
       _label('Banks'),
-      _hint('Leave all off to include every bank.'),
+      _hint(_selectedProfileId == null
+          ? 'Leave all off to include every bank.'
+          : 'Leave all off to include every bank in this profile.'),
       const SizedBox(height: 4),
       for (final bankId in bankIds)
         _checkTile(
@@ -771,6 +794,7 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
             sel
                 ? _selectedBankIds.add(bankId)
                 : _selectedBankIds.remove(bankId);
+            _pruneBankAccountSelections();
           }),
         ),
       const SizedBox(height: 14),
@@ -780,6 +804,7 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
         _checkTile(
           title: _accountLabel(acct),
           value: _selectedAccountKeys.contains(_accountKey(acct)),
+          enabled: _accountSelectable(acct),
           onChanged: (sel) => setState(() {
             final key = _accountKey(acct);
             sel
@@ -791,6 +816,10 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
   }
 
   String _accountKey(Account a) => '${a.accountNumber}|${a.bank}';
+
+  bool _accountSelectable(Account account) {
+    return _selectedBankIds.isEmpty || _selectedBankIds.contains(account.bank);
+  }
 
   String _profileLabel(int? profileId) {
     if (profileId == null) return 'all profiles';
@@ -1127,10 +1156,11 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
     required String title,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool enabled = true,
   }) {
     return InkWell(
       borderRadius: BorderRadius.circular(10),
-      onTap: () => onChanged(!value),
+      onTap: enabled ? () => onChanged(!value) : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
@@ -1141,14 +1171,19 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
                   : Icons.check_box_outline_blank_rounded,
               color: value
                   ? AppColors.primaryLight
-                  : AppColors.textTertiary(context),
+                  : enabled
+                      ? AppColors.textTertiary(context)
+                      : AppColors.slate400,
               size: 20,
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(title,
                   style: TextStyle(
-                      color: AppColors.textPrimary(context), fontSize: 14)),
+                      color: enabled
+                          ? AppColors.textPrimary(context)
+                          : AppColors.textTertiary(context),
+                      fontSize: 14)),
             ),
           ],
         ),

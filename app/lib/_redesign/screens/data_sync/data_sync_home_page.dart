@@ -66,8 +66,19 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
   }
 
   Future<void> _syncNow() async {
+    final dueCount = await SyncService.instance.countDue(reason: 'manual');
+    if (!mounted) return;
+    if (dueCount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nothing to sync')),
+      );
+      return;
+    }
     setState(() => _syncing = true);
-    unawaited(DataSyncScheduler.requestImmediateDrain(reason: 'manual'));
+    await SyncService.instance.primeProgress(
+      reason: 'manual',
+      total: dueCount,
+    );
     await SyncService.instance.requestDrain(reason: 'manual');
     if (!mounted) return;
     setState(() => _syncing = false);

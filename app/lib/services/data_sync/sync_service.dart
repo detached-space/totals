@@ -64,6 +64,8 @@ class SyncService {
 
   bool _draining = false;
   bool _drainRequested = false;
+  String? _drainLockOwner;
+  DateTime? _lastDrainLockRefreshAt;
 
   /// Live status of the most recent / ongoing drain, for the UI to observe.
   final ValueNotifier<SyncRunStatus> status =
@@ -94,12 +96,24 @@ class SyncService {
     await _maybeNotifyProgress(force: true);
   }
 
+  Future<int> countDue({String reason = 'manual'}) async {
+    if (!await DataSyncSettingsService.readEnabledFromPrefs()) return 0;
+    await _repo.reclaimStaleSending();
+    await _repo.purgeOutboxForDisabledRules();
+    return _countDueForReason(reason);
+  }
+
   /// Request an outbox drain. Safe to call from anywhere on the main isolate;
   /// concurrent calls coalesce into at most one extra pass.
   Future<void> requestDrain({String reason = 'manual'}) async {
     if (!await DataSyncSettingsService.readEnabledFromPrefs()) return;
     if (_draining) {
       _drainRequested = true;
+      return;
+    }
+    final lockOwner = await _repo.acquireDrainLock();
+    if (lockOwner == null) {
+      _log('drain skipped; another drain is already running');
       return;
     }
     final primedTotal = status.value.running &&
@@ -109,6 +123,8 @@ class SyncService {
         ? _runTotal
         : 0;
     _draining = true;
+    _drainLockOwner = lockOwner;
+    _lastDrainLockRefreshAt = null;
     _runSent = 0;
     _runFailed = 0;
     _runProcessed = 0;
@@ -148,6 +164,11 @@ class SyncService {
       await _showTerminalProgressIfNeeded();
       await _maybeNotify();
       _log('drain end (sent=$_runSent failed=$_runFailed)');
+      try {
+        await _repo.releaseDrainLock(lockOwner);
+      } catch (_) {}
+      _drainLockOwner = null;
+      _lastDrainLockRefreshAt = null;
     }
   }
 
@@ -517,7 +538,20 @@ class SyncService {
     _runProcessed++;
     if (_runProcessed > _runTotal) _runTotal = _runProcessed;
     _emitStatus(running: true);
+    await _refreshDrainLockIfNeeded();
     await _maybeNotifyProgress();
+  }
+
+  Future<void> _refreshDrainLockIfNeeded() async {
+    final owner = _drainLockOwner;
+    if (owner == null) return;
+    final now = DateTime.now();
+    final last = _lastDrainLockRefreshAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 30)) {
+      return;
+    }
+    _lastDrainLockRefreshAt = now;
+    await _repo.extendDrainLock(owner);
   }
 
   /// Build the live payload for an outbox row. For deletes, return the frozen

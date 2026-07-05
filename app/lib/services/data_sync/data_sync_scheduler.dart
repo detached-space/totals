@@ -46,7 +46,10 @@ class DataSyncScheduler {
     }
   }
 
-  static Future<void> requestImmediateDrain({String reason = 'manual'}) async {
+  static Future<void> requestImmediateDrain({
+    String reason = 'manual',
+    Duration initialDelay = Duration.zero,
+  }) async {
     if (kIsWeb) return;
     try {
       await DataSyncSettingsService.instance.ensureLoaded();
@@ -56,7 +59,7 @@ class DataSyncScheduler {
         dataSyncImmediateDrainTask,
         inputData: {'reason': reason},
         existingWorkPolicy: ExistingWorkPolicy.keep,
-        initialDelay: Duration.zero,
+        initialDelay: initialDelay,
         constraints: Constraints(networkType: NetworkType.connected),
         backoffPolicy: BackoffPolicy.exponential,
         backoffPolicyDelay: _immediateBackoff,
