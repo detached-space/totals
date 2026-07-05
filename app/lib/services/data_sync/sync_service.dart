@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/budget.dart';
+import 'package:totals/models/category.dart' as models;
 import 'package:totals/models/transaction.dart';
 import 'package:totals/services/data_sync/data_sync_repository.dart';
 import 'package:totals/services/data_sync/data_sync_settings_service.dart';
@@ -374,7 +375,10 @@ class SyncService {
           limit: 1,
         );
         if (rows.isEmpty) return null;
-        return Transaction.fromJson(Map<String, dynamic>.from(rows.first)).toJson();
+        final payload =
+            Transaction.fromJson(Map<String, dynamic>.from(rows.first))
+                .toJson();
+        return _withTransactionCategories(db, payload);
       case SyncEntity.accounts:
         final sep = entityRef.lastIndexOf('|');
         if (sep <= 0) return null;
@@ -401,6 +405,31 @@ class SyncService {
         if (rows.isEmpty) return null;
         return Budget.fromDb(Map<String, dynamic>.from(rows.first)).toJson();
     }
+  }
+
+  Future<Map<String, dynamic>> _withTransactionCategories(
+    Database db,
+    Map<String, dynamic> payload,
+  ) async {
+    final categoryIds = SyncTransactionCategoryPayload.categoryIdsFor(payload);
+    if (categoryIds.isEmpty) {
+      return SyncTransactionCategoryPayload.enrich(
+        payload,
+        const <Map<String, dynamic>>[],
+      );
+    }
+
+    final placeholders = List.filled(categoryIds.length, '?').join(',');
+    final rows = await db.query(
+      'categories',
+      where: 'id IN ($placeholders)',
+      whereArgs: categoryIds,
+    );
+    final categories = rows
+        .map((row) => models.Category.fromDb(Map<String, dynamic>.from(row)))
+        .map((category) => category.toJson());
+
+    return SyncTransactionCategoryPayload.enrich(payload, categories);
   }
 
   // -------------------------------------------------------------------------

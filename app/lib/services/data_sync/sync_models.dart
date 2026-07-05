@@ -56,6 +56,7 @@ extension SyncEntityX on SyncEntity {
           'accountNumber',
           'categoryId',
           'categoryIds',
+          'categoryNames',
           'profileId',
           'serviceCharge',
           'vat',
@@ -453,6 +454,86 @@ class SyncFilter {
   }
 
   String? encode() => isEmpty ? null : jsonEncode(toJson());
+}
+
+class SyncTransactionCategoryPayload {
+  static const categoryNamesKey = 'categoryNames';
+
+  /// Add human-readable category names to a transaction payload while preserving
+  /// the existing categoryId/categoryIds fields for compatibility.
+  static Map<String, dynamic> enrich(
+    Map<String, dynamic> transaction,
+    Iterable<Map<String, dynamic>> categoryPayloads,
+  ) {
+    final payload = Map<String, dynamic>.from(transaction);
+    final selectedIds = categoryIdsFor(payload);
+    final categoriesById = <int, Map<String, dynamic>>{};
+
+    for (final category in categoryPayloads) {
+      final id = _asInt(category['id']);
+      if (id == null || !selectedIds.contains(id)) continue;
+      categoriesById[id] = Map<String, dynamic>.from(category);
+    }
+
+    final categories = <Map<String, dynamic>>[
+      for (final id in selectedIds)
+        if (categoriesById[id] != null) categoriesById[id]!,
+    ];
+
+    payload[categoryNamesKey] = [
+      for (final category in categories)
+        if (_nameOf(category) != null) _nameOf(category)!,
+    ];
+    return payload;
+  }
+
+  static List<int> categoryIdsFor(Map<String, dynamic> transaction) {
+    final ids = <int>[];
+
+    void add(dynamic value) {
+      final id = _asInt(value);
+      if (id == null || id <= 0 || ids.contains(id)) return;
+      ids.add(id);
+    }
+
+    add(transaction['categoryId']);
+    final rawCategoryIds = transaction['categoryIds'];
+    if (rawCategoryIds is Iterable) {
+      for (final id in rawCategoryIds) {
+        add(id);
+      }
+    } else if (rawCategoryIds is String) {
+      final trimmed = rawCategoryIds.trim();
+      if (trimmed.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is Iterable) {
+            for (final id in decoded) {
+              add(id);
+            }
+          }
+        } catch (_) {
+          for (final id in trimmed.split(',')) {
+            add(id);
+          }
+        }
+      }
+    }
+
+    return List<int>.unmodifiable(ids);
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
+  }
+
+  static String? _nameOf(Map<String, dynamic>? category) {
+    final name = category?['name']?.toString().trim();
+    return name == null || name.isEmpty ? null : name;
+  }
 }
 
 // ---------------------------------------------------------------------------
