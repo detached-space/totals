@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart' hide Transaction;
+import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/budget.dart';
@@ -43,6 +44,26 @@ class SyncRunStatus {
   int get percent =>
       total <= 0 ? 0 : ((processed / total).clamp(0.0, 1.0) * 100).round();
   String get fraction => total <= 0 ? '0/0' : '$processed/$total';
+}
+
+class _BudgetUsagePayload {
+  final double usedAmount;
+  final double availableAmount;
+  final double percentageUsed;
+  final bool isExceeded;
+  final bool isApproachingLimit;
+  final DateTime periodStart;
+  final DateTime periodEnd;
+
+  const _BudgetUsagePayload({
+    required this.usedAmount,
+    required this.availableAmount,
+    required this.percentageUsed,
+    required this.isExceeded,
+    required this.isApproachingLimit,
+    required this.periodStart,
+    required this.periodEnd,
+  });
 }
 
 /// Drains the durable outbox: builds requests from rules, sends them via
@@ -604,7 +625,8 @@ class SyncService {
           limit: 1,
         );
         if (rows.isEmpty) return null;
-        return Account.fromJson(Map<String, dynamic>.from(rows.first)).toJson();
+        final account = Account.fromJson(Map<String, dynamic>.from(rows.first));
+        return _withAccountDetails(db, account);
       case SyncEntity.budgets:
         final id = int.tryParse(entityRef.replaceFirst('budget:', ''));
         if (id == null) return null;
@@ -615,8 +637,50 @@ class SyncService {
           limit: 1,
         );
         if (rows.isEmpty) return null;
-        return Budget.fromDb(Map<String, dynamic>.from(rows.first)).toJson();
+        final budget = Budget.fromDb(Map<String, dynamic>.from(rows.first));
+        return _withBudgetDetails(db, budget);
     }
+  }
+
+  Future<Map<String, dynamic>> _withAccountDetails(
+    Database db,
+    Account account,
+  ) async {
+    final payload = account.toJson();
+    final bank = await _bankPayloadForId(db, account.bank);
+    if (bank != null) {
+      payload['bankName'] = _trimmedString(bank['name']);
+      payload['bankShortName'] = _trimmedString(bank['shortName']);
+    }
+    return payload;
+  }
+
+  Future<Map<String, dynamic>> _withBudgetDetails(
+    Database db,
+    Budget budget,
+  ) async {
+    final payload = budget.toJson();
+    final categoryNames = await _categoryNamesForIds(
+      db,
+      budget.selectedCategoryIds,
+    );
+    final usage = await _usageForBudget(db, budget);
+    final recurrence = _recurrenceForBudget(budget);
+    final isRecurring = recurrence != 'never' &&
+        (budget.endDate == null || budget.endDate!.isAfter(usage.periodEnd));
+
+    payload['categoryNames'] = categoryNames;
+    payload['appliesToAllExpenses'] = budget.appliesToAllExpenses;
+    payload['usedAmount'] = usage.usedAmount;
+    payload['availableAmount'] = usage.availableAmount;
+    payload['percentageUsed'] = usage.percentageUsed;
+    payload['isExceeded'] = usage.isExceeded;
+    payload['isApproachingLimit'] = usage.isApproachingLimit;
+    payload['periodStart'] = usage.periodStart.toIso8601String();
+    payload['periodEnd'] = usage.periodEnd.toIso8601String();
+    payload['isRecurring'] = isRecurring;
+    payload['recurrence'] = recurrence;
+    return payload;
   }
 
   Future<Map<String, dynamic>> _withTransactionCategories(
@@ -642,6 +706,108 @@ class SyncService {
         .map((category) => category.toJson());
 
     return SyncTransactionCategoryPayload.enrich(payload, categories);
+  }
+
+  Future<Map<String, dynamic>?> _bankPayloadForId(
+    Database db,
+    int bankId,
+  ) async {
+    final rows = await db.query(
+      'banks',
+      where: 'id = ?',
+      whereArgs: [bankId],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return Map<String, dynamic>.from(rows.first);
+    for (final bank in AllBanksFromAssets.getAllBanks()) {
+      if (bank.id == bankId) return bank.toJson();
+    }
+    return null;
+  }
+
+  Future<List<String>> _categoryNamesForIds(
+    Database db,
+    List<int> categoryIds,
+  ) async {
+    if (categoryIds.isEmpty) return const <String>[];
+    final placeholders = List.filled(categoryIds.length, '?').join(',');
+    final rows = await db.query(
+      'categories',
+      where: 'id IN ($placeholders)',
+      whereArgs: categoryIds,
+    );
+    final byId = <int, String>{};
+    for (final row in rows) {
+      final id = (row['id'] as num?)?.toInt();
+      final name = _trimmedString(row['name']);
+      if (id == null || name == null) continue;
+      byId[id] = name;
+    }
+    return [
+      for (final id in categoryIds)
+        if (byId[id] != null) byId[id]!,
+    ];
+  }
+
+  Future<_BudgetUsagePayload> _usageForBudget(
+    Database db,
+    Budget budget,
+  ) async {
+    final periodStart = budget.getCurrentPeriodStart();
+    final periodEnd = budget.getCurrentPeriodEnd();
+    final rows = await db.query(
+      'transactions',
+      where: 'type = ?',
+      whereArgs: ['DEBIT'],
+    );
+    final categoryIds = budget.selectedCategoryIds.toSet();
+    var usedAmount = 0.0;
+
+    for (final row in rows) {
+      final transaction = Transaction.fromJson(Map<String, dynamic>.from(row));
+      final date = _parseDate(transaction.time);
+      if (date == null ||
+          date.isBefore(periodStart) ||
+          date.isAfter(periodEnd)) {
+        continue;
+      }
+      if (categoryIds.isNotEmpty &&
+          !transaction.selectedCategoryIds.any(categoryIds.contains)) {
+        continue;
+      }
+      usedAmount += transaction.amount.abs();
+    }
+
+    final availableAmount = budget.amount - usedAmount;
+    final percentageUsed =
+        budget.amount > 0 ? (usedAmount / budget.amount) * 100 : 0.0;
+    return _BudgetUsagePayload(
+      usedAmount: usedAmount,
+      availableAmount: availableAmount,
+      percentageUsed: percentageUsed,
+      isExceeded: usedAmount > budget.amount,
+      isApproachingLimit: percentageUsed >= budget.alertThreshold,
+      periodStart: periodStart,
+      periodEnd: periodEnd,
+    );
+  }
+
+  DateTime? _parseDate(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return DateTime.tryParse(trimmed);
+  }
+
+  String _recurrenceForBudget(Budget budget) {
+    final raw = budget.type == 'category'
+        ? (budget.timeFrame ?? 'monthly')
+        : budget.type;
+    return raw == 'unlimited' ? 'never' : raw;
+  }
+
+  String? _trimmedString(dynamic value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? null : text;
   }
 
   // -------------------------------------------------------------------------

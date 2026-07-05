@@ -68,6 +68,8 @@ extension SyncEntityX on SyncEntity {
         return const [
           'accountNumber',
           'bank',
+          'bankName',
+          'bankShortName',
           'balance',
           'accountHolderName',
           'settledBalance',
@@ -82,6 +84,7 @@ extension SyncEntityX on SyncEntity {
           'amount',
           'categoryId',
           'categoryIds',
+          'categoryNames',
           'startDate',
           'endDate',
           'rollover',
@@ -91,6 +94,16 @@ extension SyncEntityX on SyncEntity {
           'updatedAt',
           'timeFrame',
           'calendar',
+          'appliesToAllExpenses',
+          'usedAmount',
+          'availableAmount',
+          'percentageUsed',
+          'isExceeded',
+          'isApproachingLimit',
+          'periodStart',
+          'periodEnd',
+          'isRecurring',
+          'recurrence',
         ];
     }
   }
@@ -777,7 +790,13 @@ bool syncRuleShouldSend(SyncRule rule, String reason, DateTime now) {
   const flushReasons = {'manual', 'backfill', 'rule-on', 'enabled'};
   if (flushReasons.contains(reason)) return true;
 
-  const realtimeReasons = {'write', 'signal', 'resume', 'startup', 'foreground'};
+  const realtimeReasons = {
+    'write',
+    'signal',
+    'resume',
+    'startup',
+    'foreground'
+  };
   if (rule.triggerOnNewTxn && realtimeReasons.contains(reason)) return true;
   if (rule.triggerOnConnectivity && reason == 'connectivity') return true;
 

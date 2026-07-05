@@ -72,6 +72,73 @@ class SyncTransactionLogDetails {
   }
 }
 
+class SyncAccountLogDetails {
+  final String accountNumber;
+  final int bankId;
+  final double balance;
+  final String accountHolderName;
+
+  const SyncAccountLogDetails({
+    required this.accountNumber,
+    required this.bankId,
+    required this.balance,
+    required this.accountHolderName,
+  });
+
+  factory SyncAccountLogDetails.fromDb(Map<String, dynamic> row) {
+    double amountFrom(dynamic value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    return SyncAccountLogDetails(
+      accountNumber: (row['accountNumber'] as String?) ?? '',
+      bankId: (row['bank'] as num?)?.toInt() ?? 0,
+      balance: amountFrom(row['balance']),
+      accountHolderName: (row['accountHolderName'] as String?) ?? '',
+    );
+  }
+}
+
+class SyncBudgetLogDetails {
+  final int id;
+  final String name;
+  final double amount;
+  final String type;
+  final bool isActive;
+  final List<String> categoryNames;
+
+  const SyncBudgetLogDetails({
+    required this.id,
+    required this.name,
+    required this.amount,
+    required this.type,
+    required this.isActive,
+    this.categoryNames = const <String>[],
+  });
+
+  factory SyncBudgetLogDetails.fromDb(
+    Map<String, dynamic> row, {
+    List<String> categoryNames = const <String>[],
+  }) {
+    double amountFrom(dynamic value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    return SyncBudgetLogDetails(
+      id: (row['id'] as num?)?.toInt() ?? 0,
+      name: (row['name'] as String?) ?? '',
+      amount: amountFrom(row['amount']),
+      type: (row['type'] as String?) ?? 'budget',
+      isActive: (row['isActive'] as num? ?? 1) != 0,
+      categoryNames: categoryNames,
+    );
+  }
+}
+
 /// Persistence for the Data Sync feature: destinations, rules, and the durable
 /// outbox. Keeps all SQL out of the engine/UI. Secret values for destinations
 /// live in [FlutterSecureStorage] (never in sqflite); FK cascades are not
@@ -674,6 +741,107 @@ class DataSyncRepository {
                 if (categoryNamesById[id] != null) categoryNamesById[id]!,
             ],
           ),
+    };
+  }
+
+  Future<Map<String, SyncAccountLogDetails>> getAccountLogDetails(
+    Iterable<String> refs,
+  ) async {
+    final keys = refs
+        .map((ref) => ref.trim())
+        .where((ref) => ref.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (keys.isEmpty) return const <String, SyncAccountLogDetails>{};
+
+    final db = await _db;
+    final rows = await db.query(
+      'accounts',
+      columns: const [
+        'accountNumber',
+        'bank',
+        'balance',
+        'accountHolderName',
+      ],
+    );
+    final wanted = keys.toSet();
+    final details = <String, SyncAccountLogDetails>{};
+    for (final row in rows) {
+      final accountNumber = (row['accountNumber'] as String?)?.trim();
+      final bankId = (row['bank'] as num?)?.toInt();
+      if (accountNumber == null || accountNumber.isEmpty || bankId == null) {
+        continue;
+      }
+      final key = '$accountNumber|$bankId';
+      if (!wanted.contains(key)) continue;
+      details[key] = SyncAccountLogDetails.fromDb(row);
+    }
+    return details;
+  }
+
+  Future<Map<String, SyncBudgetLogDetails>> getBudgetLogDetails(
+    Iterable<String> refs,
+  ) async {
+    final idsByRef = <String, int>{};
+    for (final ref in refs) {
+      final trimmed = ref.trim();
+      if (trimmed.isEmpty) continue;
+      final id = int.tryParse(trimmed.replaceFirst('budget:', ''));
+      if (id != null) idsByRef[trimmed] = id;
+    }
+    if (idsByRef.isEmpty) return const <String, SyncBudgetLogDetails>{};
+
+    final db = await _db;
+    final ids = idsByRef.values.toSet().toList(growable: false);
+    final rows = <Map<String, dynamic>>[];
+    for (var i = 0; i < ids.length; i += 900) {
+      final slice = ids.sublist(
+        i,
+        i + 900 > ids.length ? ids.length : i + 900,
+      );
+      rows.addAll(await db.query(
+        'budgets',
+        columns: const [
+          'id',
+          'name',
+          'amount',
+          'type',
+          'isActive',
+          'categoryId',
+          'categoryIds',
+        ],
+        where: 'id IN (${List.filled(slice.length, '?').join(', ')})',
+        whereArgs: slice,
+      ));
+    }
+
+    final categoryIdsByBudget = <int, List<int>>{};
+    final allCategoryIds = <int>{};
+    for (final row in rows) {
+      final id = (row['id'] as num?)?.toInt();
+      if (id == null) continue;
+      final categoryIds = _categoryIdsFromRow(row);
+      categoryIdsByBudget[id] = categoryIds;
+      allCategoryIds.addAll(categoryIds);
+    }
+    final categoryNamesById = await _categoryNamesById(db, allCategoryIds);
+    final detailsById = {
+      for (final row in rows)
+        if ((row['id'] as num?)?.toInt() != null)
+          (row['id'] as num).toInt(): SyncBudgetLogDetails.fromDb(
+            row,
+            categoryNames: [
+              for (final id
+                  in categoryIdsByBudget[(row['id'] as num).toInt()] ??
+                      const <int>[])
+                if (categoryNamesById[id] != null) categoryNamesById[id]!,
+            ],
+          ),
+    };
+    return {
+      for (final entry in idsByRef.entries)
+        if (detailsById[entry.value] != null)
+          entry.key: detailsById[entry.value]!,
     };
   }
 

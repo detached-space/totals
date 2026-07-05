@@ -225,6 +225,14 @@ class BudgetRepository {
 
   Future<int> deleteBudget(int id) async {
     final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'budgets',
+      columns: const ['id', 'name'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final name = rows.isEmpty ? null : rows.first['name'] as String?;
     final result = await db.delete(
       'budgets',
       where: 'id = ?',
@@ -234,7 +242,10 @@ class BudgetRepository {
       entity: SyncEntity.budgets,
       entityRef: 'budget:$id',
       op: SyncOp.delete,
-      deleteSnapshot: {'id': id},
+      deleteSnapshot: {
+        'id': id,
+        if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+      },
     );
     return result;
   }
