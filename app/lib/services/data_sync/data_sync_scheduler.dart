@@ -13,6 +13,7 @@ class DataSyncScheduler {
 
   // 15 min is the Android WorkManager floor for periodic tasks.
   static const Duration _frequency = Duration(minutes: 15);
+  static const Duration _immediateBackoff = Duration(minutes: 1);
 
   static Future<void> sync() async {
     if (kIsWeb) return;
@@ -41,6 +42,29 @@ class DataSyncScheduler {
     } catch (e) {
       if (kDebugMode) {
         print('debug: Failed to sync Data Sync schedule: $e');
+      }
+    }
+  }
+
+  static Future<void> requestImmediateDrain({String reason = 'manual'}) async {
+    if (kIsWeb) return;
+    try {
+      await DataSyncSettingsService.instance.ensureLoaded();
+      if (!DataSyncSettingsService.instance.masterEnabled.value) return;
+      await Workmanager().registerOneOffTask(
+        dataSyncImmediateDrainUniqueName,
+        dataSyncImmediateDrainTask,
+        inputData: {'reason': reason},
+        existingWorkPolicy: ExistingWorkPolicy.keep,
+        initialDelay: Duration.zero,
+        constraints: Constraints(networkType: NetworkType.connected),
+        backoffPolicy: BackoffPolicy.exponential,
+        backoffPolicyDelay: _immediateBackoff,
+        outOfQuotaPolicy: OutOfQuotaPolicy.runAsNonExpeditedWorkRequest,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to request immediate Data Sync drain: $e');
       }
     }
   }

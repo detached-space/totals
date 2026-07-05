@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_widgets.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
@@ -5,9 +7,11 @@ import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
-import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/models/profile.dart';
+import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/data_sync/data_sync_repository.dart';
+import 'package:totals/services/data_sync/data_sync_scheduler.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/services/data_sync/sync_service.dart';
 
@@ -46,6 +50,7 @@ class _RuleWizardPage extends StatefulWidget {
 
 class _RuleWizardPageState extends State<_RuleWizardPage> {
   final _repo = DataSyncRepository();
+  static const int _allProfilesValue = -1;
   static const _stepTitles = [
     'Basics',
     'Where it goes',
@@ -70,7 +75,10 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
   final List<_MapRow> _mappings = [];
   bool _saving = false;
 
-  // Bank/account selection, loaded from the user's accounts.
+  // Profile/bank/account selection. Loaded independent of the active profile.
+  List<Profile> _profiles = const [];
+  int? _selectedProfileId;
+  List<Account> _allAccounts = const [];
   List<Account> _accounts = const [];
   Map<int, Bank> _banksById = const {};
   bool _loadingAccounts = true;
@@ -120,6 +128,7 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
         if (f.maxAmount != null) _maxAmtCtrl.text = _trimNum(f.maxAmount!);
         if (f.bankIds != null) _selectedBankIds.addAll(f.bankIds!);
         if (f.accountKeys != null) _selectedAccountKeys.addAll(f.accountKeys!);
+        _selectedProfileId = f.profileId;
       }
       e.fieldMap.forEach((totals, backend) {
         _mappings.add(_MapRow(totals, backend));
@@ -130,11 +139,18 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
 
   Future<void> _loadAccountsAndBanks() async {
     try {
-      final accounts = await AccountRepository().getAccounts();
+      final profiles = await ProfileRepository().getProfiles();
+      final accounts = await _repo.getAccountsForFilter();
       final banks = await BankConfigService().getBanks();
       if (!mounted) return;
       setState(() {
-        _accounts = accounts;
+        _profiles = profiles;
+        if (_selectedProfileId != null &&
+            !_profiles.any((profile) => profile.id == _selectedProfileId)) {
+          _selectedProfileId = null;
+        }
+        _allAccounts = accounts;
+        _applyProfileAccountFilter();
         _banksById = {for (final b in banks) b.id: b};
         _loadingAccounts = false;
       });
@@ -142,6 +158,25 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
       if (!mounted) return;
       setState(() => _loadingAccounts = false);
     }
+  }
+
+  void _applyProfileAccountFilter() {
+    final selectedProfileId = _selectedProfileId;
+    _accounts = selectedProfileId == null
+        ? _allAccounts
+        : _allAccounts
+            .where((account) => account.profileId == selectedProfileId)
+            .toList(growable: false);
+    _pruneBankAccountSelections();
+  }
+
+  void _pruneBankAccountSelections() {
+    final visibleBanks = {for (final account in _accounts) account.bank};
+    final visibleAccounts = {
+      for (final account in _accounts) _accountKey(account),
+    };
+    _selectedBankIds.removeWhere((bankId) => !visibleBanks.contains(bankId));
+    _selectedAccountKeys.removeWhere((key) => !visibleAccounts.contains(key));
   }
 
   static String _trimNum(double v) =>
@@ -220,6 +255,7 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
     final minAmt = double.tryParse(_minAmtCtrl.text.trim());
     final maxAmt = double.tryParse(_maxAmtCtrl.text.trim());
     final supportsAccounts = _entity != SyncEntity.budgets;
+    final supportsProfiles = _entity != SyncEntity.budgets;
     final filter = SyncFilter(
       type: _entity == SyncEntity.transactions && _typeFilter != 'any'
           ? _typeFilter
@@ -233,6 +269,7 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
           ? _selectedAccountKeys.toList()
           : null,
       isActive: _entity == SyncEntity.budgets && _activeOnly ? true : null,
+      profileId: supportsProfiles ? _selectedProfileId : null,
     );
     return filter.isEmpty ? null : filter;
   }
@@ -325,8 +362,13 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
       ),
     );
     if (confirmed == true) {
+      await SyncService.instance.primeProgress(
+        reason: 'backfill',
+        total: count,
+      );
       await SyncService.instance.backfillRule(rule);
-      SyncService.instance.requestDrain(reason: 'backfill');
+      unawaited(DataSyncScheduler.requestImmediateDrain(reason: 'backfill'));
+      unawaited(SyncService.instance.requestDrain(reason: 'backfill'));
     } else {
       await _repo.markRuleBackfilled(rule.id!);
     }
@@ -587,6 +629,12 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
 
   List<Widget> _stepFilter() {
     final widgets = <Widget>[];
+    if (_entity != SyncEntity.budgets) {
+      widgets.addAll([
+        ..._profileSelector(),
+        const SizedBox(height: 16),
+      ]);
+    }
     if (_entity == SyncEntity.transactions) {
       widgets.addAll([
         _label('Transaction type'),
@@ -646,12 +694,69 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
     return widgets;
   }
 
+  List<Widget> _profileSelector() {
+    if (_loadingAccounts) {
+      return [
+        _label('Profile'),
+        const SizedBox(height: 8),
+        _hint('Loading profiles…'),
+      ];
+    }
+    if (_profiles.isEmpty) {
+      return [
+        _label('Profile'),
+        const SizedBox(height: 8),
+        _hint('All profiles are included.'),
+      ];
+    }
+    return [
+      _label('Profile'),
+      const SizedBox(height: 8),
+      _boxed(
+        DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            isExpanded: true,
+            value: _selectedProfileId ?? _allProfilesValue,
+            items: [
+              const DropdownMenuItem<int>(
+                value: _allProfilesValue,
+                child: Text('All profiles'),
+              ),
+              for (final profile in _profiles)
+                if (profile.id != null)
+                  DropdownMenuItem<int>(
+                    value: profile.id,
+                    child: Text(profile.name),
+                  ),
+            ],
+            onChanged: (value) => setState(() {
+              _selectedProfileId = value == _allProfilesValue ? null : value;
+              _applyProfileAccountFilter();
+            }),
+          ),
+        ),
+      ),
+      const SizedBox(height: 6),
+      _hint(_selectedProfileId == null
+          ? 'Includes matching records from every profile.'
+          : 'Banks and accounts below are filtered to ${_profileLabel(_selectedProfileId)}.'),
+    ];
+  }
+
   List<Widget> _bankAccountLists() {
     if (_loadingAccounts) {
       return [_hint('Loading your accounts…')];
     }
     if (_accounts.isEmpty) {
-      return [_hint('No accounts found — every account is included.')];
+      final profileText = _selectedProfileId == null
+          ? ''
+          : ' for ${_profileLabel(_selectedProfileId)}';
+      final scopeText = _selectedProfileId == null
+          ? 'every account'
+          : 'every account in this profile';
+      return [
+        _hint('No accounts found$profileText — $scopeText is included.'),
+      ];
     }
     final bankIds = <int>{for (final a in _accounts) a.bank}.toList()..sort();
     return [
@@ -686,6 +791,14 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
   }
 
   String _accountKey(Account a) => '${a.accountNumber}|${a.bank}';
+
+  String _profileLabel(int? profileId) {
+    if (profileId == null) return 'all profiles';
+    for (final profile in _profiles) {
+      if (profile.id == profileId) return profile.name;
+    }
+    return 'Profile $profileId';
+  }
 
   String _bankLabel(int bankId) {
     if (bankId == CashConstants.bankId) return CashConstants.bankShortName;

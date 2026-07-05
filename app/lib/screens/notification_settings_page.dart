@@ -4,6 +4,7 @@ import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
+import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
 import 'package:totals/services/notification_settings_service.dart';
@@ -28,6 +29,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   bool _transactionEnabled = true;
   bool _failedParseReviewEnabled = true;
   bool _budgetEnabled = true;
+  bool _dataSyncNotificationsEnabled = false;
   bool _sharedExpensesEnabled = true;
   bool _loanDebtReturnRemindersEnabled = true;
   bool _dailyEnabled = true;
@@ -51,6 +53,9 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     final failedParseReview =
         await settings.isFailedParseReviewNotificationsEnabled();
     final budget = await settings.isBudgetAlertsEnabled();
+    await DataSyncSettingsService.instance.ensureLoaded();
+    final dataSyncNotifications =
+        DataSyncSettingsService.instance.notify.value;
     final sharedExpenses = await settings.isSharedExpenseNotificationsEnabled();
     final loanDebtReturnReminders =
         await settings.isLoanDebtReturnRemindersEnabled();
@@ -68,6 +73,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
       _transactionEnabled = tx;
       _failedParseReviewEnabled = failedParseReview;
       _budgetEnabled = budget;
+      _dataSyncNotificationsEnabled = dataSyncNotifications;
       _sharedExpensesEnabled = sharedExpenses;
       _loanDebtReturnRemindersEnabled = loanDebtReturnReminders;
       _dailyEnabled = daily;
@@ -99,6 +105,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   Future<void> _setBudgetEnabled(bool value) async {
     setState(() => _budgetEnabled = value);
     await NotificationSettingsService.instance.setBudgetAlertsEnabled(value);
+  }
+
+  Future<void> _setDataSyncNotificationsEnabled(bool value) async {
+    setState(() => _dataSyncNotificationsEnabled = value);
+    await DataSyncSettingsService.instance.setNotify(value);
   }
 
   Future<void> _setSharedExpensesEnabled(bool value) async {
@@ -743,6 +754,20 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                       value: _budgetEnabled,
                       onChanged: _setBudgetEnabled,
                       activeColor: AppColors.primaryLight,
+                    ),
+                  ),
+
+                  _SettingTile(
+                    icon: Icons.cloud_done_outlined,
+                    iconColor: AppColors.primaryLight,
+                    title: context.l10nText('Data Sync updates'),
+                    subtitle: context.l10nText(
+                      'Notify when records finish syncing to your backend',
+                    ),
+                    trailing: Switch(
+                      value: _dataSyncNotificationsEnabled,
+                      onChanged: _setDataSyncNotificationsEnabled,
+                      activeThumbColor: AppColors.primaryLight,
                     ),
                   ),
 

@@ -25,7 +25,7 @@ class DataSyncSettingsService {
 
   final ValueNotifier<bool> masterEnabled = ValueNotifier<bool>(false);
   final ValueNotifier<int> consentVersion = ValueNotifier<int>(0);
-  final ValueNotifier<bool> notify = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> notify = ValueNotifier<bool>(false);
 
   bool _loaded = false;
 
@@ -36,7 +36,7 @@ class DataSyncSettingsService {
     masterEnabled.value = enabled;
     cachedEnabled = enabled;
     consentVersion.value = prefs.getInt(_consentVersionKey) ?? 0;
-    notify.value = prefs.getBool(_notifyKey) ?? true;
+    notify.value = prefs.getBool(_notifyKey) ?? false;
     _loaded = true;
   }
 
@@ -51,7 +51,7 @@ class DataSyncSettingsService {
   /// that don't run [ensureLoaded]).
   static Future<bool> readNotifyFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_notifyKey) ?? true;
+    return prefs.getBool(_notifyKey) ?? false;
   }
 
   bool get hasConsent => consentVersion.value >= currentConsentVersion;

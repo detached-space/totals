@@ -24,16 +24,25 @@ class SyncRunStatus {
   final bool running;
   final int sent;
   final int failed;
+  final int processed;
+  final int total;
   final DateTime? at;
 
   const SyncRunStatus({
     this.running = false,
     this.sent = 0,
     this.failed = 0,
+    this.processed = 0,
+    this.total = 0,
     this.at,
   });
 
   bool get hasResult => at != null;
+  bool get hasProgress => total > 0;
+  int get retried => processed - sent - failed;
+  int get percent =>
+      total <= 0 ? 0 : ((processed / total).clamp(0.0, 1.0) * 100).round();
+  String get fraction => total <= 0 ? '0/0' : '$processed/$total';
 }
 
 /// Drains the durable outbox: builds requests from rules, sends them via
@@ -61,6 +70,29 @@ class SyncService {
       ValueNotifier<SyncRunStatus>(const SyncRunStatus());
   int _runSent = 0;
   int _runFailed = 0;
+  int _runProcessed = 0;
+  int _runTotal = 0;
+  String _runReason = 'manual';
+  int _lastProgressNotificationProcessed = -1;
+  DateTime? _lastProgressNotificationAt;
+  bool _runProgressNotificationVisible = false;
+
+  Future<void> primeProgress({
+    required String reason,
+    required int total,
+  }) async {
+    if (_draining || total <= 0) return;
+    _runSent = 0;
+    _runFailed = 0;
+    _runProcessed = 0;
+    _runTotal = total;
+    _runReason = reason;
+    _lastProgressNotificationProcessed = -1;
+    _lastProgressNotificationAt = null;
+    _runProgressNotificationVisible = false;
+    _emitStatus(running: true);
+    await _maybeNotifyProgress(force: true);
+  }
 
   /// Request an outbox drain. Safe to call from anywhere on the main isolate;
   /// concurrent calls coalesce into at most one extra pass.
@@ -70,16 +102,39 @@ class SyncService {
       _drainRequested = true;
       return;
     }
+    final primedTotal = status.value.running &&
+            _runReason == reason &&
+            _runProcessed == 0 &&
+            _runTotal > 0
+        ? _runTotal
+        : 0;
     _draining = true;
     _runSent = 0;
     _runFailed = 0;
-    status.value = const SyncRunStatus(running: true);
+    _runProcessed = 0;
+    _runTotal = primedTotal;
+    _runReason = reason;
+    _lastProgressNotificationProcessed = -1;
+    _lastProgressNotificationAt = null;
+    _runProgressNotificationVisible = false;
+    _emitStatus(running: true);
     _log('drain start (reason=$reason)');
     try {
+      await _repo.reclaimStaleSending();
+      await _repo.purgeOutboxForDisabledRules();
+      _runTotal = await _countDueForReason(reason);
+      _emitStatus(running: true);
+      await _maybeNotifyProgress(force: true);
       do {
         _drainRequested = false;
         final processed = await _drainOnce(reason);
         if (processed > 0 && await _repo.hasDue()) {
+          final remaining = await _countDueForReason(reason);
+          final estimatedTotal = _runProcessed + remaining;
+          if (estimatedTotal > _runTotal) {
+            _runTotal = estimatedTotal;
+            _emitStatus(running: true);
+          }
           _drainRequested = true;
         }
       } while (_drainRequested);
@@ -89,8 +144,8 @@ class SyncService {
       if (kDebugMode) debugPrintStack(stackTrace: stack);
     } finally {
       _draining = false;
-      status.value =
-          SyncRunStatus(sent: _runSent, failed: _runFailed, at: DateTime.now());
+      _emitStatus(running: false, at: DateTime.now());
+      await _showTerminalProgressIfNeeded();
       await _maybeNotify();
       _log('drain end (sent=$_runSent failed=$_runFailed)');
     }
@@ -98,17 +153,116 @@ class SyncService {
 
   /// Post a result notification when a run actually did something. It's a
   /// single, self-replacing notification (failures alert; successes update
-  /// quietly), gated by the "Notify me about syncs" setting — so even
-  /// background/scheduled runs are visible without stacking up.
+  /// quietly), gated by the "Notify me about syncs" setting so normal writes
+  /// do not crowd the notification shade by default.
   Future<void> _maybeNotify() async {
-    if (_runSent == 0 && _runFailed == 0) return;
+    final retried = _runProcessed - _runSent - _runFailed;
+    if (_runSent == 0 && _runFailed == 0 && retried <= 0) {
+      await _dismissProgressNotificationIfNeeded(force: true);
+      return;
+    }
     try {
-      if (!await DataSyncSettingsService.readNotifyFromPrefs()) return;
+      if (!await DataSyncSettingsService.readNotifyFromPrefs()) {
+        await _dismissProgressNotificationIfNeeded(force: true);
+        return;
+      }
       await NotificationService.instance.showDataSyncResult(
         sent: _runSent,
         failed: _runFailed,
+        retried: retried,
       );
+      _runProgressNotificationVisible = false;
     } catch (_) {}
+  }
+
+  Future<void> _maybeNotifyProgress({bool force = false}) async {
+    if (_runTotal <= 0) return;
+    // Let the terminal result notification own the 100% state. Posting a final
+    // progress update immediately before the summary makes Android treat the
+    // summary as an easy-to-miss replacement of the same notification.
+    if (!force && _runProcessed >= _runTotal) return;
+    try {
+      if (!await _shouldShowProgressNotification()) return;
+      final now = DateTime.now();
+      final processedDelta = _runProcessed - _lastProgressNotificationProcessed;
+      final elapsed = _lastProgressNotificationAt == null
+          ? const Duration(days: 1)
+          : now.difference(_lastProgressNotificationAt!);
+      final shouldUpdate = force ||
+          _runProcessed >= _runTotal ||
+          processedDelta >= 10 ||
+          elapsed >= const Duration(seconds: 1);
+      if (!shouldUpdate) return;
+      _lastProgressNotificationProcessed = _runProcessed;
+      _lastProgressNotificationAt = now;
+      await NotificationService.instance.showDataSyncProgress(
+        processed: _runProcessed,
+        total: _runTotal,
+        sent: _runSent,
+        failed: _runFailed,
+        reason: _runReason,
+      );
+      _runProgressNotificationVisible = true;
+    } catch (_) {}
+  }
+
+  Future<void> _showTerminalProgressIfNeeded() async {
+    if (_runTotal <= 0 || _runProcessed < _runTotal) return;
+    try {
+      if (!await _shouldShowProgressNotification()) return;
+      await NotificationService.instance.showDataSyncProgress(
+        processed: _runTotal,
+        total: _runTotal,
+        sent: _runSent,
+        failed: _runFailed,
+        reason: _runReason,
+      );
+      _runProgressNotificationVisible = true;
+    } catch (_) {}
+  }
+
+  Future<bool> _shouldShowProgressNotification() async {
+    if (_isRequiredProgressReason(_runReason)) return true;
+    return DataSyncSettingsService.readNotifyFromPrefs();
+  }
+
+  bool _isRequiredProgressReason(String reason) {
+    return reason == 'enabled' || reason == 'backfill';
+  }
+
+  Future<void> _dismissProgressNotificationIfNeeded(
+      {bool force = false}) async {
+    if (!_runProgressNotificationVisible && !force) return;
+    try {
+      await NotificationService.instance.dismissDataSyncNotification();
+      _runProgressNotificationVisible = false;
+    } catch (_) {}
+  }
+
+  void _emitStatus({required bool running, DateTime? at}) {
+    status.value = SyncRunStatus(
+      running: running,
+      sent: _runSent,
+      failed: _runFailed,
+      processed: _runProcessed,
+      total: _runTotal,
+      at: at,
+    );
+  }
+
+  Future<int> _countDueForReason(String reason) async {
+    final now = DateTime.now();
+    final rules = await _repo.getRules();
+    final dueRuleIds = _dueRuleIds(rules, reason, now);
+    return _repo.countDue(ruleIds: dueRuleIds);
+  }
+
+  Set<int> _dueRuleIds(List<SyncRule> rules, String reason, DateTime now) {
+    return rules
+        .where((r) =>
+            r.enabled && r.id != null && syncRuleShouldSend(r, reason, now))
+        .map((r) => r.id!)
+        .toSet();
   }
 
   Future<int> _drainOnce(String reason) async {
@@ -123,14 +277,11 @@ class SyncService {
         if (r.id != null) r.id!: r,
     };
     // Only rules whose trigger/schedule says "send now" for this reason.
-    final dueRuleIds = rules
-        .where((r) =>
-            r.enabled && r.id != null && syncRuleShouldSend(r, reason, now))
-        .map((r) => r.id!)
-        .toSet();
+    final dueRuleIds = _dueRuleIds(rules, reason, now);
     if (dueRuleIds.isEmpty) return 0;
 
-    final due = await _repo.claimDue(limit: _maxRowsPerDrain, ruleIds: dueRuleIds);
+    final due =
+        await _repo.claimDue(limit: _maxRowsPerDrain, ruleIds: dueRuleIds);
     if (due.isEmpty) return 0;
 
     final byRule = <int, List<SyncOutboxItem>>{};
@@ -154,6 +305,7 @@ class SyncService {
             nextAttemptAt: now.add(const Duration(minutes: 30)),
             error: 'Destination disabled or missing.',
           );
+          await _noteProcessed();
         }
         continue;
       }
@@ -202,6 +354,8 @@ class SyncService {
       if (payload == null) {
         // Source row vanished before send → nothing to push.
         await _repo.markSent(item.id);
+        _runSent++;
+        await _noteProcessed();
         return null;
       }
       final mapped = SyncFieldMapper.apply(
@@ -209,7 +363,8 @@ class SyncService {
         rule.fieldMap,
         includeUnmapped: rule.sendUnmapped,
       );
-      final uri = SyncPathTemplate.resolve(dest.baseUrl, rule.pathTemplate, payload);
+      final uri =
+          SyncPathTemplate.resolve(dest.baseUrl, rule.pathTemplate, payload);
       final res = await _http.send(
         method: rule.method,
         uri: uri,
@@ -225,6 +380,8 @@ class SyncService {
       );
     } on SyncTemplateException catch (error) {
       await _repo.markDead(item.id, error: error.message);
+      _runFailed++;
+      await _noteProcessed();
       return error.message;
     } on OutboundNetworkException catch (error) {
       return _applyOutcome(item, networkError: true, error: error.message);
@@ -245,6 +402,8 @@ class SyncService {
       final payload = await _resolvePayload(item);
       if (payload == null) {
         await _repo.markSent(item.id);
+        _runSent++;
+        await _noteProcessed();
         continue;
       }
       payloads.add(SyncFieldMapper.apply(
@@ -260,9 +419,12 @@ class SyncService {
     try {
       uri = SyncPathTemplate.resolve(dest.baseUrl, rule.pathTemplate, const {});
     } on SyncTemplateException catch (error) {
-      const msg = 'Bulk-array rules cannot use record placeholders in the path.';
+      const msg =
+          'Bulk-array rules cannot use record placeholders in the path.';
       for (final item in live) {
         await _repo.markDead(item.id, error: '$msg ${error.message}');
+        _runFailed++;
+        await _noteProcessed();
       }
       return msg;
     }
@@ -277,19 +439,21 @@ class SyncService {
       String? lastError;
       for (final item in live) {
         lastError = await _applyOutcome(
-          item,
-          statusCode: res.statusCode,
-          refusedLocally: res.refusedLocally,
-          retryAfter: res.retryAfter,
-          body: res.bodySnippet(),
-        ) ??
+              item,
+              statusCode: res.statusCode,
+              refusedLocally: res.refusedLocally,
+              retryAfter: res.retryAfter,
+              body: res.bodySnippet(),
+            ) ??
             lastError;
       }
       return lastError;
     } on OutboundNetworkException catch (error) {
       String? lastError;
       for (final item in live) {
-        lastError = await _applyOutcome(item, networkError: true, error: error.message) ?? lastError;
+        lastError = await _applyOutcome(item,
+                networkError: true, error: error.message) ??
+            lastError;
       }
       return lastError;
     }
@@ -310,10 +474,12 @@ class SyncService {
     if (refusedLocally) {
       await _repo.markDead(item.id, statusCode: statusCode, error: detail);
       _runFailed++;
+      await _noteProcessed();
       return detail ?? 'Refused locally.';
     }
 
-    final outcome = classifySyncResponse(statusCode: statusCode, networkError: networkError);
+    final outcome = classifySyncResponse(
+        statusCode: statusCode, networkError: networkError);
     final transition = nextOutboxTransition(
       currentAttempts: item.attempts,
       outcome: outcome,
@@ -324,10 +490,12 @@ class SyncService {
       case SyncOutboxStatus.sent:
         await _repo.markSent(item.id);
         _runSent++;
+        await _noteProcessed();
         return null;
       case SyncOutboxStatus.dead:
         await _repo.markDead(item.id, statusCode: statusCode, error: detail);
         _runFailed++;
+        await _noteProcessed();
         return detail ?? 'Failed (HTTP $statusCode).';
       default: // pending — schedule a retry
         final base = computeSyncBackoff(transition.attempts);
@@ -340,8 +508,16 @@ class SyncService {
           statusCode: statusCode,
           error: detail,
         );
+        await _noteProcessed();
         return detail ?? 'Retry scheduled (HTTP $statusCode).';
     }
+  }
+
+  Future<void> _noteProcessed() async {
+    _runProcessed++;
+    if (_runProcessed > _runTotal) _runTotal = _runProcessed;
+    _emitStatus(running: true);
+    await _maybeNotifyProgress();
   }
 
   /// Build the live payload for an outbox row. For deletes, return the frozen
@@ -353,7 +529,9 @@ class SyncService {
       }
       try {
         final decoded = jsonDecode(item.payloadJson!);
-        return decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+        return decoded is Map
+            ? Map<String, dynamic>.from(decoded)
+            : <String, dynamic>{};
       } catch (_) {
         return <String, dynamic>{};
       }

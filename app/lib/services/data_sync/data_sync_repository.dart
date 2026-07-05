@@ -1,7 +1,76 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
+import 'package:totals/models/account.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
+
+class SyncTransactionLogDetails {
+  final String reference;
+  final double amount;
+  final String? creditor;
+  final String? receiver;
+  final String? note;
+  final String? time;
+  final String? type;
+  final int? bankId;
+  final List<String> categoryNames;
+
+  const SyncTransactionLogDetails({
+    required this.reference,
+    required this.amount,
+    this.creditor,
+    this.receiver,
+    this.note,
+    this.time,
+    this.type,
+    this.bankId,
+    this.categoryNames = const <String>[],
+  });
+
+  bool get isCredit => type?.trim().toUpperCase() == 'CREDIT';
+  bool get isDebit => type?.trim().toUpperCase() == 'DEBIT';
+
+  String? get party {
+    final values =
+        isCredit ? [creditor, receiver, note] : [receiver, creditor, note];
+    for (final value in values) {
+      final trimmed = value?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) return trimmed;
+    }
+    return null;
+  }
+
+  String get title {
+    final party = this.party;
+    if (party != null) return party;
+    return 'Transaction';
+  }
+
+  factory SyncTransactionLogDetails.fromDb(
+    Map<String, dynamic> row, {
+    List<String> categoryNames = const <String>[],
+  }) {
+    double amountFrom(dynamic value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    return SyncTransactionLogDetails(
+      reference: (row['reference'] as String?) ?? '',
+      amount: amountFrom(row['amount']),
+      creditor: row['creditor'] as String?,
+      receiver: row['receiver'] as String?,
+      note: row['note'] as String?,
+      time: row['time'] as String?,
+      type: row['type'] as String?,
+      bankId: (row['bankId'] as num?)?.toInt(),
+      categoryNames: categoryNames,
+    );
+  }
+}
 
 /// Persistence for the Data Sync feature: destinations, rules, and the durable
 /// outbox. Keeps all SQL out of the engine/UI. Secret values for destinations
@@ -240,6 +309,27 @@ class DataSyncRepository {
     );
   }
 
+  Future<List<Account>> getAccountsForFilter({int? profileId}) async {
+    final db = await _db;
+    final rows = await db.query(
+      'accounts',
+      where: profileId == null ? null : 'profileId = ?',
+      whereArgs: profileId == null ? null : [profileId],
+      orderBy: 'bank ASC, accountNumber ASC',
+    );
+    return rows.map((row) {
+      return Account.fromJson({
+        'accountNumber': row['accountNumber'],
+        'bank': row['bank'],
+        'balance': row['balance'],
+        'accountHolderName': row['accountHolderName'],
+        'settledBalance': row['settledBalance'],
+        'pendingCredit': row['pendingCredit'],
+        'profileId': row['profileId'],
+      });
+    }).toList(growable: false);
+  }
+
   // -------------------------------------------------------------------------
   // Outbox — enqueue
   // -------------------------------------------------------------------------
@@ -332,6 +422,24 @@ class DataSyncRepository {
     return claimed;
   }
 
+  Future<int> countDue({Set<int>? ruleIds}) async {
+    if (ruleIds != null && ruleIds.isEmpty) return 0;
+    final db = await _db;
+    final now = DateTime.now().toIso8601String();
+    final where = StringBuffer('status = ? AND nextAttemptAt <= ?');
+    final args = <Object?>[SyncOutboxStatus.pending, now];
+    if (ruleIds != null) {
+      where.write(
+          ' AND ruleId IN (${List.filled(ruleIds.length, '?').join(', ')})');
+      args.addAll(ruleIds);
+    }
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM sync_outbox WHERE $where',
+      args,
+    );
+    return (rows.first['c'] as int?) ?? 0;
+  }
+
   Future<bool> hasDue() async {
     final db = await _db;
     final now = DateTime.now().toIso8601String();
@@ -417,14 +525,29 @@ class DataSyncRepository {
 
   Future<List<SyncOutboxItem>> getOutbox({
     String? status,
+    List<String>? statuses,
     int limit = 200,
     int offset = 0,
   }) async {
     final db = await _db;
+    final normalizedStatuses = (statuses ?? const <String>[])
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    final where = normalizedStatuses.isNotEmpty
+        ? 'status IN (${List.filled(normalizedStatuses.length, '?').join(', ')})'
+        : status == null
+            ? null
+            : 'status = ?';
+    final whereArgs = normalizedStatuses.isNotEmpty
+        ? normalizedStatuses
+        : status == null
+            ? null
+            : <Object?>[status];
     final rows = await db.query(
       'sync_outbox',
-      where: status == null ? null : 'status = ?',
-      whereArgs: status == null ? null : [status],
+      where: where,
+      whereArgs: whereArgs,
       orderBy: 'updatedAt DESC, id DESC',
       limit: limit,
       offset: offset,
@@ -440,6 +563,138 @@ class DataSyncRepository {
     return {
       for (final row in rows) (row['status'] as String): (row['c'] as int),
     };
+  }
+
+  Future<Map<String, SyncTransactionLogDetails>> getTransactionLogDetails(
+    Iterable<String> references,
+  ) async {
+    final refs = references
+        .map((ref) => ref.trim())
+        .where((ref) => ref.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (refs.isEmpty) return const <String, SyncTransactionLogDetails>{};
+
+    final db = await _db;
+    final rows = <Map<String, dynamic>>[];
+    for (var i = 0; i < refs.length; i += 900) {
+      final slice = refs.sublist(
+        i,
+        i + 900 > refs.length ? refs.length : i + 900,
+      );
+      rows.addAll(await db.query(
+        'transactions',
+        columns: const [
+          'reference',
+          'amount',
+          'creditor',
+          'receiver',
+          'note',
+          'time',
+          'type',
+          'bankId',
+          'categoryId',
+          'categoryIds',
+        ],
+        where: 'reference IN (${List.filled(slice.length, '?').join(', ')})',
+        whereArgs: slice,
+      ));
+    }
+
+    final categoryIdsByRef = <String, List<int>>{};
+    final allCategoryIds = <int>{};
+    for (final row in rows) {
+      final ref = (row['reference'] as String?)?.trim();
+      if (ref == null || ref.isEmpty) continue;
+      final ids = _categoryIdsFromRow(row);
+      categoryIdsByRef[ref] = ids;
+      allCategoryIds.addAll(ids);
+    }
+
+    final categoryNamesById = await _categoryNamesById(db, allCategoryIds);
+    return {
+      for (final row in rows)
+        if (((row['reference'] as String?)?.trim() ?? '').isNotEmpty)
+          (row['reference'] as String).trim(): SyncTransactionLogDetails.fromDb(
+            row,
+            categoryNames: [
+              for (final id
+                  in categoryIdsByRef[(row['reference'] as String).trim()] ??
+                      const <int>[])
+                if (categoryNamesById[id] != null) categoryNamesById[id]!,
+            ],
+          ),
+    };
+  }
+
+  static List<int> _categoryIdsFromRow(Map<String, dynamic> row) {
+    final ids = <int>[];
+
+    void addId(dynamic value) {
+      int? parsed;
+      if (value is int) {
+        parsed = value;
+      } else if (value is num) {
+        parsed = value.toInt();
+      } else if (value is String) {
+        parsed = int.tryParse(value.trim());
+      }
+      if (parsed == null || parsed <= 0 || ids.contains(parsed)) return;
+      ids.add(parsed);
+    }
+
+    addId(row['categoryId']);
+    final raw = row['categoryIds'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          for (final value in decoded) {
+            addId(value);
+          }
+        }
+      } catch (_) {
+        for (final value in raw.split(',')) {
+          addId(value);
+        }
+      }
+    } else if (raw is List) {
+      for (final value in raw) {
+        addId(value);
+      }
+    }
+
+    return ids;
+  }
+
+  Future<Map<int, String>> _categoryNamesById(
+    DatabaseExecutor db,
+    Set<int> ids,
+  ) async {
+    if (ids.isEmpty) return const <int, String>{};
+
+    final names = <int, String>{};
+    final idList = ids.toList(growable: false);
+    for (var i = 0; i < idList.length; i += 900) {
+      final slice = idList.sublist(
+        i,
+        i + 900 > idList.length ? idList.length : i + 900,
+      );
+      final rows = await db.query(
+        'categories',
+        columns: const ['id', 'name'],
+        where: 'id IN (${List.filled(slice.length, '?').join(', ')})',
+        whereArgs: slice,
+      );
+      for (final row in rows) {
+        final id = row['id'];
+        final name = (row['name'] as String?)?.trim();
+        if (id is int && name != null && name.isNotEmpty) {
+          names[id] = name;
+        }
+      }
+    }
+    return names;
   }
 
   /// Reset `dead` (and optionally stuck `sending`) rows back to `pending`.

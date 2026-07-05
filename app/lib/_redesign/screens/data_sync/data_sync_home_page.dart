@@ -67,6 +67,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
 
   Future<void> _syncNow() async {
     setState(() => _syncing = true);
+    unawaited(DataSyncScheduler.requestImmediateDrain(reason: 'manual'));
     await SyncService.instance.requestDrain(reason: 'manual');
     if (!mounted) return;
     setState(() => _syncing = false);
@@ -75,9 +76,10 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
     final st = SyncService.instance.status.value;
     final msg = st.failed > 0
         ? '${st.sent} sent · ${st.failed} failed'
-        : (st.sent > 0 ? '${st.sent} synced' : 'Nothing to sync');
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+        : (st.retried > 0
+            ? '${st.sent} sent · ${st.retried} retrying'
+            : (st.sent > 0 ? '${st.sent} synced' : 'Nothing to sync'));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _addOrEditDestination([SyncDestination? existing]) async {
@@ -172,7 +174,8 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Sync store cleared — $queued record(s) re-queued.')),
+      SnackBar(
+          content: Text('Sync store cleared — $queued record(s) re-queued.')),
     );
     await _load();
   }
@@ -190,7 +193,8 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Confirm', style: TextStyle(color: AppColors.red)),
+            child:
+                const Text('Confirm', style: TextStyle(color: AppColors.red)),
           ),
         ],
       ),
@@ -210,12 +214,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
                 _masterCard(),
                 if (_enabled) ...[
                   const SizedBox(height: 16),
-                  DataSyncPrimaryButton(
-                    label: 'Sync now',
-                    icon: AppIcons.upload_rounded,
-                    loading: _syncing,
-                    onPressed: _rules.any((r) => r.enabled) ? _syncNow : null,
-                  ),
+                  _syncNowButton(),
                   const SizedBox(height: 12),
                   _statusCard(),
                   const SizedBox(height: 20),
@@ -240,7 +239,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
                   const SizedBox(height: 24),
                   TextButton(
                     onPressed: _wipe,
-                    child: Text('Wipe all sync data',
+                    child: const Text('Wipe all sync data',
                         style: TextStyle(color: AppColors.red)),
                   ),
                 ],
@@ -264,26 +263,37 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
         final IconData icon;
         final Color color;
         final String text;
+        final String? trailing;
         if (st.running) {
           icon = Icons.sync_rounded;
           color = AppColors.primaryLight;
-          text = 'Syncing…';
+          text = st.hasProgress ? 'Syncing ${st.fraction}' : 'Preparing sync';
+          trailing = st.hasProgress ? '${st.percent}%' : null;
         } else if (!st.hasResult) {
           icon = Icons.info_outline_rounded;
           color = AppColors.slate400;
           text = 'No sync yet';
+          trailing = null;
         } else if (st.failed > 0) {
           icon = Icons.error_outline_rounded;
           color = AppColors.red;
           text = '${st.sent} sent · ${st.failed} failed';
+          trailing = _relativeTime(st.at!);
+        } else if (st.retried > 0) {
+          icon = Icons.schedule_rounded;
+          color = AppColors.primaryLight;
+          text = '${st.sent} sent · ${st.retried} retrying';
+          trailing = _relativeTime(st.at!);
         } else if (st.sent > 0) {
           icon = Icons.check_circle_outline_rounded;
           color = AppColors.incomeSuccess;
           text = '${st.sent} synced';
+          trailing = _relativeTime(st.at!);
         } else {
           icon = Icons.check_circle_outline_rounded;
           color = AppColors.slate400;
           text = 'Up to date';
+          trailing = _relativeTime(st.at!);
         }
         return InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -294,17 +304,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
-                if (st.running)
-                  SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(color),
-                    ),
-                  )
-                else
-                  Icon(icon, color: color, size: 20),
+                Icon(icon, color: color, size: 20),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -316,9 +316,9 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
                     ),
                   ),
                 ),
-                if (st.hasResult && !st.running)
+                if (trailing != null)
                   Text(
-                    _relativeTime(st.at!),
+                    trailing,
                     style: TextStyle(
                       color: AppColors.textTertiary(context),
                       fontSize: 12,
@@ -327,6 +327,24 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
               ],
             ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _syncNowButton() {
+    return ValueListenableBuilder<SyncRunStatus>(
+      valueListenable: SyncService.instance.status,
+      builder: (context, st, _) {
+        final hasEnabledRule = _rules.any((r) => r.enabled);
+        final running = st.running || _syncing;
+        final label = st.running && st.hasProgress
+            ? 'Syncing ${st.fraction}'
+            : (running ? 'Preparing sync' : 'Sync now');
+        return DataSyncPrimaryButton(
+          label: label,
+          icon: running ? Icons.sync_rounded : AppIcons.upload_rounded,
+          onPressed: hasEnabledRule && !running ? _syncNow : null,
         );
       },
     );
@@ -349,7 +367,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
           child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: value,
-            activeColor: AppColors.primaryLight,
+            activeThumbColor: AppColors.primaryLight,
             onChanged: (v) => _settings.setNotify(v),
             title: Text(
               'Notify me about syncs',
@@ -389,7 +407,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
               ),
               Switch.adaptive(
                 value: _enabled,
-                activeColor: AppColors.primaryLight,
+                activeThumbColor: AppColors.primaryLight,
                 onChanged: _toggleMaster,
               ),
             ],
@@ -415,7 +433,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
       children: [
         Row(
           children: [
-            Expanded(child: DataSyncSectionHeader('Destinations')),
+            const Expanded(child: DataSyncSectionHeader('Destinations')),
             TextButton.icon(
               onPressed: () => _addOrEditDestination(),
               icon: const Icon(AppIcons.add_rounded, size: 18),
@@ -433,7 +451,8 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
         for (final dest in _destinations) ...[
           DataSyncTile(
             icon: AppIcons.cloud_download,
-            iconColor: dest.enabled ? AppColors.primaryLight : AppColors.slate400,
+            iconColor:
+                dest.enabled ? AppColors.primaryLight : AppColors.slate400,
             title: dest.name,
             subtitle: '${dest.authType.label} · ${_host(dest.baseUrl)}',
             onTap: () => _addOrEditDestination(dest),
@@ -442,12 +461,12 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
               children: [
                 Switch.adaptive(
                   value: dest.enabled,
-                  activeColor: AppColors.primaryLight,
+                  activeThumbColor: AppColors.primaryLight,
                   onChanged: (v) => _toggleDestination(dest, v),
                 ),
                 IconButton(
                   onPressed: () => _deleteDestination(dest),
-                  icon: Icon(AppIcons.delete_outline_rounded,
+                  icon: const Icon(AppIcons.delete_outline_rounded,
                       color: AppColors.red, size: 20),
                 ),
               ],
@@ -465,7 +484,7 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
       children: [
         Row(
           children: [
-            Expanded(child: DataSyncSectionHeader('Rules')),
+            const Expanded(child: DataSyncSectionHeader('Rules')),
             TextButton.icon(
               onPressed: () => _addOrEditRule(),
               icon: const Icon(AppIcons.add_rounded, size: 18),
@@ -484,22 +503,24 @@ class _DataSyncHomePageState extends State<DataSyncHomePage> {
         for (final rule in _rules) ...[
           DataSyncTile(
             icon: AppIcons.bolt_rounded,
-            iconColor: rule.enabled ? AppColors.primaryLight : AppColors.slate400,
+            iconColor:
+                rule.enabled ? AppColors.primaryLight : AppColors.slate400,
             title: rule.name,
             subtitle: '${rule.entity.label} → ${_destName(rule.destinationId)}',
             onTap: () => _addOrEditRule(rule),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (rule.lastStatus != null) DataSyncStatusPill(rule.lastStatus!),
+                if (rule.lastStatus != null)
+                  DataSyncStatusPill(rule.lastStatus!),
                 Switch.adaptive(
                   value: rule.enabled,
-                  activeColor: AppColors.primaryLight,
+                  activeThumbColor: AppColors.primaryLight,
                   onChanged: (v) => _toggleRule(rule, v),
                 ),
                 IconButton(
                   onPressed: () => _deleteRule(rule),
-                  icon: Icon(AppIcons.delete_outline_rounded,
+                  icon: const Icon(AppIcons.delete_outline_rounded,
                       color: AppColors.red, size: 20),
                 ),
               ],

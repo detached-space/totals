@@ -927,9 +927,10 @@ class NotificationService {
   Future<void> showDataSyncResult({
     required int sent,
     required int failed,
+    int retried = 0,
     String? destination,
   }) async {
-    if (sent <= 0 && failed <= 0) return;
+    if (sent <= 0 && failed <= 0 && retried <= 0) return;
     try {
       await ensureInitialized();
       final dest = (destination ?? '').trim();
@@ -941,6 +942,11 @@ class NotificationService {
         body = sent > 0
             ? '$sent sent, $failed failed$suffix'
             : "$failed record(s) couldn't be sent$suffix";
+      } else if (retried > 0) {
+        title = 'Data Sync will retry';
+        body = sent > 0
+            ? '$sent sent, $retried queued for retry$suffix'
+            : '$retried record(s) queued for retry$suffix';
       } else {
         title = 'Data Sync complete';
         body = '$sent record(s) synced$suffix';
@@ -958,12 +964,74 @@ class NotificationService {
                 ? Importance.high
                 : Importance.defaultImportance,
             priority: failed > 0 ? Priority.high : Priority.defaultPriority,
+            showProgress: false,
+            ongoing: false,
             onlyAlertOnce: failed == 0,
           ),
           iOS: const DarwinNotificationDetails(),
         ),
       );
     } catch (_) {}
+  }
+
+  Future<void> showDataSyncProgress({
+    required int processed,
+    required int total,
+    required int sent,
+    required int failed,
+    String? reason,
+  }) async {
+    if (total <= 0) return;
+    try {
+      await ensureInitialized();
+      final safeTotal = total < 1 ? 1 : total;
+      final safeProcessed = processed.clamp(0, safeTotal).toInt();
+      final percent = ((safeProcessed / safeTotal) * 100).round();
+      final retrying = safeProcessed - sent - failed;
+      final detail = <String>[
+        '$safeProcessed/$safeTotal processed',
+        if (sent > 0) '$sent sent',
+        if (failed > 0) '$failed failed',
+        if (retrying > 0) '$retrying retrying',
+      ].join(' · ');
+
+      await _plugin.show(
+        dataSyncResultNotificationId,
+        'Data Sync $percent%',
+        detail,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _dataSyncChannelId,
+            'Data Sync',
+            channelDescription: 'Progress and results for Data Sync',
+            importance: Importance.low,
+            priority: Priority.low,
+            showProgress: true,
+            maxProgress: 100,
+            progress: percent,
+            ongoing: safeProcessed < safeTotal,
+            onlyAlertOnce: true,
+            enableVibration: false,
+            playSound: false,
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentSound: false,
+            presentBadge: false,
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> dismissDataSyncNotification() async {
+    try {
+      await ensureInitialized();
+      await _plugin.cancel(dataSyncResultNotificationId);
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to dismiss data sync notification: $e');
+      }
+    }
   }
 
   Future<void> showAccountSyncProgress({

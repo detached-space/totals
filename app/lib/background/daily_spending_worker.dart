@@ -24,6 +24,8 @@ const String sharedExpenseNotificationCatchupUniqueName =
     'sharedExpenseNotificationCatchupUnique';
 const String dataSyncDrainTask = 'dataSyncDrain';
 const String dataSyncDrainUniqueName = 'dataSyncDrainUnique';
+const String dataSyncImmediateDrainTask = 'dataSyncImmediateDrain';
+const String dataSyncImmediateDrainUniqueName = 'dataSyncImmediateDrainUnique';
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -55,9 +57,10 @@ void callbackDispatcher() {
         return true;
       }
 
-      if (task == dataSyncDrainTask) {
+      if (task == dataSyncDrainTask || task == dataSyncImmediateDrainTask) {
         // requestDrain self-gates on the master flag (read from prefs here).
-        await SyncService.instance.requestDrain(reason: 'periodic');
+        final reason = inputData?['reason'] as String? ?? 'periodic';
+        await SyncService.instance.requestDrain(reason: reason);
         return true;
       }
 
