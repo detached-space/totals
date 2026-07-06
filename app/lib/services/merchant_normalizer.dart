@@ -22,14 +22,6 @@ class MerchantNormalizer extends TransactionEnricher {
   // Known merchants: the key is a lower-case substring to match against
   // the cleaned counterparty; the value is the canonical display name.
   static final Map<String, String> _knownMerchants = {
-    'amazon': 'Amazon',
-    'netflix': 'Netflix',
-    'spotify': 'Spotify',
-    'google': 'Google',
-    'apple': 'Apple',
-    'microsoft': 'Microsoft',
-    'uber': 'Uber',
-    'telegram': 'Telegram',
     'ethiotelecom': 'Ethio Telecom',
     'safaricom': 'Safaricom',
     'mpesa': 'M-PESA',
