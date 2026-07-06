@@ -7,6 +7,8 @@ class SmsPattern {
       description; // For debugging, e.g., "CBE Debit with Service Charge"
   final bool? refRequired;
   final bool? hasAccount;
+  final bool? hasFees;
+  final Map<String, String>? fieldMapping;
 
   SmsPattern({
     required this.bankId,
@@ -16,6 +18,8 @@ class SmsPattern {
     this.description = "",
     this.refRequired,
     this.hasAccount,
+    this.hasFees,
+    this.fieldMapping,
   });
 
   factory SmsPattern.fromJson(Map<String, dynamic> json) {
@@ -27,6 +31,10 @@ class SmsPattern {
       description: json['description'] ?? "",
       refRequired: json['refRequired'],
       hasAccount: json['hasAccount'],
+      hasFees: json['hasFees'],
+      fieldMapping: json['fieldMapping'] != null
+          ? Map<String, String>.from(json['fieldMapping'])
+          : null,
     );
   }
 
@@ -39,6 +47,8 @@ class SmsPattern {
       'description': description,
       'refRequired': refRequired,
       'hasAccount': hasAccount,
+      'hasFees': hasFees,
+      'fieldMapping': fieldMapping,
     };
   }
 }

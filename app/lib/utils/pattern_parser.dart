@@ -27,30 +27,42 @@ class PatternParser {
           print("debug: ✓ Pattern Matched: ${pattern.description}");
           print("debug: Available named groups: ${match.groupNames.toList()}");
 
+          final mapping = pattern.fieldMapping;
           final Map<String, dynamic> extracted = {};
 
-          // Extract known named groups
-          // We support: amount, balance, account, reference, creditor, receiver,
-          // sender/source (for incoming transfers), time
-
           extracted['type'] = pattern.type;
-          extracted['bankId'] = pattern.bankId; // Default bank ID from pattern
+          extracted['bankId'] = pattern.bankId;
           extracted['patternDescription'] = pattern.description;
 
-          if (match.groupNames.contains('amount')) {
-            print("debug: Extracted amount: ${match.namedGroup('amount')}");
-            final cleanedAmount = _cleanNumber(match.namedGroup('amount'));
-            extracted['amount'] = double.tryParse(cleanedAmount ?? "");
-            print("debug: Extracted amount: ${extracted['amount']}");
+          String? typeOverride;
+          if (_hasGroup(match, mapping, 'type')) {
+            typeOverride = _normalizeType(_groupValue(match, mapping, 'type'));
           }
-          if (match.groupNames.contains('balance')) {
-            extracted['currentBalance'] =
-                _cleanNumber(match.namedGroup('balance'));
-            print("debug: Extracted balance: ${extracted['currentBalance']}");
+          final transactionType = typeOverride ?? pattern.type;
+
+          double? amount = _hasGroup(match, mapping, 'amount')
+              ? double.tryParse(
+                  _cleanNumber(_groupValue(match, mapping, 'amount')) ?? "")
+              : null;
+          if (amount != null) {
+            extracted['amount'] = amount;
           }
-          if (match.groupNames.contains('account')) {
+
+          String? currentBalance = _hasGroup(match, mapping, 'balance')
+              ? _cleanNumber(_groupValue(match, mapping, 'balance'))
+              : null;
+          if (currentBalance != null) {
+            extracted['currentBalance'] = currentBalance;
+          }
+
+          String? reference = _hasGroup(match, mapping, 'reference')
+              ? _groupValue(match, mapping, 'reference')
+              : null;
+
+          String? accountNumber;
+          if (_hasGroup(match, mapping, 'account')) {
             print("debug: ✓ after account - entering account extraction block");
-            String? raw = match.namedGroup('account');
+            String? raw = _groupValue(match, mapping, 'account');
             print("debug: Raw account value: '$raw'");
 
             if (raw != null) {
@@ -59,123 +71,128 @@ class PatternParser {
               final bank =
                   availableBanks.firstWhere((b) => b.id == pattern.bankId);
 
-              // Use bank configuration for account extraction
               if (bank.uniformMasking == true && bank.maskPattern != null) {
-                // Extract last N digits based on mask pattern
                 if (raw.length >= bank.maskPattern!) {
-                  extracted['accountNumber'] =
+                  accountNumber =
                       raw.substring(raw.length - bank.maskPattern!);
-                  print(
-                      "Cleaned account (masked): ${extracted['accountNumber']}");
+                  print("Cleaned account (masked): $accountNumber");
                 } else {
-                  extracted['accountNumber'] = raw;
-                  print(
-                      "Cleaned account (fallback): ${extracted['accountNumber']}");
+                  accountNumber = raw;
+                  print("Cleaned account (fallback): $accountNumber");
                 }
               } else {
-                // No masking or uniformMasking is false - use full account number
-                extracted['accountNumber'] = raw;
-                print(
-                    "Cleaned account (direct): ${extracted['accountNumber']}");
+                accountNumber = raw;
+                print("Cleaned account (direct): $accountNumber");
               }
             } else {
               print("debug: ✗ Raw account is null!");
+            }
+            if (accountNumber != null) {
+              extracted['accountNumber'] = accountNumber;
             }
           } else {
             print("debug: ✗ 'account' group NOT found in named groups");
           }
 
-          if (match.groupNames.contains('reference')) {
-            extracted['reference'] = match.namedGroup('reference');
-            print("debug: Extracted reference: ${extracted['reference']}");
-          }
-          if (match.groupNames.contains('type')) {
-            final rawType = match.namedGroup('type');
-            final normalized = _normalizeType(rawType);
-            if (normalized != null) {
-              extracted['type'] = normalized;
+          if (reference == null) {
+            if (pattern.refRequired == false) {
+              final fallbackDate = messageDate ?? DateTime.now();
+              final typePart = transactionType;
+              final amountPart = amount?.toStringAsFixed(2) ?? 'NA';
+              final accountPart = accountNumber ?? 'NA';
+              reference =
+                  "${pattern.bankId}_${typePart}_${amountPart}_${accountPart}_${fallbackDate.toIso8601String()}";
             }
           }
-          if (match.groupNames.contains('creditor')) {
-            extracted['creditor'] = match.namedGroup('creditor');
+          if (reference != null) {
+            extracted['reference'] = reference;
           }
-          if (match.groupNames.contains("receiver")) {
-            extracted['receiver'] = match.namedGroup('receiver');
+
+          String? creditor;
+          String? receiver;
+          if (_hasGroup(match, mapping, 'creditor')) {
+            creditor = _groupValue(match, mapping, 'creditor');
           }
-          _assignOptionalAmount(
-            extracted,
-            'serviceCharge',
-            match,
-            const [
-              'serviceCharge',
-              'ServiceCharge',
-              'servicecharge',
-              'service_charge'
-            ],
-          );
-          _assignOptionalAmount(
-            extracted,
-            'vat',
-            match,
-            const ['vat', 'VAT'],
-          );
-          String? counterparty = _firstNamedGroup(match, const [
-            'sender',
-            'source',
-            'agent',
-            'payer',
-            'from',
+          if (_hasGroup(match, mapping, 'receiver')) {
+            receiver = _groupValue(match, mapping, 'receiver');
+          }
+          if (creditor != null) extracted['creditor'] = creditor;
+          if (receiver != null) extracted['receiver'] = receiver;
+
+          double? serviceCharge = _extractOptionalAmount(match, mapping, const [
+            'serviceCharge', 'ServiceCharge', 'servicecharge', 'service_charge'
           ]);
-          final rawType = (extracted['type'] ?? pattern.type).toString();
-          final normalized = rawType.toUpperCase();
-          if (normalized.contains('CREDIT')) {
+          double? vat = _extractOptionalAmount(match, mapping, const ['vat', 'VAT']);
+          double? totalDebit = _extractOptionalAmount(
+              match, mapping, const ['totalAmount']);
+          double? totalFee = _extractOptionalAmount(
+              match, mapping, const ['totalFees', 'total_amount']);
+
+          if (serviceCharge != null) extracted['serviceCharge'] = serviceCharge;
+          if (vat != null) extracted['vat'] = vat;
+          if (totalDebit != null) extracted['totalDebit'] = totalDebit;
+          if (totalFee != null) extracted['totalFee'] = totalFee;
+
+          String? counterparty = _firstNamedGroup(match, mapping, const [
+            'sender', 'source', 'agent', 'payer', 'from',
+          ]);
+          final rawType = transactionType;
+          final normalizedType = rawType.toUpperCase();
+          if (normalizedType.contains('CREDIT')) {
             counterparty ??= _fallbackCounterparty(cleanBody);
             if (counterparty != null && counterparty.trim().isNotEmpty) {
               extracted['creditor'] ??= counterparty.trim();
             }
           }
-          if (match.groupNames.contains('time')) {
-            // Date parsing is complex, for now store raw string or try basic parse
-            // Ideally the regex extracts ISO-like or we have a date parser helper
-            extracted['raw_time'] = match.namedGroup('time');
-            extracted['time'] = DateTime.now()
-                .toIso8601String(); // Default to now if parse fails
-          } else {
-            extracted['time'] = DateTime.now().toIso8601String();
+
+          String? time;
+          if (_hasGroup(match, mapping, 'time')) {
+            time = _groupValue(match, mapping, 'time');
           }
+          time ??= messageDate?.toIso8601String();
+          extracted['time'] = time;
 
           final transactionLink =
               TransactionLinkUtils.extractTransactionLinkFromMessage(
             messageBody: cleanBody,
             pattern: pattern,
-            reference: extracted['reference']?.toString(),
+            reference: reference,
           );
           if (transactionLink != null) {
             extracted['transactionLink'] = transactionLink;
           }
 
-          print("debug: account ${extracted["accountNumber"]}");
-          print("debug: amount ${extracted["amount"]}");
-          print("debug: balance ${extracted["currentBalance"]}");
-          print("debug: reference ${extracted["reference"]}");
-          print("debug: receiver ${extracted["receiver"]}");
-
-          if (pattern.refRequired == false && extracted["reference"] == null) {
-            final fallbackDate = messageDate ?? DateTime.now();
-            extracted["reference"] =
-                "${pattern.bankId}_${fallbackDate.toIso8601String()}";
-          }
+          print("debug: account $accountNumber");
+          print("debug: amount $amount");
+          print("debug: balance $currentBalance");
+          print("debug: reference $reference");
+          print("debug: receiver $receiver");
 
           final requiresReference = pattern.refRequired == true;
           final requiresAccount = pattern.hasAccount == true &&
-              match.groupNames.contains('account');
+              _hasGroup(match, mapping, 'account');
+
+          if (amount == null &&
+              serviceCharge != null &&
+              vat != null &&
+              totalDebit != null) {
+            amount = totalDebit - serviceCharge - vat;
+            if (amount != null && amount >= 0) {
+              extracted['amount'] = amount;
+            }
+          }
+          if (!extracted.containsKey('totalFee') &&
+              serviceCharge != null &&
+              vat != null) {
+            extracted['totalFee'] = serviceCharge + vat;
+          }
 
           if (extracted['amount'] == null) {
             print(
                 "✗ Pattern '${pattern.description}' matched but amount missing. Skipping.");
             continue;
           }
-          if (match.groupNames.contains('balance') &&
+          if (_hasGroup(match, mapping, 'balance') &&
               extracted['currentBalance'] == null) {
             print(
                 "✗ Pattern '${pattern.description}' matched but balance missing. Skipping.");
@@ -208,30 +225,55 @@ class PatternParser {
     return null; // No match found
   }
 
+  static String? _groupValue(RegExpMatch match, Map<String, String>? mapping, String name) {
+    if (mapping != null && mapping.containsKey(name)) {
+      final index = int.tryParse(mapping[name]!);
+      if (index != null) return match.group(index);
+    }
+    return match.namedGroup(name);
+  }
+
+  static bool _hasGroup(RegExpMatch match, Map<String, String>? mapping, String name) {
+    if (mapping != null && mapping.containsKey(name)) {
+      final index = int.tryParse(mapping[name]!);
+      if (index != null) return index < match.groupCount + 1;
+    }
+    return match.groupNames.contains(name);
+  }
+
+  static double? _extractOptionalAmount(
+      RegExpMatch match,
+      Map<String, String>? mapping,
+      List<String> groupNames) {
+    for (final name in groupNames) {
+      if (!_hasGroup(match, mapping, name)) continue;
+      final cleaned = _cleanNumber(_groupValue(match, mapping, name));
+      final value = cleaned == null ? null : double.tryParse(cleaned);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
   static void _assignOptionalAmount(
     Map<String, dynamic> target,
     String key,
     RegExpMatch match,
     List<String> groupNames,
   ) {
-    for (final name in groupNames) {
-      if (!match.groupNames.contains(name)) continue;
-      final cleaned = _cleanNumber(match.namedGroup(name));
-      final value = cleaned == null ? null : double.tryParse(cleaned);
-      if (value != null) {
-        target[key] = value;
-      }
-      return;
+    final value = _extractOptionalAmount(match, null, groupNames);
+    if (value != null) {
+      target[key] = value;
     }
   }
 
   static String? _firstNamedGroup(
     RegExpMatch match,
+    Map<String, String>? mapping,
     List<String> groupNames,
   ) {
     for (final name in groupNames) {
-      if (!match.groupNames.contains(name)) continue;
-      final value = match.namedGroup(name);
+      if (!_hasGroup(match, mapping, name)) continue;
+      final value = _groupValue(match, mapping, name);
       if (value != null && value.trim().isNotEmpty) return value;
     }
     return null;

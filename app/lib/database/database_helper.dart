@@ -23,7 +23,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 27,
+      version: 28,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -100,7 +100,8 @@ class DatabaseHelper {
         profileId INTEGER,
         sourceType TEXT,
         sourceMessageId TEXT,
-        sourceFingerprint TEXT
+        sourceFingerprint TEXT,
+        totalFee REAL
       )
     ''');
 
@@ -125,7 +126,9 @@ class DatabaseHelper {
         type TEXT NOT NULL,
         description TEXT,
         refRequired INTEGER,
-        hasAccount INTEGER
+        hasAccount INTEGER,
+        hasFees INTEGER,
+        mapping TEXT
       )
     ''');
 
@@ -822,6 +825,23 @@ class DatabaseHelper {
     if (oldVersion < 27) {
       await _ensureTransactionSourceSchema(db);
       await _ensureSyncSchema(db);
+    }
+
+    if (oldVersion < 28) {
+      try {
+        await db.execute(
+          'ALTER TABLE sms_patterns ADD COLUMN hasFees INTEGER',
+        );
+        await db.execute(
+          'ALTER TABLE sms_patterns ADD COLUMN mapping TEXT',
+        );
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN totalFee REAL',
+        );
+        print("debug: Added hasFees/mapping columns to sms_patterns and totalFee to transactions");
+      } catch (e) {
+        print("debug: Error adding v28 columns (might already exist): $e");
+      }
     }
   }
 

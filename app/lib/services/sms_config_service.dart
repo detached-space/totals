@@ -67,6 +67,11 @@ class SmsConfigService {
                 map['refRequired'] == null ? null : (map['refRequired'] == 1),
             'hasAccount':
                 map['hasAccount'] == null ? null : (map['hasAccount'] == 1),
+            'hasFees':
+                map['hasFees'] == null ? null : (map['hasFees'] == 1),
+            'fieldMapping': map['mapping'] != null
+                ? Map<String, String>.from(jsonDecode(map['mapping']))
+                : null,
           });
         }).toList();
         print("debug: Loaded ${patterns.length} patterns from database");
@@ -198,6 +203,9 @@ class SmsConfigService {
             pattern.refRequired == null ? null : (pattern.refRequired! ? 1 : 0),
         'hasAccount':
             pattern.hasAccount == null ? null : (pattern.hasAccount! ? 1 : 0),
+        'hasFees':
+            pattern.hasFees == null ? null : (pattern.hasFees! ? 1 : 0),
+        'mapping': pattern.fieldMapping != null ? jsonEncode(pattern.fieldMapping) : null,
       });
     }
     await batch.commit(noResult: true);

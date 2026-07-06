@@ -18,6 +18,7 @@ class Transaction {
   final int? profileId;
   final double? serviceCharge;
   final double? vat;
+  final double? totalFee;
   final String? sourceType;
   final String? sourceMessageId;
   final String? sourceFingerprint;
@@ -40,6 +41,7 @@ class Transaction {
     this.profileId,
     this.serviceCharge,
     this.vat,
+    this.totalFee,
     this.sourceType,
     this.sourceMessageId,
     this.sourceFingerprint,
@@ -159,6 +161,7 @@ class Transaction {
       profileId: toInt(json['profileId']),
       serviceCharge: toDouble(json['serviceCharge']),
       vat: toDouble(json['vat']),
+      totalFee: toDouble(json['totalFee']),
       sourceType: json['sourceType']?.toString(),
       sourceMessageId: json['sourceMessageId']?.toString(),
       sourceFingerprint: json['sourceFingerprint']?.toString(),
@@ -183,6 +186,7 @@ class Transaction {
         if (profileId != null) 'profileId': profileId,
         if (serviceCharge != null) 'serviceCharge': serviceCharge,
         if (vat != null) 'vat': vat,
+        if (totalFee != null) 'totalFee': totalFee,
         if (sourceType != null) 'sourceType': sourceType,
         if (sourceMessageId != null) 'sourceMessageId': sourceMessageId,
         if (sourceFingerprint != null) 'sourceFingerprint': sourceFingerprint,
@@ -206,6 +210,7 @@ class Transaction {
     int? profileId,
     double? serviceCharge,
     double? vat,
+    double? totalFee,
     String? sourceType,
     String? sourceMessageId,
     String? sourceFingerprint,
@@ -263,6 +268,7 @@ class Transaction {
       profileId: profileId ?? this.profileId,
       serviceCharge: serviceCharge ?? this.serviceCharge,
       vat: vat ?? this.vat,
+      totalFee: totalFee ?? this.totalFee,
       sourceType: sourceType ?? this.sourceType,
       sourceMessageId: sourceMessageId ?? this.sourceMessageId,
       sourceFingerprint: sourceFingerprint ?? this.sourceFingerprint,
