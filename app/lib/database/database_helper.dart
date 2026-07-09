@@ -1691,10 +1691,30 @@ class DatabaseHelper {
     await db.delete('receiver_category_mappings');
   }
 
+  Future<bool> _markCategoryBuiltInByKey(Database db, String key) async {
+    final rows = await db.query(
+      'categories',
+      columns: ['id'],
+      where: 'builtInKey = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+
+    await db.update(
+      'categories',
+      {'builtIn': 1},
+      where: 'builtInKey = ?',
+      whereArgs: [key],
+    );
+    return true;
+  }
+
   Future<void> _assignBuiltInCategoryKeys(Database db) async {
     for (final builtIn in models.BuiltInCategories.all) {
       final key = builtIn.builtInKey;
       if (key == null || key.isEmpty) continue;
+      if (await _markCategoryBuiltInByKey(db, key)) continue;
 
       // 1) Match by name+flow (works for most cases).
       final byName = await db.query(
@@ -1766,8 +1786,15 @@ class DatabaseHelper {
       where: "name IN ('Gifts', 'Gifts given', 'Gifts received')",
     );
 
-    bool hasGiftsGiven = rows.any((r) => r['name'] == 'Gifts given');
-    bool hasGiftsReceived = rows.any((r) => r['name'] == 'Gifts received');
+    final hasGiftsGivenKey =
+        await _markCategoryBuiltInByKey(db, 'expense_gifts_given');
+    final hasGiftsReceivedKey =
+        await _markCategoryBuiltInByKey(db, 'income_gifts_received');
+
+    bool hasGiftsGiven =
+        hasGiftsGivenKey || rows.any((r) => r['name'] == 'Gifts given');
+    bool hasGiftsReceived =
+        hasGiftsReceivedKey || rows.any((r) => r['name'] == 'Gifts received');
 
     final giftsRow = rows.where((r) => r['name'] == 'Gifts').toList();
     if (giftsRow.isNotEmpty && !hasGiftsGiven) {
