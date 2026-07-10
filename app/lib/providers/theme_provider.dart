@@ -4,10 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/theme/app_font_option.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
+import 'package:totals/theme/app_theme_mode_preference.dart';
 import 'package:totals/services/widget_service.dart';
 
 class ThemeProvider extends ChangeNotifier {
-  static const String _themeKey = 'theme_mode';
   static const String _uiScaleKey = 'ui_scale';
   static const String _appTopPaddingKey = 'app_top_padding';
   static const String _appFontKey = 'app_font';
@@ -94,13 +94,9 @@ class ThemeProvider extends ChangeNotifier {
   }
 
   Future<void> _loadThemeMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedTheme = prefs.getString(_themeKey);
-    if (savedTheme != null) {
-      _themeMode = ThemeMode.values.firstWhere(
-        (mode) => mode.toString() == savedTheme,
-        orElse: () => ThemeMode.system,
-      );
+    final savedTheme = await AppThemeModePreference.load();
+    if (_themeMode != savedTheme) {
+      _themeMode = savedTheme;
       notifyListeners();
     }
   }
@@ -113,8 +109,7 @@ class ThemeProvider extends ChangeNotifier {
     SchedulerBinding.instance.addPostFrameCallback((_) {
       notifyListeners();
     });
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_themeKey, mode.toString());
+    await AppThemeModePreference.save(mode);
   }
 
   Future<void> _loadUiScale() async {

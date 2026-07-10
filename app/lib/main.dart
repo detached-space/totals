@@ -1,29 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/bootstrap/app_bootstrap.dart';
 import 'package:totals/providers/insights_provider.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/providers/budget_provider.dart';
 import 'package:totals/screens/home_page.dart';
 import 'package:totals/services/account_sync_status_service.dart';
-import 'package:totals/repositories/profile_repository.dart';
-import 'package:workmanager/workmanager.dart';
-import 'package:totals/background/daily_spending_worker.dart';
-import 'package:totals/services/notification_scheduler.dart';
-import 'package:totals/services/widget_service.dart';
-import 'package:totals/services/widget_launch_intent_service.dart';
-import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
-import 'package:totals/services/data_sync/data_sync_scheduler.dart';
-import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/data_sync/sync_enqueuer.dart';
 import 'package:totals/_redesign/screens/onboarding_page.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/_redesign/theme/theme.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/theme/app_font_option.dart';
 
 SnackBarThemeData _globalSnackBarTheme() {
@@ -101,63 +90,29 @@ Widget _buildUiScaledApp({
   );
 }
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Flag this as the main isolate so the Data Sync enqueuer drains inline here
   // (background isolates defer to the periodic task / signal bridge instead).
   SyncEnqueuer.isMainIsolate = true;
-  SharedExpensePushNotificationService.registerBackgroundHandler();
   try {
-    await dotenv.load(fileName: '.env', isOptional: true);
-  } catch (e) {
-    if (kDebugMode) {
-      print('debug: dotenv load failed: $e');
-    }
+    SharedExpensePushNotificationService.registerBackgroundHandler();
+  } catch (error, stackTrace) {
+    reportNonFatalBootstrapError(
+      'PUSH_REGISTRATION',
+      error,
+      stackTrace,
+    );
   }
 
-  // Initialize database and migrate if needed
-  // await MigrationHelper.migrateIfNeeded();
-
-  // Initialize default profile if none exists
-  final profileRepo = ProfileRepository();
-  await profileRepo.initializeDefaultProfile();
-
-  // Initialize home widget
-  await WidgetService.initialize();
-  await WidgetLaunchIntentService.instance.initialize();
-
-  // Warm the Data Sync master-flag cache so the write hot-path stays cheap.
-  await DataSyncSettingsService.instance.ensureLoaded();
-
-  // Read redesign flag from SharedPreferences (persists across restarts)
-  final prefs = await SharedPreferences.getInstance();
-  final useRedesign = true;
-  // final hasCompletedOnboarding =
-  //     prefs.getBool('has_completed_onboarding') ?? false;
-  const hasCompletedOnboarding = true;
-  if (!kIsWeb) {
-    try {
-      await Workmanager().initialize(
-        callbackDispatcher,
-        // isInDebugMode: kDebugMode,
-        isInDebugMode: false,
-      );
-      await NotificationScheduler.syncSpendingSummarySchedule();
-      await NotificationScheduler.syncSharedExpenseNotificationSchedule();
-      await WidgetRefreshScheduler.syncWidgetRefreshSchedule();
-      await DataSyncScheduler.sync();
-    } catch (e) {
-      // Ignore if not supported on the current platform.
-      if (kDebugMode) {
-        print('debug: Workmanager init failed: $e');
-      }
-    }
-  }
-
-  runApp(MyApp(
-    useRedesign: useRedesign,
-    showOnboarding: useRedesign && !hasCompletedOnboarding,
-  ));
+  runApp(
+    AppBootstrapGate(
+      appBuilder: (_) => const MyApp(
+        useRedesign: true,
+        showOnboarding: false,
+      ),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
