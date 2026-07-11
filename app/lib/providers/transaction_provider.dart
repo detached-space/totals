@@ -173,6 +173,9 @@ class TransactionProvider with ChangeNotifier {
 
   List<Transaction> _transactions = [];
   List<Account> _accounts = [];
+
+  /// Accounts in the active profile (read-only view).
+  List<Account> get accounts => List.unmodifiable(_accounts);
   List<Category> _categories = [];
   Map<int, Category> _categoryById = {};
   List<AutoCategorizationRule> _autoCategorizationRules = [];
@@ -867,10 +870,16 @@ class TransactionProvider with ChangeNotifier {
     _bankSummaries.sort(_compareBankSummaries);
 
     // Calculate AllSummary
-    double grandTotalCredit =
-        _bankSummaries.fold(0.0, (sum, b) => sum + b.totalCredit);
-    double grandTotalDebit =
-        _bankSummaries.fold(0.0, (sum, b) => sum + b.totalDebit);
+    // Cash movements are excluded from the headline in/out totals (they mirror
+    // bank money and would double-count); the cash balance still counts below.
+    double grandTotalCredit = _bankSummaries.fold(
+        0.0,
+        (sum, b) =>
+            b.bankId == CashConstants.bankId ? sum : sum + b.totalCredit);
+    double grandTotalDebit = _bankSummaries.fold(
+        0.0,
+        (sum, b) =>
+            b.bankId == CashConstants.bankId ? sum : sum + b.totalDebit);
     double grandTotalBalance =
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalBalance);
 
@@ -1089,6 +1098,12 @@ class TransactionProvider with ChangeNotifier {
           _categoryById[transaction.categoryId]?.uncategorized == true;
 
       if (isSelfTransfer || isMisc) continue;
+
+      // Cash-wallet movements mirror bank money (an ATM withdrawal is already
+      // a bank debit; spending that cash would count the expense twice), so
+      // cash transactions are excluded from every income/expense aggregate.
+      // Cash balances still count toward the total balance.
+      if (transaction.bankId == CashConstants.bankId) continue;
 
       final isCredit = transaction.type == 'CREDIT';
       final isDebit = transaction.type == 'DEBIT';

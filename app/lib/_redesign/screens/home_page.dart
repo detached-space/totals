@@ -23,6 +23,7 @@ import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/message_ingest_service.dart';
+import 'package:totals/utils/account_display_label.dart';
 import 'package:totals/utils/platform_support.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -415,7 +416,9 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                   final selected = _selectedRefs
                                       .contains(transaction.reference);
                                   return TransactionTile(
-                                    bank: bankLabel,
+                                    bank: accountLabelForTransaction(
+                                        transaction, provider.accounts,
+                                        bankLabel: bankLabel),
                                     category: categoryLabel,
                                     categoryModel: category,
                                     personLabel: provider

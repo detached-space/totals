@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/utils/account_display_label.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
@@ -813,7 +814,8 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                       return TransactionTile(
                         key: ValueKey(
                             'budget_txn_${t.reference}_${t.categoryId}'),
-                        bank: _localizedBankLabel(context, t.bankId),
+                        bank: accountLabelForTransaction(t, tp.accounts,
+                            bankLabel: _localizedBankLabel(context, t.bankId)),
                         category: context.l10nText(
                           tp.categoryLabelForTransaction(
                             t,
@@ -1573,7 +1575,8 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                   final isCredit = t.type == 'CREDIT';
 
                   return TransactionTile(
-                    bank: _localizedBankLabel(context, t.bankId),
+                    bank: accountLabelForTransaction(t, provider.accounts,
+                        bankLabel: _localizedBankLabel(context, t.bankId)),
                     category: context.l10nText(categoryLabel),
                     categoryModel: cat,
                     personLabel: provider.loanDebtPersonNameForTransaction(t),

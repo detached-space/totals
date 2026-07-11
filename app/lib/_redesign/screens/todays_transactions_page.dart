@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/utils/account_display_label.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
@@ -183,7 +184,8 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                     final selected = _selectedRefs.contains(tx.reference);
 
                     return TransactionTile(
-                      bank: bankLabel,
+                      bank: accountLabelForTransaction(tx, provider.accounts,
+                          bankLabel: bankLabel),
                       category: categoryLabel,
                       categoryModel: category,
                       personLabel:

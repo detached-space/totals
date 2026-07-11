@@ -28,6 +28,27 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Totals uses Face ID to unlock the app and protect your financial data.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Totals uses the camera to scan account QR codes.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Totals lets you pick images, such as account QR codes, from your library.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Totals serves your dashboard to browsers on your Wi-Fi network when you start the local web server.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>dailySpendingSummaryUnique</string>
+		<string>sharedExpenseNotificationCatchupUnique</string>
+		<string>widgetMidnightRefreshUnique</string>
+		<string>dataSyncDrainUnique</string>
+		<string>dataSyncImmediateDrainUnique</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

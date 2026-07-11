@@ -22,6 +22,7 @@ import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/services/bank_detection_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/utils/account_display_label.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
@@ -553,21 +554,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   _ActivityTransactionsViewData? _activityTransactionsViewCache;
   _LedgerViewCacheKey? _ledgerViewCacheKey;
   _LedgerViewSummary? _ledgerViewCache;
-  final ValueNotifier<bool> _showActivityPinnedHeaderDivider =
-      ValueNotifier<bool>(false);
-
   bool get _isSelecting => _selectedRefs.isNotEmpty;
-
-  double get _activityPinnedHeaderDividerTriggerOffset {
-    switch (_subTab) {
-      case _SubTab.transactions:
-        return 16;
-      case _SubTab.analytics:
-        return 12;
-      case _SubTab.ledger:
-        return 16;
-    }
-  }
 
   @override
   void initState() {
@@ -581,21 +568,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       curve: Curves.easeOutCubic,
     );
     _subTabFadeController.value = 1;
-    _activityScrollController.addListener(_syncActivityPinnedHeaderDivider);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _syncActivityPinnedHeaderDivider();
-    });
-  }
-
-  void _syncActivityPinnedHeaderDivider([double? offset]) {
-    final pixels = offset ??
-        (_activityScrollController.hasClients
-            ? _activityScrollController.offset
-            : 0);
-    final shouldShow = pixels > _activityPinnedHeaderDividerTriggerOffset;
-    if (_showActivityPinnedHeaderDivider.value == shouldShow) return;
-    _showActivityPinnedHeaderDivider.value = shouldShow;
   }
 
   DateTime _normalizeAnalyticsHeatmapMonth(DateTime date) {
@@ -1705,10 +1677,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         _selectedRefs.clear();
       }
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _syncActivityPinnedHeaderDivider();
-    });
     _subTabFadeController.forward(from: 0);
     HapticFeedback.selectionClick();
     if (_activityScrollController.hasClients) {
@@ -1816,8 +1784,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
   @override
   void dispose() {
-    _activityScrollController.removeListener(_syncActivityPinnedHeaderDivider);
-    _showActivityPinnedHeaderDivider.dispose();
     _subTabFadeController.dispose();
     _searchController.dispose();
     _activityScrollController.dispose();
@@ -1955,40 +1921,48 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       ],
     ];
 
-    return Column(
-      children: [
-        _buildActivityPinnedHeader(
-          provider: provider,
-          financialHealth: healthSnapshot,
-          activityTransactionsSummary: activityTransactionsSummary,
-          ledgerViewSummary: ledgerViewSummary,
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            color: AppColors.primaryLight,
-            onRefresh: provider.loadData,
-            child: CustomScrollView(
-              controller: _activityScrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverFadeTransition(
-                  opacity: _subTabFadeAnimation,
-                  sliver: SliverMainAxisGroup(slivers: dynamicSlivers),
-                ),
-                const SliverPadding(
-                  padding: EdgeInsets.only(bottom: 24),
-                ),
-              ],
+    // Scroll architecture: the financial-health card scrolls away with the
+    // content, while the sub-tab bar and its per-tab controls (search/filter +
+    // in-out summary, or the ledger header) stay pinned under the top tabs.
+    // PinnedHeaderSliver sizes to its child, so the pinned block can vary in
+    // height per sub-tab without hand-maintained extents.
+    return RefreshIndicator(
+      color: AppColors.primaryLight,
+      onRefresh: provider.loadData,
+      child: CustomScrollView(
+        controller: _activityScrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: _FinancialHealthCard(
+                financialHealth: healthSnapshot,
+                onTap: () => _showFinancialHealthSheet(healthSnapshot),
+              ),
             ),
           ),
-        ),
-      ],
+          PinnedHeaderSliver(
+            child: _buildActivityPinnedHeader(
+              provider: provider,
+              activityTransactionsSummary: activityTransactionsSummary,
+              ledgerViewSummary: ledgerViewSummary,
+            ),
+          ),
+          SliverFadeTransition(
+            opacity: _subTabFadeAnimation,
+            sliver: SliverMainAxisGroup(slivers: dynamicSlivers),
+          ),
+          const SliverPadding(
+            padding: EdgeInsets.only(bottom: 24),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildActivityPinnedHeader({
     required TransactionProvider provider,
-    required FinancialHealthSnapshot financialHealth,
     required _ActivityTransactionsSummary? activityTransactionsSummary,
     required _LedgerViewSummary? ledgerViewSummary,
   }) {
@@ -1999,15 +1973,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       child: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _FinancialHealthCard(
-                  financialHealth: financialHealth,
-                  onTap: () => _showFinancialHealthSheet(financialHealth),
-                ),
-                const SizedBox(height: 16),
                 _SubTabBar(
                   selectedTab: _subTab,
                   onTabChanged: _setSubTab,
@@ -2054,26 +2023,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
               ],
             ),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              child: ValueListenableBuilder<bool>(
-                valueListenable: _showActivityPinnedHeaderDivider,
-                builder: (context, showDivider, child) => AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOutCubic,
-                  opacity: showDivider ? 1 : 0,
-                  child: child,
-                ),
-                child: Container(
-                  height: 1,
-                  color: AppColors.borderColor(context),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -2100,7 +2049,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     final selected = _selectedRefs.contains(transaction.reference);
     return TransactionTile(
-      bank: bankLabel,
+      bank: accountLabelForTransaction(transaction, provider.accounts,
+          bankLabel: bankLabel),
       category: localizedCategoryLabel,
       categoryModel: category,
       personLabel: provider.loanDebtPersonNameForTransaction(transaction),
