@@ -91,7 +91,9 @@ class SummaryHandler {
       double totalPendingCredit = 0;
 
       for (var account in accounts) {
-        totalBalance += account.balance;
+        if (account.bank != CashConstants.bankId) {
+          totalBalance += account.balance;
+        }
         totalSettledBalance += account.settledBalance ?? 0;
         totalPendingCredit += account.pendingCredit ?? 0;
       }

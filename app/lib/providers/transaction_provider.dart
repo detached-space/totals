@@ -871,8 +871,9 @@ class TransactionProvider with ChangeNotifier {
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalCredit);
     double grandTotalDebit =
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalDebit);
-    double grandTotalBalance =
-        _bankSummaries.fold(0.0, (sum, b) => sum + b.totalBalance);
+    double grandTotalBalance = _bankSummaries
+        .where((bank) => bank.bankId != CashConstants.bankId)
+        .fold(0.0, (sum, bank) => sum + bank.totalBalance);
 
     _summary = AllSummary(
       totalCredit: grandTotalCredit,
@@ -1200,10 +1201,12 @@ class TransactionProvider with ChangeNotifier {
       monthlyIncomeByOffset: healthMonthIncomeByOffset,
       monthlyExpenseByOffset: healthMonthExpenseByOffset,
       totalBalance: _summary?.totalBalance ??
-          _accountSummaries.fold<double>(
-            0.0,
-            (sum, summary) => sum + summary.balance,
-          ),
+          _accountSummaries
+              .where((summary) => summary.bankId != CashConstants.bankId)
+              .fold<double>(
+                0.0,
+                (sum, summary) => sum + summary.balance,
+              ),
     );
   }
 
