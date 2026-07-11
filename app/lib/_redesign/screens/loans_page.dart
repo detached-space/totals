@@ -4808,7 +4808,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
   }
 
   Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
-    final result = await showModalBottomSheet<_LoanDebtDetailsResult>(
+    await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -4818,7 +4818,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
         repository: widget.repository,
       ),
     );
-    if (!mounted || result == null) return;
+    if (!mounted) return;
     await _reloadItemsFromStore();
   }
 
