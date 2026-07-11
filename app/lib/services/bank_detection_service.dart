@@ -8,6 +8,7 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
+import 'package:totals/utils/platform_support.dart';
 
 /// Represents a bank detected from SMS messages
 class DetectedBank {
@@ -231,6 +232,7 @@ class BankDetectionService {
     required Set<int> supportedBankIds,
     bool forceReloadBanks = false,
   }) async {
+    if (!PlatformSupport.canReadDeviceSms) return <DetectedBank>[];
     // Fetch banks from database (reload if forced or not cached)
     if (_cachedBanks == null || forceReloadBanks) {
       _cachedBanks = await _bankConfigService.getBanks();
@@ -309,6 +311,7 @@ class BankDetectionService {
 
   /// Gets all banks detected from SMS (including those already registered)
   Future<List<DetectedBank>> detectAllBanks({bool forceRefresh = false}) async {
+    if (!PlatformSupport.canReadDeviceSms) return <DetectedBank>[];
     try {
       // Try cache first
       if (!forceRefresh) {

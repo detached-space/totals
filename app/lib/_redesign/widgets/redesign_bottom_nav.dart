@@ -1,5 +1,6 @@
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -82,10 +83,22 @@ class RedesignBottomNav extends StatelessWidget {
       builder: (context, child) {
         final page = _resolvePage();
 
+        // iOS has a ~34pt home-indicator inset that Android doesn't; left to
+        // SafeArea it appears as an empty band below the bar. On iOS, fill it
+        // with the bar's own background: drop SafeArea's outer bottom padding
+        // and fold the inset into the container's bottom padding instead. On
+        // Android fillBottomInset is false, so this is byte-for-byte identical
+        // to the previous behaviour (SafeArea keeps handling the bottom there).
+        final bool fillBottomInset =
+            defaultTargetPlatform == TargetPlatform.iOS;
+        final double bottomInset =
+            fillBottomInset ? MediaQuery.paddingOf(context).bottom : 0;
+
         return SafeArea(
           top: false,
+          bottom: !fillBottomInset,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + bottomInset),
             decoration: BoxDecoration(
               color: AppColors.cardColor(context),
               border: Border(

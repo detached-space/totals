@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -18,6 +19,8 @@ import 'package:totals/widgets/clear_database_dialog.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
+import 'package:totals/services/ios_migration_service.dart';
+import 'package:totals/utils/platform_support.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
@@ -63,6 +66,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
 
   bool _isExporting = false;
   bool _isImporting = false;
+  bool _isMigratingIos = false;
   bool _isFetchingSmsPatterns = false;
   bool _isCheckingForUpdates = false;
 
@@ -1092,6 +1096,129 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
     }
   }
 
+  /// Migrate data from the old iOS (Scriptable) Totals: the user points at their
+  /// old export folder and the app converts + imports it.
+  Future<void> _importFromIosWorkaround() async {
+    try {
+      // On iOS, picking a *folder* returns a security-scoped URL that can't be read
+      // afterward (and iCloud files may be placeholders). Picking the files makes iOS
+      // copy/download them into an accessible location, so read them with withData.
+      final picked = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) return; // cancelled
+
+      final files = <String, String>{};
+      for (final pf in picked.files) {
+        String? content;
+        if (pf.bytes != null) {
+          content = utf8.decode(pf.bytes!, allowMalformed: true);
+        } else if (pf.path != null) {
+          try {
+            content = await File(pf.path!).readAsString();
+          } catch (_) {/* skip unreadable */}
+        }
+        if (content != null) files[pf.name] = content;
+      }
+
+      if (!files.containsKey('transactions.txt')) {
+        if (mounted) {
+          _showErrorSnack(context.l10nTextRead(
+              'Select your old export files (include transactions.txt).'));
+        }
+        return;
+      }
+
+      // Preview (no DB write) so we can show exactly what will import and flag
+      // any files that weren't selected — those silently degrade the result.
+      final preview = IosMigrationService.instance.convert(files).result;
+      if (!mounted) return;
+
+      final summary = StringBuffer()
+        ..writeln('${preview.transactions} transactions, '
+            '${preview.accounts} accounts, ${preview.profilesCreated} profiles, '
+            '${preview.categories} categories, ${preview.budgets} budgets.');
+      if (preview.missingFiles.isNotEmpty) {
+        summary.writeln('\n⚠️ Not selected: ${preview.missingFiles.join(', ')}.\n'
+            'For a complete migration (profiles, correct multi-account split), '
+            'go back and select ALL files in the folder.');
+      }
+      summary.write('\nDuplicates are skipped, so this is safe to run again.');
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.cardColor(ctx),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(ctx.l10nText('Import from iOS backup'),
+              style: TextStyle(color: AppColors.textPrimary(ctx))),
+          content: SingleChildScrollView(
+            child: Text(summary.toString(),
+                style: TextStyle(color: AppColors.textSecondary(ctx))),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(ctx.l10nText('Cancel'),
+                  style: TextStyle(color: AppColors.textSecondary(ctx))),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryDark,
+                foregroundColor: AppColors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(ctx.l10nText('Import')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+
+      setState(() => _isMigratingIos = true);
+      final result = await IosMigrationService.instance.importFromFiles(files);
+      if (!mounted) return;
+      Provider.of<TransactionProvider>(context, listen: false).loadData();
+      // Profiles are created/activated during import; the running app must reload
+      // to pick up the new profile list and active profile.
+      final restartNote = result.profilesCreated > 0
+          ? ' Restart the app to see your ${result.profilesCreated} profiles.'
+          : '';
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.cardColor(ctx),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(ctx.l10nText('Import complete'),
+              style: TextStyle(color: AppColors.textPrimary(ctx))),
+          content: Text(
+            'Imported ${result.transactions} transactions.$restartNote',
+            style: TextStyle(color: AppColors.textSecondary(ctx)),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryDark,
+                foregroundColor: AppColors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(ctx.l10nText('OK')),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        _showErrorSnack('${context.l10nTextRead('Migration failed')}: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isMigratingIos = false);
+    }
+  }
+
   void _showSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1494,6 +1621,27 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     : null,
                 onTap: _isImporting ? null : _importData,
               ),
+
+              if (PlatformSupport.usesFileInbox)
+                _SettingTile(
+                  icon: AppIcons.download_rounded,
+                  iconColor: AppColors.blue,
+                  title: context.l10n('settings.importFromIos', 'Import from iOS backup'),
+                  subtitle: context.l10n('settings.importFromIosSubtitle',
+                      'Select your old export files (incl. transactions.txt)'),
+                  showChevron: false,
+                  trailing: _isMigratingIos
+                      ? SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primaryLight,
+                          ),
+                        )
+                      : null,
+                  onTap: _isMigratingIos ? null : _importFromIosWorkaround,
+                ),
 
               _SettingTile(
                 icon: AppIcons.delete_outline_rounded,

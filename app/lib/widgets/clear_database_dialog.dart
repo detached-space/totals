@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/database/database_helper.dart';
 import 'package:totals/providers/budget_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/budget_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
+import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -12,6 +16,7 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
   bool clearFinancialData = false;
   bool clearBudgets = false;
   bool clearFailedParses = false;
+  bool clearOrganization = false;
   final parentContext = context;
 
   await showModalBottomSheet<void>(
@@ -23,8 +28,10 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
 
       return StatefulBuilder(
         builder: (context, setState) {
-          final hasSelection =
-              clearFinancialData || clearBudgets || clearFailedParses;
+          final hasSelection = clearFinancialData ||
+              clearBudgets ||
+              clearFailedParses ||
+              clearOrganization;
 
           return Container(
             padding: EdgeInsets.fromLTRB(
@@ -136,6 +143,20 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                       });
                     },
                   ),
+                  const SizedBox(height: 12),
+                  _buildClearOption(
+                    context: context,
+                    icon: Icons.category_outlined,
+                    title: 'Categories, Profiles & Contacts',
+                    subtitle:
+                        'Custom categories, auto-categorization rules, profiles and saved contacts',
+                    value: clearOrganization,
+                    onChanged: (value) {
+                      setState(() {
+                        clearOrganization = value ?? false;
+                      });
+                    },
+                  ),
                   if (!hasSelection)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
@@ -189,13 +210,32 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                                     if (clearFailedParses) {
                                       await FailedParseRepository().clear();
                                     }
+                                    if (clearOrganization) {
+                                      final db = await DatabaseHelper
+                                          .instance.database;
+                                      await db.delete('categories');
+                                      await db.delete('auto_category_rules');
+                                      await db.delete(
+                                          'auto_category_prompt_dismissals');
+                                      await db.delete('user_accounts');
+                                      await db.delete('profiles');
+                                      final prefs = await SharedPreferences
+                                          .getInstance();
+                                      await prefs.remove('active_profile_id');
+                                      // Restore the app's baseline state.
+                                      await CategoryRepository().ensureSeeded();
+                                      await ProfileRepository()
+                                          .initializeDefaultProfile();
+                                    }
 
                                     if (parentContext.mounted) {
                                       await Provider.of<TransactionProvider>(
                                         parentContext,
                                         listen: false,
                                       ).loadData();
-                                      if (clearFinancialData || clearBudgets) {
+                                      if (clearFinancialData ||
+                                          clearBudgets ||
+                                          clearOrganization) {
                                         try {
                                           await Provider.of<BudgetProvider>(
                                             parentContext,

@@ -7,6 +7,7 @@ import 'package:totals/models/bank.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/pattern_parser.dart';
+import 'package:totals/utils/platform_support.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/models/transaction.dart';
@@ -146,6 +147,7 @@ class SmsService {
   }
 
   Future<void> init() async {
+    if (!PlatformSupport.canReadDeviceSms) return;
     final bool? result = await _telephony.requestSmsPermissions;
     if (result != null && result) {
       _registerIncomingSmsListener();
@@ -176,6 +178,7 @@ class SmsService {
   }
 
   Future<TodaySmsSyncResult> syncTodayBankSms() async {
+    if (!PlatformSupport.canReadDeviceSms) return const TodaySmsSyncResult();
     final bool? permissionGranted = await _telephony.requestSmsPermissions;
     if (permissionGranted != true) {
       return const TodaySmsSyncResult(permissionDenied: true);
@@ -352,6 +355,50 @@ class SmsService {
     }
 
     return findBestBankForSenderAddress(address, _cachedBanks!);
+  }
+
+  /// Identifies the bank from the message body alone, for sender-less ingest
+  /// (iOS Shortcuts). Tries the patterns of the user's *registered* banks and
+  /// returns the first whose pattern matches the body — reusing the same
+  /// curated `sms_patterns.json` regexes, so no separate keyword list to
+  /// maintain. Returns null if none match (caller then treats it as noBank →
+  /// the file is quarantined, never silently dropped).
+  static Future<Bank?> _detectBankFromBody(
+    String messageBody, {
+    bool allowRemoteFetch = true,
+  }) async {
+    final accounts = await AccountRepository().getAccounts();
+    final registeredBankIds = accounts.map((a) => a.bank).toSet();
+    if (registeredBankIds.isEmpty) return null;
+
+    if (_cachedBanks == null ||
+        (allowRemoteFetch && !_cachedBanksLoadedWithRemoteFetch)) {
+      _cachedBanks =
+          await _bankConfigService.getBanks(allowRemoteFetch: allowRemoteFetch);
+      _cachedBanksLoadedWithRemoteFetch = allowRemoteFetch;
+    }
+
+    final configService = SmsConfigService();
+    final patterns = await configService.getPatterns(allowRemoteFetch: false);
+    final cleaned = configService.cleanSmsText(messageBody);
+
+    for (final bankId in registeredBankIds) {
+      final bankPatterns = patterns.where((p) => p.bankId == bankId).toList();
+      if (bankPatterns.isEmpty) continue;
+      final details = await PatternParser.extractTransactionDetails(
+        cleaned,
+        '',
+        null,
+        bankPatterns,
+        banks: _cachedBanks,
+      );
+      if (details != null) {
+        for (final b in _cachedBanks!) {
+          if (b.id == bankId) return b;
+        }
+      }
+    }
+    return null;
   }
 
   static double sanitizeAmount(String? raw) {
@@ -549,6 +596,7 @@ class SmsService {
     required Bank bank,
     required List<Bank> banks,
   }) async {
+    if (!PlatformSupport.canReadDeviceSms) return null;
     final anchor = messageDate ?? DateTime.now();
     final lowerBound = anchor
         .subtract(_canonicalInboxLookupWindow)
@@ -963,6 +1011,34 @@ class SmsService {
     return result.transaction;
   }
 
+  /// Same as [processMessage] but returns the full [ParseResult] so callers can
+  /// see *why* nothing was stored (e.g. `noBank`). Used by the iOS file-ingest
+  /// path to decide whether to delete or quarantine a dropped message.
+  static Future<ParseResult> processMessageResult(
+    String messageBody,
+    String senderAddress, {
+    DateTime? messageDate,
+    bool notifyUser = false,
+    bool skipDashenExpenseDuplicates = true,
+    bool skipAutoCategorization = false,
+    bool allowRemoteBankFetch = true,
+    bool allowRemotePatternFetch = false,
+    int? sourceMessageId,
+  }) {
+    return _processMessageInternal(
+      messageBody,
+      senderAddress,
+      messageDate: messageDate,
+      sourceMessageId: sourceMessageId,
+      notifyUser: notifyUser,
+      skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
+      skipAutoCategorization: skipAutoCategorization,
+      allowRemoteBankFetch: allowRemoteBankFetch,
+      allowRemotePatternFetch: allowRemotePatternFetch,
+      recordFailure: true,
+    );
+  }
+
   static Future<ParseResult> retryFailedParse(
     String messageBody,
     String senderAddress, {
@@ -997,11 +1073,21 @@ class SmsService {
   }) async {
     print("debug: Processing message: $messageBody");
 
-    Bank? bank = await getRelevantBank(
+    Bank? resolvedBank = await getRelevantBank(
       senderAddress,
       allowRemoteFetch: allowRemoteBankFetch,
     );
-    if (bank == null) {
+    // iOS ingest (Shortcuts → file) can't capture the sender shortcode, so the
+    // message arrives sender-less. Fall back to identifying the bank from the
+    // body by trying the user's registered banks' patterns. Only engages when
+    // there's no sender, so the Android SMS path is unaffected.
+    if (resolvedBank == null && senderAddress.trim().isEmpty) {
+      resolvedBank = await _detectBankFromBody(
+        messageBody,
+        allowRemoteFetch: allowRemoteBankFetch,
+      );
+    }
+    if (resolvedBank == null) {
       print(
           "dubg: No bank found for address $senderAddress - skipping processing.");
       return const ParseResult(
@@ -1009,6 +1095,7 @@ class SmsService {
         reason: "No matching bank",
       );
     }
+    final Bank bank = resolvedBank;
 
     // Check if the user has a registered account for this bank
     final registeredAccounts = await AccountRepository().getAccounts();

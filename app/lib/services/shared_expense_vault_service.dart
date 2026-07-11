@@ -342,26 +342,34 @@ class SharedExpenseVaultService extends ChangeNotifier {
   /// row is harmless: it's keyed by a recovery code we no longer remember,
   /// so nobody can fetch it.
   Future<void> debugReset() async {
-    assert(() {
-      // Refuse to compile this method into release builds — the assert
-      // body runs only in debug.
-      return true;
-    }());
     if (!kDebugMode) {
       _vaultLog('debugReset refused in release build');
       return;
     }
+    await forgetLocalVault();
+  }
+
+  /// Forgets this device's local vault state — the cached recovery code and the
+  /// persisted KEK in the Keychain — so the app behaves like a fresh install and
+  /// the "recover from another device" flow becomes available again.
+  ///
+  /// Safe and release-usable: it does NOT touch the server-side sealed vault
+  /// (that stays, keyed by the recovery code the user saved), so the user can
+  /// immediately restore with their recovery code + PIN. Needed because on iOS
+  /// the Keychain survives app reinstalls, which otherwise leaves stale vault
+  /// state that hides the recover flow.
+  Future<void> forgetLocalVault() async {
     try {
       await _secureStorage.delete(key: _recoveryCodeKey);
     } catch (error) {
-      _vaultLog('debugReset secure-storage delete failed: $error');
+      _vaultLog('forgetLocalVault secure-storage delete failed: $error');
     }
     await _clearPersistedKek();
     _recoveryCode = null;
     _cachedKek = null;
     _cachedSaltBase64 = null;
     _cachedKdfParams = null;
-    _vaultLog('debugReset done');
+    _vaultLog('forgetLocalVault done');
     notifyListeners();
   }
 

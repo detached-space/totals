@@ -43,6 +43,8 @@ import 'package:totals/services/background_refresh_signal_service.dart';
 import 'package:totals/services/background_sync_signal_service.dart';
 import 'package:totals/services/connectivity_service.dart';
 import 'package:totals/services/data_sync/sync_service.dart';
+import 'package:totals/services/message_ingest_service.dart';
+import 'package:totals/utils/platform_support.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
@@ -213,6 +215,9 @@ class RedesignShellState extends State<RedesignShell>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkNotificationPermissions();
       await _initSmsPermissions();
+      if (PlatformSupport.usesFileInbox) {
+        unawaited(MessageIngestService.instance.drainInbox());
+      }
       unawaited(BankDetectionStartupService.runOnAppOpen());
       if (mounted) _authenticateIfAvailable();
     });
@@ -236,14 +241,29 @@ class RedesignShellState extends State<RedesignShell>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(SmsConfigService().syncRemoteConfig());
-      unawaited(SyncService.instance.requestDrain(reason: 'resume'));
+      unawaited(_handleResumed());
+    }
+  }
+
+  Future<void> _handleResumed() async {
+    unawaited(SmsConfigService().syncRemoteConfig());
+    unawaited(SyncService.instance.requestDrain(reason: 'resume'));
+
+    // On iOS, ingest any Shortcuts-dropped messages BEFORE reloading, and await
+    // it — otherwise loadData() races the drain and reads the DB before the new
+    // transactions are committed, so freshly-arrived messages don't show until
+    // the next reload.
+    if (PlatformSupport.usesFileInbox) {
+      try {
+        await MessageIngestService.instance.drainInbox();
+      } catch (_) {
+        // Ignore ingest errors; still reload what we have.
+      }
     }
 
-    if (state == AppLifecycleState.resumed && _isAuthenticated) {
-      unawaited(
-        Provider.of<TransactionProvider>(context, listen: false).loadData(),
-      );
+    if (!mounted) return;
+    if (_isAuthenticated) {
+      await Provider.of<TransactionProvider>(context, listen: false).loadData();
     }
   }
 
@@ -1009,6 +1029,67 @@ class RedesignShellState extends State<RedesignShell>
                     child: ColoredBox(color: overlayColor),
                   ),
                 ),
+              ),
+              // "Importing messages…" pill while the iOS message drain runs
+              // (launch/resume/refresh) so a large backlog reads as syncing,
+              // not as the app being stuck.
+              ValueListenableBuilder<bool>(
+                valueListenable: MessageIngestService.instance.syncing,
+                builder: (context, syncing, _) {
+                  return Positioned(
+                    top: topSafeHeight + 8,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: syncing ? 1 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.cardColor(context),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: AppColors.borderColor(context)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color:
+                                      AppColors.black.withValues(alpha: 0.12),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primaryLight,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  context.l10nText('Importing messages…'),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary(context),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ),

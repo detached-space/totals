@@ -10,6 +10,7 @@ import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/sms_handler/telephony.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
+import 'package:totals/utils/platform_support.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/utils/sms_transaction_source.dart';
@@ -62,7 +63,7 @@ class AccountRegistrationService {
     print("debug: Account registered: $accountNumber");
 
     // Sync previous SMS in background if requested
-    if (syncPreviousSms) {
+    if (syncPreviousSms && PlatformSupport.canReadDeviceSms) {
       // Start sync in background (don't await)
       _syncPreviousSms(bankId, accountNumber, onProgress).then((_) {
         onSyncComplete?.call();
@@ -87,6 +88,7 @@ class AccountRegistrationService {
     String accountNumber,
     Function(String stage, double progress)? onProgress,
   ) async {
+    if (!PlatformSupport.canReadDeviceSms) return;
     // Fetch banks from database (with caching)
     if (_cachedBanks == null) {
       _cachedBanks = await _bankConfigService.getBanks();

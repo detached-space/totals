@@ -22,6 +22,8 @@ import 'package:totals/screens/web_page.dart';
 import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
+import 'package:totals/services/message_ingest_service.dart';
+import 'package:totals/utils/platform_support.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
@@ -110,6 +112,25 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     setState(() => _isRefreshingTodaySms = true);
 
     try {
+      // iOS has no SMS to sync; refresh instead ingests any bank messages the
+      // Shortcuts automation dropped into the Totals folder.
+      if (PlatformSupport.usesFileInbox) {
+        final added = await MessageIngestService.instance.drainInbox();
+        if (!mounted) return;
+        if (added > 0) await provider.loadData();
+        final message = added > 0
+            ? '${context.l10nTextRead('Added')} $added ${context.l10nTextRead('new transactions')}'
+            : context.l10nTextRead('No missed transactions');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+
       final result = await _smsService.syncTodayBankSms();
       if (!mounted) return;
 
@@ -151,6 +172,19 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     } finally {
       if (mounted) setState(() => _isRefreshingTodaySms = false);
     }
+  }
+
+  /// Pull-to-refresh handler. On iOS it first ingests any Shortcuts-dropped bank
+  /// messages, then reloads; elsewhere it just reloads from the DB (unchanged).
+  Future<void> _onPullToRefresh(TransactionProvider provider) async {
+    if (PlatformSupport.usesFileInbox) {
+      try {
+        await MessageIngestService.instance.drainInbox();
+      } catch (_) {
+        // Ignore ingest errors here; still reload what we have.
+      }
+    }
+    await provider.loadData();
   }
 
   Future<void> _deleteSelected(TransactionProvider provider) async {
@@ -259,7 +293,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
               children: [
                 RefreshIndicator(
                   color: AppColors.primaryLight,
-                  onRefresh: provider.loadData,
+                  onRefresh: () => _onPullToRefresh(provider),
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),

@@ -90,9 +90,11 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^2.0.0
   flutter_launcher_icons: ^0.14.3
+  sqflite_common_ffi: ^2.3.5
 flutter_launcher_icons:
   android: true
-  ios: false
+  ios: true
+  remove_alpha_ios: true
   image_path: "assets/icon/totals_icon.png" # Path to your app icon
   adaptive_icon_background: "#ffffff" # (Optional) For Android adaptive icons
   adaptive_icon_foreground: "assets/icon/totals_icon.png"

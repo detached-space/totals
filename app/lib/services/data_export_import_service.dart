@@ -9,9 +9,11 @@ import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/models/loan_debt_entry.dart';
+import 'package:totals/models/profile.dart';
 import 'package:totals/models/sms_pattern.dart';
 import 'package:totals/models/user_account.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
@@ -40,6 +42,7 @@ class DataExportImportService {
   final FailedParseRepository _failedParseRepo = FailedParseRepository();
   final LoanDebtRepository _loanDebtRepo = LoanDebtRepository();
   final UserAccountRepository _userAccountRepo = UserAccountRepository();
+  final ProfileRepository _profileRepo = ProfileRepository();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
   final SmsConfigService _smsConfigService = SmsConfigService();
@@ -242,6 +245,47 @@ class DataExportImportService {
         }
       }
 
+      // iOS-migration profiles: create the exported profiles and map their
+      // index -> new profileId so accounts and transactions land in the right
+      // profile. Only present in the iOS migration payload; normal backups have
+      // no `profiles` section and keep the prior active-profile behavior.
+      final profilesRaw = _asMapList(data['profiles']);
+      Map<int, int>? profileIndexToId;
+      if (profilesRaw.isNotEmpty) {
+        profileIndexToId = <int, int>{};
+        final now = DateTime.now();
+        // Idempotent: re-importing must reuse an existing profile with the same
+        // name (case-insensitive), not stack up duplicate "Yew"/"Synergy" rows.
+        final existing = await _profileRepo.getProfiles();
+        final existingByName = <String, int>{
+          for (final pr in existing)
+            if (pr.id != null) pr.name.trim().toLowerCase(): pr.id!,
+        };
+        final sorted = [...profilesRaw]..sort((a, b) =>
+            ((a['order'] as num?)?.toInt() ?? 0)
+                .compareTo((b['order'] as num?)?.toInt() ?? 0));
+        for (final p in sorted) {
+          final index = (p['index'] as num?)?.toInt();
+          if (index == null) continue;
+          final name = (p['name'] ?? 'Profile').toString();
+          final key = name.trim().toLowerCase();
+          final id = existingByName[key] ??
+              await _profileRepo.saveProfile(Profile(name: name, createdAt: now));
+          existingByName[key] = id;
+          profileIndexToId[index] = id;
+        }
+        // Show the first imported profile so the user immediately sees data.
+        if (profileIndexToId.isNotEmpty) {
+          await _profileRepo.setActiveProfile(profileIndexToId.values.first);
+        }
+      }
+
+      int? mappedProfileId(Map<String, dynamic> raw) {
+        if (profileIndexToId == null) return null;
+        final pn = (raw['profileNumber'] as num?)?.toInt();
+        return pn == null ? null : profileIndexToId[pn];
+      }
+
       // Import accounts (append, skip duplicates)
       // Use repository to ensure they're associated with active profile
       final accountsRaw = _asMapList(data['accounts']);
@@ -268,7 +312,7 @@ class DataExportImportService {
               accountHolderName: account.accountHolderName,
               settledBalance: account.settledBalance,
               pendingCredit: account.pendingCredit,
-              profileId: account.profileId,
+              profileId: mappedProfileId(rawAccount) ?? account.profileId,
             ),
           );
           existingAccountKeys.add(key);
@@ -326,6 +370,11 @@ class DataExportImportService {
 
           if (reference != transaction.reference) {
             transaction = transaction.copyWith(reference: reference);
+          }
+
+          final txProfileId = mappedProfileId(rawTransaction);
+          if (txProfileId != null) {
+            transaction = transaction.copyWith(profileId: txProfileId);
           }
 
           final sourceCategoryIds = transaction.selectedCategoryIds;
@@ -728,6 +777,9 @@ class DataExportImportService {
         'smsPatterns',
         aliases: const ['sms_patterns'],
       ),
+      // iOS-migration payloads carry a profiles section; normal backups don't.
+      // It MUST pass through normalization or profile import silently no-ops.
+      'profiles': _readList(raw, 'profiles'),
     };
   }
 

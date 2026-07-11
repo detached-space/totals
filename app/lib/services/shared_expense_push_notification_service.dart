@@ -40,7 +40,12 @@ class SharedExpensePushNotificationService {
   bool _firebaseReady = false;
 
   static bool get _supportsFcm =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  static bool get _isIOS =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   static void registerBackgroundHandler() {
     if (!_supportsFcm) return;
@@ -56,6 +61,13 @@ class SharedExpensePushNotificationService {
     if (!await _ensureFirebaseReady()) return;
 
     await NotificationService.instance.ensureInitialized();
+    if (_isIOS) {
+      // iOS delivers pushes through APNs; the user must authorize notifications
+      // and the app must register with APNs before FCM will mint a token.
+      // requestPermission() triggers registerForRemoteNotifications via the
+      // plugin's swizzled AppDelegate.
+      await FirebaseMessaging.instance.requestPermission();
+    }
     await FirebaseMessaging.instance.setAutoInitEnabled(true);
     await syncRegistration();
 
@@ -95,8 +107,15 @@ class SharedExpensePushNotificationService {
     try {
       final enabled = await NotificationSettingsService.instance
           .isSharedExpenseNotificationsEnabled();
-      final token =
-          enabled ? await FirebaseMessaging.instance.getToken() : null;
+      String? token;
+      if (enabled) {
+        if (_isIOS) {
+          // On iOS `getToken()` returns null until the APNs token is available.
+          // Wait briefly for APNs registration before asking for the FCM token.
+          await _ensureApnsToken();
+        }
+        token = await FirebaseMessaging.instance.getToken();
+      }
       await TotalsEngineClient().updatePushRegistration(
         pushToken: token,
         pushPlatform: token == null ? null : 'fcm',
@@ -105,6 +124,22 @@ class SharedExpensePushNotificationService {
       if (kDebugMode) {
         debugPrint('debug: Shared expense push registration failed: $error');
       }
+    }
+  }
+
+  /// Waits (briefly) for the iOS APNs token so the subsequent `getToken()`
+  /// call can succeed. No-op / harmless on Android. Gives up after ~2.5s; the
+  /// next `syncRegistration()` (token refresh, settings toggle, group sync)
+  /// will retry.
+  Future<void> _ensureApnsToken() async {
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        final apns = await FirebaseMessaging.instance.getAPNSToken();
+        if (apns != null) return;
+      } catch (_) {
+        // Ignore and retry — APNs may not be registered yet.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
     }
   }
 

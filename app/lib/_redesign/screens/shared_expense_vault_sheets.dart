@@ -556,13 +556,19 @@ class SharedExpenseVaultRestoreLink extends StatelessWidget {
     return ListenableBuilder(
       listenable: SharedExpenseVaultService.instance,
       builder: (context, _) {
-        if (SharedExpenseVaultService.instance.hasVault) {
-          return const SizedBox.shrink();
-        }
+        final hasVault = SharedExpenseVaultService.instance.hasVault;
+        // When this device already has a vault we still let the user recover a
+        // (different / previous) backup — needed on iOS where the Keychain
+        // survives reinstalls and would otherwise strand a stale vault and hide
+        // this flow. Forgetting is local-only; the saved recovery code still works.
+        final onPressed = hasVault
+            ? () => _forgetThenRestore(context)
+            : () => showVaultRestoreSheet(context);
         return TextButton.icon(
-          onPressed: () => showVaultRestoreSheet(context),
+          onPressed: onPressed,
           icon: const Icon(Icons.restore, size: 18),
-          label: Text(context.l10nText('Restore from another device')),
+          label: Text(context.l10nText(
+              hasVault ? 'Recover a different backup' : 'Restore from another device')),
           style: TextButton.styleFrom(
             foregroundColor: AppColors.primaryLight,
             textStyle: const TextStyle(fontWeight: FontWeight.w700),
@@ -570,6 +576,48 @@ class SharedExpenseVaultRestoreLink extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _forgetThenRestore(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardColor(ctx),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(ctx.l10nText('Recover a different backup'),
+            style: TextStyle(color: AppColors.textPrimary(ctx))),
+        content: Text(
+          ctx.l10nText(
+              'This forgets the shared-expenses backup on this device so you can restore with a recovery code. Your saved recovery code still works — nothing on the server is deleted.'),
+          style: TextStyle(color: AppColors.textSecondary(ctx)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.l10nText('Cancel'),
+                style: TextStyle(color: AppColors.textSecondary(ctx))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryDark,
+              foregroundColor: AppColors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text(ctx.l10nText('Continue')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    // Capture a STABLE navigator context before forgetLocalVault(): its
+    // notifyListeners() rebuilds this button (hasVault flips false) and unmounts
+    // the local `context`, which would otherwise make the code below bail
+    // silently — the "does nothing" bug. The root navigator lives above the
+    // shared page, so its context survives the rebuild.
+    final navigatorContext = Navigator.of(context, rootNavigator: true).context;
+    await SharedExpenseVaultService.instance.forgetLocalVault();
+    await showVaultRestoreSheet(navigatorContext);
   }
 }
 
