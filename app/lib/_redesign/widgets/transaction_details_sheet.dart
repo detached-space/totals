@@ -11,6 +11,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/category_sort.dart';
@@ -85,6 +86,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   String _draftColorKey = _kCategoryColorOptions.first.key;
   List<int> _quickCategoryIds = const [];
   List<int> _autoCategorizationDraftCategoryIds = const [];
+  Future<TransactionSourceSms?>? _sourceSmsFuture;
   late Transaction _transaction;
   final TextEditingController _counterpartyController = TextEditingController();
   final FocusNode _counterpartyFocus = FocusNode();
@@ -125,6 +127,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     super.initState();
     _categoryExpanded = widget.initiallyExpandCategory;
     _transaction = widget.transaction;
+    if (TransactionSmsSourceService.hasSmsSource(_transaction)) {
+      _sourceSmsFuture = TransactionSmsSourceService().resolve(_transaction);
+    }
     _syncAutoCategorizationCheckbox();
     _counterpartyController.text = _storedCounterpartyValue ?? '';
     _counterpartyFocus.addListener(_handleCounterpartyFocusChange);
@@ -180,7 +185,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       .where((account) => account.bankId == _tx.bankId)
       .toList(growable: false);
 
-  bool get _canEditAccount => _bankAccounts.length > 1;
+  bool get _canEditAccount {
+    if (_bankAccounts.isEmpty) return false;
+    return _bankAccounts.length > 1 ||
+        _provider.accountSummaryForTransaction(_tx) == null;
+  }
 
   String get _formattedAmount {
     final formatted = formatNumberWithComma(_tx.amount);
@@ -962,6 +971,169 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     );
   }
 
+  Widget _buildSourceSmsSection() {
+    final sourceSmsFuture = _sourceSmsFuture;
+    if (sourceSmsFuture == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                AppIcons.sms_outlined,
+                size: 17,
+                color: AppColors.primaryLight,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                context.l10nText('Source SMS'),
+                style: TextStyle(
+                  color: AppColors.textPrimary(context),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          FutureBuilder<TransactionSourceSms?>(
+            future: sourceSmsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceColor(context),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: AppColors.borderColor(context),
+                    ),
+                  ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                );
+              }
+
+              final sms = snapshot.data;
+              if (sms == null) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceColor(context),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: AppColors.borderColor(context),
+                    ),
+                  ),
+                  child: Text(
+                    context.l10nText(
+                      'The source SMS is no longer available on this device.',
+                    ),
+                    style: TextStyle(
+                      color: AppColors.textSecondary(context),
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                );
+              }
+
+              final metadata = <String>[
+                if (sms.senderAddress?.isNotEmpty == true) sms.senderAddress!,
+                if (sms.receivedAt != null)
+                  AppDateFormat.monthDayMaybeYear(
+                    sms.receivedAt!,
+                    context: context,
+                  ),
+                if (sms.messageId?.isNotEmpty == true)
+                  '${context.l10nText('SMS ID')} ${sms.messageId}',
+              ];
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceColor(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.borderColor(context)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (metadata.isNotEmpty)
+                          Expanded(
+                            child: Text(
+                              metadata.join(' • '),
+                              style: TextStyle(
+                                color: AppColors.textTertiary(context),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          )
+                        else
+                          const Spacer(),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 28,
+                          ),
+                          tooltip: context.l10nText('Copy SMS'),
+                          onPressed: () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: sms.body),
+                            );
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  context.l10nTextRead('SMS copied'),
+                                ),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          icon: Icon(
+                            AppIcons.copy,
+                            size: 17,
+                            color: AppColors.textSecondary(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (metadata.isNotEmpty) const SizedBox(height: 7),
+                    SelectableText(
+                      sms.body,
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveNote() async {
     if (_isSavingNote) return;
 
@@ -1425,6 +1597,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                             value: _formattedServiceCharge!),
                       if (_formattedVat != null)
                         _DetailRow(label: 'VAT', value: _formattedVat!),
+                      if (_sourceSmsFuture != null) _buildSourceSmsSection(),
 
                       // Category row
                       if (isLockedSelfTransfer)

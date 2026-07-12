@@ -712,6 +712,27 @@ class TransactionRepository {
     await deleteTransactionsByReferences(references);
   }
 
+  /// Deletes every transaction for [bank] in the active profile.
+  ///
+  /// This is used when the bank's final registered account is removed: once
+  /// no account remains, retaining an orphaned Other-transactions bucket is
+  /// surprising and leaves totals behind for a bank the user deleted.
+  Future<void> deleteTransactionsByBank(int bank) async {
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final where = <String>['bankId = ?'];
+    final args = <dynamic>[bank];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      args.add(activeProfileId);
+    }
+    await _deleteTransactionsAndEnqueue(
+      db,
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
+  }
+
   Future<void> deleteTransactionsByReferences(
       Iterable<String> references) async {
     final refs = references.toSet();

@@ -1722,6 +1722,30 @@ class TransactionProvider with ChangeNotifier {
     return updated;
   }
 
+  Future<int> updateAccountForTransactions(
+    Iterable<Transaction> transactions,
+    String ownerAccountNumber,
+  ) async {
+    final normalizedOwner = ownerAccountNumber.trim();
+    if (normalizedOwner.isEmpty) {
+      throw ArgumentError('Account number cannot be empty');
+    }
+    final updates = transactions
+        .map(
+          (transaction) => TransactionOwnershipUpdate(
+            reference: transaction.reference,
+            ownerAccountNumber: normalizedOwner,
+            ownerAssignmentSource: Transaction.manualOwnerAssignment,
+          ),
+        )
+        .toList(growable: false);
+    if (updates.isEmpty) return 0;
+
+    final changed = await _transactionRepo.updateTransactionOwnerships(updates);
+    if (changed > 0) await loadData();
+    return changed;
+  }
+
   Future<void> updateCounterpartyForTransaction(
     Transaction transaction,
     String? counterparty,

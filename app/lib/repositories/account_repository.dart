@@ -421,30 +421,59 @@ class AccountRepository {
 
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
+    final bankAccountWhere = <String>['bank = ?'];
+    final bankAccountArgs = <Object?>[bank];
+    if (activeProfileId != null) {
+      bankAccountWhere.add('profileId = ?');
+      bankAccountArgs.add(activeProfileId);
+    } else {
+      bankAccountWhere.add('profileId IS NULL');
+    }
+    final bankAccountRows = await db.query(
+      'accounts',
+      columns: const <String>['accountNumber'],
+      where: bankAccountWhere.join(' AND '),
+      whereArgs: bankAccountArgs,
+    );
+    final isDeletingFinalAccount = bankAccountRows.length == 1 &&
+        bankAccountRows.single['accountNumber'] == accountNumber;
+    final accountDeleteWhere = <String>[
+      'accountNumber = ?',
+      'bank = ?',
+      if (activeProfileId != null) 'profileId = ?' else 'profileId IS NULL',
+    ];
+    final accountDeleteArgs = <Object?>[
+      accountNumber,
+      bank,
+      if (activeProfileId != null) activeProfileId,
+    ];
 
     if (bank == CashConstants.bankId) {
       final transactionRepo = TransactionRepository();
       await transactionRepo.deleteTransactionsByAccount(accountNumber, bank);
       await db.delete(
         'accounts',
-        where: 'accountNumber = ? AND bank = ?',
-        whereArgs: [accountNumber, bank],
+        where: accountDeleteWhere.join(' AND '),
+        whereArgs: accountDeleteArgs,
       );
       await _ensureDefaultAccountForBank(db, bank, activeProfileId);
       return;
     }
 
-    // The repository uses the same ownership predicate as summaries and
-    // navigation. It deletes only rows with evidence for this owner; ambiguous
-    // activity remains available if the account is added again later.
     final transactionRepo = TransactionRepository();
-    await transactionRepo.deleteTransactionsByAccount(accountNumber, bank);
+    if (isDeletingFinalAccount) {
+      await transactionRepo.deleteTransactionsByBank(bank);
+    } else {
+      // With other accounts still registered, remove only rows belonging to
+      // this owner and preserve the shared Other-transactions bucket.
+      await transactionRepo.deleteTransactionsByAccount(accountNumber, bank);
+    }
 
     // Finally, delete the account itself
     await db.delete(
       'accounts',
-      where: 'accountNumber = ? AND bank = ?',
-      whereArgs: [accountNumber, bank],
+      where: accountDeleteWhere.join(' AND '),
+      whereArgs: accountDeleteArgs,
     );
     await _ensureDefaultAccountForBank(db, bank, activeProfileId);
   }

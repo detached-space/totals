@@ -3744,7 +3744,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
   }
 
-  void _showAddAccountSheet({int? bankId, bank_model.Bank? initialBank}) {
+  void _showAddAccountSheet({
+    int? bankId,
+    bank_model.Bank? initialBank,
+    String? accountHolderNameSuggestion,
+  }) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -3752,6 +3756,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       builder: (_) => _AddAccountSheet(
         initialBankId: bankId ?? _selectedBankId,
         initialBank: initialBank,
+        accountHolderNameSuggestion: accountHolderNameSuggestion,
         onAccountAdded: () {
           Provider.of<TransactionProvider>(context, listen: false).loadData();
         },
@@ -11672,6 +11677,93 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
 
   void _clearSelection() => setState(() => _selectedRefs.clear());
 
+  void _selectAll(Iterable<Transaction> transactions) {
+    final references = transactions
+        .map((transaction) => transaction.reference)
+        .where((reference) => reference.trim().isNotEmpty);
+    setState(() => _selectedRefs.addAll(references));
+  }
+
+  Future<void> _moveSelectedToAccount(
+    TransactionProvider provider,
+  ) async {
+    if (_selectedRefs.isEmpty) return;
+    final accounts = provider.accountSummaries
+        .where((account) => account.bankId == widget.bankId)
+        .toList(growable: false);
+    if (accounts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'Add an account before moving these transactions.',
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final selectedCount = _selectedRefs.length;
+    final destination = await showModalBottomSheet<AccountSummary>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _MoveTransactionsAccountSheet(
+        accounts: accounts,
+        transactionCount: selectedCount,
+      ),
+    );
+    if (!mounted || destination == null) return;
+
+    final selectedReferences = Set<String>.from(_selectedRefs);
+    final selectedTransactions = provider.allTransactions
+        .where(
+          (transaction) =>
+              transaction.bankId == widget.bankId &&
+              selectedReferences.contains(transaction.reference),
+        )
+        .toList(growable: false);
+    if (selectedTransactions.isEmpty) {
+      _clearSelection();
+      return;
+    }
+
+    try {
+      final changed = await provider.updateAccountForTransactions(
+        selectedTransactions,
+        destination.accountNumber,
+      );
+      if (!mounted) return;
+      setState(() {
+        _selectedRefs.clear();
+        _currentPage = 0;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Moved')} $changed '
+            '${context.l10nTextRead(changed == 1 ? 'transaction' : 'transactions')} '
+            '${context.l10nTextRead('to')} ${destination.accountHolderName} '
+            '• ${destination.accountNumber}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update account')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   void _setPage(int page) {
     if (_currentPage == page) return;
     setState(() => _currentPage = page);
@@ -12072,6 +12164,18 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
+              if (widget.unmatchedOnly && filtered.isNotEmpty)
+                IconButton(
+                  onPressed: () => _selectAll(filtered),
+                  tooltip: context.l10nText('Select all'),
+                  icon: const Icon(Icons.select_all_rounded),
+                ),
+              if (_isSelecting && widget.unmatchedOnly)
+                IconButton(
+                  onPressed: () => _moveSelectedToAccount(provider),
+                  tooltip: context.l10nText('Move to account'),
+                  icon: const Icon(Icons.drive_file_move_outline),
+                ),
               if (_isSelecting)
                 IconButton(
                   onPressed: () => _deleteSelected(provider),
@@ -12117,7 +12221,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
                                 summary: summary,
                               ),
                             ],
-                            if (_isSelecting) ...[
+                            if (_isSelecting && !widget.unmatchedOnly) ...[
                               const SizedBox(height: 12),
                               _SelectionBar(
                                 count: _selectedRefs.length,
@@ -12688,7 +12792,11 @@ class _BankGrid extends StatefulWidget {
   final bool showBalance;
   final AccountSyncStatusService syncStatusService;
   final ValueChanged<int> onBankTap;
-  final void Function({int? bankId, bank_model.Bank? initialBank}) onAddAccount;
+  final void Function({
+    int? bankId,
+    bank_model.Bank? initialBank,
+    String? accountHolderNameSuggestion,
+  }) onAddAccount;
 
   const _BankGrid({
     required this.bankSummaries,
@@ -12782,6 +12890,8 @@ class _BankGridState extends State<_BankGrid> with WidgetsBindingObserver {
             onTap: () => widget.onAddAccount(
               bankId: detected.bank.id,
               initialBank: detected.bank,
+              accountHolderNameSuggestion:
+                  detected.accountHolderSuggestions.join(' / '),
             ),
           )),
       _AddAccountCard(onTap: () => widget.onAddAccount()),
@@ -13405,6 +13515,129 @@ class _UnmatchedTransactionsNotice extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MoveTransactionsAccountSheet extends StatelessWidget {
+  final List<AccountSummary> accounts;
+  final int transactionCount;
+
+  const _MoveTransactionsAccountSheet({
+    required this.accounts,
+    required this.transactionCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.72,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.background(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.slate400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                context.l10nText('Move to account'),
+                style: TextStyle(
+                  color: AppColors.textPrimary(context),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$transactionCount ${context.l10nText(transactionCount == 1 ? 'transaction selected' : 'transactions selected')}',
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: accounts.length,
+                  separatorBuilder: (_, __) => Divider(
+                    color: AppColors.borderColor(context),
+                    height: 1,
+                  ),
+                  itemBuilder: (context, index) {
+                    final account = accounts[index];
+                    final status = <String>[
+                      if (account.isDefault) context.l10nText('Default'),
+                      if (account.isDormant) context.l10nText('Dormant'),
+                    ];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryLight.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          AppIcons.account_balance_outlined,
+                          color: AppColors.primaryLight,
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(
+                        account.accountHolderName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColors.textPrimary(context),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        <String>[
+                          account.accountNumber,
+                          if (status.isNotEmpty) status.join(' • '),
+                        ].join('  •  '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColors.textSecondary(context),
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: Icon(
+                        AppIcons.chevron_right_rounded,
+                        color: AppColors.textTertiary(context),
+                        size: 18,
+                      ),
+                      onTap: () => Navigator.pop(context, account),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -14310,11 +14543,13 @@ class _SetCashAmountSheetState extends State<_SetCashAmountSheet> {
 class _AddAccountSheet extends StatefulWidget {
   final int? initialBankId;
   final bank_model.Bank? initialBank;
+  final String? accountHolderNameSuggestion;
   final VoidCallback onAccountAdded;
 
   const _AddAccountSheet({
     this.initialBankId,
     this.initialBank,
+    this.accountHolderNameSuggestion,
     required this.onAccountAdded,
   });
 
@@ -14363,6 +14598,17 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
         !_isSubmitting &&
         _selectedBankId != null &&
         _hasSupportedBanks;
+  }
+
+  String? get _holderNameSuggestion {
+    final suggestion = widget.accountHolderNameSuggestion?.trim();
+    final suggestedBankId = widget.initialBankId ?? widget.initialBank?.id;
+    if (suggestion == null ||
+        suggestion.isEmpty ||
+        _selectedBankId != suggestedBankId) {
+      return null;
+    }
+    return suggestion;
   }
 
   Future<Set<int>> _loadSupportedBankIds() async {
@@ -14668,7 +14914,9 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                       ),
                       decoration: InputDecoration(
                         labelText: context.l10nText('Account Holder Name'),
-                        hintText: context.l10nText('Enter account holder name'),
+                        hintText: _holderNameSuggestion == null
+                            ? context.l10nText('Enter account holder name')
+                            : '${context.l10nText('Suggested')}: ${_holderNameSuggestion!}',
                         hintStyle: TextStyle(color: hintColor),
                         labelStyle: TextStyle(color: hintColor),
                         floatingLabelStyle: TextStyle(

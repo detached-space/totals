@@ -237,6 +237,24 @@ String? accountHolderNameFromGreeting(
   );
 }
 
+/// Extracts a non-generic account-holder suggestion from the opening SMS
+/// greeting. This is intentionally limited to the first line so names of
+/// transfer counterparties in the body cannot become onboarding suggestions.
+String? suggestedAccountHolderNameFromSms(String messageBody) {
+  final match = RegExp(
+    r'^\s*(?:dear|hi|hello)\s+([^,;:\r\n]{1,100})',
+    caseSensitive: false,
+  ).firstMatch(messageBody);
+  final raw = match
+      ?.group(1)
+      ?.trim()
+      .replaceAll(RegExp(r'[\s.!]+$'), '')
+      .replaceAll(RegExp(r'\s+'), ' ');
+  final canonical = canonicalAccountHolderName(raw);
+  if (canonical == null || _isGenericAccountGreeting(canonical)) return null;
+  return raw;
+}
+
 /// Whether the SMS explicitly greets a person who is not uniquely represented
 /// by one of the supplied accounts.
 ///
