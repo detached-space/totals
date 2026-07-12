@@ -71,7 +71,6 @@ class AccountOwnershipService {
 
     for (final bank in banks) {
       if (bankId != null && bank.id != bankId) continue;
-      if (bank.simBased != true) continue;
       var bankAccounts =
           accounts.where((account) => account.bank == bank.id).toList();
       if (bankAccounts.isEmpty) continue;
@@ -80,6 +79,7 @@ class AccountOwnershipService {
       if (messages.isEmpty) continue;
       final messagesById = <String, SmsMessage>{};
       final messagesByFingerprint = <String, List<SmsMessage>>{};
+      final messagesByReference = <String, List<SmsMessage>>{};
       final obsoleteTelebirrCreditReferences = <String>{};
       final obsoleteTelebirrDebitReferences = <String>{};
       for (final message in messages) {
@@ -96,6 +96,16 @@ class AccountOwnershipService {
         if (fingerprint != null) {
           messagesByFingerprint
               .putIfAbsent(fingerprint, () => <SmsMessage>[])
+              .add(message);
+        }
+        for (final messageReference in _messageReferences(message.body)) {
+          final reference = SmsTransactionSource.canonicalReference(
+            bankId: bank.id,
+            storedReference: messageReference,
+          );
+          if (reference.isEmpty) continue;
+          messagesByReference
+              .putIfAbsent(reference, () => <SmsMessage>[])
               .add(message);
         }
         if (bank.id == 6 && message.body != null) {
@@ -160,6 +170,7 @@ class AccountOwnershipService {
           transaction,
           messagesById: messagesById,
           messagesByFingerprint: messagesByFingerprint,
+          messagesByReference: messagesByReference,
         );
         final messageBody = message?.body;
         if (bank.id == 6 &&
@@ -178,10 +189,14 @@ class AccountOwnershipService {
       // Pass one: number and anchored greeting evidence learn ownership and
       // conflict-free device subscription mappings.
       for (final transaction in bankTransactions) {
+        // A user-selected owner is authoritative and must not be used as
+        // evidence for a different automatic owner or SIM binding.
+        if (transaction.hasManualOwnerAssignment) continue;
         final message = _sourceMessage(
           transaction,
           messagesById: messagesById,
           messagesByFingerprint: messagesByFingerprint,
+          messagesByReference: messagesByReference,
         );
         final body = message?.body;
         if (body == null) continue;
@@ -203,27 +218,29 @@ class AccountOwnershipService {
         }
       }
 
-      final proposedBindings = <String, int>{};
-      for (final account in bankAccounts) {
-        final votes = subscriptionVotes[account.accountNumber];
-        if (votes == null || votes.isEmpty) continue;
-        final ranked = votes.entries.toList()
-          ..sort((left, right) => right.value.compareTo(left.value));
-        if (ranked.length > 1 && ranked[0].value == ranked[1].value) continue;
-        proposedBindings[account.accountNumber] = ranked.first.key;
-      }
-      final claims = <int, int>{};
-      for (final subscriptionId in proposedBindings.values) {
-        claims[subscriptionId] = (claims[subscriptionId] ?? 0) + 1;
-      }
-      for (final entry in proposedBindings.entries) {
-        if (claims[entry.value] != 1) continue;
-        final didBind = await _accountRepository.bindSmsSubscription(
-          accountNumber: entry.key,
-          bank: bank.id,
-          subscriptionId: entry.value,
-        );
-        if (didBind) learnedSubscriptions++;
+      if (bank.simBased == true) {
+        final proposedBindings = <String, int>{};
+        for (final account in bankAccounts) {
+          final votes = subscriptionVotes[account.accountNumber];
+          if (votes == null || votes.isEmpty) continue;
+          final ranked = votes.entries.toList()
+            ..sort((left, right) => right.value.compareTo(left.value));
+          if (ranked.length > 1 && ranked[0].value == ranked[1].value) continue;
+          proposedBindings[account.accountNumber] = ranked.first.key;
+        }
+        final claims = <int, int>{};
+        for (final subscriptionId in proposedBindings.values) {
+          claims[subscriptionId] = (claims[subscriptionId] ?? 0) + 1;
+        }
+        for (final entry in proposedBindings.entries) {
+          if (claims[entry.value] != 1) continue;
+          final didBind = await _accountRepository.bindSmsSubscription(
+            accountNumber: entry.key,
+            bank: bank.id,
+            subscriptionId: entry.value,
+          );
+          if (didBind) learnedSubscriptions++;
+        }
       }
 
       accounts = await _accountRepository.getAccounts();
@@ -233,10 +250,12 @@ class AccountOwnershipService {
       // Pass two: use the learned subscription mapping for messages that do
       // not carry a usable owner number or greeting.
       for (final transaction in bankTransactions) {
+        if (transaction.hasManualOwnerAssignment) continue;
         final message = _sourceMessage(
           transaction,
           messagesById: messagesById,
           messagesByFingerprint: messagesByFingerprint,
+          messagesByReference: messagesByReference,
         );
         final strongOwner = strongOwners[transaction.reference];
         final body = message?.body;
@@ -261,12 +280,16 @@ class AccountOwnershipService {
             bank: bank,
             accounts: bankAccounts,
           );
-          if (body != null &&
-              assignedAccount != null &&
-              hasUnmatchedSpecificAccountGreeting(body, bankAccounts)) {
+          final hasConflictingGreeting = body != null &&
+              hasUnmatchedSpecificAccountGreeting(body, bankAccounts);
+          if (hasConflictingGreeting &&
+              (assignedAccount != null ||
+                  transaction.ownerAssignmentSource !=
+                      Transaction.conflictingOwnerAssignment)) {
             updates.add(TransactionOwnershipUpdate(
               reference: transaction.reference,
               ownerAccountNumber: null,
+              ownerAssignmentSource: Transaction.conflictingOwnerAssignment,
               sourceMessageId: message?.id?.toString(),
             ));
           }
@@ -287,6 +310,7 @@ class AccountOwnershipService {
         updates.add(TransactionOwnershipUpdate(
           reference: transaction.reference,
           ownerAccountNumber: owner.accountNumber,
+          ownerAssignmentSource: Transaction.automaticOwnerAssignment,
           sourceSubscriptionId: subscriptionId != null && subscriptionId >= 0
               ? subscriptionId
               : null,
@@ -338,6 +362,7 @@ class AccountOwnershipService {
     Transaction transaction, {
     required Map<String, SmsMessage> messagesById,
     required Map<String, List<SmsMessage>> messagesByFingerprint,
+    required Map<String, List<SmsMessage>> messagesByReference,
   }) {
     final fingerprint = transaction.sourceFingerprint?.trim();
     if (fingerprint != null && fingerprint.isNotEmpty) {
@@ -347,9 +372,32 @@ class AccountOwnershipService {
 
     final messageId = transaction.sourceMessageId?.trim();
     if (messageId != null && messageId.isNotEmpty) {
-      return messagesById[messageId];
+      final message = messagesById[messageId];
+      if (message != null) return message;
     }
+
+    // Very old exports may have neither the modern source fingerprint nor a
+    // stable inbox row id. A unique bank reference still reconnects the row
+    // without guessing by amount or date.
+    final reference = SmsTransactionSource.canonicalReference(
+      bankId: transaction.bankId,
+      storedReference: transaction.reference,
+    );
+    final referenceMatches = messagesByReference[reference];
+    if (referenceMatches?.length == 1) return referenceMatches!.single;
     return null;
+  }
+
+  Iterable<String> _messageReferences(String? body) sync* {
+    if (body == null || body.trim().isEmpty) return;
+    final pattern = RegExp(
+      r'''(?:transaction\s+(?:number|no\.?|id)|txn\s*(?:id|no\.?)|ref(?:erence)?\s*(?:number|no\.?)?)\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9@.\-]{4,})''',
+      caseSensitive: false,
+    );
+    for (final match in pattern.allMatches(body)) {
+      final value = match.group(1)?.trim();
+      if (value != null && value.isNotEmpty) yield value;
+    }
   }
 
   Future<List<SmsMessage>> _loadBankMessages(

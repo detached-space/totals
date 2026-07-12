@@ -3,6 +3,11 @@ import 'dart:convert';
 import 'package:totals/utils/sms_transaction_source.dart';
 
 class Transaction {
+  static const String manualOwnerAssignment = 'manual';
+  static const String automaticOwnerAssignment = 'automatic';
+  static const String defaultOwnerAssignment = 'default';
+  static const String conflictingOwnerAssignment = 'conflict';
+
   final double amount; // required
   final String reference; // required
   final String? creditor;
@@ -17,6 +22,10 @@ class Transaction {
   final String? accountNumber; // Last 4 digits
   /// User-entered account number selected as the authoritative owner.
   final String? ownerAccountNumber;
+
+  /// How [ownerAccountNumber] was chosen. Manual choices are authoritative and
+  /// must survive imports, reparses, and duplicate merging.
+  final String? ownerAssignmentSource;
   final int? categoryId;
   final List<int>? categoryIds;
   final int? profileId;
@@ -44,6 +53,7 @@ class Transaction {
     this.transactionLink,
     this.accountNumber,
     this.ownerAccountNumber,
+    this.ownerAssignmentSource,
     int? categoryId,
     List<int>? categoryIds,
     this.profileId,
@@ -171,6 +181,7 @@ class Transaction {
       transactionLink: json['transactionLink'],
       accountNumber: json['accountNumber'],
       ownerAccountNumber: json['ownerAccountNumber']?.toString(),
+      ownerAssignmentSource: json['ownerAssignmentSource']?.toString(),
       categoryId: toInt(json['categoryId']),
       categoryIds: _decodeCategoryIds(json['categoryIds']),
       profileId: toInt(json['profileId']),
@@ -198,6 +209,7 @@ class Transaction {
         'transactionLink': transactionLink,
         'accountNumber': accountNumber,
         'ownerAccountNumber': ownerAccountNumber,
+        'ownerAssignmentSource': ownerAssignmentSource,
         'categoryId': primaryCategoryId,
         'categoryIds': selectedCategoryIds.isEmpty ? null : selectedCategoryIds,
         if (profileId != null) 'profileId': profileId,
@@ -222,6 +234,7 @@ class Transaction {
     String? transactionLink,
     String? accountNumber,
     String? ownerAccountNumber,
+    String? ownerAssignmentSource,
     int? categoryId,
     List<int>? categoryIds,
     int? profileId,
@@ -234,6 +247,7 @@ class Transaction {
     bool clearCategoryId = false, // Flag to explicitly clear categoryId
     bool clearCategoryIds = false,
     bool clearNote = false,
+    bool clearOwnerAccountNumber = false,
   }) {
     int? nextCategoryId;
     List<int>? nextCategoryIds;
@@ -280,7 +294,11 @@ class Transaction {
       type: type ?? this.type,
       transactionLink: transactionLink ?? this.transactionLink,
       accountNumber: accountNumber ?? this.accountNumber,
-      ownerAccountNumber: ownerAccountNumber ?? this.ownerAccountNumber,
+      ownerAccountNumber: clearOwnerAccountNumber
+          ? null
+          : (ownerAccountNumber ?? this.ownerAccountNumber),
+      ownerAssignmentSource:
+          ownerAssignmentSource ?? this.ownerAssignmentSource,
       categoryId: nextCategoryId,
       categoryIds: nextCategoryIds,
       profileId: profileId ?? this.profileId,
@@ -292,4 +310,7 @@ class Transaction {
       sourceSubscriptionId: sourceSubscriptionId ?? this.sourceSubscriptionId,
     );
   }
+
+  bool get hasManualOwnerAssignment =>
+      ownerAssignmentSource == manualOwnerAssignment;
 }

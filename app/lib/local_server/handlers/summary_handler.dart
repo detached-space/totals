@@ -70,7 +70,9 @@ class SummaryHandler {
       double totalPendingCredit = 0;
 
       for (var account in accounts) {
-        if (account.bank != CashConstants.bankId) {
+        if (account.bank != CashConstants.bankId &&
+            account.includeInTotals &&
+            !account.isDormant) {
           totalBalance += account.balance;
         }
         totalSettledBalance += account.settledBalance ?? 0;
@@ -148,7 +150,9 @@ class SummaryHandler {
           double pendingCredit = 0;
 
           for (var account in bankAccounts) {
-            totalBalance += account.balance;
+            if (account.includeInTotals && !account.isDormant) {
+              totalBalance += account.balance;
+            }
             settledBalance += account.settledBalance ?? 0;
             pendingCredit += account.pendingCredit ?? 0;
           }
@@ -239,6 +243,9 @@ class SummaryHandler {
             'balance': account.balance,
             'settledBalance': account.settledBalance,
             'pendingCredit': account.pendingCredit,
+            'includeInTotals': account.includeInTotals,
+            'isDormant': account.isDormant,
+            'isDefault': account.isDefault,
             'totalCredit': totalCredit,
             'totalDebit': totalDebit,
             'transactionCount': accountTransactions.length,

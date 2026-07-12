@@ -48,6 +48,7 @@ class AccountRepository {
         'accountHolderName': CashConstants.defaultAccountHolderName,
         'settledBalance': 0.0,
         'pendingCredit': 0.0,
+        'isDefault': 1,
         if (profileId != null) 'profileId': profileId,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
@@ -77,6 +78,9 @@ class AccountRepository {
         'pendingCredit': map['pendingCredit'],
         'profileId': map['profileId'],
         'smsSubscriptionId': map['smsSubscriptionId'],
+        'includeInTotals': map['includeInTotals'],
+        'isDormant': map['isDormant'],
+        'isDefault': map['isDefault'],
       });
     }).toList();
   }
@@ -94,6 +98,21 @@ class AccountRepository {
       whereArgs: [account.accountNumber, account.bank],
       limit: 1,
     );
+    final bankWhere = <String>['bank = ?'];
+    final bankWhereArgs = <Object?>[account.bank];
+    if (profileId != null) {
+      bankWhere.add('profileId = ?');
+      bankWhereArgs.add(profileId);
+    } else {
+      bankWhere.add('profileId IS NULL');
+    }
+    final existingBankAccounts = await db.query(
+      'accounts',
+      columns: const <String>['id'],
+      where: bankWhere.join(' AND '),
+      whereArgs: bankWhereArgs,
+      limit: 1,
+    );
     final data = <String, Object?>{
       'accountNumber': account.accountNumber,
       'bank': account.bank,
@@ -104,6 +123,18 @@ class AccountRepository {
       'profileId': profileId,
       'smsSubscriptionId': account.smsSubscriptionId ??
           (existing.isEmpty ? null : existing.first['smsSubscriptionId']),
+      // Balance refreshes and other legacy callers should never reset the
+      // user's account preferences. Those are changed only through
+      // updateAccountPreferences below.
+      'includeInTotals': existing.isEmpty
+          ? (account.includeInTotals ? 1 : 0)
+          : existing.first['includeInTotals'],
+      'isDormant': existing.isEmpty
+          ? (account.isDormant ? 1 : 0)
+          : existing.first['isDormant'],
+      'isDefault': existing.isEmpty
+          ? (existingBankAccounts.isEmpty ? 1 : 0)
+          : existing.first['isDefault'],
     };
 
     if (existing.isEmpty) {
@@ -125,6 +156,9 @@ class AccountRepository {
         'accountNumber': account.accountNumber,
         'bank': account.bank,
         'profileId': profileId,
+        'includeInTotals': data['includeInTotals'],
+        'isDormant': data['isDormant'],
+        'isDefault': data['isDefault'],
       },
     );
   }
@@ -134,10 +168,44 @@ class AccountRepository {
     final activeProfileId = await _getActiveProfileId();
     final batch = db.batch();
     final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    final existingRows = await db.query(
+      'accounts',
+      columns: const <String>['bank', 'profileId', 'isDefault'],
+    );
+    String bankProfileKey(int bank, int? profileId) =>
+        '$bank|${profileId ?? ''}';
+    final banksWithAccounts = existingRows
+        .map((row) => bankProfileKey(
+              (row['bank'] as num).toInt(),
+              (row['profileId'] as num?)?.toInt(),
+            ))
+        .toSet();
+    final banksWithDefaults = existingRows
+        .where((row) => row['isDefault'] == 1)
+        .map((row) => bankProfileKey(
+              (row['bank'] as num).toInt(),
+              (row['profileId'] as num?)?.toInt(),
+            ))
+        .toSet();
+    final preferredImportedDefaults = <String, String>{};
+    for (final account in accounts) {
+      final profileId = account.profileId ?? activeProfileId;
+      final key = bankProfileKey(account.bank, profileId);
+      final current = preferredImportedDefaults[key];
+      if (current == null || account.isDefault) {
+        preferredImportedDefaults[key] = account.accountNumber;
+      }
+    }
 
     for (var account in accounts) {
       // Use account's profileId if provided, otherwise use active profile
       final profileId = account.profileId ?? activeProfileId;
+      final bankKey = bankProfileKey(account.bank, profileId);
+      final canChooseImportedDefault = !banksWithAccounts.contains(bankKey) &&
+          !banksWithDefaults.contains(bankKey);
+      final isDefault = canChooseImportedDefault &&
+          preferredImportedDefaults[bankKey] == account.accountNumber;
+      if (isDefault) banksWithDefaults.add(bankKey);
 
       batch.insert(
         'accounts',
@@ -150,6 +218,9 @@ class AccountRepository {
           'pendingCredit': account.pendingCredit,
           'profileId': profileId,
           'smsSubscriptionId': account.smsSubscriptionId,
+          'includeInTotals': account.includeInTotals ? 1 : 0,
+          'isDormant': account.isDormant ? 1 : 0,
+          'isDefault': isDefault ? 1 : 0,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
@@ -158,6 +229,9 @@ class AccountRepository {
         'accountNumber': account.accountNumber,
         'bank': account.bank,
         'profileId': profileId,
+        'includeInTotals': account.includeInTotals ? 1 : 0,
+        'isDormant': account.isDormant ? 1 : 0,
+        'isDefault': isDefault ? 1 : 0,
       }));
     }
 
@@ -190,6 +264,105 @@ class AccountRepository {
           account.accountNumber,
           accountNumber,
         ));
+  }
+
+  Future<bool> updateAccountPreferences({
+    required String accountNumber,
+    required int bank,
+    bool? includeInTotals,
+    bool? isDormant,
+  }) async {
+    if (includeInTotals == null && isDormant == null) return false;
+
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final values = <String, Object?>{
+      if (includeInTotals != null) 'includeInTotals': includeInTotals ? 1 : 0,
+      if (isDormant != null) 'isDormant': isDormant ? 1 : 0,
+    };
+    if (isDormant == true) values['includeInTotals'] = 0;
+    final where = <String>['accountNumber = ?', 'bank = ?'];
+    final whereArgs = <Object?>[accountNumber, bank];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      whereArgs.add(activeProfileId);
+    }
+
+    final changed = await db.update(
+      'accounts',
+      values,
+      where: where.join(' AND '),
+      whereArgs: whereArgs,
+    );
+    if (changed == 0) return false;
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.accounts,
+      entityRef: '$accountNumber|$bank',
+      op: SyncOp.upsert,
+      row: {
+        'accountNumber': accountNumber,
+        'bank': bank,
+        if (activeProfileId != null) 'profileId': activeProfileId,
+        ...values,
+      },
+    );
+    return true;
+  }
+
+  Future<bool> setDefaultAccount({
+    required String accountNumber,
+    required int bank,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final where = <String>['bank = ?'];
+    final whereArgs = <Object?>[bank];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      whereArgs.add(activeProfileId);
+    } else {
+      where.add('profileId IS NULL');
+    }
+
+    final rows = await db.query(
+      'accounts',
+      columns: const <String>['accountNumber'],
+      where: where.join(' AND '),
+      whereArgs: whereArgs,
+    );
+    if (!rows.any((row) => row['accountNumber'] == accountNumber)) {
+      return false;
+    }
+
+    await db.transaction((txn) async {
+      await txn.update(
+        'accounts',
+        const <String, Object?>{'isDefault': 0},
+        where: where.join(' AND '),
+        whereArgs: whereArgs,
+      );
+      await txn.update(
+        'accounts',
+        const <String, Object?>{'isDefault': 1},
+        where: '${where.join(' AND ')} AND accountNumber = ?',
+        whereArgs: <Object?>[...whereArgs, accountNumber],
+      );
+    });
+
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.accounts,
+      records: rows.map((row) {
+        final number = row['accountNumber'].toString();
+        return MapEntry('$number|$bank', <String, dynamic>{
+          'accountNumber': number,
+          'bank': bank,
+          if (activeProfileId != null) 'profileId': activeProfileId,
+          'isDefault': number == accountNumber ? 1 : 0,
+        });
+      }).toList(growable: false),
+    );
+    return true;
   }
 
   /// Stores a learned device-local SMS subscription mapping without replacing
@@ -247,6 +420,7 @@ class AccountRepository {
     );
 
     final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
 
     if (bank == CashConstants.bankId) {
       final transactionRepo = TransactionRepository();
@@ -256,6 +430,7 @@ class AccountRepository {
         where: 'accountNumber = ? AND bank = ?',
         whereArgs: [accountNumber, bank],
       );
+      await _ensureDefaultAccountForBank(db, bank, activeProfileId);
       return;
     }
 
@@ -271,5 +446,49 @@ class AccountRepository {
       where: 'accountNumber = ? AND bank = ?',
       whereArgs: [accountNumber, bank],
     );
+    await _ensureDefaultAccountForBank(db, bank, activeProfileId);
+  }
+
+  Future<void> _ensureDefaultAccountForBank(
+    Database db,
+    int bank,
+    int? profileId,
+  ) async {
+    final where = <String>['bank = ?'];
+    final args = <Object?>[bank];
+    if (profileId != null) {
+      where.add('profileId = ?');
+      args.add(profileId);
+    } else {
+      where.add('profileId IS NULL');
+    }
+    final rows = await db.query(
+      'accounts',
+      columns: const <String>['id', 'accountNumber', 'isDefault'],
+      where: where.join(' AND '),
+      whereArgs: args,
+      orderBy: 'id ASC',
+    );
+    if (rows.isEmpty || rows.any((row) => row['isDefault'] == 1)) return;
+    await db.update(
+      'accounts',
+      const <String, Object?>{'isDefault': 1},
+      where: 'id = ?',
+      whereArgs: <Object?>[rows.first['id']],
+    );
+    final promotedNumber = rows.first['accountNumber']?.toString();
+    if (promotedNumber != null && promotedNumber.isNotEmpty) {
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.accounts,
+        entityRef: '$promotedNumber|$bank',
+        op: SyncOp.upsert,
+        row: <String, dynamic>{
+          'accountNumber': promotedNumber,
+          'bank': bank,
+          if (profileId != null) 'profileId': profileId,
+          'isDefault': 1,
+        },
+      );
+    }
   }
 }

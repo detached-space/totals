@@ -19,6 +19,7 @@ import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/auto_categorization_service.dart';
+import 'package:totals/services/account_ownership_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
@@ -274,6 +275,9 @@ class DataExportImportService {
               settledBalance: account.settledBalance,
               pendingCredit: account.pendingCredit,
               profileId: account.profileId,
+              includeInTotals: account.includeInTotals,
+              isDormant: account.isDormant,
+              isDefault: account.isDefault,
             ),
           );
           existingAccountKeys.add(key);
@@ -660,6 +664,16 @@ class DataExportImportService {
       if (smsPatternsRaw.isNotEmpty) {
         final patternsList = smsPatternsRaw.map(SmsPattern.fromJson).toList();
         await _smsConfigService.savePatterns(patternsList);
+      }
+
+      // Older Totals backups predate durable account ownership. Reconnect
+      // imported SMS rows to the original inbox before the UI builds account
+      // totals; ambiguous rows remain in Other transactions.
+      try {
+        await AccountOwnershipService.instance.reconcile();
+      } catch (_) {
+        // Import is already committed. Ownership repair is best-effort and
+        // will run again on SMS service initialization or account reparse.
       }
     } catch (e) {
       throw Exception('Failed to import data: $e');

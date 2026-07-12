@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
@@ -73,6 +74,8 @@ class _TransactionDetailsSheet extends StatefulWidget {
 
 class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _categoryExpanded = false;
+  bool _accountExpanded = false;
+  bool _isApplyingAccount = false;
   bool _isSavingCounterparty = false;
   bool _isSavingNote = false;
   bool _isApplyingCategory = false;
@@ -172,6 +175,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     if (holderName.isEmpty) return account.accountNumber;
     return '$holderName • ${account.accountNumber}';
   }
+
+  List<AccountSummary> get _bankAccounts => _provider.accountSummaries
+      .where((account) => account.bankId == _tx.bankId)
+      .toList(growable: false);
+
+  bool get _canEditAccount => _bankAccounts.length > 1;
 
   String get _formattedAmount {
     final formatted = formatNumberWithComma(_tx.amount);
@@ -835,6 +844,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       transactionLink: _tx.transactionLink,
       accountNumber: _tx.accountNumber,
       ownerAccountNumber: _tx.ownerAccountNumber,
+      ownerAssignmentSource: _tx.ownerAssignmentSource,
       categoryId: _tx.categoryId,
       categoryIds: _tx.categoryIds,
       profileId: _tx.profileId,
@@ -880,6 +890,76 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         ),
       );
     }
+  }
+
+  void _toggleAccountPicker() {
+    if (!_canEditAccount || _isApplyingAccount) return;
+    setState(() => _accountExpanded = !_accountExpanded);
+  }
+
+  Future<void> _assignAccount(AccountSummary account) async {
+    if (_isApplyingAccount) return;
+    final current = _provider.accountSummaryForTransaction(_tx);
+    if (current?.accountNumber == account.accountNumber &&
+        _tx.hasManualOwnerAssignment) {
+      setState(() => _accountExpanded = false);
+      return;
+    }
+
+    setState(() => _isApplyingAccount = true);
+    try {
+      final updated = await _provider.updateAccountForTransaction(
+        _tx,
+        account.accountNumber,
+      );
+      if (!mounted) return;
+      setState(() {
+        _transaction = updated;
+        _accountExpanded = false;
+        _isApplyingAccount = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isApplyingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update account')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Widget _buildAccountPicker() {
+    final selectedAccount = _provider.accountSummaryForTransaction(_tx);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _bankAccounts
+            .map(
+              (account) => _TransactionAccountChip(
+                label: account.accountHolderName.trim().isEmpty
+                    ? account.accountNumber
+                    : '${account.accountHolderName} • ${account.accountNumber}',
+                selected:
+                    selectedAccount?.accountNumber == account.accountNumber,
+                isLoading: _isApplyingAccount,
+                onTap: () => _assignAccount(account),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
   }
 
   Future<void> _saveNote() async {
@@ -1324,7 +1404,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         label: 'Account',
                         value: _accountLabel,
                         marquee: true,
+                        onTap: _canEditAccount ? _toggleAccountPicker : null,
+                        trailingIcon: _canEditAccount
+                            ? (_accountExpanded
+                                ? AppIcons.keyboard_arrow_up
+                                : AppIcons.keyboard_arrow_down)
+                            : null,
                       ),
+                      if (_accountExpanded && _canEditAccount)
+                        _buildAccountPicker(),
                       if (_formattedDate != null)
                         _DetailRow(
                             label: 'Date & Time', value: _formattedDate!),
@@ -2043,12 +2131,14 @@ class _DetailRow extends StatelessWidget {
   final String value;
   final bool marquee;
   final VoidCallback? onTap;
+  final IconData? trailingIcon;
 
   const _DetailRow({
     required this.label,
     required this.value,
     this.marquee = false,
     this.onTap,
+    this.trailingIcon,
   });
 
   @override
@@ -2059,41 +2149,98 @@ class _DetailRow extends StatelessWidget {
       fontWeight: FontWeight.w600,
     );
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        border: Border(
-            bottom:
-                BorderSide(color: AppColors.borderColor(context), width: 1)),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: _kLabelWidth,
-            child: Text(
-              context.l10nText(label),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: AppColors.textSecondary(context),
-              ),
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: AppColors.borderColor(context),
+              width: 1,
             ),
           ),
-          const Spacer(),
-          if (marquee)
-            Flexible(
-              child: GestureDetector(
-                onTap: onTap,
-                child: _MarqueeText(text: value, style: valueStyle),
-              ),
-            )
-          else
-            Flexible(
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: _kLabelWidth,
               child: Text(
-                value,
-                textAlign: TextAlign.end,
-                style: valueStyle,
+                context.l10nText(label),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textSecondary(context),
+                ),
               ),
             ),
-        ],
+            const Spacer(),
+            if (marquee)
+              Flexible(
+                child: _MarqueeText(text: value, style: valueStyle),
+              )
+            else
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.end,
+                  style: valueStyle,
+                ),
+              ),
+            if (trailingIcon != null) ...[
+              const SizedBox(width: 6),
+              Icon(
+                trailingIcon,
+                size: 18,
+                color: AppColors.textSecondary(context),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TransactionAccountChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _TransactionAccountChip({
+    required this.label,
+    required this.selected,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground =
+        selected ? AppColors.white : AppColors.textPrimary(context);
+    return InkWell(
+      onTap: isLoading ? null : onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primaryLight
+              : AppColors.surfaceColor(context),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected
+                ? AppColors.primaryLight
+                : AppColors.borderColor(context),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: foreground.withValues(alpha: isLoading ? 0.5 : 1),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }

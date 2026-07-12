@@ -723,6 +723,8 @@ class AccountTransactionReparseService {
         );
         if (owner != null) {
           details['ownerAccountNumber'] = owner.accountNumber;
+          details['ownerAssignmentSource'] =
+              Transaction.automaticOwnerAssignment;
         }
         parsedMessages++;
 
@@ -1147,6 +1149,7 @@ class AccountTransactionReparseService {
     _ParsedSourceSmsTransaction parsed,
   ) {
     var score = _transactionDetailScore(transaction);
+    if (transaction.hasManualOwnerAssignment) score += 10000;
     if (_logicalLegKey(transaction) == parsed.referenceKey) {
       score += 1000;
     }
@@ -1172,7 +1175,12 @@ class AccountTransactionReparseService {
           sourceType: parsed.sourceType,
           sourceMessageId: parsed.sourceMessageId,
           sourceFingerprint: parsed.sourceFingerprint,
-          ownerAccountNumber: parsed.ownerAccountNumber,
+          ownerAccountNumber: keeper.hasManualOwnerAssignment
+              ? keeper.ownerAccountNumber
+              : parsed.ownerAccountNumber,
+          ownerAssignmentSource: keeper.hasManualOwnerAssignment
+              ? keeper.ownerAssignmentSource
+              : parsed.ownerAssignmentSource,
           sourceSubscriptionId: parsed.sourceSubscriptionId,
         );
 
@@ -1185,7 +1193,12 @@ class AccountTransactionReparseService {
       sourceType: parsed.sourceType,
       sourceMessageId: parsed.sourceMessageId,
       sourceFingerprint: parsed.sourceFingerprint,
-      ownerAccountNumber: parsed.ownerAccountNumber,
+      ownerAccountNumber: merged.hasManualOwnerAssignment
+          ? merged.ownerAccountNumber
+          : parsed.ownerAccountNumber,
+      ownerAssignmentSource: merged.hasManualOwnerAssignment
+          ? merged.ownerAssignmentSource
+          : parsed.ownerAssignmentSource,
       sourceSubscriptionId: parsed.sourceSubscriptionId,
     );
   }
@@ -1195,6 +1208,11 @@ class AccountTransactionReparseService {
     Transaction candidate,
   ) {
     final categoryIds = _mergedCategoryIds(current, candidate);
+    final manualOwner = current.hasManualOwnerAssignment
+        ? current
+        : candidate.hasManualOwnerAssignment
+            ? candidate
+            : null;
     return Transaction(
       amount: current.amount,
       reference: current.reference,
@@ -1210,8 +1228,16 @@ class AccountTransactionReparseService {
       transactionLink: _pickTransactionLink(
           current.transactionLink, candidate.transactionLink),
       accountNumber: _pickText(current.accountNumber, candidate.accountNumber),
-      ownerAccountNumber:
-          _pickText(current.ownerAccountNumber, candidate.ownerAccountNumber),
+      ownerAccountNumber: manualOwner?.ownerAccountNumber ??
+          _pickText(
+            current.ownerAccountNumber,
+            candidate.ownerAccountNumber,
+          ),
+      ownerAssignmentSource: manualOwner?.ownerAssignmentSource ??
+          _pickText(
+            current.ownerAssignmentSource,
+            candidate.ownerAssignmentSource,
+          ),
       categoryId: current.categoryId ?? candidate.categoryId,
       categoryIds: categoryIds,
       profileId: current.profileId ?? candidate.profileId,
@@ -1755,6 +1781,7 @@ class AccountTransactionReparseService {
   }
 
   Transaction? _mergeParsedFields(Transaction existing, Transaction reparsed) {
+    final preserveManualOwner = existing.hasManualOwnerAssignment;
     final updated = Transaction(
       amount: existing.amount,
       reference: existing.reference,
@@ -1770,8 +1797,18 @@ class AccountTransactionReparseService {
       transactionLink: _pickTransactionLink(
           existing.transactionLink, reparsed.transactionLink),
       accountNumber: _pickText(reparsed.accountNumber, existing.accountNumber),
-      ownerAccountNumber:
-          _pickText(reparsed.ownerAccountNumber, existing.ownerAccountNumber),
+      ownerAccountNumber: preserveManualOwner
+          ? existing.ownerAccountNumber
+          : _pickText(
+              reparsed.ownerAccountNumber,
+              existing.ownerAccountNumber,
+            ),
+      ownerAssignmentSource: preserveManualOwner
+          ? existing.ownerAssignmentSource
+          : _pickText(
+              reparsed.ownerAssignmentSource,
+              existing.ownerAssignmentSource,
+            ),
       categoryId: existing.categoryId,
       categoryIds: existing.categoryIds,
       profileId: existing.profileId,
@@ -1828,6 +1865,7 @@ class AccountTransactionReparseService {
         a.transactionLink == b.transactionLink &&
         a.accountNumber == b.accountNumber &&
         a.ownerAccountNumber == b.ownerAccountNumber &&
+        a.ownerAssignmentSource == b.ownerAssignmentSource &&
         a.categoryId == b.categoryId &&
         listEquals(a.selectedCategoryIds, b.selectedCategoryIds) &&
         a.profileId == b.profileId &&

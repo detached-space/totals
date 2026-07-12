@@ -109,7 +109,17 @@ List<TransactionDeduplicationPlan> buildLegacySmsReferenceDeduplicationPlans({
         .where((value) => value.isNotEmpty)
         .map((value) => value.toUpperCase())
         .toSet();
-    if (owners.length > 1) continue;
+    final manualOwners = group
+        .where((transaction) => transaction.hasManualOwnerAssignment)
+        .map((transaction) => transaction.ownerAccountNumber?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .map((value) => value.toUpperCase())
+        .toSet();
+    if (manualOwners.length > 1 ||
+        (manualOwners.isEmpty && owners.length > 1)) {
+      continue;
+    }
 
     final keeper = _selectLegacySmsKeeper(group);
     final duplicates = group
@@ -313,6 +323,7 @@ Transaction _selectLegacySmsKeeper(List<Transaction> transactions) {
 
 int _legacySmsKeeperScore(Transaction transaction) {
   var score = _detailScore(transaction);
+  if (transaction.hasManualOwnerAssignment) score += 10000;
   if (transaction.reference.trim() != transaction.displayReference) {
     score += 100;
   }
@@ -350,6 +361,7 @@ int _compareTransactionRichness(Transaction left, Transaction right) {
 
 int _detailScore(Transaction transaction) {
   var score = 0;
+  if (transaction.hasManualOwnerAssignment) score += 10000;
   if (_hasText(transaction.receiver)) score += 5;
   if (_hasText(transaction.creditor)) score += 5;
   if (_hasValue(transaction.vat)) score += 4;
@@ -403,6 +415,11 @@ Transaction _mergeTransactions(
         (id) => !merged.selectedCategoryIds.contains(id),
       ),
     ];
+    final manualOwner = merged.hasManualOwnerAssignment
+        ? merged
+        : transaction.hasManualOwnerAssignment
+            ? transaction
+            : null;
     merged = merged.copyWith(
       creditor: _pickBetterText(merged.creditor, transaction.creditor),
       receiver: _pickBetterText(merged.receiver, transaction.receiver),
@@ -415,10 +432,16 @@ Transaction _mergeTransactions(
           _pickBetterText(merged.transactionLink, transaction.transactionLink),
       accountNumber:
           _pickBetterText(merged.accountNumber, transaction.accountNumber),
-      ownerAccountNumber: _pickBetterText(
-        merged.ownerAccountNumber,
-        transaction.ownerAccountNumber,
-      ),
+      ownerAccountNumber: manualOwner?.ownerAccountNumber ??
+          _pickBetterText(
+            merged.ownerAccountNumber,
+            transaction.ownerAccountNumber,
+          ),
+      ownerAssignmentSource: manualOwner?.ownerAssignmentSource ??
+          _pickExistingText(
+            merged.ownerAssignmentSource,
+            transaction.ownerAssignmentSource,
+          ),
       categoryId: merged.categoryId ?? transaction.categoryId,
       categoryIds: mergedCategoryIds,
       profileId: merged.profileId ?? transaction.profileId,

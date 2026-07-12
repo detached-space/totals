@@ -187,7 +187,7 @@ Account? resolveSmsOwnership({
     return null;
   }
 
-  return resolveAccountOwnership(
+  final resolved = resolveAccountOwnership(
     bank: bank,
     accounts: bankAccounts,
     // Wallet parsers frequently expose the transfer counterparty as the raw
@@ -196,6 +196,17 @@ Account? resolveSmsOwnership({
     parsedAccountHolderName: greetingOwner,
     sourceSubscriptionId: sourceSubscriptionId,
   );
+  if (resolved != null) return resolved;
+
+  // The bank's one user-designated default is the safe destination only after
+  // the message has passed the explicit greeting and "your account" vetoes
+  // above. This handles genuinely generic SMS without swallowing transactions
+  // that clearly name another owner or account.
+  final defaultAccounts = bankAccounts
+      .where((account) => account.isDefault)
+      .toList(growable: false);
+  if (defaultAccounts.length == 1) return defaultAccounts.single;
+  return null;
 }
 
 List<String> _ownerAccountNumbersFromMessage(String messageBody) {

@@ -16,12 +16,14 @@ import 'package:totals/utils/account_identity.dart';
 class TransactionOwnershipUpdate {
   final String reference;
   final String? ownerAccountNumber;
+  final String? ownerAssignmentSource;
   final int? sourceSubscriptionId;
   final String? sourceMessageId;
 
   const TransactionOwnershipUpdate({
     required this.reference,
     required this.ownerAccountNumber,
+    this.ownerAssignmentSource,
     this.sourceSubscriptionId,
     this.sourceMessageId,
   });
@@ -103,6 +105,7 @@ class TransactionRepository {
       'transactionLink': map['transactionLink'],
       'accountNumber': map['accountNumber'],
       'ownerAccountNumber': map['ownerAccountNumber'],
+      'ownerAssignmentSource': map['ownerAssignmentSource'],
       'categoryId': map['categoryId'],
       'categoryIds': map['categoryIds'],
       'profileId': map['profileId'],
@@ -176,6 +179,7 @@ class TransactionRepository {
       'transactionLink': transactionToSave.transactionLink,
       'accountNumber': transactionToSave.accountNumber,
       'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+      'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
       'categoryId': transactionToSave.categoryId,
       'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
           ? null
@@ -275,6 +279,7 @@ class TransactionRepository {
           'transactionLink': transactionToSave.transactionLink,
           'accountNumber': transactionToSave.accountNumber,
           'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+          'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
           'categoryId': transactionToSave.categoryId,
           'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
               ? null
@@ -303,6 +308,7 @@ class TransactionRepository {
         'sourceMessageId': transactionToSave.sourceMessageId,
         'sourceFingerprint': transactionToSave.sourceFingerprint,
         'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+        'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
       }));
     }
 
@@ -317,6 +323,7 @@ class TransactionRepository {
   Future<bool> updateTransactionOwnership({
     required String reference,
     required String ownerAccountNumber,
+    required String ownerAssignmentSource,
     int? sourceSubscriptionId,
     String? sourceMessageId,
   }) async {
@@ -329,8 +336,23 @@ class TransactionRepository {
       args.add(activeProfileId);
     }
 
+    final existingRows = await db.query(
+      'transactions',
+      columns: const <String>['ownerAssignmentSource'],
+      where: where.join(' AND '),
+      whereArgs: args,
+      limit: 1,
+    );
+    if (existingRows.isNotEmpty &&
+        existingRows.single['ownerAssignmentSource'] ==
+            Transaction.manualOwnerAssignment &&
+        ownerAssignmentSource != Transaction.manualOwnerAssignment) {
+      return false;
+    }
+
     final values = <String, Object?>{
       'ownerAccountNumber': ownerAccountNumber,
+      'ownerAssignmentSource': ownerAssignmentSource,
       if (sourceSubscriptionId != null && sourceSubscriptionId >= 0)
         'sourceSubscriptionId': sourceSubscriptionId,
       if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty)
@@ -354,6 +376,7 @@ class TransactionRepository {
         ? <String, dynamic>{
             'reference': reference,
             'ownerAccountNumber': ownerAccountNumber,
+            'ownerAssignmentSource': ownerAssignmentSource,
           }
         : Map<String, dynamic>.from(currentRows.single)
       ..remove('sourceSubscriptionId');
@@ -403,8 +426,15 @@ class TransactionRepository {
         previousRowsByReference[reference] = Map<String, dynamic>.from(row);
       }
     }
+    final updatesToApply = deduped.values.where((update) {
+      final previous = previousRowsByReference[update.reference];
+      final previousSource = previous?['ownerAssignmentSource']?.toString();
+      return previousSource != Transaction.manualOwnerAssignment ||
+          update.ownerAssignmentSource == Transaction.manualOwnerAssignment;
+    }).toList(growable: false);
+    if (updatesToApply.isEmpty) return 0;
     final batch = db.batch();
-    for (final update in deduped.values) {
+    for (final update in updatesToApply) {
       final where = <String>['reference = ?'];
       final args = <Object?>[update.reference];
       if (activeProfileId != null) {
@@ -415,6 +445,8 @@ class TransactionRepository {
         'transactions',
         <String, Object?>{
           'ownerAccountNumber': update.ownerAccountNumber,
+          if (update.ownerAssignmentSource != null)
+            'ownerAssignmentSource': update.ownerAssignmentSource,
           // Clearing a disproven owner must also clear its SIM shortcut;
           // otherwise read-time ownership would immediately assign it again.
           if (update.ownerAccountNumber == null)
@@ -435,7 +467,7 @@ class TransactionRepository {
     // delete against the old snapshot first; the current-row upsert below will
     // then recreate it only for broader rules that still match (for example,
     // the whole bank).
-    for (final update in deduped.values) {
+    for (final update in updatesToApply) {
       if (update.ownerAccountNumber != null) continue;
       final previous = previousRowsByReference[update.reference];
       if (previous == null) continue;
@@ -449,12 +481,15 @@ class TransactionRepository {
     }
 
     final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
-    for (final update in deduped.values) {
+    for (final update in updatesToApply) {
       final row = Map<String, dynamic>.from(
         previousRowsByReference[update.reference] ??
             <String, dynamic>{'reference': update.reference},
       );
       row['ownerAccountNumber'] = update.ownerAccountNumber;
+      if (update.ownerAssignmentSource != null) {
+        row['ownerAssignmentSource'] = update.ownerAssignmentSource;
+      }
       if (update.ownerAccountNumber == null) {
         row['sourceSubscriptionId'] = null;
       } else if (update.sourceSubscriptionId != null &&
@@ -471,7 +506,7 @@ class TransactionRepository {
       entity: SyncEntity.transactions,
       records: syncRecords,
     );
-    return deduped.length;
+    return updatesToApply.length;
   }
 
   Future<void> clearAll() async {

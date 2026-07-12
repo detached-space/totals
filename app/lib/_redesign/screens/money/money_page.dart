@@ -48,6 +48,12 @@ enum _TopTab { activity, accounts }
 
 enum _SubTab { transactions, analytics, ledger }
 
+enum _AccountMenuAction {
+  viewTransactions,
+  reparse,
+  delete,
+}
+
 enum _AnalyticsHeatmapMode { all, expense, income }
 
 enum _AnalyticsHeatmapView { daily, monthly }
@@ -3361,9 +3367,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   syncProgress: syncProgress,
                   onOpenTransactions: () =>
                       _openAccountTransactionsPage(account),
-                  isReparsing: isReparsing,
-                  onDelete:
-                      isCash ? null : () => _showDeleteConfirmation(account),
+                  onOpenMenu: () => _showAccountActions(
+                    provider,
+                    account,
+                    isBusy: isReparsing,
+                  ),
                   onCashExpense: isCash ? _showCashExpenseSheet : null,
                   onCashIncome: isCash ? _showCashIncomeSheet : null,
                   onSetCashAmount: isCash ? _showSetCashAmountSheet : null,
@@ -3383,6 +3391,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   onTap: () => _openUnmatchedTransactionsPage(
                     provider,
                     _selectedBankId!,
+                  ),
+                  onAddAccount: () => _showAddAccountSheet(
+                    bankId: _selectedBankId,
                   ),
                 ),
               if (_selectedBankId != CashConstants.bankId &&
@@ -3757,6 +3768,140 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         ),
       ),
     );
+  }
+
+  Future<void> _showAccountActions(
+    TransactionProvider provider,
+    AccountSummary account, {
+    required bool isBusy,
+  }) async {
+    final isCash = account.bankId == CashConstants.bankId;
+    final action = await showModalBottomSheet<_AccountMenuAction>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AccountActionsSheet(
+        account: account,
+        isCash: isCash,
+        isBusy: isBusy,
+        bankAccountCount: provider.accountSummaries
+            .where((candidate) => candidate.bankId == account.bankId)
+            .length,
+        onIncludeChanged: (include) => _updateAccountPreferences(
+          provider,
+          account,
+          includeInTotals: include,
+          successMessage: include
+              ? 'Account included in total balance.'
+              : 'Account excluded from total balance.',
+        ),
+        onDormantChanged: (dormant) => _updateAccountPreferences(
+          provider,
+          account,
+          isDormant: dormant,
+          successMessage: dormant
+              ? 'Account marked as dormant and excluded from totals.'
+              : 'Account marked as active.',
+        ),
+        onSetDefault: () => _setDefaultAccount(provider, account),
+      ),
+    );
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case _AccountMenuAction.viewTransactions:
+        _openAccountTransactionsPage(account);
+        break;
+      case _AccountMenuAction.reparse:
+        await _openAccountsReparseSheet(
+          provider,
+          <AccountSummary>[account],
+          provider.getBankName(account.bankId),
+        );
+        break;
+      case _AccountMenuAction.delete:
+        _showDeleteConfirmation(account);
+        break;
+    }
+  }
+
+  Future<bool> _updateAccountPreferences(
+    TransactionProvider provider,
+    AccountSummary account, {
+    bool? includeInTotals,
+    bool? isDormant,
+    required String successMessage,
+  }) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final changed = await provider.updateAccountPreferences(
+        bankId: account.bankId,
+        accountNumber: account.accountNumber,
+        includeInTotals: includeInTotals,
+        isDormant: isDormant,
+      );
+      if (!mounted) return changed;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              changed ? successMessage : 'Account settings were not changed.',
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return changed;
+    } catch (error) {
+      if (!mounted) return false;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update account')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return false;
+    }
+  }
+
+  Future<bool> _setDefaultAccount(
+    TransactionProvider provider,
+    AccountSummary account,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final changed = await provider.setDefaultAccount(
+        bankId: account.bankId,
+        accountNumber: account.accountNumber,
+      );
+      if (!mounted) return changed;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              changed
+                  ? 'Default account updated.'
+                  : 'Default account was not changed.',
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return changed;
+    } catch (error) {
+      if (!mounted) return false;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update account')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return false;
+    }
   }
 
   Future<void> _openUnmatchedTransactionsPage(
@@ -13032,6 +13177,7 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
   final bool showAmounts;
   final String? accountHolderName;
   final VoidCallback onTap;
+  final VoidCallback onAddAccount;
 
   const _UnmatchedTransactionsCard({
     required this.transactionCount,
@@ -13040,6 +13186,7 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
     required this.showAmounts,
     required this.accountHolderName,
     required this.onTap,
+    required this.onAddAccount,
   });
 
   @override
@@ -13112,10 +13259,14 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Icon(
-                    AppIcons.chevron_right_rounded,
-                    color: AppColors.textSecondary(context),
-                    size: 22,
+                  IconButton(
+                    onPressed: onAddAccount,
+                    tooltip: context.l10nText('Add account'),
+                    icon: const Icon(
+                      AppIcons.add_rounded,
+                      color: AppColors.primaryLight,
+                      size: 22,
+                    ),
                   ),
                 ],
               ),
@@ -13259,6 +13410,270 @@ class _UnmatchedTransactionsNotice extends StatelessWidget {
   }
 }
 
+class _AccountActionsSheet extends StatefulWidget {
+  final AccountSummary account;
+  final bool isCash;
+  final bool isBusy;
+  final int bankAccountCount;
+  final Future<bool> Function(bool include) onIncludeChanged;
+  final Future<bool> Function(bool dormant) onDormantChanged;
+  final Future<bool> Function() onSetDefault;
+
+  const _AccountActionsSheet({
+    required this.account,
+    required this.isCash,
+    required this.isBusy,
+    required this.bankAccountCount,
+    required this.onIncludeChanged,
+    required this.onDormantChanged,
+    required this.onSetDefault,
+  });
+
+  @override
+  State<_AccountActionsSheet> createState() => _AccountActionsSheetState();
+}
+
+class _AccountActionsSheetState extends State<_AccountActionsSheet> {
+  late bool _includeInTotals;
+  late bool _isDormant;
+  late bool _isDefault;
+  bool _isUpdating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _includeInTotals = widget.account.includeInTotals;
+    _isDormant = widget.account.isDormant;
+    _isDefault = widget.account.isDefault;
+  }
+
+  void _select(BuildContext context, _AccountMenuAction action) {
+    Navigator.pop(context, action);
+  }
+
+  Future<void> _toggleTotals() async {
+    if (_isUpdating || _isDormant) return;
+    final next = !_includeInTotals;
+    setState(() => _isUpdating = true);
+    final changed = await widget.onIncludeChanged(next);
+    if (!mounted) return;
+    setState(() {
+      if (changed) _includeInTotals = next;
+      _isUpdating = false;
+    });
+  }
+
+  Future<void> _toggleDormant() async {
+    if (_isUpdating) return;
+    final next = !_isDormant;
+    setState(() => _isUpdating = true);
+    final changed = await widget.onDormantChanged(next);
+    if (!mounted) return;
+    setState(() {
+      if (changed) {
+        _isDormant = next;
+        if (next) _includeInTotals = false;
+      }
+      _isUpdating = false;
+    });
+  }
+
+  Future<void> _setDefault() async {
+    if (_isUpdating || _isDefault) return;
+    setState(() => _isUpdating = true);
+    final changed = await widget.onSetDefault();
+    if (!mounted) return;
+    setState(() {
+      if (changed) _isDefault = true;
+      _isUpdating = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.paddingOf(context).bottom + 16;
+    final accountLabel = widget.isCash
+        ? context.l10nText('Cash Wallet')
+        : widget.account.accountNumber;
+    final holderLabel = widget.isCash
+        ? context.l10nText('Personal funds')
+        : widget.account.accountHolderName;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPadding),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.borderColor(context),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            accountLabel,
+            style: TextStyle(
+              color: AppColors.textPrimary(context),
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            holderLabel,
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _AccountActionTile(
+            icon: AppIcons.receipt_long_rounded,
+            label: 'View transactions',
+            onTap: () => _select(
+              context,
+              _AccountMenuAction.viewTransactions,
+            ),
+          ),
+          if (!widget.isCash) ...[
+            _AccountActionTile(
+              icon: AppIcons.refresh,
+              label: widget.isBusy
+                  ? 'Reparse in progress'
+                  : 'Reparse transactions',
+              onTap: widget.isBusy
+                  ? null
+                  : () => _select(context, _AccountMenuAction.reparse),
+            ),
+            _AccountActionTile(
+              icon: _includeInTotals
+                  ? AppIcons.visibility_off_outlined
+                  : AppIcons.visibility_outlined,
+              label: _isDormant
+                  ? 'Excluded while account is dormant'
+                  : _includeInTotals
+                      ? 'Exclude from total balance'
+                      : 'Include in total balance',
+              onTap: _isUpdating || _isDormant ? null : _toggleTotals,
+            ),
+            _AccountActionTile(
+              icon: _isDormant
+                  ? AppIcons.check_circle_rounded
+                  : AppIcons.schedule_rounded,
+              label: _isDormant
+                  ? 'Mark account as active'
+                  : 'Mark account as dormant',
+              onTap: _isUpdating ? null : _toggleDormant,
+            ),
+            _AccountActionTile(
+              icon: _isDefault
+                  ? AppIcons.check_circle_rounded
+                  : AppIcons.account_balance_outlined,
+              label: _isDefault || widget.bankAccountCount == 1
+                  ? 'Default account'
+                  : 'Set as default',
+              onTap: _isUpdating || _isDefault || widget.bankAccountCount == 1
+                  ? null
+                  : _setDefault,
+            ),
+            Divider(color: AppColors.borderColor(context), height: 20),
+            _AccountActionTile(
+              icon: AppIcons.delete_outline_rounded,
+              label: 'Remove Account',
+              color: AppColors.red,
+              onTap: widget.isBusy || _isUpdating
+                  ? null
+                  : () => _select(context, _AccountMenuAction.delete),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountActionTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+  final VoidCallback? onTap;
+
+  const _AccountActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final effectiveColor = (color ?? AppColors.textPrimary(context))
+        .withValues(alpha: enabled ? 1 : 0.4);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      minLeadingWidth: 24,
+      leading: Icon(icon, color: effectiveColor, size: 21),
+      title: Text(
+        context.l10nText(label),
+        style: TextStyle(
+          color: effectiveColor,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _AccountStatusBadge extends StatelessWidget {
+  final String label;
+  final IconData icon;
+
+  const _AccountStatusBadge({
+    required this.label,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: AppColors.primaryLight),
+          const SizedBox(width: 4),
+          Text(
+            context.l10nText(label),
+            style: const TextStyle(
+              color: AppColors.primaryLight,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AccountCard extends StatelessWidget {
   final AccountSummary account;
   final int bankId;
@@ -13267,9 +13682,8 @@ class _AccountCard extends StatelessWidget {
   final int transactionCount;
   final String? syncStatus;
   final double? syncProgress;
-  final bool isReparsing;
   final VoidCallback onOpenTransactions;
-  final VoidCallback? onDelete;
+  final VoidCallback onOpenMenu;
   final VoidCallback? onCashExpense;
   final VoidCallback? onCashIncome;
   final VoidCallback? onSetCashAmount;
@@ -13283,9 +13697,8 @@ class _AccountCard extends StatelessWidget {
     required this.transactionCount,
     required this.syncStatus,
     required this.syncProgress,
-    this.isReparsing = false,
     required this.onOpenTransactions,
-    this.onDelete,
+    required this.onOpenMenu,
     this.onCashExpense,
     this.onCashIncome,
     this.onSetCashAmount,
@@ -13311,8 +13724,6 @@ class _AccountCard extends StatelessWidget {
         : '${(normalizedProgress * 100).round()}%';
     final primaryValueLabel =
         syncStatus != null ? (syncPercentLabel ?? '0%') : balanceLabel;
-    final isBusy = isReparsing || syncStatus != null;
-    final canDelete = onDelete != null && !isBusy;
 
     final accountLabel =
         isCash ? context.l10nText('On-hand cash') : account.accountNumber;
@@ -13382,13 +13793,44 @@ class _AccountCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ],
+                            if (!isCash &&
+                                (account.isDormant ||
+                                    !account.includeInTotals ||
+                                    account.isDefault)) ...[
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: [
+                                  if (account.isDormant)
+                                    const _AccountStatusBadge(
+                                      label: 'Dormant',
+                                      icon: AppIcons.schedule_rounded,
+                                    ),
+                                  if (!account.includeInTotals)
+                                    const _AccountStatusBadge(
+                                      label: 'Excluded from totals',
+                                      icon: AppIcons.visibility_off_outlined,
+                                    ),
+                                  if (account.isDefault)
+                                    const _AccountStatusBadge(
+                                      label: 'Default',
+                                      icon: AppIcons.check_circle_rounded,
+                                    ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
-                      Icon(
-                        AppIcons.chevron_right_rounded,
-                        color: AppColors.textSecondary(context),
-                        size: 22,
+                      IconButton(
+                        onPressed: onOpenMenu,
+                        tooltip: context.l10nText('Account options'),
+                        icon: Icon(
+                          AppIcons.more_vert,
+                          color: AppColors.textSecondary(context),
+                          size: 22,
+                        ),
                       ),
                     ],
                   ),
@@ -13493,39 +13935,6 @@ class _AccountCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (onDelete != null) ...[
-                    const SizedBox(height: 14),
-                    Container(height: 1, color: AppColors.borderColor(context)),
-                    if (onDelete != null) ...[
-                      const SizedBox(height: 12),
-                      GestureDetector(
-                        onTap: canDelete ? onDelete : null,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              AppIcons.delete_outline_rounded,
-                              size: 16,
-                              color: AppColors.red.withValues(
-                                alpha: canDelete ? 0.7 : 0.35,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              context.l10nText('Remove Account'),
-                              style: TextStyle(
-                                color: AppColors.red.withValues(
-                                  alpha: canDelete ? 0.7 : 0.35,
-                                ),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
                   // Cash wallet actions – always visible below the card
                   if (isCash) ...[
                     const SizedBox(height: 12),

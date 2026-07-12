@@ -1228,6 +1228,7 @@ class SmsService {
       );
       if (resolvedOwner != null) {
         details['ownerAccountNumber'] = resolvedOwner.accountNumber;
+        details['ownerAssignmentSource'] = Transaction.automaticOwnerAssignment;
         if (sourceSubscriptionId != null && sourceSubscriptionId >= 0) {
           details['sourceSubscriptionId'] = sourceSubscriptionId;
           // Learn a SIM binding only from explicit owner context. Parsed wallet
@@ -1266,6 +1267,7 @@ class SmsService {
         await txRepo.updateTransactionOwnership(
           reference: smsSourceDuplicate.reference,
           ownerAccountNumber: resolvedOwner.accountNumber,
+          ownerAssignmentSource: Transaction.automaticOwnerAssignment,
           sourceSubscriptionId: sourceSubscriptionId,
           sourceMessageId: sourceMessageId?.toString(),
         );
@@ -1287,6 +1289,7 @@ class SmsService {
         await txRepo.updateTransactionOwnership(
           reference: newRef,
           ownerAccountNumber: resolvedOwner.accountNumber,
+          ownerAssignmentSource: Transaction.automaticOwnerAssignment,
           sourceSubscriptionId: sourceSubscriptionId,
           sourceMessageId: sourceMessageId?.toString(),
         );

@@ -508,6 +508,7 @@ class _AddCashTransactionContentState
         currentBalance: remainingBalance.toStringAsFixed(2),
         accountNumber: selectedAccount.accountNumber,
         ownerAccountNumber: selectedAccount.accountNumber,
+        ownerAssignmentSource: Transaction.manualOwnerAssignment,
         categoryId:
             selectedCategoryIds.isEmpty ? null : selectedCategoryIds.first,
         categoryIds: selectedCategoryIds.isEmpty ? null : selectedCategoryIds,

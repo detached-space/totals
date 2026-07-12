@@ -307,6 +307,7 @@ class TransactionsHandler {
       'transactionLink': transaction.transactionLink,
       'accountNumber': transaction.accountNumber,
       'ownerAccountNumber': transaction.ownerAccountNumber,
+      'ownerAssignmentSource': transaction.ownerAssignmentSource,
       'categoryId': transaction.categoryId,
       'categoryIds': transaction.selectedCategoryIds.isEmpty
           ? null

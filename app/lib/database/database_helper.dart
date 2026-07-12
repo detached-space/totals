@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 29,
+        version: 31,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV29Schema(db);
+      await _validateV31Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -121,7 +121,8 @@ class DatabaseHelper {
         sourceType TEXT,
         sourceMessageId TEXT,
         sourceFingerprint TEXT,
-        sourceSubscriptionId INTEGER
+        sourceSubscriptionId INTEGER,
+        ownerAssignmentSource TEXT
       )
     ''');
 
@@ -177,6 +178,9 @@ class DatabaseHelper {
         pendingCredit REAL,
         profileId INTEGER,
         smsSubscriptionId INTEGER,
+        includeInTotals INTEGER NOT NULL DEFAULT 1,
+        isDormant INTEGER NOT NULL DEFAULT 0,
+        isDefault INTEGER NOT NULL DEFAULT 0,
         UNIQUE(accountNumber, bank)
       )
     ''');
@@ -320,6 +324,11 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX idx_accounts_smsSubscriptionId ON accounts(bank, smsSubscriptionId)',
     );
+    await db.execute('''
+      CREATE UNIQUE INDEX idx_accounts_one_default_per_bank
+      ON accounts(bank, COALESCE(profileId, -1))
+      WHERE isDefault = 1
+    ''');
     await db.execute(
       'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)',
     );
@@ -343,11 +352,36 @@ class DatabaseHelper {
       if (newVersion >= 29) {
         await _migrateV28ToV29(db);
       }
+      if (newVersion >= 30) {
+        await _migrateV29ToV30(db);
+      }
+      if (newVersion >= 31) {
+        await _migrateV30ToV31(db);
+      }
       return;
     }
 
     if (oldVersion < 29) {
       await _migrateV28ToV29(db);
+      if (newVersion >= 30) {
+        await _migrateV29ToV30(db);
+      }
+      if (newVersion >= 31) {
+        await _migrateV30ToV31(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 30) {
+      await _migrateV29ToV30(db);
+      if (newVersion >= 31) {
+        await _migrateV30ToV31(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 31) {
+      await _migrateV30ToV31(db);
       return;
     }
 
@@ -906,6 +940,51 @@ class DatabaseHelper {
       );
     });
     await _runV28Stage('v29 final validation', () => _validateV29Schema(db));
+  }
+
+  Future<void> _migrateV29ToV30(Database db) async {
+    await _runV28Stage('v30 account preferences', () async {
+      await _v28EnsureColumns(db, 'accounts', {
+        'includeInTotals':
+            'ALTER TABLE accounts ADD COLUMN includeInTotals INTEGER NOT NULL DEFAULT 1',
+        'isDormant':
+            'ALTER TABLE accounts ADD COLUMN isDormant INTEGER NOT NULL DEFAULT 0',
+      });
+    });
+    await _runV28Stage('v30 final validation', () => _validateV30Schema(db));
+  }
+
+  Future<void> _migrateV30ToV31(Database db) async {
+    await _runV28Stage('v31 account assignment controls', () async {
+      await _v28EnsureColumns(db, 'accounts', {
+        'isDefault':
+            'ALTER TABLE accounts ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0',
+      });
+      await _v28EnsureColumns(db, 'transactions', {
+        'ownerAssignmentSource':
+            'ALTER TABLE transactions ADD COLUMN ownerAssignmentSource TEXT',
+      });
+
+      // Every bank starts with one deterministic default. When more accounts
+      // are added, this first account remains the default until the user
+      // explicitly changes it.
+      await db.execute('UPDATE accounts SET isDefault = 0');
+      await db.execute('''
+        UPDATE accounts
+        SET isDefault = 1
+        WHERE id IN (
+          SELECT MIN(id)
+          FROM accounts
+          GROUP BY bank, COALESCE(profileId, -1)
+        )
+      ''');
+      await db.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_default_per_bank
+        ON accounts(bank, COALESCE(profileId, -1))
+        WHERE isDefault = 1
+      ''');
+    });
+    await _runV28Stage('v31 final validation', () => _validateV31Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -1793,6 +1872,39 @@ class DatabaseHelper {
     final accountColumns = await _v28Columns(db, 'accounts');
     if (!accountColumns.contains('smsSubscriptionId')) {
       throw StateError('v29 invariant accounts missing smsSubscriptionId');
+    }
+  }
+
+  Future<void> _validateV30Schema(Database db) async {
+    await _validateV29Schema(db);
+    final accountColumns = await _v28Columns(db, 'accounts');
+    const requiredAccountColumns = {'includeInTotals', 'isDormant'};
+    final missingAccountColumns =
+        requiredAccountColumns.difference(accountColumns);
+    if (missingAccountColumns.isNotEmpty) {
+      throw StateError(
+        'v30 invariant accounts missing ${missingAccountColumns.join(', ')}',
+      );
+    }
+  }
+
+  Future<void> _validateV31Schema(Database db) async {
+    await _validateV30Schema(db);
+    final accountColumns = await _v28Columns(db, 'accounts');
+    if (!accountColumns.contains('isDefault')) {
+      throw StateError('v31 invariant accounts missing isDefault');
+    }
+    final transactionColumns = await _v28Columns(db, 'transactions');
+    if (!transactionColumns.contains('ownerAssignmentSource')) {
+      throw StateError(
+        'v31 invariant transactions missing ownerAssignmentSource',
+      );
+    }
+    final accountIndexes = (await db.rawQuery("PRAGMA index_list('accounts')"))
+        .map((row) => row['name'])
+        .toSet();
+    if (!accountIndexes.contains('idx_accounts_one_default_per_bank')) {
+      throw StateError('v31 invariant default-account index missing');
     }
   }
 

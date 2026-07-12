@@ -27,6 +27,9 @@ class AccountSummary {
   final double settledBalance;
   final double pendingCredit;
   final double balance;
+  final bool includeInTotals;
+  final bool isDormant;
+  final bool isDefault;
   AccountSummary(
       {required this.bankId,
       required this.accountNumber,
@@ -36,7 +39,10 @@ class AccountSummary {
       required this.totalDebit,
       required this.settledBalance,
       required this.balance,
-      required this.pendingCredit});
+      required this.pendingCredit,
+      this.includeInTotals = true,
+      this.isDormant = false,
+      this.isDefault = false});
 }
 
 class AllSummary {

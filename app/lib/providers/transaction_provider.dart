@@ -358,6 +358,8 @@ class TransactionProvider with ChangeNotifier {
     final cashComparison = _compareCashFirst(a.bankId, b.bankId);
     if (cashComparison != 0) return cashComparison;
 
+    if (a.isDormant != b.isDormant) return a.isDormant ? 1 : -1;
+
     final holderComparison = _normalizedSortText(
       a.accountHolderName,
     ).compareTo(_normalizedSortText(b.accountHolderName));
@@ -801,6 +803,9 @@ class TransactionProvider with ChangeNotifier {
         settledBalance: account.settledBalance ?? 0.0,
         balance: accountBalance,
         pendingCredit: account.pendingCredit ?? 0.0,
+        includeInTotals: account.includeInTotals,
+        isDormant: account.isDormant,
+        isDefault: account.isDefault,
       );
       for (final transaction in accountTransactions) {
         accountSummaryByTransactionReference[transaction.reference] = summary;
@@ -850,14 +855,16 @@ class TransactionProvider with ChangeNotifier {
       double pendingCredit =
           accounts.fold(0.0, (sum, a) => sum + (a.pendingCredit ?? 0.0));
       final isCashBank = bankId == CashConstants.bankId;
-      final hasSingleNonCashAccount = !isCashBank && accounts.length == 1;
+      final includedAccounts = accounts
+          .where((account) => account.includeInTotals && !account.isDormant)
+          .toList();
       final totalBalance = isCashBank
-          ? accounts.fold(0.0, (sum, a) => sum + a.balance) + cashBalance
-          : hasSingleNonCashAccount
-              ? resolvedAccountBalances[
-                      accountBalanceResolverKey(accounts.first)] ??
-                  accounts.first.balance
-              : accounts.fold(0.0, (sum, a) => sum + a.balance);
+          ? includedAccountBalanceTotal(accounts: includedAccounts) +
+              (includedAccounts.isEmpty ? 0.0 : cashBalance)
+          : includedAccountBalanceTotal(
+              accounts: includedAccounts,
+              resolvedBalances: resolvedAccountBalances,
+            );
 
       return BankSummary(
         bankId: bankId,
@@ -1468,6 +1475,37 @@ class TransactionProvider with ChangeNotifier {
     return formatNumberWithComma(rounded).replaceFirst(RegExp(r'\\.00$'), '');
   }
 
+  Future<bool> updateAccountPreferences({
+    required int bankId,
+    required String accountNumber,
+    bool? includeInTotals,
+    bool? isDormant,
+  }) async {
+    final changed = await _accountRepo.updateAccountPreferences(
+      accountNumber: accountNumber,
+      bank: bankId,
+      includeInTotals: includeInTotals,
+      isDormant: isDormant,
+    );
+    if (!changed) return false;
+    await loadData();
+    await WidgetService.refreshWidget();
+    return true;
+  }
+
+  Future<bool> setDefaultAccount({
+    required int bankId,
+    required String accountNumber,
+  }) async {
+    final changed = await _accountRepo.setDefaultAccount(
+      accountNumber: accountNumber,
+      bank: bankId,
+    );
+    if (!changed) return false;
+    await loadData();
+    return true;
+  }
+
   Future<double> setCashWalletBalance({
     required double targetBalance,
     required String accountNumber,
@@ -1660,6 +1698,30 @@ class TransactionProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<Transaction> updateAccountForTransaction(
+    Transaction transaction,
+    String ownerAccountNumber,
+  ) async {
+    final normalizedOwner = ownerAccountNumber.trim();
+    if (normalizedOwner.isEmpty) {
+      throw ArgumentError('Account number cannot be empty');
+    }
+    final updated = transaction.copyWith(
+      ownerAccountNumber: normalizedOwner,
+      ownerAssignmentSource: Transaction.manualOwnerAssignment,
+    );
+    final changed = await _transactionRepo.updateTransactionOwnership(
+      reference: transaction.reference,
+      ownerAccountNumber: normalizedOwner,
+      ownerAssignmentSource: Transaction.manualOwnerAssignment,
+    );
+    if (!changed) {
+      throw StateError('Transaction could not be assigned to that account');
+    }
+    await loadData();
+    return updated;
+  }
+
   Future<void> updateCounterpartyForTransaction(
     Transaction transaction,
     String? counterparty,
@@ -1685,6 +1747,7 @@ class TransactionProvider with ChangeNotifier {
       transactionLink: transaction.transactionLink,
       accountNumber: transaction.accountNumber,
       ownerAccountNumber: transaction.ownerAccountNumber,
+      ownerAssignmentSource: transaction.ownerAssignmentSource,
       categoryId: transaction.categoryId,
       categoryIds: transaction.categoryIds,
       profileId: transaction.profileId,
