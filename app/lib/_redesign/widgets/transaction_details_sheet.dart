@@ -1017,7 +1017,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
             _DetailRow(
               label: 'Source SMS',
               value: collapsedValue,
-              marquee: true,
               onTap: () => setState(
                 () => _sourceSmsExpanded = !_sourceSmsExpanded,
               ),
@@ -1529,7 +1528,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       _DetailRow(
                         label: 'Reference',
                         value: _tx.displayReference,
-                        marquee: true,
                         onTap: () {
                           unawaited(_handleReferenceTap());
                         },
@@ -1538,7 +1536,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       _DetailRow(
                         label: 'Account',
                         value: _accountLabel,
-                        marquee: true,
                         onTap: _canEditAccount ? _toggleAccountPicker : null,
                         trailingIcon: _canEditAccount
                             ? (_accountExpanded
@@ -1644,8 +1641,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Widget _buildNoteSection() {
     final theme = Theme.of(context);
-    final valueColumnWidth =
-        (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+    final valueColumnWidth = _detailValueColumnWidth(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1709,8 +1705,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Widget _buildCategoryRow(Category? category) {
     final theme = Theme.of(context);
-    final valueColumnWidth =
-        (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+    final valueColumnWidth = _detailValueColumnWidth(context);
     final categoryLabel = context.l10nText(
       _provider.categoryLabelForTransaction(
         _tx,
@@ -2228,6 +2223,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
 const double _kLabelWidth = 110;
 
+double _detailValueColumnWidth(BuildContext context) {
+  return (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+}
+
 class _CategoryColorOption {
   final String key;
   final Color color;
@@ -2265,14 +2264,12 @@ const List<_CategoryColorOption> _kCategoryColorOptions = [
 class _DetailRow extends StatelessWidget {
   final String label;
   final String value;
-  final bool marquee;
   final VoidCallback? onTap;
   final IconData? trailingIcon;
 
   const _DetailRow({
     required this.label,
     required this.value,
-    this.marquee = false,
     this.onTap,
     this.trailingIcon,
   });
@@ -2280,6 +2277,7 @@ class _DetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final valueColumnWidth = _detailValueColumnWidth(context);
     final valueStyle = theme.textTheme.bodyMedium?.copyWith(
       color: AppColors.textPrimary(context),
       fontWeight: FontWeight.w600,
@@ -2309,26 +2307,24 @@ class _DetailRow extends StatelessWidget {
               ),
             ),
             const Spacer(),
-            if (marquee)
-              Flexible(
-                child: _MarqueeText(text: value, style: valueStyle),
-              )
-            else
-              Flexible(
-                child: Text(
-                  value,
-                  textAlign: TextAlign.end,
-                  style: valueStyle,
-                ),
+            SizedBox(
+              width: valueColumnWidth,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _MarqueeText(text: value, style: valueStyle),
+                  ),
+                  if (trailingIcon != null) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      trailingIcon,
+                      size: 18,
+                      color: AppColors.textSecondary(context),
+                    ),
+                  ],
+                ],
               ),
-            if (trailingIcon != null) ...[
-              const SizedBox(width: 6),
-              Icon(
-                trailingIcon,
-                size: 18,
-                color: AppColors.textSecondary(context),
-              ),
-            ],
+            ),
           ],
         ),
       ),

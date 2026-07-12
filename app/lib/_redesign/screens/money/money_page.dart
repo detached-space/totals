@@ -3249,6 +3249,22 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final accounts = isOverview
         ? <AccountSummary>[]
         : accountSummaries.where((a) => a.bankId == _selectedBankId).toList();
+    if (!isOverview) {
+      accounts.sort((left, right) {
+        if (left.isDefault != right.isDefault) {
+          return left.isDefault ? -1 : 1;
+        }
+        return compareAccountDisplayFields(
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) => _localizedBankLabel(context, bankId),
+        );
+      });
+    }
     final isSelectedBankSyncing = !isOverview &&
         (syncStatusService.hasAnyAccountSyncing(_selectedBankId!) ||
             accounts.any(
@@ -3817,7 +3833,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           account,
           isDormant: dormant,
           successMessage: dormant
-              ? 'Account marked as dormant and excluded from totals.'
+              ? 'Account marked as dormant and excluded from total balance.'
               : 'Account marked as active.',
         ),
         onSetDefault: () => _setDefaultAccount(provider, account),
@@ -13970,6 +13986,7 @@ class _AccountCard extends StatelessWidget {
         : '${(normalizedProgress * 100).round()}%';
     final primaryValueLabel =
         syncStatus != null ? (syncPercentLabel ?? '0%') : balanceLabel;
+    final showPrimaryValue = syncStatus != null || !account.isDormant;
 
     final accountLabel =
         isCash ? context.l10nText('On-hand cash') : account.accountNumber;
@@ -14055,7 +14072,7 @@ class _AccountCard extends StatelessWidget {
                                     ),
                                   if (!account.includeInTotals)
                                     const _AccountStatusBadge(
-                                      label: 'Excluded from totals',
+                                      label: 'Excluded from total balance',
                                       icon: AppIcons.visibility_off_outlined,
                                     ),
                                   if (account.isDefault)
@@ -14080,28 +14097,32 @@ class _AccountCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const SizedBox(width: 56),
-                      Text(
-                        primaryValueLabel,
-                        style: TextStyle(
-                          color: syncStatus != null
-                              ? AppColors.primaryLight
-                              : showBalance
-                                  ? (AppColors.isDark(context)
-                                      ? AppColors.slate400
-                                      : AppColors.slate700)
-                                  : AppColors.textSecondary(context),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing:
-                              (syncPercentLabel != null || showBalance) ? 0 : 2,
+                  if (showPrimaryValue) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const SizedBox(width: 56),
+                        Text(
+                          primaryValueLabel,
+                          style: TextStyle(
+                            color: syncStatus != null
+                                ? AppColors.primaryLight
+                                : showBalance
+                                    ? (AppColors.isDark(context)
+                                        ? AppColors.slate400
+                                        : AppColors.slate700)
+                                    : AppColors.textSecondary(context),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing:
+                                (syncPercentLabel != null || showBalance)
+                                    ? 0
+                                    : 2,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   Container(height: 1, color: AppColors.borderColor(context)),
                   const SizedBox(height: 12),
