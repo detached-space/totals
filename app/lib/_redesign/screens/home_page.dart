@@ -24,6 +24,7 @@ import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/screens/todays_transactions_page.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
@@ -744,9 +745,7 @@ Map<String, double> _deriveCashBalancesForHomeBreakdown({
   if (cashTransactions.isEmpty) return const <String, double>{};
 
   final netCashDelta = cashTransactions.fold<double>(0.0, (sum, transaction) {
-    if (transaction.type == 'DEBIT') return sum - transaction.amount;
-    if (transaction.type == 'CREDIT') return sum + transaction.amount;
-    return sum;
+    return sum + transactionBalanceDelta(transaction);
   });
 
   // Account balances are stored as present totals; reverse the transaction
@@ -766,11 +765,7 @@ Map<String, double> _deriveCashBalancesForHomeBreakdown({
 
   final derived = <String, double>{};
   for (final transaction in byTimeAsc) {
-    if (transaction.type == 'DEBIT') {
-      rollingBalance -= transaction.amount;
-    } else if (transaction.type == 'CREDIT') {
-      rollingBalance += transaction.amount;
-    }
+    rollingBalance += transactionBalanceDelta(transaction);
 
     final parsed = double.tryParse(transaction.currentBalance ?? '');
     if (parsed != null) {

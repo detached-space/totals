@@ -19,14 +19,16 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
-import 'package:totals/services/telebirr_bank_transfer_service.dart';
+import 'package:totals/services/owned_account_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
+import 'package:totals/utils/account_reconciliation.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 class TransactionTotals {
   final double income;
@@ -171,8 +173,8 @@ class TransactionProvider with ChangeNotifier {
   final BudgetAlertService _budgetAlertService = BudgetAlertService();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
-  final TelebirrBankTransferService _telebirrMatchService =
-      TelebirrBankTransferService();
+  final OwnedAccountTransferService _ownedAccountTransferService =
+      OwnedAccountTransferService();
 
   List<Transaction> _transactions = [];
   List<Account> _accounts = [];
@@ -509,7 +511,7 @@ class TransactionProvider with ChangeNotifier {
     final existing = _selfTransferLabelByReference[transaction.reference];
     if (existing != null) return existing;
     if (_isManualSelfCategory(transaction)) {
-      return transaction.type == 'CREDIT' ? 'to self' : 'from self';
+      return transaction.type == 'CREDIT' ? 'from self' : 'to self';
     }
     return null;
   }
@@ -598,11 +600,7 @@ class TransactionProvider with ChangeNotifier {
         CashConstants.bankId: CashConstants.bankShortName,
         for (final bank in banks) bank.id: bank.shortName,
       };
-      final labels = _buildSelfTransferLabels(
-        _telebirrMatchService.findMatches(_allTransactions, banks),
-      );
-      labels.addAll(_buildCashTransferLabels(_allTransactions));
-      _selfTransferLabelByReference = labels;
+      _rebuildSelfTransferLabels(_allTransactions, banks);
 
       await _calculateSummaries(_allTransactions);
       _filterTransactions(_allTransactions);
@@ -756,22 +754,34 @@ class TransactionProvider with ChangeNotifier {
       double totalDebit = 0.0;
       double totalCredit = 0.0;
       double cashBalance = 0.0;
+      double transferIn = 0.0;
+      double transferOut = 0.0;
+      double feesAndVat = 0.0;
       for (var t in accountTransactions) {
-        double amount = t.amount;
-        final skip = _categoryById[t.categoryId]?.uncategorized == true;
-        if (t.type == "DEBIT") {
-          cashBalance -= amount;
-          if (!skip) {
-            totalDebit += amount;
-          }
+        final isSelfTransfer = _isSelfTransfer(t);
+        final feeAmount = transactionFeeAmount(t);
+        cashBalance += transactionBalanceDelta(t);
+        if (t.type == 'DEBIT') {
+          feesAndVat += feeAmount;
         }
-        if (t.type == "CREDIT") {
-          cashBalance += amount;
-          if (!skip) {
-            totalCredit += amount;
-          }
+        totalCredit += transactionIncomeAmount(
+          t,
+          isSelfTransfer: isSelfTransfer,
+        );
+        totalDebit += transactionExpenseAmount(
+          t,
+          isSelfTransfer: isSelfTransfer,
+        );
+        if (isSelfTransfer && t.type == 'CREDIT') {
+          transferIn += t.amount.abs();
+        } else if (isSelfTransfer && t.type == 'DEBIT') {
+          transferOut += t.amount.abs();
         }
       }
+
+      final reconciliation = account.bank == CashConstants.bankId
+          ? null
+          : reconcileAccountTransactions(accountTransactions);
 
       final isCashAccount = account.bank == CashConstants.bankId;
       final bankAccountCount = bankAccounts.length;
@@ -798,6 +808,22 @@ class TransactionProvider with ChangeNotifier {
         includeInTotals: account.includeInTotals,
         isDormant: account.isDormant,
         isDefault: account.isDefault,
+        transferIn: transferIn,
+        transferOut: transferOut,
+        feesAndVat: feesAndVat,
+        reconciliationOpeningBalance: reconciliation?.openingBalance,
+        reconciliationClosingBalance: reconciliation?.closingBalance,
+        reconciliationExpectedClosingBalance:
+            reconciliation?.expectedClosingBalance,
+        unreconciledAdjustment: reconciliation?.adjustment ?? 0.0,
+        reconciliationMismatchCount: reconciliation?.mismatchCount ?? 0,
+        reconciliationTransactionReferences:
+            reconciliation?.mismatchedTransactionReferences.toList(
+                  growable: false,
+                ) ??
+                const <String>[],
+        reconciliationMismatchPeriods: reconciliation?.mismatchPeriods ??
+            const <ReconciliationMismatchPeriod>[],
       );
       for (final transaction in accountTransactions) {
         accountSummaryByTransactionReference[transaction.reference] = summary;
@@ -821,26 +847,49 @@ class TransactionProvider with ChangeNotifier {
       // Filter transactions for this bank (using valid transactions only)
       final bankTransactions =
           validTransactions.where((t) => t.bankId == bankId).toList();
-
-      double totalDebit = 0.0;
-      double totalCredit = 0.0;
-      double cashBalance = 0.0;
-
-      for (var t in bankTransactions) {
-        double amount = t.amount;
-        final skip = _categoryById[t.categoryId]?.uncategorized == true;
-        if (t.type == "DEBIT") {
-          cashBalance -= amount;
-          if (!skip) {
-            totalDebit += amount;
-          }
-        } else if (t.type == "CREDIT") {
-          cashBalance += amount;
-          if (!skip) {
-            totalCredit += amount;
-          }
-        }
-      }
+      final bankAccountSummaries = _accountSummaries
+          .where((summary) => summary.bankId == bankId)
+          .toList(growable: false);
+      final totalDebit = bankAccountSummaries.fold<double>(
+        0.0,
+        (sum, summary) => sum + summary.totalDebit,
+      );
+      final totalCredit = bankAccountSummaries.fold<double>(
+        0.0,
+        (sum, summary) => sum + summary.totalCredit,
+      );
+      final transferIn = bankAccountSummaries.fold<double>(
+        0.0,
+        (sum, summary) => sum + summary.transferIn,
+      );
+      final transferOut = bankAccountSummaries.fold<double>(
+        0.0,
+        (sum, summary) => sum + summary.transferOut,
+      );
+      final feesAndVat = bankAccountSummaries.fold<double>(
+        0.0,
+        (sum, summary) => sum + summary.feesAndVat,
+      );
+      final unreconciledAdjustment = bankAccountSummaries.fold<double>(
+        0.0,
+        (sum, summary) => sum + summary.unreconciledAdjustment,
+      );
+      final reconciliationMismatchCount = bankAccountSummaries.fold<int>(
+        0,
+        (sum, summary) => sum + summary.reconciliationMismatchCount,
+      );
+      final reconciliationTransactionReferences = <String>{
+        for (final summary in bankAccountSummaries)
+          ...summary.reconciliationTransactionReferences,
+      }.toList(growable: false);
+      final reconciliationMismatchPeriods = <ReconciliationMismatchPeriod>[
+        for (final summary in bankAccountSummaries)
+          ...summary.reconciliationMismatchPeriods,
+      ];
+      final cashBalance = bankTransactions.fold<double>(
+        0.0,
+        (sum, transaction) => sum + transactionBalanceDelta(transaction),
+      );
 
       double settledBalance =
           accounts.fold(0.0, (sum, a) => sum + (a.settledBalance ?? 0.0));
@@ -866,6 +915,14 @@ class TransactionProvider with ChangeNotifier {
         pendingCredit: pendingCredit,
         totalBalance: totalBalance,
         accountCount: accounts.length,
+        transferIn: transferIn,
+        transferOut: transferOut,
+        feesAndVat: feesAndVat,
+        unreconciledAdjustment: unreconciledAdjustment,
+        reconciliationMismatchCount: reconciliationMismatchCount,
+        reconciliationTransactionReferences:
+            reconciliationTransactionReferences,
+        reconciliationMismatchPeriods: reconciliationMismatchPeriods,
       );
     }).toList();
     _bankSummaries.sort(_compareBankSummaries);
@@ -878,6 +935,31 @@ class TransactionProvider with ChangeNotifier {
     double grandTotalBalance = _bankSummaries
         .where((bank) => bank.bankId != CashConstants.bankId)
         .fold(0.0, (sum, bank) => sum + bank.totalBalance);
+    final grandTransferIn =
+        _bankSummaries.fold<double>(0.0, (sum, bank) => sum + bank.transferIn);
+    final grandTransferOut = _bankSummaries.fold<double>(
+      0.0,
+      (sum, bank) => sum + bank.transferOut,
+    );
+    final grandFeesAndVat = _bankSummaries.fold<double>(
+      0.0,
+      (sum, bank) => sum + bank.feesAndVat,
+    );
+    final grandUnreconciledAdjustment = _bankSummaries.fold<double>(
+      0.0,
+      (sum, bank) => sum + bank.unreconciledAdjustment,
+    );
+    final grandReconciliationMismatchCount = _bankSummaries.fold<int>(
+      0,
+      (sum, bank) => sum + bank.reconciliationMismatchCount,
+    );
+    final grandReconciliationTransactionReferences = <String>{
+      for (final bank in _bankSummaries)
+        ...bank.reconciliationTransactionReferences,
+    }.toList(growable: false);
+    final grandReconciliationMismatchPeriods = <ReconciliationMismatchPeriod>[
+      for (final bank in _bankSummaries) ...bank.reconciliationMismatchPeriods,
+    ];
 
     _summary = AllSummary(
       totalCredit: grandTotalCredit,
@@ -885,6 +967,14 @@ class TransactionProvider with ChangeNotifier {
       banks: groupedAccounts.length,
       accounts: _accounts.length,
       totalBalance: grandTotalBalance,
+      transferIn: grandTransferIn,
+      transferOut: grandTransferOut,
+      feesAndVat: grandFeesAndVat,
+      unreconciledAdjustment: grandUnreconciledAdjustment,
+      reconciliationMismatchCount: grandReconciliationMismatchCount,
+      reconciliationTransactionReferences:
+          grandReconciliationTransactionReferences,
+      reconciliationMismatchPeriods: grandReconciliationMismatchPeriods,
     );
   }
 
@@ -978,6 +1068,10 @@ class TransactionProvider with ChangeNotifier {
   }
 
   Future<void> _recomputeAfterTransactionMutation() async {
+    _rebuildSelfTransferLabels(
+      _allTransactions,
+      await _bankConfigService.getBanks(),
+    );
     await _calculateSummaries(_allTransactions);
     _filterTransactions(_allTransactions);
     _recomputeRedesignHomeMetrics(_allTransactions);
@@ -985,15 +1079,22 @@ class TransactionProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  Map<String, String> _buildSelfTransferLabels(
-    List<TelebirrBankTransferMatch> matches,
+  void _rebuildSelfTransferLabels(
+    List<Transaction> transactions,
+    List<Bank> banks,
   ) {
     final labels = <String, String>{};
+    final matches = _ownedAccountTransferService.findMatches(
+      transactions: transactions,
+      banks: banks,
+      accounts: _accounts,
+    );
     for (final match in matches) {
-      labels[match.telebirrTransaction.reference] = 'from self';
-      labels[match.bankTransaction.reference] = 'to self';
+      labels[match.debitTransaction.reference] = 'to self';
+      labels[match.creditTransaction.reference] = 'from self';
     }
-    return labels;
+    labels.addAll(_buildCashTransferLabels(transactions));
+    _selfTransferLabelByReference = labels;
   }
 
   Map<String, String> _buildCashTransferLabels(
@@ -1093,87 +1194,65 @@ class TransactionProvider with ChangeNotifier {
         monthHasTransactions[monthOffset] = true;
       }
 
-      final isMisc =
-          _categoryById[transaction.categoryId]?.uncategorized == true;
-
-      if (isSelfTransfer || isMisc) continue;
-
       final isCredit = transaction.type == 'CREDIT';
       final isDebit = transaction.type == 'DEBIT';
       if (!isCredit && !isDebit) continue;
 
-      final amount = transaction.amount;
+      final incomeAmount = transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      final expenseAmount = transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
       final category = _categoryById[transaction.categoryId];
 
       if (isToday) {
-        if (isCredit) {
-          todayIncome += amount;
-        } else {
-          todayExpense += amount;
-        }
+        todayIncome += incomeAmount;
+        todayExpense += expenseAmount;
       }
 
       if (isWeek) {
-        if (isCredit) {
-          weekIncome += amount;
-        } else {
-          weekExpense += amount;
-        }
+        weekIncome += incomeAmount;
+        weekExpense += expenseAmount;
 
         final weekIndex = dateOnly.difference(weekStart).inDays;
         if (weekIndex >= 0 && weekIndex < 7) {
-          if (isCredit) {
-            weekIncomeBuckets[weekIndex] += amount;
-          } else {
-            weekExpenseBuckets[weekIndex] += amount;
-          }
+          weekIncomeBuckets[weekIndex] += incomeAmount;
+          weekExpenseBuckets[weekIndex] += expenseAmount;
         }
       }
 
       if (isMonth) {
-        if (isCredit) {
-          monthIncome += amount;
-        } else {
-          monthExpense += amount;
-        }
+        monthIncome += incomeAmount;
+        monthExpense += expenseAmount;
       }
 
       if (isLast30) {
-        if (isCredit) {
-          thirtyDayIncome += amount;
-        } else {
-          thirtyDayExpense += amount;
-        }
+        thirtyDayIncome += incomeAmount;
+        thirtyDayExpense += expenseAmount;
 
         final monthIndex = dateOnly.difference(last30Start).inDays;
         if (monthIndex >= 0 && monthIndex < 30) {
-          if (isCredit) {
-            monthIncomeBuckets[monthIndex] += amount;
-          } else {
-            monthExpenseBuckets[monthIndex] += amount;
-          }
+          monthIncomeBuckets[monthIndex] += incomeAmount;
+          monthExpenseBuckets[monthIndex] += expenseAmount;
         }
       }
 
       if (monthOffset >= 0 && monthOffset <= 3) {
-        monthNetByOffset[monthOffset] += isCredit ? amount : -amount;
-        if (isCredit) {
-          healthMonthIncomeByOffset[monthOffset] += amount;
-        } else {
-          healthMonthExpenseByOffset[monthOffset] += amount;
-        }
+        monthNetByOffset[monthOffset] += incomeAmount - expenseAmount;
+        healthMonthIncomeByOffset[monthOffset] += incomeAmount;
+        healthMonthExpenseByOffset[monthOffset] += expenseAmount;
       }
 
       if (isLast90) {
-        if (isCredit) {
-          ninetyDayIncome += amount;
-        } else {
-          ninetyDayExpense += amount;
-          if (category != null && !category.uncategorized) {
-            ninetyDayCategorizedExpense += amount;
-            if (category.essential) {
-              ninetyDayEssentialExpense += amount;
-            }
+        ninetyDayIncome += incomeAmount;
+        ninetyDayExpense += expenseAmount;
+        if (expenseAmount > 0 && category != null && !category.uncategorized) {
+          ninetyDayCategorizedExpense += expenseAmount;
+          if (category.essential) {
+            ninetyDayEssentialExpense += expenseAmount;
           }
         }
       }

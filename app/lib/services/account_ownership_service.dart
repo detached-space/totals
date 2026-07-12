@@ -10,6 +10,7 @@ import 'package:totals/services/background_refresh_signal_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/account_balance_refresh.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/sms_message_classifier.dart';
 import 'package:totals/utils/sms_transaction_source.dart';
@@ -477,27 +478,13 @@ class AccountOwnershipService {
     for (final account in accounts) {
       final bank = bankById[account.bank];
       if (bank == null || bank.simBased != true) continue;
-      Transaction? latest;
-      DateTime? latestTime;
-      for (final transaction in transactions) {
-        if (!registeredAccountNumbersMatch(
-          bank,
-          transaction.ownerAccountNumber,
-          account.accountNumber,
-        )) {
-          continue;
-        }
-        final parsedBalance = _parseBalance(transaction.currentBalance);
-        if (parsedBalance == null) continue;
-        final transactionTime = DateTime.tryParse(transaction.time ?? '');
-        if (latest == null ||
-            (transactionTime != null &&
-                (latestTime == null || transactionTime.isAfter(latestTime)))) {
-          latest = transaction;
-          latestTime = transactionTime;
-        }
-      }
-      final balance = _parseBalance(latest?.currentBalance);
+      final balance = resolveRefreshedAccountBalance(
+        account: account,
+        bank: bank,
+        accounts: accounts,
+        banksById: bankById,
+        transactions: transactions,
+      );
       if (balance == null || (balance - account.balance).abs() < 0.0001) {
         continue;
       }
@@ -514,11 +501,5 @@ class AccountOwnershipService {
       didChange = true;
     }
     return didChange;
-  }
-
-  double? _parseBalance(String? raw) {
-    final value = raw?.trim().replaceAll(',', '');
-    if (value == null || value.isEmpty) return null;
-    return double.tryParse(value);
   }
 }

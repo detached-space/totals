@@ -23,12 +23,16 @@ import 'package:totals/services/bank_detection_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/account_reconciliation.dart';
+import 'package:totals/utils/reconciliation_ledger_filter.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
+import 'package:totals/_redesign/widgets/credit_debit_breakdown_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:kenat/kenat.dart';
@@ -2260,6 +2264,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       showIncome: activeSupportContext.showIncome,
     );
     final moneyFlowSnapshot = _buildAnalyticsMoneyFlowSnapshot(
+      provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
       periodKey: activeSupportContext.periodKey,
@@ -2571,7 +2576,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var largestDeposit = 0.0;
 
     for (final transaction in transactions) {
-      final isCredit = transaction.type == 'CREDIT';
       final isDebit = transaction.type == 'DEBIT';
       final dt = _parseTransactionTime(transaction.time);
       final isWithinAnchorMonth =
@@ -2582,24 +2586,31 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       }
 
       totalTransactions += 1;
-      totalFees +=
-          (transaction.serviceCharge ?? 0.0) + (transaction.vat ?? 0.0);
+      totalFees += transactionFeeAmount(transaction);
 
-      final isSelfTransfer =
-          isDebit ? provider.isSelfTransfer(transaction) : false;
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      final incomeAmount = transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      final expenseAmount = transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
       final category = transaction.categoryId == null
           ? null
           : provider.getCategoryById(transaction.categoryId!);
       final isMisc = category?.uncategorized == true;
 
-      if (isCredit) {
-        totalIncome += transaction.amount;
+      if (incomeAmount > 0) {
+        totalIncome += incomeAmount;
         incomeCount += 1;
-        largestDeposit = math.max(largestDeposit, transaction.amount);
-      } else if (isDebit) {
-        totalExpense += transaction.amount;
+        largestDeposit = math.max(largestDeposit, incomeAmount);
+      }
+      if (expenseAmount > 0) {
+        totalExpense += expenseAmount;
         expenseCount += 1;
-        largestExpense = math.max(largestExpense, transaction.amount);
+        largestExpense = math.max(largestExpense, expenseAmount);
       }
 
       if (isDebit && !isSelfTransfer && !isMisc) {
@@ -2609,7 +2620,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           recipient,
           () => _AnalyticsRecipientAccumulator(),
         );
-        existing.amount += transaction.amount;
+        existing.amount += expenseAmount;
         existing.count += 1;
       }
 
@@ -2620,31 +2631,30 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
               .getEthiopian()['day']!
           : dt.day;
 
-      if (isCredit) {
-        byDayIncome[day] = (byDayIncome[day] ?? 0.0) + transaction.amount;
-        byDayNet[day] = (byDayNet[day] ?? 0.0) + transaction.amount;
-      } else if (isDebit) {
-        byDayExpense[day] = (byDayExpense[day] ?? 0.0) + transaction.amount;
-        byDayNet[day] = (byDayNet[day] ?? 0.0) - transaction.amount;
-      }
+      byDayIncome[day] = (byDayIncome[day] ?? 0.0) + incomeAmount;
+      byDayExpense[day] = (byDayExpense[day] ?? 0.0) + expenseAmount;
+      byDayNet[day] = (byDayNet[day] ?? 0.0) + incomeAmount - expenseAmount;
 
-      final includeBubbleCategory =
-          categoryMode == _AnalyticsHeatmapMode.income ? isCredit : isDebit;
-      final skipBubbleCategory = categoryMode == _AnalyticsHeatmapMode.income
-          ? isMisc
-          : isSelfTransfer || isMisc;
+      final includeBubbleCategory = categoryMode == _AnalyticsHeatmapMode.income
+          ? incomeAmount > 0
+          : isDebit && expenseAmount > 0;
 
-      if (includeBubbleCategory && !skipBubbleCategory) {
-        final categoryName = (category?.name.trim().isNotEmpty ?? false)
-            ? category!.name.trim()
-            : 'Other';
+      if (includeBubbleCategory) {
+        final categoryName = isSelfTransfer
+            ? 'Fees & VAT'
+            : !isMisc && (category?.name.trim().isNotEmpty ?? false)
+                ? category!.name.trim()
+                : 'Other';
+        final categoryAmount = categoryMode == _AnalyticsHeatmapMode.income
+            ? incomeAmount
+            : expenseAmount;
         categoryTotals[categoryName] =
-            (categoryTotals[categoryName] ?? 0.0) + transaction.amount;
+            (categoryTotals[categoryName] ?? 0.0) + categoryAmount;
       }
 
-      if (isDebit && !isSelfTransfer && !isMisc) {
+      if (isDebit && expenseAmount > 0) {
         final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
-        weekdayExpenseTotals[weekdayIndex] += transaction.amount;
+        weekdayExpenseTotals[weekdayIndex] += expenseAmount;
       }
     }
 
@@ -2731,18 +2741,19 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (dt == null) continue;
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final category = transaction.categoryId == null
-          ? null
-          : provider.getCategoryById(transaction.categoryId!);
-      final isMisc = category?.uncategorized == true;
-      if (showIncome) {
-        if (isSelfTransfer) continue;
-      } else {
-        if (isSelfTransfer || isMisc) continue;
-      }
+      final amount = showIncome
+          ? transactionIncomeAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            )
+          : transactionExpenseAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            );
+      if (amount <= 0) continue;
 
       final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
-      weekdayExpenseTotals[weekdayIndex] += transaction.amount;
+      weekdayExpenseTotals[weekdayIndex] += amount;
     }
 
     var peakWeekdayIndex = 0;
@@ -2784,15 +2795,22 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       }
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final category = transaction.categoryId == null
-          ? null
-          : provider.getCategoryById(transaction.categoryId!);
-      final isMisc = category?.uncategorized == true;
       if (showIncome) {
         if (isSelfTransfer) continue;
       } else {
-        if (isSelfTransfer || isMisc) continue;
+        if (isSelfTransfer) continue;
       }
+
+      final amount = showIncome
+          ? transactionIncomeAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            )
+          : transactionExpenseAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            );
+      if (amount <= 0) continue;
 
       recipientExpenseCount += 1;
       final recipient = _transactionCounterparty(transaction);
@@ -2800,7 +2818,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         recipient,
         () => _AnalyticsRecipientAccumulator(),
       );
-      existing.amount += transaction.amount;
+      existing.amount += amount;
       existing.count += 1;
     }
 
@@ -2826,7 +2844,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
-  _AnalyticsMoneyFlowSnapshot _buildAnalyticsMoneyFlowSnapshot({
+  _AnalyticsMoneyFlowSnapshot _buildAnalyticsMoneyFlowSnapshot(
+    TransactionProvider provider, {
     required List<Transaction> transactions,
     required String periodLabel,
     required String periodKey,
@@ -2839,13 +2858,19 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       totalTransactions += 1;
-      if (transaction.type == 'CREDIT') {
-        totalIncome += transaction.amount;
-        largestDeposit = math.max(largestDeposit, transaction.amount);
-      } else if (transaction.type == 'DEBIT') {
-        totalExpense += transaction.amount;
-        largestExpense = math.max(largestExpense, transaction.amount);
-      }
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      final incomeAmount = transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      final expenseAmount = transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      totalIncome += incomeAmount;
+      totalExpense += expenseAmount;
+      largestDeposit = math.max(largestDeposit, incomeAmount);
+      largestExpense = math.max(largestExpense, expenseAmount);
     }
 
     final netCashFlow = totalIncome - totalExpense;
@@ -2981,7 +3006,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         final oldestBal = _parseRunningBalance(oldest.currentBalance);
         if (oldestBal != null) {
           if (oldest.type == 'DEBIT') {
-            startingBalance = oldestBal + oldest.amount;
+            startingBalance = oldestBal + transactionDebitOutflow(oldest);
           } else {
             startingBalance = oldestBal - oldest.amount;
           }
@@ -3147,7 +3172,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
 
     final filtered = _filterTransactions(provider, provider.allTransactions);
-    final summary = _summarizeActivityTransactions(filtered);
+    final summary = _summarizeActivityTransactions(provider, filtered);
     final sorted = List<Transaction>.from(filtered)
       ..sort((a, b) {
         final aTime = _parseTransactionTime(a.time);
@@ -3190,17 +3215,22 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   _ActivityTransactionsSummary _summarizeActivityTransactions(
+    TransactionProvider provider,
     List<Transaction> transactions,
   ) {
     var totalIncome = 0.0;
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      if (transaction.type == 'CREDIT') {
-        totalIncome += transaction.amount;
-      } else if (transaction.type == 'DEBIT') {
-        totalExpense += transaction.amount;
-      }
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      totalIncome += transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      totalExpense += transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
     }
 
     return _ActivityTransactionsSummary(
@@ -3225,7 +3255,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final accountCount = summary?.accounts ?? 0;
     final totalCredit = summary?.totalCredit ?? 0.0;
     final totalDebit = summary?.totalDebit ?? 0.0;
-    final totalTxnCount = provider.allTransactions.length;
+    final totalTxnCount = accountSummaries.fold<int>(
+      0,
+      (sum, account) => sum + account.totalTransactions.toInt(),
+    );
 
     // Bank detail data
     BankSummary? bankSummary;
@@ -3276,21 +3309,24 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var unmatchedCredit = 0.0;
     var unmatchedDebit = 0.0;
     for (final transaction in unmatchedTransactions) {
-      if (provider.getCategoryById(transaction.categoryId)?.uncategorized ==
-          true) {
-        continue;
-      }
       if (transaction.type == 'CREDIT') {
-        unmatchedCredit += transaction.amount;
+        unmatchedCredit += transactionIncomeAmount(
+          transaction,
+          isSelfTransfer: provider.isSelfTransfer(transaction),
+        );
       } else if (transaction.type == 'DEBIT') {
-        unmatchedDebit += transaction.amount;
+        unmatchedDebit += transactionExpenseAmount(
+          transaction,
+          isSelfTransfer: provider.isSelfTransfer(transaction),
+        );
       }
     }
     final bankTxnCount = isOverview
         ? 0
-        : provider.allTransactions
-            .where((t) => t.bankId == _selectedBankId)
-            .length;
+        : accounts.fold<int>(
+            0,
+            (sum, account) => sum + account.totalTransactions.toInt(),
+          );
     final selectedBankTotalBalance = bankSummary?.totalBalance ?? 0.0;
     final selectedBankAccountCount = bankSummary?.accountCount ?? 0;
     final selectedBankCredit = bankSummary?.totalCredit ?? 0.0;
@@ -3308,7 +3344,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             'Account',
             'Accounts',
           );
-
     return RefreshIndicator(
       color: AppColors.primaryLight,
       onRefresh: provider.loadData,
@@ -3325,6 +3360,25 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
               transactionCount: isOverview ? totalTxnCount : bankTxnCount,
               totalCredit: isOverview ? totalCredit : selectedBankCredit,
               totalDebit: isOverview ? totalDebit : selectedBankDebit,
+              transferIn: isOverview
+                  ? summary?.transferIn ?? 0
+                  : bankSummary!.transferIn,
+              transferOut: isOverview
+                  ? summary?.transferOut ?? 0
+                  : bankSummary!.transferOut,
+              feesAndVat: isOverview
+                  ? summary?.feesAndVat ?? 0
+                  : bankSummary!.feesAndVat,
+              unreconciledAdjustment: isOverview
+                  ? summary?.unreconciledAdjustment ?? 0
+                  : bankSummary!.unreconciledAdjustment,
+              reconciliationMismatchCount: isOverview
+                  ? summary?.reconciliationMismatchCount ?? 0
+                  : bankSummary!.reconciliationMismatchCount,
+              reconciliationMismatchPeriods: isOverview
+                  ? summary?.reconciliationMismatchPeriods ??
+                      const <ReconciliationMismatchPeriod>[]
+                  : bankSummary!.reconciliationMismatchPeriods,
               showBalance: _showAccountBalances,
               onToggleBalance: () =>
                   setState(() => _showAccountBalances = !_showAccountBalances),
@@ -4367,9 +4421,7 @@ Map<String, double> _deriveCashBalancesByReference({
   if (cashTransactions.isEmpty) return const <String, double>{};
 
   final netCashDelta = cashTransactions.fold<double>(0.0, (sum, transaction) {
-    if (transaction.type == 'DEBIT') return sum - transaction.amount;
-    if (transaction.type == 'CREDIT') return sum + transaction.amount;
-    return sum;
+    return sum + transactionBalanceDelta(transaction);
   });
 
   // In this codebase, account.balance acts like a base value and transactions
@@ -4389,11 +4441,7 @@ Map<String, double> _deriveCashBalancesByReference({
 
   final derived = <String, double>{};
   for (final transaction in byTimeAsc) {
-    if (transaction.type == 'DEBIT') {
-      rollingBalance -= transaction.amount;
-    } else if (transaction.type == 'CREDIT') {
-      rollingBalance += transaction.amount;
-    }
+    rollingBalance += transactionBalanceDelta(transaction);
 
     final parsed = _parseRunningBalance(transaction.currentBalance);
     if (parsed != null) {
@@ -5543,7 +5591,7 @@ class _ActivityTransactionsSummaryRow extends StatelessWidget {
             TextSpan(
               style: baseStyle,
               children: [
-                TextSpan(text: '${context.l10nText('Outgoing')} '),
+                TextSpan(text: '${context.l10nText('Expenses')} '),
                 TextSpan(
                   text:
                       '-$currencyLabel ${_formatEtbAbbrev(summary.totalExpense)}',
@@ -5556,7 +5604,7 @@ class _ActivityTransactionsSummaryRow extends StatelessWidget {
             TextSpan(
               style: baseStyle,
               children: [
-                TextSpan(text: '${context.l10nText('Incoming')} '),
+                TextSpan(text: '${context.l10nText('Income')} '),
                 TextSpan(
                   text:
                       '+$currencyLabel ${_formatEtbAbbrev(summary.totalIncome)}',
@@ -7451,15 +7499,23 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   }
 
   double _heatmapDelta(Transaction transaction) {
+    final isSelfTransfer =
+        context.read<TransactionProvider>().isSelfTransfer(transaction);
+    final incomeAmount = transactionIncomeAmount(
+      transaction,
+      isSelfTransfer: isSelfTransfer,
+    );
+    final expenseAmount = transactionExpenseAmount(
+      transaction,
+      isSelfTransfer: isSelfTransfer,
+    );
     switch (widget.mode) {
       case _AnalyticsHeatmapMode.all:
-        if (transaction.type == 'CREDIT') return transaction.amount;
-        if (transaction.type == 'DEBIT') return -transaction.amount;
-        return 0.0;
+        return incomeAmount - expenseAmount;
       case _AnalyticsHeatmapMode.expense:
-        return transaction.type == 'DEBIT' ? -transaction.amount : 0.0;
+        return -expenseAmount;
       case _AnalyticsHeatmapMode.income:
-        return transaction.type == 'CREDIT' ? transaction.amount : 0.0;
+        return incomeAmount;
     }
   }
 }
@@ -8934,12 +8990,16 @@ class _AnalyticsLineChartCard extends StatelessWidget {
     for (final transaction in transactions) {
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
-      if (provider.isSelfTransfer(transaction)) continue;
-
-      final category = provider.getCategoryById(transaction.categoryId);
-      if (category?.uncategorized == true) continue;
-
-      final amount = transaction.amount.abs();
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      final amount = transaction.type == 'CREDIT'
+          ? transactionIncomeAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            )
+          : transactionExpenseAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            );
       if (amount <= 0.001) continue;
 
       int? bucketIndex;
@@ -9622,7 +9682,17 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       final isExpense = transaction.type == 'DEBIT';
       if (mode == _AnalyticsHeatmapMode.income && !isIncome) continue;
       if (mode == _AnalyticsHeatmapMode.expense && !isExpense) continue;
-      if (provider.isSelfTransfer(transaction)) continue;
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      final amount = isIncome
+          ? transactionIncomeAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            )
+          : transactionExpenseAmount(
+              transaction,
+              isSelfTransfer: isSelfTransfer,
+            );
+      if (amount <= 0.001) continue;
 
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
@@ -9636,8 +9706,17 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       final categoryName = category?.name.trim() ?? '';
       final isOther =
           category == null || category.uncategorized || categoryName.isEmpty;
-      final label = isOther ? 'Other' : categoryName;
-      final key = isOther ? 'other' : 'category:${category.id}';
+      final isTransferFee = isSelfTransfer && isExpense;
+      final label = isTransferFee
+          ? 'Fees & VAT'
+          : isOther
+              ? 'Other'
+              : categoryName;
+      final key = isTransferFee
+          ? 'fees-and-vat'
+          : isOther
+              ? 'other'
+              : 'category:${category.id}';
       final accumulator = statsByKey.putIfAbsent(
         key,
         () => _AnalyticsBarCategoryAccumulator(
@@ -9647,7 +9726,6 @@ class _AnalyticsBarChartCard extends StatelessWidget {
         ),
       );
 
-      final amount = transaction.amount.abs();
       accumulator.bucketValues[bucketIndex] += amount;
       accumulator.total += amount;
     }
@@ -12000,17 +12078,22 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   }
 
   _ActivityTransactionsSummary _summarizeTransactions(
+    TransactionProvider provider,
     List<Transaction> transactions,
   ) {
     var totalIncome = 0.0;
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      if (transaction.type == 'CREDIT') {
-        totalIncome += transaction.amount;
-      } else if (transaction.type == 'DEBIT') {
-        totalExpense += transaction.amount;
-      }
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      totalIncome += transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      totalExpense += transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
     }
 
     return _ActivityTransactionsSummary(
@@ -12182,11 +12265,10 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   Widget build(BuildContext context) {
     context.watch<ThemeProvider>();
     final theme = Theme.of(context);
-    final bankName = _localizedBankName(context, widget.bankId);
     final accountTitle = widget.account == null
-        ? (widget.unmatchedOnly
-            ? '${context.l10nText('Other transactions')} • $bankName'
-            : bankName)
+        ? widget.unmatchedOnly
+            ? '${context.l10nText('Other transactions')} • ${_localizedBankName(context, widget.bankId)}'
+            : _localizedBankName(context, widget.bankId)
         : '${widget.account!.accountHolderName} • ${widget.account!.accountNumber}';
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
@@ -12203,7 +12285,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
             if (bTime == null) return -1;
             return bTime.compareTo(aTime);
           });
-        final summary = _summarizeTransactions(filtered);
+        final summary = _summarizeTransactions(provider, filtered);
         final totalPages =
             (filtered.length / _itemsPerPage).ceil().clamp(1, 999999);
         final safePage = _currentPage.clamp(0, totalPages - 1);
@@ -12383,6 +12465,1076 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   }
 }
 
+class _ReconciliationLedgerPage extends StatefulWidget {
+  final List<ReconciliationMismatchPeriod> periods;
+
+  const _ReconciliationLedgerPage({required this.periods});
+
+  @override
+  State<_ReconciliationLedgerPage> createState() =>
+      _ReconciliationLedgerPageState();
+}
+
+class _ReconciliationLedgerPageState extends State<_ReconciliationLedgerPage> {
+  ReconciliationLedgerFilter _filter = const ReconciliationLedgerFilter();
+
+  List<ReconciliationLedgerEntry> _buildEntries(
+    TransactionProvider provider,
+    Map<String, Transaction> transactionsByReference,
+  ) {
+    return widget.periods.map((period) {
+      final checkpointTransaction =
+          transactionsByReference[period.checkpointReference];
+      final account = checkpointTransaction == null
+          ? null
+          : provider.accountSummaryForTransaction(checkpointTransaction);
+      return ReconciliationLedgerEntry(
+        period: period,
+        bankId: checkpointTransaction?.bankId,
+        accountKey: account == null ? null : _accountSummaryKey(account),
+      );
+    }).toList(growable: false);
+  }
+
+  Future<void> _openFilterSheet(
+    TransactionProvider provider,
+    List<ReconciliationLedgerEntry> entries,
+  ) async {
+    final bankIds =
+        entries.map((entry) => entry.bankId).whereType<int>().toSet();
+    final accountKeys =
+        entries.map((entry) => entry.accountKey).whereType<String>().toSet();
+    final accounts = provider.accountSummaries
+        .where((account) => accountKeys.contains(_accountSummaryKey(account)))
+        .toList(growable: false);
+    final result = await showModalBottomSheet<ReconciliationLedgerFilter>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ReconciliationLedgerFilterSheet(
+        currentFilter: _filter,
+        bankIds: bankIds.toList(growable: false),
+        accounts: accounts,
+      ),
+    );
+    if (result != null && mounted) setState(() => _filter = result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    context.watch<ThemeProvider>();
+    final provider = context.watch<TransactionProvider>();
+    final transactionsByReference = <String, Transaction>{
+      for (final transaction in provider.allTransactions)
+        transaction.reference: transaction,
+    };
+    final entries = _buildEntries(provider, transactionsByReference);
+    final visibleEntries = filterAndSortReconciliationLedgerEntries(
+      entries: entries,
+      filter: _filter,
+    );
+
+    return Scaffold(
+      backgroundColor: AppColors.background(context),
+      appBar: AppBar(
+        backgroundColor: AppColors.background(context),
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        title: Text(
+          context.l10nText('Balance mismatch ledger'),
+          style: TextStyle(
+            color: AppColors.textPrimary(context),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: _FilterActionButton(
+                onTap: () => _openFilterSheet(provider, entries),
+                activeFilterCount: _filter.activeCount,
+                size: 38,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            8,
+            20,
+            MediaQuery.of(context).padding.bottom + 24,
+          ),
+          children: [
+            Text(
+              context.l10nText(
+                'Each section starts at the previous reported balance and applies every transaction until the balance that did not match.',
+              ),
+              style: TextStyle(
+                color: AppColors.textSecondary(context),
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${visibleEntries.length} ${context.l10nText('of')} ${entries.length} ${context.l10nText('mismatches')}',
+                    style: TextStyle(
+                      color: AppColors.textSecondary(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  context.l10nText(_reconciliationSortLabel(_filter.sort)),
+                  style: const TextStyle(
+                    color: AppColors.primaryLight,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (visibleEntries.isEmpty)
+              _ReconciliationLedgerEmptyState(
+                hasFilters: _filter.isActive,
+                onClear: () => setState(
+                  () => _filter = const ReconciliationLedgerFilter(),
+                ),
+              )
+            else
+              for (var index = 0; index < visibleEntries.length; index++) ...[
+                Builder(
+                  builder: (context) {
+                    final entry = visibleEntries[index];
+                    final period = entry.period;
+                    final periodTransactions = period.transactionReferences
+                        .map((reference) => transactionsByReference[reference])
+                        .whereType<Transaction>()
+                        .toList(growable: false);
+                    final checkpointTransaction =
+                        transactionsByReference[period.checkpointReference];
+                    final account = checkpointTransaction == null
+                        ? null
+                        : provider.accountSummaryForTransaction(
+                            checkpointTransaction);
+                    final bankLabel = checkpointTransaction == null
+                        ? context.l10nText('Account')
+                        : _localizedBankLabel(
+                            context,
+                            checkpointTransaction.bankId,
+                          );
+                    final accountLabel = account == null
+                        ? bankLabel
+                        : _reconciliationAccountLabel(
+                            bankLabel,
+                            account,
+                          );
+
+                    return _ReconciliationPeriodCard(
+                      periodNumber: index + 1,
+                      period: period,
+                      transactions: periodTransactions,
+                      accountLabel: accountLabel,
+                      provider: provider,
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReconciliationPeriodCard extends StatelessWidget {
+  final int periodNumber;
+  final ReconciliationMismatchPeriod period;
+  final List<Transaction> transactions;
+  final String accountLabel;
+  final TransactionProvider provider;
+
+  const _ReconciliationPeriodCard({
+    required this.periodNumber,
+    required this.period,
+    required this.transactions,
+    required this.accountLabel,
+    required this.provider,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    var runningBalance = period.previousReportedBalance;
+    final rows = <Widget>[];
+    for (final transaction in transactions) {
+      runningBalance += transactionBalanceDelta(transaction);
+      rows.add(
+        _ReconciliationTransactionRow(
+          transaction: transaction,
+          expectedBalance: runningBalance,
+          isCheckpoint: transaction.reference == period.checkpointReference,
+          isSelfTransfer: provider.isSelfTransfer(transaction),
+          onTap: () => showTransactionDetailsSheet(
+            context: context,
+            transaction: transaction,
+            provider: provider,
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${context.l10nText('Mismatch')} $periodNumber',
+                  style: const TextStyle(
+                    color: AppColors.amber,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  accountLabel,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _formatDateHeader(period.checkpointTime, context),
+                  style: TextStyle(
+                    color: AppColors.textSecondary(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            color: AppColors.background(context),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        context.l10nText('Previous reported checkpoint'),
+                        style: TextStyle(
+                          color: AppColors.textSecondary(context),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _reconciliationDateTimeLabel(
+                          context,
+                          period.previousCheckpointTime,
+                        ),
+                        style: TextStyle(
+                          color: AppColors.textTertiary(context),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  _formatReconciliationEtb(
+                    context,
+                    period.previousReportedBalance,
+                  ),
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: Text(
+                    context.l10nText('Transaction'),
+                    style: _reconciliationColumnHeaderStyle(context),
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    '${context.l10nText('Credit / Debit')} (${context.l10nText('ETB')})',
+                    textAlign: TextAlign.right,
+                    style: _reconciliationColumnHeaderStyle(context),
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    '${context.l10nText('Expected')} (${context.l10nText('ETB')})',
+                    textAlign: TextAlign.right,
+                    style: _reconciliationColumnHeaderStyle(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (rows.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: Text(
+                context.l10nText(
+                    'The transactions for this period are no longer available.'),
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 13,
+                ),
+              ),
+            )
+          else
+            ...rows,
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.amber.withValues(alpha: 0.08),
+              border: Border(
+                top: BorderSide(color: AppColors.borderColor(context)),
+              ),
+            ),
+            child: Column(
+              children: [
+                _ReconciliationResultRow(
+                  label: 'Expected balance',
+                  value: period.expectedBalance,
+                ),
+                const SizedBox(height: 8),
+                _ReconciliationResultRow(
+                  label: 'Reported balance',
+                  value: period.reportedBalance,
+                ),
+                const SizedBox(height: 10),
+                Container(height: 1, color: AppColors.borderColor(context)),
+                const SizedBox(height: 10),
+                _ReconciliationResultRow(
+                  label: 'Difference',
+                  value: period.difference,
+                  signed: true,
+                  emphasized: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _reconciliationAccountLabel(
+  String bankLabel,
+  AccountSummary account,
+) {
+  final holderName = account.accountHolderName.trim();
+  if (holderName.isEmpty) return '$bankLabel • ${account.accountNumber}';
+  return '$bankLabel • $holderName • ${account.accountNumber}';
+}
+
+String _reconciliationSortLabel(ReconciliationLedgerSort sort) {
+  switch (sort) {
+    case ReconciliationLedgerSort.newest:
+      return 'Newest first';
+    case ReconciliationLedgerSort.oldest:
+      return 'Oldest first';
+    case ReconciliationLedgerSort.largestDifference:
+      return 'Largest difference';
+  }
+}
+
+class _ReconciliationLedgerEmptyState extends StatelessWidget {
+  final bool hasFilters;
+  final VoidCallback onClear;
+
+  const _ReconciliationLedgerEmptyState({
+    required this.hasFilters,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Column(
+        children: [
+          Text(
+            context.l10nText(
+              hasFilters
+                  ? 'No balance mismatches match these filters.'
+                  : 'No balance mismatches found.',
+            ),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontSize: 14,
+            ),
+          ),
+          if (hasFilters) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: onClear,
+              child: Text(context.l10nText('Clear filters')),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReconciliationLedgerFilterSheet extends StatefulWidget {
+  final ReconciliationLedgerFilter currentFilter;
+  final List<int> bankIds;
+  final List<AccountSummary> accounts;
+
+  const _ReconciliationLedgerFilterSheet({
+    required this.currentFilter,
+    required this.bankIds,
+    required this.accounts,
+  });
+
+  @override
+  State<_ReconciliationLedgerFilterSheet> createState() =>
+      _ReconciliationLedgerFilterSheetState();
+}
+
+class _ReconciliationLedgerFilterSheetState
+    extends State<_ReconciliationLedgerFilterSheet> {
+  late ReconciliationLedgerSort _sort;
+  DateTime? _startDate;
+  DateTime? _endDate;
+  late Set<int> _selectedBankIds;
+  String? _selectedAccountKey;
+  ReconciliationDifferenceDirection? _direction;
+
+  @override
+  void initState() {
+    super.initState();
+    final current = widget.currentFilter;
+    _sort = current.sort;
+    _startDate = current.startDate;
+    _endDate = current.endDate;
+    _selectedBankIds = current.bankIds.toSet();
+    _selectedAccountKey = widget.accounts.any(
+      (account) => _accountSummaryKey(account) == current.accountKey,
+    )
+        ? current.accountKey
+        : null;
+    _direction = current.direction;
+  }
+
+  List<int> get _orderedBankIds {
+    final ids = widget.bankIds.toList(growable: false);
+    ids.sort(
+      (left, right) => compareDisplayText(
+        _localizedBankLabel(context, left),
+        _localizedBankLabel(context, right),
+      ),
+    );
+    return ids;
+  }
+
+  List<AccountSummary> get _visibleAccounts {
+    final accounts = _selectedBankIds.isEmpty
+        ? widget.accounts
+        : widget.accounts.where(
+            (account) => _selectedBankIds.contains(account.bankId),
+          );
+    return _sortedAccountSummariesForDisplay(accounts, context);
+  }
+
+  void _toggleBank(int bankId) {
+    setState(() {
+      _selectedAccountKey = null;
+      if (!_selectedBankIds.add(bankId)) _selectedBankIds.remove(bankId);
+    });
+  }
+
+  void _selectAccount(String? accountKey) {
+    setState(() {
+      _selectedAccountKey = accountKey;
+      if (accountKey != null) _selectedBankIds.clear();
+    });
+  }
+
+  void _clearAll() {
+    setState(() {
+      _sort = ReconciliationLedgerSort.newest;
+      _startDate = null;
+      _endDate = null;
+      _selectedBankIds = <int>{};
+      _selectedAccountKey = null;
+      _direction = null;
+    });
+  }
+
+  void _apply() {
+    Navigator.of(context).pop(
+      ReconciliationLedgerFilter(
+        sort: _sort,
+        startDate: _startDate,
+        endDate: _endDate,
+        bankIds: _selectedBankIds.toSet(),
+        accountKey: _selectedAccountKey,
+        direction: _direction,
+      ),
+    );
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final initial = (isStart ? _startDate : _endDate) ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (pickerContext, child) {
+        final dark = AppColors.isDark(pickerContext);
+        return Theme(
+          data: Theme.of(pickerContext).copyWith(
+            colorScheme: dark
+                ? const ColorScheme.dark(
+                    primary: AppColors.primaryLight,
+                    onPrimary: AppColors.white,
+                    surface: AppColors.darkCard,
+                    onSurface: AppColors.white,
+                  )
+                : const ColorScheme.light(
+                    primary: AppColors.primaryDark,
+                    onPrimary: AppColors.white,
+                    surface: AppColors.white,
+                    onSurface: AppColors.slate900,
+                  ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (isStart) {
+        _startDate = picked;
+        if (_endDate != null && _endDate!.isBefore(picked)) {
+          _endDate = null;
+        }
+      } else {
+        _endDate = picked;
+        if (_startDate != null && _startDate!.isAfter(picked)) {
+          _startDate = null;
+        }
+      }
+    });
+  }
+
+  String _accountLabel(AccountSummary account) {
+    return _reconciliationAccountLabel(
+      _localizedBankLabel(context, account.bankId),
+      account,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 10),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.slate400,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    context.l10nText('Order & filter ledger'),
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(
+                    AppIcons.close,
+                    color: AppColors.textSecondary(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                12,
+                20,
+                16 + bottomInset + safeBottom,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionLabel('ORDER BY'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final sort in ReconciliationLedgerSort.values)
+                        _FilterChip(
+                          label: _reconciliationSortLabel(sort),
+                          selected: _sort == sort,
+                          onTap: () => setState(() => _sort = sort),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  _sectionLabel('DIFFERENCE'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _FilterChip(
+                        label: 'All differences',
+                        selected: _direction == null,
+                        onTap: () => setState(() => _direction = null),
+                      ),
+                      _FilterChip(
+                        label: 'Reported balance is lower',
+                        selected: _direction ==
+                            ReconciliationDifferenceDirection.reportedLower,
+                        onTap: () => setState(
+                          () => _direction =
+                              ReconciliationDifferenceDirection.reportedLower,
+                        ),
+                      ),
+                      _FilterChip(
+                        label: 'Reported balance is higher',
+                        selected: _direction ==
+                            ReconciliationDifferenceDirection.reportedHigher,
+                        onTap: () => setState(
+                          () => _direction =
+                              ReconciliationDifferenceDirection.reportedHigher,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  _sectionLabel('DATE RANGE'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DatePickerField(
+                          hint: 'Start date',
+                          value: _startDate == null
+                              ? null
+                              : _formatDateHeader(_startDate!, context),
+                          onTap: () => _pickDate(isStart: true),
+                          onClear: _startDate == null
+                              ? null
+                              : () => setState(() => _startDate = null),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _DatePickerField(
+                          hint: 'End date',
+                          value: _endDate == null
+                              ? null
+                              : _formatDateHeader(_endDate!, context),
+                          onTap: () => _pickDate(isStart: false),
+                          onClear: _endDate == null
+                              ? null
+                              : () => setState(() => _endDate = null),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (widget.bankIds.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('BANK'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _FilterChip(
+                          label: 'All Banks',
+                          selected: _selectedBankIds.isEmpty,
+                          onTap: () => setState(() {
+                            _selectedBankIds.clear();
+                          }),
+                        ),
+                        for (final bankId in _orderedBankIds)
+                          _FilterChip(
+                            label: _localizedBankLabel(context, bankId),
+                            selected: _selectedBankIds.contains(bankId),
+                            onTap: () => _toggleBank(bankId),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (widget.accounts.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('ACCOUNT'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Transform.translate(
+                        offset: const Offset(-20, 0),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                label: 'All account activity',
+                                selected: _selectedAccountKey == null,
+                                onTap: () => _selectAccount(null),
+                              ),
+                              for (final account in _visibleAccounts)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: _accountLabel(account),
+                                    selected: _selectedAccountKey ==
+                                        _accountSummaryKey(account),
+                                    onTap: () => _selectAccount(
+                                      _accountSummaryKey(account),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _clearAll,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textSecondary(context),
+                            side: BorderSide(
+                              color: AppColors.borderColor(context),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(context.l10nText('Clear All')),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: _apply,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primaryDark,
+                            foregroundColor: AppColors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            context.l10nText('Apply Filters'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String label) {
+    return Text(
+      context.l10nText(label),
+      style: TextStyle(
+        color: AppColors.textSecondary(context),
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.8,
+      ),
+    );
+  }
+}
+
+class _ReconciliationTransactionRow extends StatelessWidget {
+  final Transaction transaction;
+  final double expectedBalance;
+  final bool isCheckpoint;
+  final bool isSelfTransfer;
+  final VoidCallback onTap;
+
+  const _ReconciliationTransactionRow({
+    required this.transaction,
+    required this.expectedBalance,
+    required this.isCheckpoint,
+    required this.isSelfTransfer,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final delta = transactionBalanceDelta(transaction);
+    final isCredit = delta >= 0;
+    final amountColor = isCredit ? AppColors.incomeSuccess : AppColors.red;
+    final time = _parseTransactionTime(transaction.time);
+    final feeAmount = transactionFeeAmount(transaction);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: AppColors.borderColor(context)),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 5,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _localizedTransactionCounterparty(
+                        context,
+                        transaction,
+                        isSelfTransfer: isSelfTransfer,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      time == null
+                          ? context.l10nText('Unknown date')
+                          : _reconciliationDateTimeLabel(context, time),
+                      style: TextStyle(
+                        color: AppColors.textTertiary(context),
+                        fontSize: 10,
+                      ),
+                    ),
+                    if (isCheckpoint) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        context.l10nText('Balance checkpoint'),
+                        style: const TextStyle(
+                          color: AppColors.amber,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${isCredit ? '+' : '-'}${_formatEtbFull(delta.abs())}',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color: amountColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (feeAmount > 0) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        '${context.l10nText('incl. fees & VAT')} ${_formatEtbFull(feeAmount)}',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: AppColors.textTertiary(context),
+                          fontSize: 9,
+                          height: 1.15,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  _formatEtbFull(expectedBalance),
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReconciliationResultRow extends StatelessWidget {
+  final String label;
+  final double value;
+  final bool signed;
+  final bool emphasized;
+
+  const _ReconciliationResultRow({
+    required this.label,
+    required this.value,
+    this.signed = false,
+    this.emphasized = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final prefix = signed ? (value >= 0 ? '+' : '-') : '';
+    final displayedValue = signed ? value.abs() : value;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            context.l10nText(label),
+            style: TextStyle(
+              color: emphasized
+                  ? AppColors.amber
+                  : AppColors.textSecondary(context),
+              fontSize: emphasized ? 13 : 12,
+              fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ),
+        Text(
+          '$prefix${_formatReconciliationEtb(context, displayedValue)}',
+          style: TextStyle(
+            color:
+                emphasized ? AppColors.amber : AppColors.textPrimary(context),
+            fontSize: emphasized ? 14 : 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+TextStyle _reconciliationColumnHeaderStyle(BuildContext context) {
+  return TextStyle(
+    color: AppColors.textSecondary(context),
+    fontSize: 9,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.25,
+  );
+}
+
+String _reconciliationDateTimeLabel(BuildContext context, DateTime date) {
+  return '${_formatDateHeader(date, context)} • ${_formatLedgerTime(date, context)}';
+}
+
+String _formatReconciliationEtb(BuildContext context, double value) {
+  return '${context.l10nText('ETB')} ${_formatEtbFull(value)}';
+}
+
 class _HeatmapDayLedgerPage extends StatelessWidget {
   final DateTime date;
   final _AnalyticsHeatmapFilter filter;
@@ -12413,11 +13565,15 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     var incomeTotal = 0.0;
     var expenseTotal = 0.0;
     for (final transaction in transactions) {
-      if (transaction.type == 'CREDIT') {
-        incomeTotal += transaction.amount;
-      } else if (transaction.type == 'DEBIT') {
-        expenseTotal += transaction.amount;
-      }
+      final isSelfTransfer = provider.isSelfTransfer(transaction);
+      incomeTotal += transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      expenseTotal += transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
     }
     final netTotal = incomeTotal - expenseTotal;
     final transactionLabel = _formatLocalizedCount(
@@ -12743,6 +13899,12 @@ class _AccountsBalanceCard extends StatelessWidget {
   final int transactionCount;
   final double totalCredit;
   final double totalDebit;
+  final double transferIn;
+  final double transferOut;
+  final double feesAndVat;
+  final double unreconciledAdjustment;
+  final int reconciliationMismatchCount;
+  final List<ReconciliationMismatchPeriod> reconciliationMismatchPeriods;
   final bool showBalance;
   final VoidCallback onToggleBalance;
 
@@ -12753,6 +13915,12 @@ class _AccountsBalanceCard extends StatelessWidget {
     required this.transactionCount,
     required this.totalCredit,
     required this.totalDebit,
+    required this.transferIn,
+    required this.transferOut,
+    required this.feesAndVat,
+    required this.unreconciledAdjustment,
+    required this.reconciliationMismatchCount,
+    required this.reconciliationMismatchPeriods,
     required this.showBalance,
     required this.onToggleBalance,
   });
@@ -12760,14 +13928,16 @@ class _AccountsBalanceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currencyLabel = context.l10nText('ETB');
+    final mergedCredit = totalCredit + transferIn;
+    final mergedDebit = totalDebit + transferOut;
     final balanceLabel = showBalance
         ? '$currencyLabel ${_formatEtbFull(balance)}'
         : '$currencyLabel ***';
     final creditLabel = showBalance
-        ? '+$currencyLabel ${_formatEtbFull(totalCredit)}'
+        ? '+$currencyLabel ${_formatEtbFull(mergedCredit)}'
         : '+$currencyLabel ***';
     final debitLabel = showBalance
-        ? '-$currencyLabel ${_formatEtbFull(totalDebit)}'
+        ? '-$currencyLabel ${_formatEtbFull(mergedDebit)}'
         : '-$currencyLabel ***';
 
     return Container(
@@ -12832,32 +14002,62 @@ class _AccountsBalanceCard extends StatelessWidget {
             color: AppColors.white.withValues(alpha: 0.2),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Text(
-                creditLabel,
-                style: const TextStyle(
-                  color: AppColors.incomeSuccess,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+          Semantics(
+            button: true,
+            label: context.l10nText('Open credit and debit breakdown'),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => showCreditDebitBreakdownSheet(
+                context,
+                totalCredit: totalCredit,
+                totalDebit: totalDebit,
+                transferIn: transferIn,
+                transferOut: transferOut,
+                feesAndVat: feesAndVat,
+                unreconciledAdjustment: unreconciledAdjustment,
+                reconciliationMismatchCount: reconciliationMismatchCount,
+                onUnreconciledTap: reconciliationMismatchPeriods.isEmpty
+                    ? null
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => _ReconciliationLedgerPage(
+                              periods: reconciliationMismatchPeriods,
+                            ),
+                          ),
+                        ),
+                showAmounts: showBalance,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Text(
+                      creditLabel,
+                      style: const TextStyle(
+                        color: AppColors.incomeSuccess,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      ' | ',
+                      style: TextStyle(
+                        color: AppColors.white.withValues(alpha: 0.5),
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      debitLabel,
+                      style: const TextStyle(
+                        color: AppColors.red,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                ' | ',
-                style: TextStyle(
-                  color: AppColors.white.withValues(alpha: 0.5),
-                  fontSize: 14,
-                ),
-              ),
-              Text(
-                debitLabel,
-                style: const TextStyle(
-                  color: AppColors.red,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -13493,7 +14693,7 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          context.l10nText('IN & OUT'),
+                          context.l10nText('INCOME & EXPENSE'),
                           style: TextStyle(
                             color: AppColors.textSecondary(context),
                             fontSize: 10,
@@ -14025,10 +15225,10 @@ class _AccountCard extends StatelessWidget {
         ? '$currencyLabel ${_formatEtbFull(account.balance)}'
         : '*****';
     final creditLabel = showBalance
-        ? '+$currencyLabel ${_formatEtbFull(account.totalCredit)}'
+        ? '+$currencyLabel ${_formatEtbFull(account.totalCredit + account.transferIn)}'
         : '***';
     final debitLabel = showBalance
-        ? '-$currencyLabel ${_formatEtbFull(account.totalDebit)}'
+        ? '-$currencyLabel ${_formatEtbFull(account.totalDebit + account.transferOut)}'
         : '***';
     final normalizedProgress = syncProgress?.clamp(0.0, 1.0).toDouble();
     final syncPercentLabel = normalizedProgress == null
@@ -14204,50 +15404,83 @@ class _AccountCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 24),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              context.l10nText('IN & OUT'),
-                              style: TextStyle(
-                                color: AppColors.textSecondary(context),
-                                fontSize: 10,
-                                letterSpacing: 0.8,
-                                fontWeight: FontWeight.w500,
-                              ),
+                        child: Semantics(
+                          button: true,
+                          label: context
+                              .l10nText('Open credit and debit breakdown'),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => showCreditDebitBreakdownSheet(
+                              context,
+                              totalCredit: account.totalCredit,
+                              totalDebit: account.totalDebit,
+                              transferIn: account.transferIn,
+                              transferOut: account.transferOut,
+                              feesAndVat: account.feesAndVat,
+                              unreconciledAdjustment:
+                                  account.unreconciledAdjustment,
+                              reconciliationMismatchCount:
+                                  account.reconciliationMismatchCount,
+                              onUnreconciledTap:
+                                  account.reconciliationMismatchPeriods.isEmpty
+                                      ? null
+                                      : () => Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) =>
+                                                  _ReconciliationLedgerPage(
+                                                periods: account
+                                                    .reconciliationMismatchPeriods,
+                                              ),
+                                            ),
+                                          ),
+                              showAmounts: showBalance,
                             ),
-                            const SizedBox(height: 2),
-                            Wrap(
-                              spacing: 4,
-                              runSpacing: 2,
-                              crossAxisAlignment: WrapCrossAlignment.center,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  creditLabel,
-                                  style: const TextStyle(
-                                    color: AppColors.incomeSuccess,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                Text(
-                                  '|',
+                                  context.l10nText('CREDIT & DEBIT'),
                                   style: TextStyle(
-                                    color: AppColors.textTertiary(context),
-                                    fontSize: 14,
+                                    color: AppColors.textSecondary(context),
+                                    fontSize: 10,
+                                    letterSpacing: 0.8,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                Text(
-                                  debitLabel,
-                                  style: const TextStyle(
-                                    color: AppColors.red,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                const SizedBox(height: 2),
+                                Wrap(
+                                  spacing: 4,
+                                  runSpacing: 2,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(
+                                      creditLabel,
+                                      style: const TextStyle(
+                                        color: AppColors.incomeSuccess,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    Text(
+                                      '|',
+                                      style: TextStyle(
+                                        color: AppColors.textTertiary(context),
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    Text(
+                                      debitLabel,
+                                      style: const TextStyle(
+                                        color: AppColors.red,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ],

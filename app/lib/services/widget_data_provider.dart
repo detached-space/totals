@@ -1,10 +1,12 @@
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
-import 'package:totals/services/telebirr_bank_transfer_service.dart';
+import 'package:totals/services/owned_account_transfer_service.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 class CategoryExpense {
   final int categoryId;
@@ -29,9 +31,10 @@ class CategoryExpense {
 
 class WidgetDataProvider {
   final TransactionRepository _transactionRepository;
+  final AccountRepository _accountRepository;
   final CategoryRepository _categoryRepository;
   final BankConfigService _bankConfigService;
-  final TelebirrBankTransferService _telebirrMatchService;
+  final OwnedAccountTransferService _ownedAccountTransferService;
 
   static const List<String> _rankColors = [
     '#5AC8FA',
@@ -41,23 +44,25 @@ class WidgetDataProvider {
 
   WidgetDataProvider({
     TransactionRepository? transactionRepository,
+    AccountRepository? accountRepository,
     CategoryRepository? categoryRepository,
     BankConfigService? bankConfigService,
-    TelebirrBankTransferService? telebirrMatchService,
-  })
-      : _transactionRepository =
+    OwnedAccountTransferService? ownedAccountTransferService,
+  })  : _transactionRepository =
             transactionRepository ?? TransactionRepository(),
+        _accountRepository = accountRepository ?? AccountRepository(),
         _categoryRepository = categoryRepository ?? CategoryRepository(),
         _bankConfigService = bankConfigService ?? BankConfigService(),
-        _telebirrMatchService =
-            telebirrMatchService ?? TelebirrBankTransferService();
+        _ownedAccountTransferService =
+            ownedAccountTransferService ?? OwnedAccountTransferService();
 
   Future<List<Transaction>> _getTransactionsByTypeForRange(
     String type,
     DateTime start,
     DateTime end,
   ) async {
-    final transactions = await _transactionRepository.getTransactionsByDateRange(
+    final transactions =
+        await _transactionRepository.getTransactionsByDateRange(
       start,
       end,
       type: type,
@@ -103,22 +108,28 @@ class WidgetDataProvider {
   ) async {
     if (transactions.isEmpty) return transactions;
     final allTransactions = await _transactionRepository.getTransactions();
-    final toSelfReferences =
-        await _buildSelfTransferToReferences(allTransactions);
+    final selfTransferReferences =
+        await _buildSelfTransferReferences(allTransactions);
     final manualSelfCategoryIds = await _loadManualSelfCategoryIds();
-    if (toSelfReferences.isEmpty && manualSelfCategoryIds.isEmpty) {
+    if (selfTransferReferences.isEmpty && manualSelfCategoryIds.isEmpty) {
       return transactions;
     }
 
-    return transactions
-        .where((transaction) =>
-            (_shouldKeepForWidgetTotals(transaction) ||
-                !toSelfReferences.contains(transaction.reference)) &&
-            !_isManualSelfTransfer(
-              transaction,
-              manualSelfCategoryIds,
-            ))
-        .toList();
+    final filtered = <Transaction>[];
+    for (final transaction in transactions) {
+      final isSelfTransfer =
+          selfTransferReferences.contains(transaction.reference) ||
+              _isManualSelfTransfer(transaction, manualSelfCategoryIds);
+      if (!isSelfTransfer || _shouldKeepForWidgetTotals(transaction)) {
+        filtered.add(transaction);
+        continue;
+      }
+      if (transaction.type == 'DEBIT' &&
+          transactionFeeAmount(transaction) > 0) {
+        filtered.add(transaction.copyWith(amount: 0));
+      }
+    }
+    return filtered;
   }
 
   bool _shouldKeepForWidgetTotals(Transaction transaction) {
@@ -129,27 +140,35 @@ class WidgetDataProvider {
         transaction.type == 'DEBIT';
   }
 
-  Future<Set<String>> _buildSelfTransferToReferences(
+  Future<Set<String>> _buildSelfTransferReferences(
     List<Transaction> transactions,
   ) async {
     if (transactions.isEmpty) return <String>{};
     final banks = await _bankConfigService.getBanks();
-    final matches = _telebirrMatchService.findMatches(transactions, banks);
-    final toSelfReferences = <String>{};
+    final accounts = await _accountRepository.getAccounts();
+    final matches = _ownedAccountTransferService.findMatches(
+      transactions: transactions,
+      banks: banks,
+      accounts: accounts,
+    );
+    final references = <String>{};
 
     for (final match in matches) {
-      toSelfReferences.add(match.bankTransaction.reference);
+      references
+        ..add(match.debitTransaction.reference)
+        ..add(match.creditTransaction.reference);
     }
-    toSelfReferences.addAll(_buildCashTransferToReferences(transactions));
-    return toSelfReferences;
+    references.addAll(_buildCashTransferReferences(transactions));
+    return references;
   }
 
-  Set<String> _buildCashTransferToReferences(
+  Set<String> _buildCashTransferReferences(
     List<Transaction> transactions,
   ) {
-    final toSelfReferences = <String>{};
+    final references = <String>{};
     final byReference = {
-      for (final transaction in transactions) transaction.reference: transaction,
+      for (final transaction in transactions)
+        transaction.reference: transaction,
     };
 
     for (final transaction in transactions) {
@@ -160,10 +179,12 @@ class WidgetDataProvider {
       final linkedReference =
           reference.substring(CashConstants.atmReferencePrefix.length);
       if (!byReference.containsKey(linkedReference)) continue;
-      toSelfReferences.add(linkedReference);
+      references
+        ..add(reference)
+        ..add(linkedReference);
     }
 
-    return toSelfReferences;
+    return references;
   }
 
   Future<Set<int>> _loadManualSelfCategoryIds() async {
@@ -193,7 +214,9 @@ class WidgetDataProvider {
     final Map<int, double> categoryTotals = {};
     for (final tx in transactions) {
       final catId = tx.categoryId ?? 0;
-      categoryTotals[catId] = (categoryTotals[catId] ?? 0) + tx.amount;
+      final amount =
+          tx.type == 'DEBIT' ? transactionDebitOutflow(tx) : tx.amount;
+      categoryTotals[catId] = (categoryTotals[catId] ?? 0) + amount;
     }
 
     final sortedEntries = categoryTotals.entries.toList()
@@ -241,7 +264,7 @@ class WidgetDataProvider {
     );
     return transactions.fold<double>(
       0.0,
-      (sum, tx) => sum + tx.amount,
+      (sum, tx) => sum + transactionDebitOutflow(tx),
     );
   }
 
@@ -249,7 +272,8 @@ class WidgetDataProvider {
     final anchor = now ?? DateTime.now();
     final currentWeekStart = _startOfWeek(anchor);
     final lastWeekStart = currentWeekStart.subtract(const Duration(days: 7));
-    final lastWeekEnd = _endOfDay(currentWeekStart.subtract(const Duration(days: 1)));
+    final lastWeekEnd =
+        _endOfDay(currentWeekStart.subtract(const Duration(days: 1)));
     return getSpendingForRange(lastWeekStart, lastWeekEnd);
   }
 

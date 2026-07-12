@@ -1,6 +1,7 @@
 import 'package:totals/models/budget.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 class BudgetService {
   final BudgetRepository _budgetRepository = BudgetRepository();
@@ -32,10 +33,16 @@ class BudgetService {
       final filtered = transactions
           .where((t) => t.selectedCategoryIds.any(ids.contains))
           .toList();
-      return filtered.fold<double>(0.0, (sum, t) => sum + t.amount.abs());
+      return filtered.fold<double>(
+        0.0,
+        (sum, transaction) => sum + transactionDebitOutflow(transaction),
+      );
     }
 
-    return transactions.fold<double>(0.0, (sum, t) => sum + t.amount.abs());
+    return transactions.fold<double>(
+      0.0,
+      (sum, transaction) => sum + transactionDebitOutflow(transaction),
+    );
   }
 
   // Calculate budget usage/spent amounts for a budget
