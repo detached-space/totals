@@ -37,7 +37,7 @@
       "id": 4,
       "name": "Dashen Bank",
       "shortName": "Dashen",
-      "codes": ["DashenBank"],
+      "codes": ["Dashen", "DashenBank", "Dashen Bank"],
       "image": "assets/images/dashen.png",
       "maskPattern": 3,
       "uniformMasking": true,

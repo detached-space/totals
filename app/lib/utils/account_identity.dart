@@ -44,6 +44,13 @@ bool accountNumbersMatch(Bank bank, String? left, String? right) {
   if (bank.simBased == true) return leftValue == rightValue;
 
   final maskLength = bank.uniformMasking == true ? bank.maskPattern : null;
+  if (_maskedAccountNumbersMatch(
+    left,
+    right,
+    minimumEvidence: maskLength != null && maskLength > 0 ? maskLength : 3,
+  )) {
+    return true;
+  }
   if (maskLength != null && maskLength > 0) {
     if (leftValue.length < maskLength || rightValue.length < maskLength) {
       return false;
@@ -53,6 +60,91 @@ bool accountNumbersMatch(Bank bank, String? left, String? right) {
   }
 
   return leftValue == rightValue;
+}
+
+/// Matches account masks by the digit positions they actually reveal.
+///
+/// Banks sometimes change a mask from `5107*****4011` to `5107********1`.
+/// Comparing only a fixed trailing suffix loses the useful `5107` prefix and
+/// leaves older messages unassigned. This matcher keeps wildcard positions,
+/// requires at least the bank's configured amount of shared evidence, and is
+/// still followed by a unique-account check in the ownership resolver.
+bool _maskedAccountNumbersMatch(
+  String? left,
+  String? right, {
+  required int minimumEvidence,
+}) {
+  final leftPattern = _accountMaskPattern(left);
+  final rightPattern = _accountMaskPattern(right);
+  if (leftPattern == null || rightPattern == null) return false;
+  if (!leftPattern.contains('?') && !rightPattern.contains('?')) return false;
+
+  if (leftPattern.length == rightPattern.length) {
+    var evidence = 0;
+    for (var index = 0; index < leftPattern.length; index++) {
+      final leftCharacter = leftPattern[index];
+      final rightCharacter = rightPattern[index];
+      if (leftCharacter == '?' || rightCharacter == '?') continue;
+      if (leftCharacter != rightCharacter) return false;
+      evidence++;
+    }
+    return evidence >= minimumEvidence;
+  }
+
+  final prefixEvidence = _matchingEdgeEvidence(
+    _literalMaskPrefix(leftPattern),
+    _literalMaskPrefix(rightPattern),
+  );
+  if (prefixEvidence < 0) return false;
+  final suffixEvidence = _matchingEdgeEvidence(
+    _literalMaskSuffix(leftPattern),
+    _literalMaskSuffix(rightPattern),
+    fromEnd: true,
+  );
+  if (suffixEvidence < 0) return false;
+  return prefixEvidence + suffixEvidence >= minimumEvidence;
+}
+
+String? _accountMaskPattern(String? raw) {
+  final value = raw?.trim().toUpperCase();
+  if (value == null || value.isEmpty) return null;
+
+  final pattern = StringBuffer();
+  for (final character in value.split('')) {
+    if (character == '*' ||
+        character == 'X' ||
+        character == '•' ||
+        character == '#') {
+      pattern.write('?');
+    } else if (RegExp(r'[A-Z0-9]').hasMatch(character)) {
+      pattern.write(character);
+    }
+  }
+  return pattern.isEmpty ? null : pattern.toString();
+}
+
+String _literalMaskPrefix(String pattern) {
+  final wildcard = pattern.indexOf('?');
+  return wildcard < 0 ? pattern : pattern.substring(0, wildcard);
+}
+
+String _literalMaskSuffix(String pattern) {
+  final wildcard = pattern.lastIndexOf('?');
+  return wildcard < 0 ? pattern : pattern.substring(wildcard + 1);
+}
+
+int _matchingEdgeEvidence(
+  String left,
+  String right, {
+  bool fromEnd = false,
+}) {
+  final overlap = left.length < right.length ? left.length : right.length;
+  for (var offset = 0; offset < overlap; offset++) {
+    final leftIndex = fromEnd ? left.length - offset - 1 : offset;
+    final rightIndex = fromEnd ? right.length - offset - 1 : offset;
+    if (left[leftIndex] != right[rightIndex]) return -1;
+  }
+  return overlap;
 }
 
 /// Compares two durable, user-entered account identities.

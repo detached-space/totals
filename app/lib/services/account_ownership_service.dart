@@ -104,9 +104,28 @@ class AccountOwnershipService {
             storedReference: messageReference,
           );
           if (reference.isEmpty) continue;
-          messagesByReference
-              .putIfAbsent(reference, () => <SmsMessage>[])
-              .add(message);
+          final matches = messagesByReference.putIfAbsent(
+            reference,
+            () => <SmsMessage>[],
+          );
+          if (!matches.contains(message)) matches.add(message);
+        }
+        final messageDateMillis = message.date;
+        if (messageDateMillis != null) {
+          // Native patterns without a bank reference historically used this
+          // exact bank-and-SMS-timestamp value. Index it so old backups that
+          // predate sourceMessageId/sourceFingerprint can reconnect to the
+          // original inbox row during import reconciliation.
+          final timestampReference = SmsTransactionSource.canonicalReference(
+            bankId: bank.id,
+            storedReference:
+                '${bank.id}_${DateTime.fromMillisecondsSinceEpoch(messageDateMillis).toIso8601String()}',
+          );
+          final matches = messagesByReference.putIfAbsent(
+            timestampReference,
+            () => <SmsMessage>[],
+          );
+          if (!matches.contains(message)) matches.add(message);
         }
         if (bank.id == 6 && message.body != null) {
           final authorizationCode =

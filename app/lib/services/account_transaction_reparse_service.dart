@@ -1296,7 +1296,13 @@ class AccountTransactionReparseService {
     Transaction parsed,
     List<Account> bankAccounts,
   ) {
-    return _transactionBelongsToTargetAccount(
+    // A legacy import may contain the same SMS row without durable ownership
+    // because an older parser reduced a mask such as `5107********1` to
+    // `**1`. It is safe to merge that unresolved row after the freshly parsed
+    // SMS identifies the target account: source matching also requires bank,
+    // direction, amount, balance, and a two-minute timestamp window. A row
+    // already owned by a different account remains ineligible.
+    return _transactionCanBeReconciledToTargetAccount(
           transaction,
           bank: bank,
           accountNumber: accountNumber,

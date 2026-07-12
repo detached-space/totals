@@ -77,6 +77,7 @@ class _TransactionDetailsSheet extends StatefulWidget {
 class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _categoryExpanded = false;
   bool _accountExpanded = false;
+  bool _sourceSmsExpanded = false;
   bool _isApplyingAccount = false;
   bool _isSavingCounterparty = false;
   bool _isSavingNote = false;
@@ -989,161 +990,109 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final sourceSmsFuture = _sourceSmsFuture;
     if (sourceSmsFuture == null) return const SizedBox.shrink();
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 6),
+    return FutureBuilder<TransactionSourceSms?>(
+      future: sourceSmsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _DetailRow(
+            label: 'Source SMS',
+            value: context.l10nText('Loading…'),
+          );
+        }
+
+        final sms = snapshot.data;
+        if (sms == null) {
+          return _DetailRow(
+            label: 'Source SMS',
+            value: context.l10nText('Unavailable'),
+          );
+        }
+
+        final sender = sms.senderAddress?.trim();
+        final collapsedValue = sender != null && sender.isNotEmpty
+            ? sender
+            : context.l10nText('View message');
+        return Column(
+          children: [
+            _DetailRow(
+              label: 'Source SMS',
+              value: collapsedValue,
+              marquee: true,
+              onTap: () => setState(
+                () => _sourceSmsExpanded = !_sourceSmsExpanded,
+              ),
+              trailingIcon: _sourceSmsExpanded
+                  ? AppIcons.keyboard_arrow_up
+                  : AppIcons.keyboard_arrow_down,
+            ),
+            if (_sourceSmsExpanded) _buildExpandedSourceSms(sms),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildExpandedSourceSms(TransactionSourceSms sms) {
+    final metadata = <String>[
+      if (sms.senderAddress?.trim().isNotEmpty == true)
+        sms.senderAddress!.trim(),
+      if (sms.receivedAt != null)
+        AppDateFormat.monthDayMaybeYear(
+          sms.receivedAt!,
+          context: context,
+        ),
+      if (sms.messageId?.trim().isNotEmpty == true)
+        '${context.l10nText('SMS ID')} ${sms.messageId}',
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(
-                AppIcons.sms_outlined,
-                size: 17,
-                color: AppColors.primaryLight,
+          if (metadata.isNotEmpty)
+            Text(
+              metadata.join(' • '),
+              style: TextStyle(
+                color: AppColors.textTertiary(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
               ),
-              const SizedBox(width: 7),
-              Text(
-                context.l10nText('Source SMS'),
-                style: TextStyle(
-                  color: AppColors.textPrimary(context),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
+            ),
+          if (metadata.isNotEmpty) const SizedBox(height: 8),
+          SelectableText(
+            sms.body,
+            style: TextStyle(
+              color: AppColors.textPrimary(context),
+              fontSize: 12,
+              height: 1.45,
+            ),
           ),
-          const SizedBox(height: 9),
-          FutureBuilder<TransactionSourceSms?>(
-            future: sourceSmsFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceColor(context),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: AppColors.borderColor(context),
-                    ),
-                  ),
-                  child: const Center(
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                );
-              }
-
-              final sms = snapshot.data;
-              if (sms == null) {
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceColor(context),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: AppColors.borderColor(context),
-                    ),
-                  ),
-                  child: Text(
-                    context.l10nText(
-                      'The source SMS is no longer available on this device.',
-                    ),
-                    style: TextStyle(
-                      color: AppColors.textSecondary(context),
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
-                  ),
-                );
-              }
-
-              final metadata = <String>[
-                if (sms.senderAddress?.isNotEmpty == true) sms.senderAddress!,
-                if (sms.receivedAt != null)
-                  AppDateFormat.monthDayMaybeYear(
-                    sms.receivedAt!,
-                    context: context,
-                  ),
-                if (sms.messageId?.isNotEmpty == true)
-                  '${context.l10nText('SMS ID')} ${sms.messageId}',
-              ];
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceColor(context),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.borderColor(context)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (metadata.isNotEmpty)
-                          Expanded(
-                            child: Text(
-                              metadata.join(' • '),
-                              style: TextStyle(
-                                color: AppColors.textTertiary(context),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          )
-                        else
-                          const Spacer(),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 32,
-                            minHeight: 28,
-                          ),
-                          tooltip: context.l10nText('Copy SMS'),
-                          onPressed: () async {
-                            await Clipboard.setData(
-                              ClipboardData(text: sms.body),
-                            );
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  context.l10nTextRead('SMS copied'),
-                                ),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          },
-                          icon: Icon(
-                            AppIcons.copy,
-                            size: 17,
-                            color: AppColors.textSecondary(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (metadata.isNotEmpty) const SizedBox(height: 7),
-                    SelectableText(
-                      sms.body,
-                      style: TextStyle(
-                        color: AppColors.textPrimary(context),
-                        fontSize: 12,
-                        height: 1.45,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => _copySourceSms(sms.body),
+              child: Text(context.l10nText('Copy SMS')),
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _copySourceSms(String body) async {
+    await Clipboard.setData(ClipboardData(text: body));
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(context.l10nTextRead('SMS copied')),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

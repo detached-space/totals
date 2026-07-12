@@ -14929,7 +14929,7 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
                         labelText: context.l10nText('Account Holder Name'),
                         hintText: _holderNameSuggestion == null
                             ? context.l10nText('Enter account holder name')
-                            : '${context.l10nText('Suggested')}: ${_holderNameSuggestion!}',
+                            : _holderNameSuggestion!,
                         hintStyle: TextStyle(color: hintColor),
                         labelStyle: TextStyle(color: hintColor),
                         floatingLabelStyle: TextStyle(
