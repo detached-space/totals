@@ -47,6 +47,7 @@ import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
@@ -697,6 +698,33 @@ class RedesignShellState extends State<RedesignShell>
     for (final bank in AllBanksFromAssets.getAllBanks()) {
       banksById.putIfAbsent(bank.id, () => bank);
     }
+    final sortedQuickAccessAccounts = List<UserAccount>.from(
+      quickAccessAccounts,
+    )..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) => banksById[bankId]?.name ?? 'Bank $bankId',
+        ),
+      );
+    final sortedUserAccounts = userAccounts
+        .where((account) => account.bank != CashConstants.bankId)
+        .toList(growable: true)
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bank,
+          rightBankId: right.bank,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) => banksById[bankId]?.name ?? 'Bank $bankId',
+        ),
+      );
 
     await showModalBottomSheet<void>(
       context: context,
@@ -704,10 +732,8 @@ class RedesignShellState extends State<RedesignShell>
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return _QuickAccessAccountsSheet(
-          quickAccessAccounts: quickAccessAccounts,
-          userAccounts: userAccounts
-              .where((account) => account.bank != CashConstants.bankId)
-              .toList(growable: false),
+          quickAccessAccounts: sortedQuickAccessAccounts,
+          userAccounts: sortedUserAccounts,
           banksById: banksById,
           onManageAccounts: () {
             Navigator.of(sheetContext).pop();

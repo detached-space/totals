@@ -14,6 +14,7 @@ import 'package:totals/services/data_sync/data_sync_repository.dart';
 import 'package:totals/services/data_sync/data_sync_scheduler.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/services/data_sync/sync_service.dart';
+import 'package:totals/utils/account_sort.dart';
 
 /// Opens the full-screen, step-by-step rule editor. Returns true if saved.
 Future<bool?> showDataSyncRuleSheet(
@@ -149,9 +150,9 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
             !_profiles.any((profile) => profile.id == _selectedProfileId)) {
           _selectedProfileId = null;
         }
+        _banksById = {for (final b in banks) b.id: b};
         _allAccounts = accounts;
         _applyProfileAccountFilter();
-        _banksById = {for (final b in banks) b.id: b};
         _loadingAccounts = false;
       });
     } catch (_) {
@@ -163,10 +164,21 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
   void _applyProfileAccountFilter() {
     final selectedProfileId = _selectedProfileId;
     _accounts = selectedProfileId == null
-        ? _allAccounts
+        ? List<Account>.from(_allAccounts)
         : _allAccounts
             .where((account) => account.profileId == selectedProfileId)
-            .toList(growable: false);
+            .toList(growable: true);
+    _accounts.sort(
+      (left, right) => compareAccountDisplayFields(
+        leftBankId: left.bank,
+        rightBankId: right.bank,
+        leftHolderName: left.accountHolderName,
+        rightHolderName: right.accountHolderName,
+        leftAccountNumber: left.accountNumber,
+        rightAccountNumber: right.accountNumber,
+        bankNameForId: _bankLabel,
+      ),
+    );
     _pruneBankAccountSelections();
   }
 
@@ -779,7 +791,13 @@ class _RuleWizardPageState extends State<_RuleWizardPage> {
             : '${_profileLabel(_selectedProfileId)} has no accounts yet. Bank and account filters are unavailable.'),
       ];
     }
-    final bankIds = <int>{for (final a in _accounts) a.bank}.toList()..sort();
+    final bankIds = <int>{for (final a in _accounts) a.bank}.toList()
+      ..sort(
+        (left, right) => compareDisplayText(
+          _bankLabel(left),
+          _bankLabel(right),
+        ),
+      );
     return [
       _label('Banks'),
       _hint(_selectedProfileId == null

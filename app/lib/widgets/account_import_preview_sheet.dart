@@ -3,6 +3,7 @@ import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 class _AccountPreviewItem {
@@ -45,6 +46,9 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
 
   Future<void> _loadPreviewData() async {
     final banks = AllBanksFromAssets.getAllBanks();
+    final bankNamesById = <int, String>{
+      for (final bank in banks) bank.id: bank.name,
+    };
     final items = <_AccountPreviewItem>[];
 
     for (final entry in widget.payload.accounts) {
@@ -71,10 +75,17 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
       ));
     }
 
-    // Sort: new accounts first
-    items.sort((a, b) {
-      if (a.exists == b.exists) return 0;
-      return a.exists ? 1 : -1;
+    // Use the same display order as every other account list.
+    items.sort((left, right) {
+      return compareAccountDisplayFields(
+        leftBankId: left.entry.bankId,
+        rightBankId: right.entry.bankId,
+        leftHolderName: left.entry.name,
+        rightHolderName: right.entry.name,
+        leftAccountNumber: left.entry.accountNumber,
+        rightAccountNumber: right.entry.accountNumber,
+        bankNameForId: (bankId) => bankNamesById[bankId] ?? 'Unknown Bank',
+      );
     });
 
     if (mounted) {

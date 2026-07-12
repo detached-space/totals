@@ -13,6 +13,7 @@ import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -181,9 +182,22 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return '$holderName • ${account.accountNumber}';
   }
 
-  List<AccountSummary> get _bankAccounts => _provider.accountSummaries
-      .where((account) => account.bankId == _tx.bankId)
-      .toList(growable: false);
+  List<AccountSummary> get _bankAccounts {
+    return _provider.accountSummaries
+        .where((account) => account.bankId == _tx.bankId)
+        .toList(growable: true)
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: _provider.getBankShortName,
+        ),
+      );
+  }
 
   bool get _canEditAccount {
     if (_bankAccounts.isEmpty) return false;

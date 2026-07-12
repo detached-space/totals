@@ -13,6 +13,7 @@ import 'package:totals/models/bank.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
 
 class AccountShareQrPage extends StatefulWidget {
@@ -213,13 +214,18 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
     final payload = _buildPayload();
     final qrData = payload == null ? null : AccountSharePayload.encode(payload);
     final sortedAccounts = List<Account>.from(_accounts)
-      ..sort((a, b) {
-        final nameA = _getBankInfo(a.bank)?.name ?? '';
-        final nameB = _getBankInfo(b.bank)?.name ?? '';
-        final bankCompare = nameA.compareTo(nameB);
-        if (bankCompare != 0) return bankCompare;
-        return a.accountNumber.compareTo(b.accountNumber);
-      });
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bank,
+          rightBankId: right.bank,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) =>
+              _getBankInfo(bankId)?.name ?? 'Bank $bankId',
+        ),
+      );
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,

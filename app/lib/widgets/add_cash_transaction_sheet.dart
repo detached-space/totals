@@ -10,6 +10,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/manual_transaction_selection.dart';
@@ -104,20 +105,23 @@ class _AddCashTransactionContentState
 
   List<AccountSummary> get _selectableAccounts {
     final summaries =
-        List<AccountSummary>.from(widget.provider.accountSummaries)
-          ..sort((a, b) {
-            if (a.bankId == b.bankId) {
-              return a.accountNumber.compareTo(b.accountNumber);
-            }
-            if (a.bankId == CashConstants.bankId) return -1;
-            if (b.bankId == CashConstants.bankId) return 1;
-            return a.bankId.compareTo(b.bankId);
-          });
+        List<AccountSummary>.from(widget.provider.accountSummaries);
     final hasCash =
         summaries.any((summary) => summary.bankId == CashConstants.bankId);
     if (!hasCash) {
-      summaries.insert(0, _cashAccountSummary());
+      summaries.add(_cashAccountSummary());
     }
+    summaries.sort(
+      (left, right) => compareAccountDisplayFields(
+        leftBankId: left.bankId,
+        rightBankId: right.bankId,
+        leftHolderName: left.accountHolderName,
+        rightHolderName: right.accountHolderName,
+        leftAccountNumber: left.accountNumber,
+        rightAccountNumber: right.accountNumber,
+        bankNameForId: widget.provider.getBankShortName,
+      ),
+    );
     return summaries;
   }
 

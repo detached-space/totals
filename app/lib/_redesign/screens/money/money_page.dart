@@ -23,6 +23,7 @@ import 'package:totals/services/bank_detection_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
@@ -3454,7 +3455,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       backgroundColor: Colors.transparent,
       builder: (_) => _FilterTransactionsSheet(
         currentFilter: _filter,
-        bankIds: bankIds.toList()..sort(),
+        bankIds: bankIds.toList()
+          ..sort(
+            (left, right) => compareDisplayText(
+              _localizedBankLabel(context, left),
+              _localizedBankLabel(context, right),
+            ),
+          ),
         accounts: provider.accountSummaries,
         unmatchedBankIds: unmatchedBankIds,
         categories: categories,
@@ -3488,7 +3495,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       builder: (_) => _LedgerFilterSheet(
         currentFilter: _ledgerFilter,
         bankIds: bankIds.toList()
-          ..sort((a, b) => _bankLabel(a).compareTo(_bankLabel(b))),
+          ..sort(
+            (left, right) => compareDisplayText(
+              _localizedBankLabel(context, left),
+              _localizedBankLabel(context, right),
+            ),
+          ),
         accounts: provider.accountSummaries,
         unmatchedBankIds: unmatchedBankIds,
       ),
@@ -13531,6 +13543,7 @@ class _MoveTransactionsAccountSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sortedAccounts = _sortedAccountSummariesForDisplay(accounts, context);
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.72,
@@ -13578,13 +13591,13 @@ class _MoveTransactionsAccountSheet extends StatelessWidget {
               Flexible(
                 child: ListView.separated(
                   shrinkWrap: true,
-                  itemCount: accounts.length,
+                  itemCount: sortedAccounts.length,
                   separatorBuilder: (_, __) => Divider(
                     color: AppColors.borderColor(context),
                     height: 1,
                   ),
                   itemBuilder: (context, index) {
-                    final account = accounts[index];
+                    final account = sortedAccounts[index];
                     final status = <String>[
                       if (account.isDefault) context.l10nText('Default'),
                       if (account.isDormant) context.l10nText('Dormant'),
@@ -15075,6 +15088,24 @@ String _accountSummaryKey(AccountSummary account) {
   return '${account.bankId}:${account.accountNumber}';
 }
 
+List<AccountSummary> _sortedAccountSummariesForDisplay(
+  Iterable<AccountSummary> accounts,
+  BuildContext context,
+) {
+  return List<AccountSummary>.from(accounts)
+    ..sort(
+      (left, right) => compareAccountDisplayFields(
+        leftBankId: left.bankId,
+        rightBankId: right.bankId,
+        leftHolderName: left.accountHolderName,
+        rightHolderName: right.accountHolderName,
+        leftAccountNumber: left.accountNumber,
+        rightAccountNumber: right.accountNumber,
+        bankNameForId: (bankId) => _localizedBankLabel(context, bankId),
+      ),
+    );
+}
+
 String _otherAccountFilterKey(int bankId) => 'other:$bankId';
 
 int? _otherAccountFilterBankId(String key) {
@@ -15852,10 +15883,10 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
 
   List<AccountSummary> get _visibleAccounts {
     final bankId = _selectedBankId;
-    if (bankId == null) return widget.accounts;
-    return widget.accounts
-        .where((account) => account.bankId == bankId)
-        .toList(growable: false);
+    final accounts = bankId == null
+        ? widget.accounts
+        : widget.accounts.where((account) => account.bankId == bankId);
+    return _sortedAccountSummariesForDisplay(accounts, context);
   }
 
   List<int> get _visibleUnmatchedBankIds {
@@ -15863,7 +15894,12 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     final ids = widget.unmatchedBankIds
         .where((candidate) => bankId == null || candidate == bankId)
         .toList(growable: false);
-    ids.sort((a, b) => _bankLabel(a).compareTo(_bankLabel(b)));
+    ids.sort(
+      (left, right) => compareDisplayText(
+        _localizedBankLabel(context, left),
+        _localizedBankLabel(context, right),
+      ),
+    );
     return ids;
   }
 
@@ -16395,10 +16431,12 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
   }
 
   List<AccountSummary> get _visibleAccounts {
-    if (_selectedBankIds.isEmpty) return widget.accounts;
-    return widget.accounts
-        .where((account) => _selectedBankIds.contains(account.bankId))
-        .toList(growable: false);
+    final accounts = _selectedBankIds.isEmpty
+        ? widget.accounts
+        : widget.accounts.where(
+            (account) => _selectedBankIds.contains(account.bankId),
+          );
+    return _sortedAccountSummariesForDisplay(accounts, context);
   }
 
   List<int> get _visibleUnmatchedBankIds {
@@ -16408,7 +16446,12 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
               _selectedBankIds.isEmpty || _selectedBankIds.contains(bankId),
         )
         .toList(growable: false);
-    ids.sort((a, b) => _bankLabel(a).compareTo(_bankLabel(b)));
+    ids.sort(
+      (left, right) => compareDisplayText(
+        _localizedBankLabel(context, left),
+        _localizedBankLabel(context, right),
+      ),
+    );
     return ids;
   }
 
