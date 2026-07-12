@@ -718,54 +718,6 @@ class _AddCashTransactionContentState
                             ),
                             const SizedBox(height: 16),
 
-                            TextField(
-                              controller: _balanceAfterController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                decimal: true,
-                                signed: true,
-                              ),
-                              decoration: InputDecoration(
-                                labelText:
-                                    '${context.l10nText('Balance After')} '
-                                    '(${context.l10nText('Optional')})',
-                                hintText: '0.00',
-                                hintStyle: TextStyle(color: hintColor),
-                                labelStyle: TextStyle(color: hintColor),
-                                floatingLabelStyle: TextStyle(
-                                  color: hintColor,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                prefixText: '${context.l10nText('ETB')} ',
-                                prefixIcon: const Icon(
-                                  Icons.account_balance_wallet_outlined,
-                                  size: 20,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide(
-                                    color: colorScheme.outline.withValues(
-                                      alpha: 0.5,
-                                    ),
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide(
-                                    color: accentColor,
-                                    width: 2,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: colorScheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.3),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
                             // From/To Field
                             TextField(
                               controller: _noteController,
@@ -869,6 +821,59 @@ class _AddCashTransactionContentState
                             const SizedBox(height: 16),
 
                             _buildDateTimeField(context),
+                            const SizedBox(height: 16),
+
+                            TextField(
+                              controller: _balanceAfterController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                                signed: true,
+                              ),
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                              decoration: InputDecoration(
+                                labelText:
+                                    '${context.l10nText('Balance After')} '
+                                    '(${context.l10nText('Optional')})',
+                                hintText: '0.00',
+                                hintStyle: TextStyle(color: hintColor),
+                                labelStyle: TextStyle(color: hintColor),
+                                floatingLabelStyle: TextStyle(
+                                  color: hintColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                prefixText: '${context.l10nText('ETB')} ',
+                                prefixStyle:
+                                    theme.textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: hintColor,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: colorScheme.outline.withValues(
+                                      alpha: 0.5,
+                                    ),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: _isDebit ? Colors.red : Colors.green,
+                                    width: 2,
+                                  ),
+                                ),
+                                filled: true,
+                                fillColor: colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.3),
+                              ),
+                            ),
                           ],
                         ),
                       ),
