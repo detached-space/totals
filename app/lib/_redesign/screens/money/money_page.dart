@@ -545,6 +545,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   final Set<String> _reparsingAccountKeys = <String>{};
   _LedgerFilter _ledgerFilter = const _LedgerFilter();
   final ScrollController _activityScrollController = ScrollController();
+  final GlobalKey _activityFinancialCardKey = GlobalKey();
   int _currentPage = 0;
   static const int _pageSize = 20;
   _AnalyticsHeatmapFilter _analyticsHeatmapFilter =
@@ -585,14 +586,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   bool get _isSelecting => _selectedRefs.isNotEmpty;
 
   double get _activityPinnedHeaderDividerTriggerOffset {
-    switch (_subTab) {
-      case _SubTab.transactions:
-        return 16;
-      case _SubTab.analytics:
-        return 12;
-      case _SubTab.ledger:
-        return 16;
+    final renderObject =
+        _activityFinancialCardKey.currentContext?.findRenderObject();
+    if (renderObject is RenderBox && renderObject.hasSize) {
+      return renderObject.size.height;
     }
+    return double.infinity;
   }
 
   @override
@@ -1980,40 +1979,44 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       ],
     ];
 
-    return Column(
-      children: [
-        _buildActivityPinnedHeader(
-          provider: provider,
-          financialHealth: healthSnapshot,
-          activityTransactionsSummary: activityTransactionsSummary,
-          ledgerViewSummary: ledgerViewSummary,
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            color: AppColors.primaryLight,
-            onRefresh: provider.loadData,
-            child: CustomScrollView(
-              controller: _activityScrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverFadeTransition(
-                  opacity: _subTabFadeAnimation,
-                  sliver: SliverMainAxisGroup(slivers: dynamicSlivers),
-                ),
-                const SliverPadding(
-                  padding: EdgeInsets.only(bottom: 24),
-                ),
-              ],
+    return RefreshIndicator(
+      color: AppColors.primaryLight,
+      onRefresh: provider.loadData,
+      child: CustomScrollView(
+        controller: _activityScrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              key: _activityFinancialCardKey,
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: _FinancialHealthCard(
+                financialHealth: healthSnapshot,
+                onTap: () => _showFinancialHealthSheet(healthSnapshot),
+              ),
             ),
           ),
-        ),
-      ],
+          PinnedHeaderSliver(
+            child: _buildActivityPinnedHeader(
+              provider: provider,
+              activityTransactionsSummary: activityTransactionsSummary,
+              ledgerViewSummary: ledgerViewSummary,
+            ),
+          ),
+          SliverFadeTransition(
+            opacity: _subTabFadeAnimation,
+            sliver: SliverMainAxisGroup(slivers: dynamicSlivers),
+          ),
+          const SliverPadding(
+            padding: EdgeInsets.only(bottom: 24),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildActivityPinnedHeader({
     required TransactionProvider provider,
-    required FinancialHealthSnapshot financialHealth,
     required _ActivityTransactionsSummary? activityTransactionsSummary,
     required _LedgerViewSummary? ledgerViewSummary,
   }) {
@@ -2028,11 +2031,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _FinancialHealthCard(
-                  financialHealth: financialHealth,
-                  onTap: () => _showFinancialHealthSheet(financialHealth),
-                ),
-                const SizedBox(height: 16),
                 _SubTabBar(
                   selectedTab: _subTab,
                   onTabChanged: _setSubTab,
