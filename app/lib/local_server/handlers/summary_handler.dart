@@ -8,6 +8,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
 
 /// Handler for summary-related API endpoints
 class SummaryHandler {
@@ -36,7 +37,6 @@ class SummaryHandler {
   Future<List<Transaction>> _filterOrphanedTransactions(
       List<Transaction> transactions) async {
     final accounts = await _accountRepo.getAccounts();
-    final banks = await _bankConfigService.getBanks();
 
     return transactions.where((t) {
       if (t.bankId == null) return false;
@@ -52,28 +52,7 @@ class SummaryHandler {
             .any((account) => account.accountNumber == t.accountNumber);
       }
 
-      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
-        for (var account in bankAccounts) {
-          bool matches = false;
-          final bank = banks.firstWhere((b) => b.id == t.bankId);
-
-          if (bank.uniformMasking == true) {
-            matches = t.accountNumber!
-                    .substring(t.accountNumber!.length - bank.maskPattern!) ==
-                account.accountNumber.substring(
-                    account.accountNumber.length - bank.maskPattern!);
-          } else if (bank.uniformMasking == false) {
-            matches = true;
-          } else {
-            matches = t.accountNumber == account.accountNumber;
-          }
-
-          if (matches) return true;
-        }
-        return false;
-      } else {
-        return bankAccounts.length == 1;
-      }
+      return true;
     }).toList();
   }
 
@@ -226,49 +205,16 @@ class SummaryHandler {
           // Find transactions for this account
           final accountTransactions = transactions.where((t) {
             if (t.bankId != account.bank) return false;
-
-            // Match by account number (handling partial matches for different banks)
-            if (t.accountNumber == null) {
-              // Include transactions with no account number if this is the only account for the bank
-              final bankAccountCount =
-                  accounts.where((a) => a.bank == account.bank).length;
-              return bankAccountCount == 1;
+            if (account.bank == CashConstants.bankId) {
+              return t.accountNumber == account.accountNumber;
             }
-
-            // Different banks use different matching logic
-            switch (account.bank) {
-              case 1: // CBE - match last 4 digits
-                if (account.accountNumber.length >= 4 &&
-                    t.accountNumber!.length >= 4) {
-                  return t.accountNumber!
-                          .substring(t.accountNumber!.length - 4) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 4);
-                }
-                break;
-              case 4: // Dashen - match last 3 digits
-                if (account.accountNumber.length >= 3 &&
-                    t.accountNumber!.length >= 3) {
-                  return t.accountNumber!
-                          .substring(t.accountNumber!.length - 3) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 3);
-                }
-                break;
-              case 3: // Bank of Abyssinia - match last 2 digits
-                if (account.accountNumber.length >= 2 &&
-                    t.accountNumber!.length >= 2) {
-                  return t.accountNumber!
-                          .substring(t.accountNumber!.length - 2) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 2);
-                }
-                break;
-              default:
-                return t.bankId == account.bank;
-            }
-
-            return t.bankId == account.bank;
+            if (bank == null) return false;
+            return transactionBelongsToAccount(
+              transaction: t,
+              account: account,
+              bank: bank,
+              accounts: accounts,
+            );
           }).toList();
 
           // Calculate transaction totals

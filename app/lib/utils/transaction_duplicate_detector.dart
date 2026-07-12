@@ -1,4 +1,5 @@
 import 'package:totals/models/transaction.dart';
+import 'package:totals/utils/sms_transaction_source.dart';
 
 const int dashenCanonicalMaskPattern = 3;
 const int dashenLegacyMaskPattern = 4;
@@ -55,6 +56,73 @@ bool hasExactAmountAndBalanceDuplicate({
   }
 
   return false;
+}
+
+/// Finds duplicates created when a backup from a pre-source-identity version
+/// is appended to rows parsed by a newer version of Totals.
+///
+/// New Telebirr SMS rows keep debit and credit legs separate with a private
+/// suffix. A legacy backup contains the same bank reference without that
+/// suffix, so SQLite's exact-reference constraint cannot catch the duplicate.
+/// Direction, amount, canonical bank reference, and profile must all agree.
+/// Conflicting durable owners are deliberately left untouched.
+List<TransactionDeduplicationPlan> buildLegacySmsReferenceDeduplicationPlans({
+  required Iterable<Transaction> transactions,
+  int? bankId,
+}) {
+  final groups = <String, List<Transaction>>{};
+  for (final transaction in transactions) {
+    if (bankId != null && transaction.bankId != bankId) continue;
+    final canonicalReference = SmsTransactionSource.canonicalReference(
+      bankId: transaction.bankId,
+      storedReference: transaction.reference,
+    );
+    if (canonicalReference.isEmpty) continue;
+    final type = (transaction.type ?? '').trim().toUpperCase();
+    if (type.isEmpty) continue;
+    final key = <Object?>[
+      transaction.profileId,
+      transaction.bankId,
+      canonicalReference,
+      type,
+      transaction.amount.toStringAsFixed(4),
+    ].join('|');
+    groups.putIfAbsent(key, () => <Transaction>[]).add(transaction);
+  }
+
+  final plans = <TransactionDeduplicationPlan>[];
+  for (final group in groups.values) {
+    if (group.length < 2) continue;
+    final scoped = group
+        .where((transaction) =>
+            transaction.reference.trim() != transaction.displayReference)
+        .toList(growable: false);
+    final legacy = group
+        .where((transaction) =>
+            transaction.reference.trim() == transaction.displayReference)
+        .toList(growable: false);
+    if (scoped.isEmpty || legacy.isEmpty) continue;
+
+    final owners = group
+        .map((transaction) => transaction.ownerAccountNumber?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .map((value) => value.toUpperCase())
+        .toSet();
+    if (owners.length > 1) continue;
+
+    final keeper = _selectLegacySmsKeeper(group);
+    final duplicates = group
+        .where((transaction) => transaction.reference != keeper.reference)
+        .toList(growable: false);
+    if (duplicates.isEmpty) continue;
+    plans.add(TransactionDeduplicationPlan(
+      keeper: keeper,
+      mergedKeeper: _mergeTransactions(keeper, group),
+      duplicates: duplicates,
+    ));
+  }
+  return plans;
 }
 
 Set<String> buildDashenDeduplicationSuffixes({
@@ -233,6 +301,31 @@ Transaction _selectKeeper(List<Transaction> transactions) {
   return keeper;
 }
 
+Transaction _selectLegacySmsKeeper(List<Transaction> transactions) {
+  var keeper = transactions.first;
+  for (final candidate in transactions.skip(1)) {
+    if (_legacySmsKeeperScore(candidate) > _legacySmsKeeperScore(keeper)) {
+      keeper = candidate;
+    }
+  }
+  return keeper;
+}
+
+int _legacySmsKeeperScore(Transaction transaction) {
+  var score = _detailScore(transaction);
+  if (transaction.reference.trim() != transaction.displayReference) {
+    score += 100;
+  }
+  if (_hasText(transaction.ownerAccountNumber)) score += 40;
+  if (_hasText(transaction.sourceMessageId)) score += 15;
+  if (transaction.sourceSubscriptionId != null &&
+      transaction.sourceSubscriptionId! >= 0) {
+    score += 10;
+  }
+  if (_hasText(transaction.sourceFingerprint)) score += 5;
+  return score;
+}
+
 int _compareTransactionRichness(Transaction left, Transaction right) {
   final scoreDiff = _detailScore(left) - _detailScore(right);
   if (scoreDiff != 0) return scoreDiff;
@@ -313,6 +406,7 @@ Transaction _mergeTransactions(
     merged = merged.copyWith(
       creditor: _pickBetterText(merged.creditor, transaction.creditor),
       receiver: _pickBetterText(merged.receiver, transaction.receiver),
+      note: _pickBetterText(merged.note, transaction.note),
       time: _pickBetterText(merged.time, transaction.time),
       status: _pickBetterText(merged.status, transaction.status),
       currentBalance:
@@ -321,17 +415,25 @@ Transaction _mergeTransactions(
           _pickBetterText(merged.transactionLink, transaction.transactionLink),
       accountNumber:
           _pickBetterText(merged.accountNumber, transaction.accountNumber),
+      ownerAccountNumber: _pickBetterText(
+        merged.ownerAccountNumber,
+        transaction.ownerAccountNumber,
+      ),
       categoryId: merged.categoryId ?? transaction.categoryId,
       categoryIds: mergedCategoryIds,
       profileId: merged.profileId ?? transaction.profileId,
       serviceCharge:
           _pickBetterNumber(merged.serviceCharge, transaction.serviceCharge),
       vat: _pickBetterNumber(merged.vat, transaction.vat),
-      sourceType: _pickBetterText(merged.sourceType, transaction.sourceType),
-      sourceMessageId:
-          _pickBetterText(merged.sourceMessageId, transaction.sourceMessageId),
-      sourceFingerprint: _pickBetterText(
+      sourceType: _pickExistingText(merged.sourceType, transaction.sourceType),
+      sourceMessageId: _pickExistingText(
+          merged.sourceMessageId, transaction.sourceMessageId),
+      sourceFingerprint: _pickExistingText(
           merged.sourceFingerprint, transaction.sourceFingerprint),
+      sourceSubscriptionId: _pickBetterSubscription(
+        merged.sourceSubscriptionId,
+        transaction.sourceSubscriptionId,
+      ),
     );
   }
   return merged;
@@ -378,6 +480,10 @@ String? _pickBetterText(String? current, String? candidate) {
   return current;
 }
 
+String? _pickExistingText(String? current, String? candidate) {
+  return _hasText(current) ? current : candidate;
+}
+
 double? _pickBetterNumber(double? current, double? candidate) {
   if (!_hasValue(current)) return candidate;
   if (!_hasValue(candidate)) return current;
@@ -385,6 +491,12 @@ double? _pickBetterNumber(double? current, double? candidate) {
     return candidate;
   }
   return current;
+}
+
+int? _pickBetterSubscription(int? current, int? candidate) {
+  if (current != null && current >= 0) return current;
+  if (candidate != null && candidate >= 0) return candidate;
+  return null;
 }
 
 bool _hasText(String? value) {

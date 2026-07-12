@@ -223,6 +223,8 @@ List<bank_model.Bank> _dedupeBanksForSelection(List<bank_model.Bank> banks) {
 class _TransactionFilter {
   final String? type; // null = All, 'DEBIT' = Expense, 'CREDIT' = Income
   final int? bankId; // null = All Banks
+  // null = all activity; otherwise a registered-account key or other:<bankId>.
+  final String? accountKey;
   final int? categoryId; // null = All Categories
   final double? minAmount;
   final double? maxAmount;
@@ -232,6 +234,7 @@ class _TransactionFilter {
   _TransactionFilter({
     this.type,
     this.bankId,
+    this.accountKey,
     this.categoryId,
     this.minAmount,
     this.maxAmount,
@@ -242,6 +245,7 @@ class _TransactionFilter {
   bool get isActive =>
       type != null ||
       bankId != null ||
+      accountKey != null ||
       categoryId != null ||
       minAmount != null ||
       maxAmount != null ||
@@ -252,6 +256,7 @@ class _TransactionFilter {
     int count = 0;
     if (type != null) count++;
     if (bankId != null) count++;
+    if (accountKey != null) count++;
     if (categoryId != null) count++;
     if (minAmount != null || maxAmount != null) count++;
     if (startDate != null || endDate != null) count++;
@@ -263,20 +268,26 @@ class _LedgerFilter {
   final DateTime? startDate;
   final DateTime? endDate;
   final Set<int> bankIds;
+  final String? accountKey;
 
   const _LedgerFilter({
     this.startDate,
     this.endDate,
     this.bankIds = const <int>{},
+    this.accountKey,
   });
 
   bool get isActive =>
-      startDate != null || endDate != null || bankIds.isNotEmpty;
+      startDate != null ||
+      endDate != null ||
+      bankIds.isNotEmpty ||
+      accountKey != null;
 
   int get activeCount {
     int count = 0;
     if (startDate != null || endDate != null) count++;
     if (bankIds.isNotEmpty) count++;
+    if (accountKey != null) count++;
     return count;
   }
 }
@@ -367,6 +378,7 @@ class _ActivityTransactionsViewCacheKey {
   final String searchQuery;
   final String? type;
   final int? bankId;
+  final String? accountKey;
   final int? categoryId;
   final double? minAmount;
   final double? maxAmount;
@@ -381,6 +393,7 @@ class _ActivityTransactionsViewCacheKey {
     required this.searchQuery,
     required this.type,
     required this.bankId,
+    required this.accountKey,
     required this.categoryId,
     required this.minAmount,
     required this.maxAmount,
@@ -399,6 +412,7 @@ class _ActivityTransactionsViewCacheKey {
         other.searchQuery == searchQuery &&
         other.type == type &&
         other.bankId == bankId &&
+        other.accountKey == accountKey &&
         other.categoryId == categoryId &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
@@ -415,6 +429,7 @@ class _ActivityTransactionsViewCacheKey {
       searchQuery,
       type,
       bankId,
+      accountKey,
       categoryId,
       minAmount,
       maxAmount,
@@ -456,6 +471,7 @@ class _LedgerViewCacheKey {
   final int? startDateMillis;
   final int? endDateMillis;
   final String bankIdsKey;
+  final String? accountKey;
 
   const _LedgerViewCacheKey({
     required this.dataVersion,
@@ -464,6 +480,7 @@ class _LedgerViewCacheKey {
     required this.startDateMillis,
     required this.endDateMillis,
     required this.bankIdsKey,
+    required this.accountKey,
   });
 
   @override
@@ -475,7 +492,8 @@ class _LedgerViewCacheKey {
         other.language == language &&
         other.startDateMillis == startDateMillis &&
         other.endDateMillis == endDateMillis &&
-        other.bankIdsKey == bankIdsKey;
+        other.bankIdsKey == bankIdsKey &&
+        other.accountKey == accountKey;
   }
 
   @override
@@ -486,6 +504,7 @@ class _LedgerViewCacheKey {
         startDateMillis,
         endDateMillis,
         bankIdsKey,
+        accountKey,
       );
 }
 
@@ -1676,7 +1695,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         .whereType<Category>()
         .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
-
     final selectedFilter = await showModalBottomSheet<_AnalyticsHeatmapFilter>(
       context: context,
       isScrollControlled: true,
@@ -2851,6 +2869,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       startDateMillis: _ledgerFilter.startDate?.millisecondsSinceEpoch,
       endDateMillis: _ledgerFilter.endDate?.millisecondsSinceEpoch,
       bankIdsKey: sortedLedgerBankIds.join(','),
+      accountKey: _ledgerFilter.accountKey,
     );
 
     final cachedData = _ledgerViewCache;
@@ -2858,8 +2877,14 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       return cachedData;
     }
 
-    // Sort all transactions by time ascending for ledger view
-    final allTxns = List<Transaction>.from(provider.allTransactions)
+    final ledgerSource = _ledgerFilter.accountKey == null
+        ? provider.allTransactions
+        : _transactionsForAccountFilter(
+            provider,
+            _ledgerFilter.accountKey!,
+          );
+    // Sort the selected ownership partition by time descending for the ledger.
+    final allTxns = List<Transaction>.from(ledgerSource)
       ..sort((a, b) {
         final aTime = _parseTransactionTime(a.time);
         final bTime = _parseTransactionTime(b.time);
@@ -2885,6 +2910,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
               bankIds: _ledgerFilter.bankIds
                   .where((id) => ledgerBankIds.contains(id))
                   .toSet(),
+              accountKey: _ledgerFilter.accountKey,
             );
           });
         }
@@ -2931,7 +2957,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
 
     // Compute starting balance from the oldest transaction in the range
-    if (filtered.isNotEmpty) {
+    if (filtered.isNotEmpty &&
+        _otherAccountFilterBankId(_ledgerFilter.accountKey ?? '') == null) {
       final oldest = filtered.last; // descending → last is oldest
       final oldestIdx = allTxns.indexOf(oldest);
       startingBalanceDate = _parseTransactionTime(oldest.time);
@@ -3100,6 +3127,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       searchQuery: _searchQuery,
       type: _filter.type,
       bankId: _filter.bankId,
+      accountKey: _filter.accountKey,
       categoryId: _filter.categoryId,
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
@@ -3113,7 +3141,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       return cachedData;
     }
 
-    final filtered = _filterTransactions(provider.allTransactions);
+    final filtered = _filterTransactions(provider, provider.allTransactions);
     final summary = _summarizeActivityTransactions(filtered);
     final sorted = List<Transaction>.from(filtered)
       ..sort((a, b) {
@@ -3214,6 +3242,29 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final accounts = isOverview
         ? <AccountSummary>[]
         : accountSummaries.where((a) => a.bankId == _selectedBankId).toList();
+    final isSelectedBankSyncing = !isOverview &&
+        (syncStatusService.hasAnyAccountSyncing(_selectedBankId!) ||
+            accounts.any(
+              (account) => _reparsingAccountKeys.contains(
+                _accountActionKey(account),
+              ),
+            ));
+    final unmatchedTransactions = isOverview
+        ? const <Transaction>[]
+        : provider.unmatchedTransactionsForBank(_selectedBankId!);
+    var unmatchedCredit = 0.0;
+    var unmatchedDebit = 0.0;
+    for (final transaction in unmatchedTransactions) {
+      if (provider.getCategoryById(transaction.categoryId)?.uncategorized ==
+          true) {
+        continue;
+      }
+      if (transaction.type == 'CREDIT') {
+        unmatchedCredit += transaction.amount;
+      } else if (transaction.type == 'DEBIT') {
+        unmatchedDebit += transaction.amount;
+      }
+    }
     final bankTxnCount = isOverview
         ? 0
         : provider.allTransactions
@@ -3223,6 +3274,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final selectedBankAccountCount = bankSummary?.accountCount ?? 0;
     final selectedBankCredit = bankSummary?.totalCredit ?? 0.0;
     final selectedBankDebit = bankSummary?.totalDebit ?? 0.0;
+    final selectedBankName =
+        isOverview ? null : _localizedBankName(context, _selectedBankId!);
     final balanceTitle = isOverview
         ? context.l10nText('TOTAL BALANCE')
         : '${_localizedBankLabel(context, _selectedBankId)} ${context.l10nText('Balance')}';
@@ -3279,7 +3332,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                 onBankTap: (bankId) => setState(() => _selectedBankId = bankId),
                 onAddAccount: _showAddAccountSheet,
               )
-            else
+            else ...[
               ...accounts.map((account) {
                 final isCash = account.bankId == CashConstants.bankId;
                 final acctTxnCount = account.totalTransactions.toInt();
@@ -3307,11 +3360,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   syncStatus: syncStatus,
                   syncProgress: syncProgress,
                   onOpenTransactions: () =>
-                      _openBankTransactionsPage(account.bankId),
+                      _openAccountTransactionsPage(account),
                   isReparsing: isReparsing,
-                  onReparse: isCash
-                      ? null
-                      : () => _openAccountReparseSheet(provider, account),
                   onDelete:
                       isCash ? null : () => _showDeleteConfirmation(account),
                   onCashExpense: isCash ? _showCashExpenseSheet : null,
@@ -3320,6 +3370,42 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   onClearCash: isCash ? _confirmClearCashWallet : null,
                 );
               }),
+              if (_selectedBankId != CashConstants.bankId &&
+                  unmatchedTransactions.isNotEmpty)
+                _UnmatchedTransactionsCard(
+                  transactionCount: unmatchedTransactions.length,
+                  totalCredit: unmatchedCredit,
+                  totalDebit: unmatchedDebit,
+                  showAmounts: _showAccountBalances,
+                  accountHolderName: accounts.length == 1
+                      ? accounts.single.accountHolderName
+                      : null,
+                  onTap: () => _openUnmatchedTransactionsPage(
+                    provider,
+                    _selectedBankId!,
+                  ),
+                ),
+              if (_selectedBankId != CashConstants.bankId &&
+                  accounts.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                _CashActionButton(
+                  label: isSelectedBankSyncing
+                      ? 'Syncing accounts...'
+                      : 'Reparse accounts',
+                  icon: AppIcons.refresh,
+                  color: AppColors.primaryDark,
+                  outlined: true,
+                  isLoading: isSelectedBankSyncing,
+                  onTap: isSelectedBankSyncing
+                      ? null
+                      : () => _openAccountsReparseSheet(
+                            provider,
+                            List<AccountSummary>.from(accounts),
+                            selectedBankName!,
+                          ),
+                ),
+              ],
+            ],
           ],
         ),
       ),
@@ -3327,7 +3413,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   Future<void> _openFilterSheet(TransactionProvider provider) async {
-    // Derive unique bank IDs and account numbers from ALL transactions.
+    // Derive bank/category choices from activity; account choices come from
+    // the provider's durable ownership partitions below.
     final allTxns = provider.allTransactions;
     final bankIds = <int>{};
     final categoryIds = <int>{};
@@ -3342,6 +3429,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         .whereType<Category>()
         .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
+    final unmatchedBankIds = bankIds
+        .where(
+          (bankId) =>
+              bankId != CashConstants.bankId &&
+              provider.unmatchedTransactionsForBank(bankId).isNotEmpty,
+        )
+        .toSet();
 
     final result = await showModalBottomSheet<_TransactionFilter>(
       context: context,
@@ -3350,6 +3444,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       builder: (_) => _FilterTransactionsSheet(
         currentFilter: _filter,
         bankIds: bankIds.toList()..sort(),
+        accounts: provider.accountSummaries,
+        unmatchedBankIds: unmatchedBankIds,
         categories: categories,
       ),
     );
@@ -3366,6 +3462,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     for (final transaction in provider.allTransactions) {
       if (transaction.bankId != null) bankIds.add(transaction.bankId!);
     }
+    final unmatchedBankIds = bankIds
+        .where(
+          (bankId) =>
+              bankId != CashConstants.bankId &&
+              provider.unmatchedTransactionsForBank(bankId).isNotEmpty,
+        )
+        .toSet();
 
     final result = await showModalBottomSheet<_LedgerFilter>(
       context: context,
@@ -3375,6 +3478,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         currentFilter: _ledgerFilter,
         bankIds: bankIds.toList()
           ..sort((a, b) => _bankLabel(a).compareTo(_bankLabel(b))),
+        accounts: provider.accountSummaries,
+        unmatchedBankIds: unmatchedBankIds,
       ),
     );
     if (result != null) {
@@ -3393,7 +3498,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
-  List<Transaction> _filterTransactions(List<Transaction> transactions) {
+  List<Transaction> _filterTransactions(
+    TransactionProvider provider,
+    List<Transaction> transactions,
+  ) {
     var result = transactions;
 
     // Type filter
@@ -3404,6 +3512,19 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     // Bank filter
     if (_filter.bankId != null) {
       result = result.where((t) => t.bankId == _filter.bankId).toList();
+    }
+
+    // Account filter uses the provider's durable ownership partition. Parsed
+    // accountNumber can describe a counterparty and must not be used here.
+    if (_filter.accountKey != null) {
+      final accountTransactions =
+          _transactionsForAccountFilter(provider, _filter.accountKey!);
+      final references = accountTransactions
+          .map((transaction) => transaction.reference)
+          .toSet();
+      result = result
+          .where((transaction) => references.contains(transaction.reference))
+          .toList();
     }
 
     // Category filter
@@ -3627,119 +3748,130 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
-  void _openBankTransactionsPage(int bankId) {
+  void _openAccountTransactionsPage(AccountSummary account) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _BankTransactionsPage(bankId: bankId),
+        builder: (_) => _BankTransactionsPage(
+          bankId: account.bankId,
+          account: account,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openUnmatchedTransactionsPage(
+    TransactionProvider provider,
+    int bankId,
+  ) async {
+    // Ownership reconciliation can finish after the account cards were first
+    // rendered. Reload before opening so a newly assigned transaction cannot
+    // remain in a stale Other list.
+    await provider.loadData();
+    if (!mounted) return;
+    if (provider.unmatchedTransactionsForBank(bankId).isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead('All transactions are now assigned.'),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _BankTransactionsPage(
+          bankId: bankId,
+          unmatchedOnly: true,
+        ),
       ),
     );
   }
 
   String _accountActionKey(AccountSummary account) {
-    return '${account.bankId}:${account.accountNumber}';
-  }
-
-  bank_model.Bank? _resolveBankInfo(int bankId) {
-    for (final bank in _assetBanks) {
-      if (bank.id == bankId) return bank;
-    }
-    return null;
+    return _accountSummaryKey(account);
   }
 
   List<Transaction> _transactionsForAccount(
     TransactionProvider provider,
     AccountSummary account,
   ) {
-    final bank = _resolveBankInfo(account.bankId);
-    return provider.allTransactions.where((transaction) {
-      if (transaction.bankId != account.bankId) return false;
-
-      if (account.bankId == CashConstants.bankId) {
-        return transaction.accountNumber == account.accountNumber;
-      }
-
-      if (bank?.uniformMasking == true && bank?.maskPattern != null) {
-        final maskPattern = bank!.maskPattern!;
-        final transactionAccount = transaction.accountNumber?.trim();
-        if (transactionAccount == null || transactionAccount.isEmpty) {
-          return false;
-        }
-        if (account.accountNumber.length < maskPattern ||
-            transactionAccount.length < maskPattern) {
-          return false;
-        }
-        return account.accountNumber.substring(
-              account.accountNumber.length - maskPattern,
-            ) ==
-            transactionAccount.substring(
-              transactionAccount.length - maskPattern,
-            );
-      }
-
-      if (bank?.uniformMasking == false) {
-        return true;
-      }
-
-      return transaction.accountNumber == account.accountNumber;
-    }).toList(growable: false);
+    return provider.transactionsForAccount(
+      account.bankId,
+      account.accountNumber,
+    );
   }
 
-  Future<void> _openAccountReparseSheet(
+  Future<void> _openAccountsReparseSheet(
     TransactionProvider provider,
-    AccountSummary account,
+    List<AccountSummary> accounts,
+    String bankName,
   ) async {
+    if (accounts.isEmpty) return;
+    final bankId = accounts.first.bankId;
     final selection = await showModalBottomSheet<_AccountReparseSelection>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _ReparseAccountSheet(
-        accountNumber: account.accountNumber,
-        bankName: _localizedBankName(context, account.bankId),
+      builder: (_) => _ReparseAccountsSheet(
+        accounts: accounts,
+        bankName: bankName,
       ),
     );
-    if (selection == null) return;
-
-    await _reparseTransactionsForAccount(
-      provider,
-      account,
-      startDate: selection.startDate,
-      refreshExistingTransactions: selection.refreshExistingTransactions,
-      importMissedTransactions: selection.importMissedTransactions,
-      applyAutoCategorization: selection.applyAutoCategorization,
-    );
-  }
-
-  Future<void> _reparseTransactionsForAccount(
-    TransactionProvider provider,
-    AccountSummary account, {
-    DateTime? startDate,
-    bool refreshExistingTransactions = true,
-    bool importMissedTransactions = true,
-    bool applyAutoCategorization = true,
-  }) async {
-    final accountKey = _accountActionKey(account);
-    if (_reparsingAccountKeys.contains(accountKey)) return;
+    if (!mounted || selection == null) return;
 
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final accountTransactions = _transactionsForAccount(provider, account);
+    final selectedAccounts = accounts
+        .where(
+          (account) => selection.selectedAccountKeys.contains(
+            _accountActionKey(account),
+          ),
+        )
+        .toList(growable: false);
+    if (selectedAccounts.isEmpty) return;
 
-    setState(() => _reparsingAccountKeys.add(accountKey));
+    if (AccountSyncStatusService.instance.hasAnyAccountSyncing(bankId)) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'Another account for this bank is already syncing.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final selectedKeys = selectedAccounts.map(_accountActionKey).toSet();
+    setState(() => _reparsingAccountKeys.addAll(selectedKeys));
+
+    final targets = selectedAccounts
+        .map(
+          (account) => AccountTransactionReparseTarget(
+            accountNumber: account.accountNumber,
+            transactions: _transactionsForAccount(provider, account),
+          ),
+        )
+        .toList(growable: false);
 
     try {
       final result = await _accountTransactionReparseService
-          .startReparseAccountTransactionsInBackground(
-        bankId: account.bankId,
-        accountNumber: account.accountNumber,
-        transactions: accountTransactions,
-        startDate: startDate,
-        refreshExistingTransactions: refreshExistingTransactions,
-        importMissedTransactions: importMissedTransactions,
-        applyAutoCategorization: applyAutoCategorization,
+          .startReparseAccountsInBackground(
+        bankId: bankId,
+        targets: targets,
+        startDate: selection.startDate,
+        refreshExistingTransactions: selection.refreshExistingTransactions,
+        importMissedTransactions: selection.importMissedTransactions,
+        applyAutoCategorization: selection.applyAutoCategorization,
       );
 
       if (!mounted) return;
       final message = result.started
-          ? 'Reparse started in the background. Progress will appear on the account card.'
+          ? 'Reparse started for ${selectedAccounts.length} '
+              '${selectedAccounts.length == 1 ? 'account' : 'accounts'}. '
+              'Selected accounts will run one at a time.'
           : (result.errorMessage ?? 'Could not start reparse.');
       messenger?.showSnackBar(
         SnackBar(content: Text(context.l10nTextRead(message))),
@@ -3755,7 +3887,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       );
     } finally {
       if (mounted) {
-        setState(() => _reparsingAccountKeys.remove(accountKey));
+        setState(() => _reparsingAccountKeys.removeAll(selectedKeys));
       }
     }
   }
@@ -11350,10 +11482,14 @@ class _LedgerFlatItem {
 
 class _BankTransactionsPage extends StatefulWidget {
   final int bankId;
+  final AccountSummary? account;
+  final bool unmatchedOnly;
 
   const _BankTransactionsPage({
     required this.bankId,
-  });
+    this.account,
+    this.unmatchedOnly = false,
+  }) : assert(account == null || !unmatchedOnly);
 
   @override
   State<_BankTransactionsPage> createState() => _BankTransactionsPageState();
@@ -11401,9 +11537,20 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   }
 
   List<Transaction> _bankTransactions(TransactionProvider provider) {
-    return provider.allTransactions
-        .where((transaction) => transaction.bankId == widget.bankId)
-        .toList(growable: false);
+    if (widget.unmatchedOnly) {
+      return provider.unmatchedTransactionsForBank(widget.bankId);
+    }
+    final accountSummary = widget.account;
+    if (accountSummary == null) {
+      return provider.allTransactions
+          .where((transaction) => transaction.bankId == widget.bankId)
+          .toList(growable: false);
+    }
+
+    return provider.transactionsForAccount(
+      widget.bankId,
+      accountSummary.accountNumber,
+    );
   }
 
   List<Category> _categoriesForBankTransactions(
@@ -11426,6 +11573,16 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   Future<void> _openFilterSheet(TransactionProvider provider) async {
     final transactions = _bankTransactions(provider);
     final categories = _categoriesForBankTransactions(provider, transactions);
+    final accounts = widget.account == null && !widget.unmatchedOnly
+        ? provider.accountSummaries
+            .where((account) => account.bankId == widget.bankId)
+            .toList(growable: false)
+        : const <AccountSummary>[];
+    final unmatchedBankIds = widget.account == null &&
+            !widget.unmatchedOnly &&
+            provider.unmatchedTransactionsForBank(widget.bankId).isNotEmpty
+        ? <int>{widget.bankId}
+        : const <int>{};
 
     final result = await showModalBottomSheet<_TransactionFilter>(
       context: context,
@@ -11434,6 +11591,8 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       builder: (_) => _FilterTransactionsSheet(
         currentFilter: _filter,
         bankIds: const <int>[],
+        accounts: accounts,
+        unmatchedBankIds: unmatchedBankIds,
         categories: categories,
         showBankFilter: false,
       ),
@@ -11454,6 +11613,17 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
 
     if (_filter.type != null) {
       result = result.where((t) => t.type == _filter.type).toList();
+    }
+
+    if (_filter.accountKey != null) {
+      final accountTransactions =
+          _transactionsForAccountFilter(provider, _filter.accountKey!);
+      final references = accountTransactions
+          .map((transaction) => transaction.reference)
+          .toSet();
+      result = result
+          .where((transaction) => references.contains(transaction.reference))
+          .toList();
     }
 
     if (_filter.categoryId != null) {
@@ -11698,12 +11868,18 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     context.watch<ThemeProvider>();
     final theme = Theme.of(context);
     final bankName = _localizedBankName(context, widget.bankId);
+    final accountTitle = widget.account == null
+        ? (widget.unmatchedOnly
+            ? '${context.l10nText('Other transactions')} • $bankName'
+            : bankName)
+        : '${widget.account!.accountHolderName} • ${widget.account!.accountNumber}';
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Consumer<TransactionProvider>(
       builder: (context, provider, _) {
         final bankTransactions = _bankTransactions(provider);
         final filtered = _filterTransactions(provider, bankTransactions)
+            .toList(growable: true)
           ..sort((a, b) {
             final aTime = _parseTransactionTime(a.time);
             final bTime = _parseTransactionTime(b.time);
@@ -11722,7 +11898,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
         final flatItems = _buildFlatItems(pageTransactions);
         final title = _isSelecting
             ? '${_selectedRefs.length} ${context.l10nText('selected')}'
-            : bankName;
+            : accountTitle;
         final showsPagination = flatItems.isNotEmpty && totalPages > 1;
 
         return Scaffold(
@@ -11776,6 +11952,10 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            if (widget.unmatchedOnly) ...[
+                              const _UnmatchedTransactionsNotice(),
+                              const SizedBox(height: 12),
+                            ],
                             _SearchFilterRow(
                               controller: _searchController,
                               onChanged: (value) => setState(() {
@@ -12845,6 +13025,240 @@ class _BankSelectorStrip extends StatelessWidget {
   }
 }
 
+class _UnmatchedTransactionsCard extends StatelessWidget {
+  final int transactionCount;
+  final double totalCredit;
+  final double totalDebit;
+  final bool showAmounts;
+  final String? accountHolderName;
+  final VoidCallback onTap;
+
+  const _UnmatchedTransactionsCard({
+    required this.transactionCount,
+    required this.totalCredit,
+    required this.totalDebit,
+    required this.showAmounts,
+    required this.accountHolderName,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final currencyLabel = context.l10nText('ETB');
+    final creditLabel =
+        showAmounts ? '+$currencyLabel ${_formatEtbFull(totalCredit)}' : '***';
+    final debitLabel =
+        showAmounts ? '-$currencyLabel ${_formatEtbFull(totalDebit)}' : '***';
+    final holderName = accountHolderName?.trim();
+    final subtitle = holderName != null && holderName.isNotEmpty
+        ? '${context.l10nText('Not assigned to')} $holderName'
+        : context.l10nText('Not assigned to an account you added');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLight.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      AppIcons.help_outline_rounded,
+                      color: AppColors.primaryLight,
+                      size: 23,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10nText('Other transactions'),
+                          style: TextStyle(
+                            color: AppColors.textPrimary(context),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: AppColors.textSecondary(context),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    AppIcons.chevron_right_rounded,
+                    color: AppColors.textSecondary(context),
+                    size: 22,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(height: 1, color: AppColors.borderColor(context)),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        context.l10nText('TRANSACTIONS'),
+                        style: TextStyle(
+                          color: AppColors.textSecondary(context),
+                          fontSize: 10,
+                          letterSpacing: 0.8,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatCount(transactionCount),
+                        style: TextStyle(
+                          color: AppColors.textPrimary(context),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 24),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10nText('IN & OUT'),
+                          style: TextStyle(
+                            color: AppColors.textSecondary(context),
+                            fontSize: 10,
+                            letterSpacing: 0.8,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              creditLabel,
+                              style: const TextStyle(
+                                color: AppColors.incomeSuccess,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              '|',
+                              style: TextStyle(
+                                color: AppColors.textTertiary(context),
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              debitLabel,
+                              style: const TextStyle(
+                                color: AppColors.red,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                context.l10nText(
+                  'Add the matching account and Totals will move these automatically.',
+                ),
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 11,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnmatchedTransactionsNotice extends StatelessWidget {
+  const _UnmatchedTransactionsNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppColors.primaryLight.withValues(alpha: 0.24),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            AppIcons.info_outline_rounded,
+            color: AppColors.primaryLight,
+            size: 19,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              context.l10nText(
+                'These are included in the bank total, but not in any account balance or account transaction count.',
+              ),
+              style: TextStyle(
+                color: AppColors.textSecondary(context),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AccountCard extends StatelessWidget {
   final AccountSummary account;
   final int bankId;
@@ -12855,7 +13269,6 @@ class _AccountCard extends StatelessWidget {
   final double? syncProgress;
   final bool isReparsing;
   final VoidCallback onOpenTransactions;
-  final VoidCallback? onReparse;
   final VoidCallback? onDelete;
   final VoidCallback? onCashExpense;
   final VoidCallback? onCashIncome;
@@ -12872,7 +13285,6 @@ class _AccountCard extends StatelessWidget {
     required this.syncProgress,
     this.isReparsing = false,
     required this.onOpenTransactions,
-    this.onReparse,
     this.onDelete,
     this.onCashExpense,
     this.onCashIncome,
@@ -13081,22 +13493,11 @@ class _AccountCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (onReparse != null || onDelete != null) ...[
+                  if (onDelete != null) ...[
                     const SizedBox(height: 14),
                     Container(height: 1, color: AppColors.borderColor(context)),
-                    if (onReparse != null) ...[
-                      const SizedBox(height: 12),
-                      _CashActionButton(
-                        label: isBusy ? 'Syncing...' : 'Reparse SMS',
-                        icon: AppIcons.refresh,
-                        color: AppColors.primaryDark,
-                        outlined: true,
-                        isLoading: isBusy,
-                        onTap: isBusy ? null : onReparse,
-                      ),
-                    ],
                     if (onDelete != null) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                       GestureDetector(
                         onTap: canDelete ? onDelete : null,
                         child: Row(
@@ -14013,13 +14414,45 @@ class _AddAccountSheetState extends State<_AddAccountSheet> {
   }
 }
 
+String _accountSummaryKey(AccountSummary account) {
+  return '${account.bankId}:${account.accountNumber}';
+}
+
+String _otherAccountFilterKey(int bankId) => 'other:$bankId';
+
+int? _otherAccountFilterBankId(String key) {
+  if (!key.startsWith('other:')) return null;
+  return int.tryParse(key.substring('other:'.length));
+}
+
+List<Transaction> _transactionsForAccountFilter(
+  TransactionProvider provider,
+  String accountKey,
+) {
+  final otherBankId = _otherAccountFilterBankId(accountKey);
+  if (otherBankId != null) {
+    return provider.unmatchedTransactionsForBank(otherBankId);
+  }
+  for (final account in provider.accountSummaries) {
+    if (_accountSummaryKey(account) == accountKey) {
+      return provider.transactionsForAccount(
+        account.bankId,
+        account.accountNumber,
+      );
+    }
+  }
+  return const <Transaction>[];
+}
+
 class _AccountReparseSelection {
+  final Set<String> selectedAccountKeys;
   final DateTime? startDate;
   final bool refreshExistingTransactions;
   final bool importMissedTransactions;
   final bool applyAutoCategorization;
 
   const _AccountReparseSelection({
+    required this.selectedAccountKeys,
     this.startDate,
     this.refreshExistingTransactions = true,
     this.importMissedTransactions = true,
@@ -14027,20 +14460,21 @@ class _AccountReparseSelection {
   });
 }
 
-class _ReparseAccountSheet extends StatefulWidget {
-  final String accountNumber;
+class _ReparseAccountsSheet extends StatefulWidget {
+  final List<AccountSummary> accounts;
   final String bankName;
 
-  const _ReparseAccountSheet({
-    required this.accountNumber,
+  const _ReparseAccountsSheet({
+    required this.accounts,
     required this.bankName,
   });
 
   @override
-  State<_ReparseAccountSheet> createState() => _ReparseAccountSheetState();
+  State<_ReparseAccountsSheet> createState() => _ReparseAccountsSheetState();
 }
 
-class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
+class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
+  late Set<String> _selectedAccountKeys;
   DateTime? _startDate;
   bool _refreshExistingTransactions = true;
   bool _importMissedTransactions = true;
@@ -14050,6 +14484,33 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
       _refreshExistingTransactions ||
       _importMissedTransactions ||
       _applyAutoCategorization;
+
+  bool get _allAccountsSelected =>
+      widget.accounts.isNotEmpty &&
+      _selectedAccountKeys.length == widget.accounts.length;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedAccountKeys = widget.accounts.map(_accountSummaryKey).toSet();
+  }
+
+  void _toggleAllAccounts() {
+    setState(() {
+      _selectedAccountKeys = _allAccountsSelected
+          ? <String>{}
+          : widget.accounts.map(_accountSummaryKey).toSet();
+    });
+  }
+
+  void _toggleAccount(AccountSummary account) {
+    final key = _accountSummaryKey(account);
+    setState(() {
+      if (!_selectedAccountKeys.remove(key)) {
+        _selectedAccountKeys.add(key);
+      }
+    });
+  }
 
   Future<void> _pickStartDate() async {
     final initialDate = _startDate ?? DateTime.now();
@@ -14117,7 +14578,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  context.l10nText('Reparse SMS'),
+                  context.l10nText('Reparse accounts'),
                   style: TextStyle(
                     color: AppColors.textPrimary(context),
                     fontSize: 20,
@@ -14144,7 +14605,7 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
             const SizedBox(height: 12),
             Text(
               context.l10nText(
-                'Choose what this scan should do for the selected account. Existing categories stay untouched; auto-categorization only fills uncategorized transactions.',
+                'Select the accounts to scan, then choose what the reparse should update. Selected accounts run one at a time.',
               ),
               style: TextStyle(
                 color: hintColor,
@@ -14164,26 +14625,80 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    widget.bankName,
-                    style: TextStyle(
-                      color: AppColors.textPrimary(context),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.accountNumber,
-                    style: TextStyle(
-                      color: hintColor,
-                      fontSize: 13,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.bankName,
+                          style: TextStyle(
+                            color: AppColors.textPrimary(context),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${_selectedAccountKeys.length}/${widget.accounts.length} '
+                        '${context.l10nText('selected')}',
+                        style: TextStyle(
+                          color: hintColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    context.l10nText('Accounts'),
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _toggleAllAccounts,
+                  child: Text(
+                    context.l10nText(
+                      _allAccountsSelected ? 'Clear' : 'Select all',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ...widget.accounts.map(
+              (account) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _ReparseAccountTile(
+                  account: account,
+                  selected: _selectedAccountKeys.contains(
+                    _accountSummaryKey(account),
+                  ),
+                  onChanged: () => _toggleAccount(account),
+                ),
+              ),
+            ),
+            if (_selectedAccountKeys.isEmpty) ...[
+              Text(
+                context.l10nText('Choose at least one account to reparse.'),
+                style: TextStyle(
+                  color: AppColors.red.withValues(alpha: 0.8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            const SizedBox(height: 12),
             Text(
               context.l10nText('Actions'),
               style: TextStyle(
@@ -14335,10 +14850,14 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                 Expanded(
                   flex: 2,
                   child: ElevatedButton(
-                    onPressed: !_hasSelectedAction
+                    onPressed: !_hasSelectedAction ||
+                            _selectedAccountKeys.isEmpty
                         ? null
                         : () => Navigator.of(context).pop(
                               _AccountReparseSelection(
+                                selectedAccountKeys: Set<String>.unmodifiable(
+                                  _selectedAccountKeys,
+                                ),
                                 startDate: _startDate,
                                 refreshExistingTransactions:
                                     _refreshExistingTransactions,
@@ -14358,7 +14877,13 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
                       ),
                     ),
                     child: Text(
-                      context.l10nText('Run Reparse'),
+                      '${context.l10nText('Reparse')} '
+                      '${_selectedAccountKeys.length} '
+                      '${context.l10nText(
+                        _selectedAccountKeys.length == 1
+                            ? 'account'
+                            : 'accounts',
+                      )}',
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -14370,6 +14895,91 @@ class _ReparseAccountSheetState extends State<_ReparseAccountSheet> {
             ),
             const SizedBox(height: 30),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReparseAccountTile extends StatelessWidget {
+  final AccountSummary account;
+  final bool selected;
+  final VoidCallback onChanged;
+
+  const _ReparseAccountTile({
+    required this.account,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final holderName = account.accountHolderName.trim();
+    return Material(
+      color: AppColors.surfaceColor(context),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onChanged,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? AppColors.primaryDark.withValues(alpha: 0.45)
+                  : AppColors.borderColor(context),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      holderName.isEmpty
+                          ? context.l10nText('Account')
+                          : holderName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      account.accountNumber,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textSecondary(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_formatCount(account.totalTransactions.toInt())} '
+                      '${context.l10nText('transactions')}',
+                      style: TextStyle(
+                        color: AppColors.textTertiary(context),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Checkbox(
+                value: selected,
+                onChanged: (_) => onChanged(),
+                activeColor: AppColors.primaryDark,
+                checkColor: AppColors.white,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -14443,12 +15053,16 @@ class _ReparseScopeTile extends StatelessWidget {
 class _FilterTransactionsSheet extends StatefulWidget {
   final _TransactionFilter currentFilter;
   final List<int> bankIds;
+  final List<AccountSummary> accounts;
+  final Set<int> unmatchedBankIds;
   final List<Category> categories;
   final bool showBankFilter;
 
   const _FilterTransactionsSheet({
     required this.currentFilter,
     required this.bankIds,
+    required this.accounts,
+    required this.unmatchedBankIds,
     required this.categories,
     this.showBankFilter = true,
   });
@@ -14461,6 +15075,7 @@ class _FilterTransactionsSheet extends StatefulWidget {
 class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   late String? _selectedType;
   late int? _selectedBankId;
+  late String? _selectedAccountKey;
   late int? _selectedCategoryId;
   late final TextEditingController _minAmountController;
   late final TextEditingController _maxAmountController;
@@ -14473,6 +15088,11 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     super.initState();
     _selectedType = widget.currentFilter.type;
     _selectedBankId = widget.currentFilter.bankId;
+    final currentAccountKey = widget.currentFilter.accountKey;
+    _selectedAccountKey =
+        currentAccountKey != null && _accountKeyIsVisible(currentAccountKey)
+            ? currentAccountKey
+            : null;
     _selectedCategoryId = widget.currentFilter.categoryId;
     _minAmountController = TextEditingController(
       text: _formatAmountInput(widget.currentFilter.minAmount),
@@ -14495,6 +15115,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     setState(() {
       _selectedType = null;
       _selectedBankId = null;
+      _selectedAccountKey = null;
       _selectedCategoryId = null;
       _minAmountController.clear();
       _maxAmountController.clear();
@@ -14525,6 +15146,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
       _TransactionFilter(
         type: _selectedType,
         bankId: _selectedBankId,
+        accountKey: _selectedAccountKey,
         categoryId: _selectedCategoryId,
         minAmount: minAmount,
         maxAmount: maxAmount,
@@ -14569,6 +15191,63 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
         .toStringAsFixed(2)
         .replaceFirst(RegExp(r'0+$'), '')
         .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  List<AccountSummary> get _visibleAccounts {
+    final bankId = _selectedBankId;
+    if (bankId == null) return widget.accounts;
+    return widget.accounts
+        .where((account) => account.bankId == bankId)
+        .toList(growable: false);
+  }
+
+  List<int> get _visibleUnmatchedBankIds {
+    final bankId = _selectedBankId;
+    final ids = widget.unmatchedBankIds
+        .where((candidate) => bankId == null || candidate == bankId)
+        .toList(growable: false);
+    ids.sort((a, b) => _bankLabel(a).compareTo(_bankLabel(b)));
+    return ids;
+  }
+
+  bool _accountKeyIsVisible(String key) {
+    if (_visibleAccounts.any(
+      (account) => _accountSummaryKey(account) == key,
+    )) {
+      return true;
+    }
+    return _visibleUnmatchedBankIds.any(
+      (bankId) => _otherAccountFilterKey(bankId) == key,
+    );
+  }
+
+  void _selectBank(int? bankId) {
+    setState(() {
+      _selectedBankId = bankId;
+      if (_selectedAccountKey != null &&
+          !_accountKeyIsVisible(_selectedAccountKey!)) {
+        _selectedAccountKey = null;
+      }
+    });
+  }
+
+  String _accountFilterLabel(AccountSummary account) {
+    final holderName = account.accountHolderName.trim();
+    final identity = holderName.isEmpty
+        ? account.accountNumber
+        : '$holderName • ${account.accountNumber}';
+    if (widget.showBankFilter && _selectedBankId == null) {
+      return '${_localizedBankLabel(context, account.bankId)} • $identity';
+    }
+    return identity;
+  }
+
+  String _otherAccountFilterLabel(int bankId) {
+    final other = context.l10nText('Other transactions');
+    if (widget.showBankFilter && _selectedBankId == null) {
+      return '${_localizedBankLabel(context, bankId)} • $other';
+    }
+    return other;
   }
 
   void _handleAmountChanged(String _) {
@@ -14729,16 +15408,69 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                         _FilterChip(
                           label: 'All Banks',
                           selected: _selectedBankId == null,
-                          onTap: () => setState(() => _selectedBankId = null),
+                          onTap: () => _selectBank(null),
                         ),
                         for (final bankId in widget.bankIds)
                           _FilterChip(
                             label: _localizedBankLabel(context, bankId),
                             selected: _selectedBankId == bankId,
-                            onTap: () =>
-                                setState(() => _selectedBankId = bankId),
+                            onTap: () => _selectBank(bankId),
                           ),
                       ],
+                    ),
+                  ],
+
+                  if (widget.accounts.isNotEmpty ||
+                      widget.unmatchedBankIds.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('ACCOUNT'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Transform.translate(
+                        offset: const Offset(-20, 0),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                label: 'All account activity',
+                                selected: _selectedAccountKey == null,
+                                onTap: () => setState(
+                                  () => _selectedAccountKey = null,
+                                ),
+                              ),
+                              for (final account in _visibleAccounts)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: _accountFilterLabel(account),
+                                    selected: _selectedAccountKey ==
+                                        _accountSummaryKey(account),
+                                    onTap: () => setState(
+                                      () => _selectedAccountKey =
+                                          _accountSummaryKey(account),
+                                    ),
+                                  ),
+                                ),
+                              for (final bankId in _visibleUnmatchedBankIds)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: _otherAccountFilterLabel(bankId),
+                                    selected: _selectedAccountKey ==
+                                        _otherAccountFilterKey(bankId),
+                                    onTap: () => setState(
+                                      () => _selectedAccountKey =
+                                          _otherAccountFilterKey(bankId),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ],
 
@@ -14931,10 +15663,14 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
 class _LedgerFilterSheet extends StatefulWidget {
   final _LedgerFilter currentFilter;
   final List<int> bankIds;
+  final List<AccountSummary> accounts;
+  final Set<int> unmatchedBankIds;
 
   const _LedgerFilterSheet({
     required this.currentFilter,
     required this.bankIds,
+    required this.accounts,
+    required this.unmatchedBankIds,
   });
 
   @override
@@ -14945,6 +15681,7 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
   DateTime? _startDate;
   DateTime? _endDate;
   late Set<int> _selectedBankIds;
+  String? _selectedAccountKey;
 
   @override
   void initState() {
@@ -14952,6 +15689,9 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
     _startDate = widget.currentFilter.startDate;
     _endDate = widget.currentFilter.endDate;
     _selectedBankIds = widget.currentFilter.bankIds.toSet();
+    _selectedAccountKey = _accountKeyExists(widget.currentFilter.accountKey)
+        ? widget.currentFilter.accountKey
+        : null;
   }
 
   void _clearAll() {
@@ -14959,11 +15699,13 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
       _startDate = null;
       _endDate = null;
       _selectedBankIds = <int>{};
+      _selectedAccountKey = null;
     });
   }
 
   void _toggleBank(int bankId) {
     setState(() {
+      _selectedAccountKey = null;
       if (_selectedBankIds.contains(bankId)) {
         _selectedBankIds.remove(bankId);
       } else {
@@ -14978,8 +15720,59 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
         startDate: _startDate,
         endDate: _endDate,
         bankIds: _selectedBankIds.toSet(),
+        accountKey: _selectedAccountKey,
       ),
     );
+  }
+
+  bool _accountKeyExists(String? key) {
+    if (key == null) return false;
+    if (widget.accounts.any(
+      (account) => _accountSummaryKey(account) == key,
+    )) {
+      return true;
+    }
+    return widget.unmatchedBankIds.any(
+      (bankId) => _otherAccountFilterKey(bankId) == key,
+    );
+  }
+
+  List<AccountSummary> get _visibleAccounts {
+    if (_selectedBankIds.isEmpty) return widget.accounts;
+    return widget.accounts
+        .where((account) => _selectedBankIds.contains(account.bankId))
+        .toList(growable: false);
+  }
+
+  List<int> get _visibleUnmatchedBankIds {
+    final ids = widget.unmatchedBankIds
+        .where(
+          (bankId) =>
+              _selectedBankIds.isEmpty || _selectedBankIds.contains(bankId),
+        )
+        .toList(growable: false);
+    ids.sort((a, b) => _bankLabel(a).compareTo(_bankLabel(b)));
+    return ids;
+  }
+
+  void _selectAccount(String? accountKey) {
+    setState(() {
+      _selectedAccountKey = accountKey;
+      if (accountKey != null) _selectedBankIds.clear();
+    });
+  }
+
+  String _accountFilterLabel(AccountSummary account) {
+    final holderName = account.accountHolderName.trim();
+    final identity = holderName.isEmpty
+        ? account.accountNumber
+        : '$holderName • ${account.accountNumber}';
+    return '${_localizedBankLabel(context, account.bankId)} • $identity';
+  }
+
+  String _otherAccountFilterLabel(int bankId) {
+    return '${_localizedBankLabel(context, bankId)} • '
+        '${context.l10nText('Other transactions')}';
   }
 
   Future<void> _pickDate({required bool isStart}) async {
@@ -15137,6 +15930,55 @@ class _LedgerFilterSheetState extends State<_LedgerFilterSheet> {
                         ),
                     ],
                   ),
+                  if (widget.accounts.isNotEmpty ||
+                      widget.unmatchedBankIds.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('ACCOUNT'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Transform.translate(
+                        offset: const Offset(-20, 0),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                label: 'All account activity',
+                                selected: _selectedAccountKey == null,
+                                onTap: () => _selectAccount(null),
+                              ),
+                              for (final account in _visibleAccounts)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: _accountFilterLabel(account),
+                                    selected: _selectedAccountKey ==
+                                        _accountSummaryKey(account),
+                                    onTap: () => _selectAccount(
+                                      _accountSummaryKey(account),
+                                    ),
+                                  ),
+                                ),
+                              for (final bankId in _visibleUnmatchedBankIds)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: _otherAccountFilterLabel(bankId),
+                                    selected: _selectedAccountKey ==
+                                        _otherAccountFilterKey(bankId),
+                                    onTap: () => _selectAccount(
+                                      _otherAccountFilterKey(bankId),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   Row(
                     children: [

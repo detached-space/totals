@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:totals/utils/sms_transaction_source.dart';
+
 class Transaction {
   final double amount; // required
   final String reference; // required
@@ -13,6 +15,8 @@ class Transaction {
   final String? type; // CREDIT or DEBIT
   final String? transactionLink;
   final String? accountNumber; // Last 4 digits
+  /// User-entered account number selected as the authoritative owner.
+  final String? ownerAccountNumber;
   final int? categoryId;
   final List<int>? categoryIds;
   final int? profileId;
@@ -21,6 +25,10 @@ class Transaction {
   final String? sourceType;
   final String? sourceMessageId;
   final String? sourceFingerprint;
+
+  /// Android SMS subscription that delivered the source message. Device-local
+  /// routing metadata; [ownerAccountNumber] is the durable ownership identity.
+  final int? sourceSubscriptionId;
 
   Transaction({
     required this.amount,
@@ -35,6 +43,7 @@ class Transaction {
     this.type,
     this.transactionLink,
     this.accountNumber,
+    this.ownerAccountNumber,
     int? categoryId,
     List<int>? categoryIds,
     this.profileId,
@@ -43,6 +52,7 @@ class Transaction {
     this.sourceType,
     this.sourceMessageId,
     this.sourceFingerprint,
+    this.sourceSubscriptionId,
   })  : categoryId = _resolvePrimaryCategoryId(categoryId, categoryIds),
         categoryIds = _normalizeCategoryIds(
           categoryIds,
@@ -122,6 +132,12 @@ class Transaction {
 
   int? get primaryCategoryId => categoryId;
 
+  /// Bank-provided transaction number without Totals' SMS row-identity suffix.
+  String get displayReference => SmsTransactionSource.displayReference(
+        bankId: bankId,
+        storedReference: reference,
+      );
+
   bool includesCategory(int? id) {
     if (id == null) return false;
     return selectedCategoryIds.contains(id);
@@ -154,6 +170,7 @@ class Transaction {
       type: json['type'],
       transactionLink: json['transactionLink'],
       accountNumber: json['accountNumber'],
+      ownerAccountNumber: json['ownerAccountNumber']?.toString(),
       categoryId: toInt(json['categoryId']),
       categoryIds: _decodeCategoryIds(json['categoryIds']),
       profileId: toInt(json['profileId']),
@@ -162,12 +179,14 @@ class Transaction {
       sourceType: json['sourceType']?.toString(),
       sourceMessageId: json['sourceMessageId']?.toString(),
       sourceFingerprint: json['sourceFingerprint']?.toString(),
+      sourceSubscriptionId: toInt(json['sourceSubscriptionId']),
     );
   }
 
   Map<String, dynamic> toJson() => {
         'amount': amount,
         'reference': reference,
+        'bankReference': displayReference,
         'creditor': creditor,
         'receiver': receiver,
         'note': note,
@@ -178,6 +197,7 @@ class Transaction {
         'type': type,
         'transactionLink': transactionLink,
         'accountNumber': accountNumber,
+        'ownerAccountNumber': ownerAccountNumber,
         'categoryId': primaryCategoryId,
         'categoryIds': selectedCategoryIds.isEmpty ? null : selectedCategoryIds,
         if (profileId != null) 'profileId': profileId,
@@ -201,6 +221,7 @@ class Transaction {
     String? type,
     String? transactionLink,
     String? accountNumber,
+    String? ownerAccountNumber,
     int? categoryId,
     List<int>? categoryIds,
     int? profileId,
@@ -209,6 +230,7 @@ class Transaction {
     String? sourceType,
     String? sourceMessageId,
     String? sourceFingerprint,
+    int? sourceSubscriptionId,
     bool clearCategoryId = false, // Flag to explicitly clear categoryId
     bool clearCategoryIds = false,
     bool clearNote = false,
@@ -258,6 +280,7 @@ class Transaction {
       type: type ?? this.type,
       transactionLink: transactionLink ?? this.transactionLink,
       accountNumber: accountNumber ?? this.accountNumber,
+      ownerAccountNumber: ownerAccountNumber ?? this.ownerAccountNumber,
       categoryId: nextCategoryId,
       categoryIds: nextCategoryIds,
       profileId: profileId ?? this.profileId,
@@ -266,6 +289,7 @@ class Transaction {
       sourceType: sourceType ?? this.sourceType,
       sourceMessageId: sourceMessageId ?? this.sourceMessageId,
       sourceFingerprint: sourceFingerprint ?? this.sourceFingerprint,
+      sourceSubscriptionId: sourceSubscriptionId ?? this.sourceSubscriptionId,
     );
   }
 }

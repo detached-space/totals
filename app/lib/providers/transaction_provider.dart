@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:totals/models/account.dart';
 import 'package:totals/models/auto_categorization.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
@@ -21,6 +22,7 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
+import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -190,6 +192,9 @@ class TransactionProvider with ChangeNotifier {
   AllSummary? _summary;
   List<BankSummary> _bankSummaries = [];
   List<AccountSummary> _accountSummaries = [];
+  Map<int, List<Transaction>> _unmatchedTransactionsByBank = const {};
+  Map<String, List<Transaction>> _transactionsByAccount = const {};
+  Map<String, AccountSummary> _accountSummaryByTransactionReference = const {};
 
   bool _isLoading = false;
   String _searchKey = "";
@@ -234,6 +239,26 @@ class TransactionProvider with ChangeNotifier {
   AllSummary? get summary => _summary;
   List<BankSummary> get bankSummaries => _bankSummaries;
   List<AccountSummary> get accountSummaries => _accountSummaries;
+  List<Account> get accounts => List<Account>.unmodifiable(_accounts);
+  List<Transaction> unmatchedTransactionsForBank(int bankId) =>
+      List<Transaction>.unmodifiable(
+        _unmatchedTransactionsByBank[bankId] ?? const <Transaction>[],
+      );
+  List<Transaction> transactionsForAccount(
+    int bankId,
+    String accountNumber,
+  ) =>
+      List<Transaction>.unmodifiable(
+        _transactionsByAccount[_accountPartitionKey(bankId, accountNumber)] ??
+            const <Transaction>[],
+      );
+
+  /// Returns the registered account that owns [transaction] using the same
+  /// durable partition used by account summaries and account detail pages.
+  AccountSummary? accountSummaryForTransaction(Transaction transaction) {
+    return _accountSummaryByTransactionReference[transaction.reference];
+  }
+
   DateTime get selectedDate => _selectedDate;
 
   bool isSharedExpenseTransaction(Transaction transaction) {
@@ -653,117 +678,86 @@ class TransactionProvider with ChangeNotifier {
 
   Future<void> _calculateSummaries(List<Transaction> allTransactions) async {
     final banks = await _bankConfigService.getBanks();
-    final banksById = {for (final bank in banks) bank.id: bank};
-
-    // Filter out transactions that don't have a matching account (orphaned transactions)
-    final validTransactions = allTransactions.where((t) {
-      if (t.bankId == null) return false;
-
-      // Check if there's an account for this transaction's bank
-      final bankAccounts = _accounts.where((a) => a.bank == t.bankId).toList();
-      if (bankAccounts.isEmpty) return false;
-
-      if (t.bankId == CashConstants.bankId) {
-        return true;
-      }
-
-      final bank = banksById[t.bankId];
-      if (bank == null) return false;
-
-      // If transaction has accountNumber, verify it matches an account
-      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
-        for (var account in bankAccounts) {
-          bool matches = false;
-
-          if (bank.uniformMasking == true) {
-            // CBE: match last 4 digits
-            matches = t.accountNumber!
-                    .substring(t.accountNumber!.length - bank.maskPattern!) ==
-                account.accountNumber.substring(
-                    account.accountNumber.length - bank.maskPattern!);
-          } else if (bank.uniformMasking == false) {
-            // Awash/Telebirr: match by bankId only
-            matches = true;
-          } else {
-            // Other banks: exact match
-            matches = t.accountNumber == account.accountNumber;
-          }
-
-          if (matches) return true;
-        }
-        return false; // No matching account found
-      } else {
-        // NULL accountNumber - include only if single account for bank (legacy data)
-        return bankAccounts.length == 1;
-      }
-    }).toList();
+    final banksById = <int, Bank>{
+      CashConstants.bankId: Bank(
+        id: CashConstants.bankId,
+        name: CashConstants.bankName,
+        shortName: CashConstants.bankShortName,
+        codes: const <String>[],
+        image: CashConstants.bankImage,
+        colors: CashConstants.bankColors,
+      ),
+      for (final bank in banks) bank.id: bank,
+    };
 
     // Group accounts by bank
-    Map<int, List<Account>> groupedAccounts = {};
-    for (var account in _accounts) {
-      if (!groupedAccounts.containsKey(account.bank)) {
-        groupedAccounts[account.bank] = [];
-      }
-      groupedAccounts[account.bank]!.add(account);
+    final groupedAccounts = <int, List<Account>>{};
+    for (final account in _accounts) {
+      groupedAccounts.putIfAbsent(account.bank, () => <Account>[]).add(account);
     }
 
+    // Bank totals retain every transaction for a registered bank, including
+    // rows whose account ownership is still ambiguous. Account totals below
+    // use the centralized resolver so those rows are never counted twice.
+    final validTransactions = allTransactions
+        .where((transaction) =>
+            transaction.bankId != null &&
+            groupedAccounts.containsKey(transaction.bankId))
+        .toList(growable: false);
+
     final resolvedAccountBalances = <String, double>{};
+    final resolvedOwners = <Transaction, Account?>{};
+    final unmatchedTransactionsByBank = <int, List<Transaction>>{};
+    final transactionsByAccount = <String, List<Transaction>>{};
+    final accountSummaryByTransactionReference = <String, AccountSummary>{};
+
+    for (final transaction in validTransactions) {
+      final bankId = transaction.bankId;
+      if (bankId == null) continue;
+      final bank = banksById[bankId];
+      final bankAccounts = groupedAccounts[bankId] ?? const <Account>[];
+      final owner = bank == null
+          ? null
+          : resolveTransactionOwnership(
+              transaction: transaction,
+              bank: bank,
+              accounts: bankAccounts,
+            );
+      resolvedOwners[transaction] = owner;
+      if (owner == null) {
+        unmatchedTransactionsByBank
+            .putIfAbsent(bankId, () => <Transaction>[])
+            .add(transaction);
+      }
+    }
+    _unmatchedTransactionsByBank = {
+      for (final entry in unmatchedTransactionsByBank.entries)
+        entry.key: List<Transaction>.unmodifiable(entry.value),
+    };
 
     // Calculate Account Summaries
     _accountSummaries = _accounts.map((account) {
-      // Logic for specific account transactions
-      // Note: original logic had a specific condition for bankId == 1 handling substrings
-      // Use validTransactions to ensure we only include transactions with matching accounts
-      var accountTransactions = validTransactions.where((t) {
-        bool bankMatch = t.bankId == account.bank;
-        if (!bankMatch) return false;
-
-        if (account.bank == CashConstants.bankId) {
-          return true;
-        }
-
-        final bank = banksById[t.bankId];
+      final bankAccounts = groupedAccounts[account.bank] ?? const <Account>[];
+      final bank = banksById[account.bank];
+      final accountTransactions = validTransactions.where((transaction) {
+        if (transaction.bankId != account.bank) return false;
         if (bank == null) return false;
-
-        if (bank.uniformMasking == true) {
-          // CBE check: last 4 digits
-
-          return t.accountNumber
-                  ?.substring(t.accountNumber!.length - bank.maskPattern!) ==
-              account.accountNumber
-                  .substring(account.accountNumber.length - bank.maskPattern!);
-        } else {
-          return t.bankId == account.bank;
-        }
-      }).toList();
+        final owner = resolvedOwners[transaction];
+        return owner != null &&
+            registeredAccountNumbersMatch(
+              bank,
+              owner.accountNumber,
+              account.accountNumber,
+            );
+      }).toList(growable: false);
+      transactionsByAccount[_accountPartitionKey(
+        account.bank,
+        account.accountNumber,
+      )] = List<Transaction>.unmodifiable(accountTransactions);
 
       debugPrint(
         "debug: Account Transactions: ${accountTransactions.length}",
       );
-
-      // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
-      // This handles legacy data or parsing failures where account wasn't captured.
-      // NOTE: Skip this for banks that match by bankId only (uniformMasking == false)
-      // because they already get all transactions via the else clause above
-      if (account.bank != CashConstants.bankId) {
-        try {
-          final accountBank = banksById[account.bank];
-          if (accountBank != null && accountBank.uniformMasking != false) {
-            var bankAccounts =
-                _accounts.where((a) => a.bank == account.bank).toList();
-            if (bankAccounts.length == 1 && bankAccounts.first == account) {
-              var orphanedTransactions = validTransactions
-                  .where((t) =>
-                      t.bankId == account.bank &&
-                      (t.accountNumber == null || t.accountNumber!.isEmpty))
-                  .toList();
-              accountTransactions.addAll(orphanedTransactions);
-            }
-          }
-        } catch (e) {
-          // Bank not found in database, skip orphaned transactions fallback
-        }
-      }
 
       double totalDebit = 0.0;
       double totalCredit = 0.0;
@@ -786,7 +780,7 @@ class TransactionProvider with ChangeNotifier {
       }
 
       final isCashAccount = account.bank == CashConstants.bankId;
-      final bankAccountCount = groupedAccounts[account.bank]?.length ?? 0;
+      final bankAccountCount = bankAccounts.length;
       final accountBalance = resolveDisplayedAccountBalance(
         account: account,
         accountTransactions: accountTransactions,
@@ -797,7 +791,7 @@ class TransactionProvider with ChangeNotifier {
       resolvedAccountBalances[accountBalanceResolverKey(account)] =
           accountBalance;
 
-      return AccountSummary(
+      final summary = AccountSummary(
         bankId: account.bank,
         accountNumber: account.accountNumber,
         accountHolderName: account.accountHolderName,
@@ -808,7 +802,18 @@ class TransactionProvider with ChangeNotifier {
         balance: accountBalance,
         pendingCredit: account.pendingCredit ?? 0.0,
       );
+      for (final transaction in accountTransactions) {
+        accountSummaryByTransactionReference[transaction.reference] = summary;
+      }
+      return summary;
     }).toList();
+    _transactionsByAccount = Map<String, List<Transaction>>.unmodifiable(
+      transactionsByAccount,
+    );
+    _accountSummaryByTransactionReference =
+        Map<String, AccountSummary>.unmodifiable(
+      accountSummaryByTransactionReference,
+    );
     _accountSummaries.sort(_compareAccountSummaries);
 
     // Calculate Bank Summaries
@@ -878,11 +883,14 @@ class TransactionProvider with ChangeNotifier {
     _summary = AllSummary(
       totalCredit: grandTotalCredit,
       totalDebit: grandTotalDebit,
-      banks: _accounts
-          .length, // Original logic passed account length to banks? weird, but sticking to logic
+      banks: groupedAccounts.length,
       accounts: _accounts.length,
       totalBalance: grandTotalBalance,
     );
+  }
+
+  static String _accountPartitionKey(int bankId, String accountNumber) {
+    return '$bankId:${accountNumber.trim()}';
   }
 
   void _filterTransactions(List<Transaction> allTransactions) {
@@ -1676,6 +1684,7 @@ class TransactionProvider with ChangeNotifier {
       type: transaction.type,
       transactionLink: transaction.transactionLink,
       accountNumber: transaction.accountNumber,
+      ownerAccountNumber: transaction.ownerAccountNumber,
       categoryId: transaction.categoryId,
       categoryIds: transaction.categoryIds,
       profileId: transaction.profileId,
@@ -1684,6 +1693,7 @@ class TransactionProvider with ChangeNotifier {
       sourceType: transaction.sourceType,
       sourceMessageId: transaction.sourceMessageId,
       sourceFingerprint: transaction.sourceFingerprint,
+      sourceSubscriptionId: transaction.sourceSubscriptionId,
     );
 
     final previous = _replaceTransactionLocally(updated);

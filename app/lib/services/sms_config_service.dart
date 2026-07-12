@@ -7,6 +7,9 @@ import 'package:totals/models/sms_pattern.dart';
 
 class SmsConfigService {
   static const String _patternsAssetPath = 'assets/sms_patterns.json';
+  static const Set<String> _bundledPatternOverrides = <String>{
+    '4|dashen telebirr credit',
+  };
   static Future<void>? _remoteConfigSyncInFlight;
   List<SmsPattern>? _assetPatternsCache;
 
@@ -56,7 +59,7 @@ class SmsConfigService {
     final List<Map<String, dynamic>> maps = await db.query('sms_patterns');
     if (maps.isNotEmpty) {
       try {
-        final patterns = maps.map((map) {
+        final storedPatterns = maps.map((map) {
           return SmsPattern.fromJson({
             'bankId': map['bankId'],
             'senderId': map['senderId'],
@@ -69,6 +72,10 @@ class SmsConfigService {
                 map['hasAccount'] == null ? null : (map['hasAccount'] == 1),
           });
         }).toList();
+        final patterns = _applyBundledPatternOverrides(
+          storedPatterns,
+          await _loadAssetPatterns(),
+        );
         print("debug: Loaded ${patterns.length} patterns from database");
         return patterns;
       } catch (e) {
@@ -82,8 +89,12 @@ class SmsConfigService {
       final hasInternet = await _hasInternetConnection();
       if (hasInternet) {
         try {
-          final patterns = await _fetchRemotePatterns();
-          if (patterns.isNotEmpty) {
+          final remotePatterns = await _fetchRemotePatterns();
+          if (remotePatterns.isNotEmpty) {
+            final patterns = _applyBundledPatternOverrides(
+              remotePatterns,
+              await _loadAssetPatterns(),
+            );
             await savePatterns(patterns);
             return patterns;
           }
@@ -102,6 +113,30 @@ class SmsConfigService {
       await savePatterns(assetPatterns);
     }
     return assetPatterns;
+  }
+
+  List<SmsPattern> _applyBundledPatternOverrides(
+    List<SmsPattern> storedPatterns,
+    List<SmsPattern> bundledPatterns,
+  ) {
+    final merged = List<SmsPattern>.from(storedPatterns);
+    for (final bundled in bundledPatterns) {
+      final key = _patternKey(bundled);
+      if (!_bundledPatternOverrides.contains(key)) continue;
+      final storedIndex = merged.indexWhere(
+        (pattern) => _patternKey(pattern) == key,
+      );
+      if (storedIndex < 0) {
+        merged.add(bundled);
+      } else {
+        merged[storedIndex] = bundled;
+      }
+    }
+    return merged;
+  }
+
+  String _patternKey(SmsPattern pattern) {
+    return '${pattern.bankId}|${pattern.description.trim().toLowerCase()}';
   }
 
   Future<bool> _hasInternetConnection() async {

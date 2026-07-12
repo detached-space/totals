@@ -54,6 +54,7 @@ extension SyncEntityX on SyncEntity {
           'type',
           'transactionLink',
           'accountNumber',
+          'ownerAccountNumber',
           'categoryId',
           'categoryIds',
           'categoryNames',
@@ -307,8 +308,8 @@ class SyncFilter {
   final List<int>? bankIds;
 
   /// Accounts to include, each as "<accountNumber>|<bank>". Empty/null = all.
-  /// Transactions store only the account's last 4 digits, so transaction
-  /// matching is by suffix; accounts match exactly.
+  /// Assigned transactions match their authoritative `ownerAccountNumber`.
+  /// Unassigned transactions do not match an account-scoped rule.
   final List<String>? accountKeys;
 
   final DateTime? startDate;
@@ -390,6 +391,26 @@ class SyncFilter {
   }
 
   bool _matchesAnyAccount(Map<String, dynamic> row, int? rowBank) {
+    final ownerAccount = (row['ownerAccountNumber'] as String?)?.trim();
+    if (ownerAccount != null && ownerAccount.isNotEmpty) {
+      for (final key in accountKeys!) {
+        final sep = key.lastIndexOf('|');
+        if (sep <= 0) continue;
+        final keyNum = key.substring(0, sep);
+        final keyBank = int.tryParse(key.substring(sep + 1));
+        if (keyBank != null && rowBank != null && keyBank != rowBank) continue;
+        if (keyNum == ownerAccount) return true;
+      }
+      return false;
+    }
+
+    // Transactions must have a durable owner before an account-scoped export
+    // can include them. Their parsed account number may be the counterparty.
+    final isTransactionRow = row.containsKey('bankId') ||
+        row.containsKey('reference') ||
+        row.containsKey('amount');
+    if (isTransactionRow) return false;
+
     final rowAcct = (row['accountNumber'] as String?)?.trim();
     if (rowAcct == null || rowAcct.isEmpty) return false;
     for (final key in accountKeys!) {
@@ -398,10 +419,7 @@ class SyncFilter {
       final keyNum = key.substring(0, sep);
       final keyBank = int.tryParse(key.substring(sep + 1));
       if (keyBank != null && rowBank != null && keyBank != rowBank) continue;
-      // An accounts row holds the full number (exact match); a transaction row
-      // holds only the last 4 digits, so fall back to a suffix match.
       if (keyNum == rowAcct) return true;
-      if (rowAcct.length >= 3 && keyNum.endsWith(rowAcct)) return true;
     }
     return false;
   }

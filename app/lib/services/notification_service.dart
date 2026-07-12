@@ -78,10 +78,8 @@ class NotificationService {
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
-    final androidPlugin = _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         _transactionChannelId,
@@ -190,8 +188,7 @@ class NotificationService {
       }
 
       // For regular taps, use the intent bus
-      final payload =
-          response.notificationResponseType ==
+      final payload = response.notificationResponseType ==
               NotificationResponseType.selectedNotificationAction
           ? response.actionId
           : response.payload;
@@ -447,19 +444,15 @@ class NotificationService {
       if (kIsWeb) return true;
 
       if (defaultTargetPlatform == TargetPlatform.android) {
-        final androidPlugin = _plugin
-            .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin
-            >();
+        final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
         final granted = await androidPlugin?.requestNotificationsPermission();
         if (granted != null) return granted;
         final status = await Permission.notification.request();
         return status.isGranted;
       } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-        final iosPlugin = _plugin
-            .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin
-            >();
+        final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>();
         final granted = await iosPlugin?.requestPermissions(
           alert: true,
           badge: true,
@@ -559,6 +552,7 @@ class NotificationService {
         bankId: CashConstants.bankId,
         type: 'DEBIT',
         accountNumber: CashConstants.defaultAccountNumber,
+        ownerAccountNumber: CashConstants.defaultAccountNumber,
       );
 
       await TransactionRepository().saveTransaction(
@@ -960,9 +954,8 @@ class NotificationService {
             _dataSyncChannelId,
             'Data Sync',
             channelDescription: 'Results of syncing your data to your backend',
-            importance: failed > 0
-                ? Importance.high
-                : Importance.defaultImportance,
+            importance:
+                failed > 0 ? Importance.high : Importance.defaultImportance,
             priority: failed > 0 ? Priority.high : Priority.defaultPriority,
             showProgress: false,
             ongoing: false,
@@ -1342,7 +1335,7 @@ class NotificationService {
       final body = cleanPayee.isEmpty
           ? 'Pay $amountText${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.'
           : 'Pay $amountText to $cleanPayee'
-                '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
+              '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
 
       await _plugin.show(
         _sharedExpenseNudgeNotificationId(nudgeId),
@@ -1430,11 +1423,11 @@ class NotificationService {
       const title = 'Shared Expenses has a new update';
       final body = hasSingleGroup
           ? updateCount == 1
-                ? '$cleanGroupName has a new shared expense update to review.'
-                : '$cleanGroupName has $updateCount new shared expense updates to review.'
+              ? '$cleanGroupName has a new shared expense update to review.'
+              : '$cleanGroupName has $updateCount new shared expense updates to review.'
           : 'You have $updateCount new shared expense '
-                '${updateCount == 1 ? 'update' : 'updates'}'
-                '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
+              '${updateCount == 1 ? 'update' : 'updates'}'
+              '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
 
       await _plugin.show(
         sharedExpenseDigestNotificationId,
@@ -1559,11 +1552,14 @@ class NotificationService {
   static void _configureLocalTimeZone() {
     final now = DateTime.now();
     final offset = now.timeZoneOffset.inMilliseconds;
-    final abbreviation = now.timeZoneName.trim().isEmpty
-        ? 'LOCAL'
-        : now.timeZoneName.trim();
+    final abbreviation =
+        now.timeZoneName.trim().isEmpty ? 'LOCAL' : now.timeZoneName.trim();
     tz.setLocalLocation(
-      tz.Location('device_local_$offset', [tz.minTime], [0], [
+      tz.Location('device_local_$offset', [
+        tz.minTime
+      ], [
+        0
+      ], [
         tz.TimeZone(offset, isDst: false, abbreviation: abbreviation),
       ]),
     );
@@ -1579,9 +1575,8 @@ class NotificationService {
     required LoanDebtDirection direction,
     required double? amount,
   }) {
-    final cleanName = personName.trim().isEmpty
-        ? 'this person'
-        : personName.trim();
+    final cleanName =
+        personName.trim().isEmpty ? 'this person' : personName.trim();
     final amountText = _formatLoanDebtReminderAmount(amount);
     final borrowed = direction == LoanDebtDirection.borrowed;
     final amountPhrase = amountText == null ? '' : ' $amountText';

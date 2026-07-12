@@ -4277,7 +4277,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     addRow(
       icon: AppIcons.receipt_long_rounded,
       label: context.l10nText('Reference'),
-      value: _transaction.reference,
+      value: _transaction.displayReference,
     );
 
     return Container(

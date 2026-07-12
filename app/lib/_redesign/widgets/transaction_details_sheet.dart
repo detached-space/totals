@@ -164,6 +164,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return context.l10nText(_provider.getBankShortName(_tx.bankId));
   }
 
+  String get _accountLabel {
+    final account = _provider.accountSummaryForTransaction(_tx);
+    if (account == null) return context.l10nText('Other transactions');
+
+    final holderName = account.accountHolderName.trim();
+    if (holderName.isEmpty) return account.accountNumber;
+    return '$holderName • ${account.accountNumber}';
+  }
+
   String get _formattedAmount {
     final formatted = formatNumberWithComma(_tx.amount);
     final prefix = _isCredit ? '+ ' : '- ';
@@ -727,7 +736,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   }
 
   void _copyReference({String message = 'Reference copied'}) {
-    Clipboard.setData(ClipboardData(text: _tx.reference));
+    Clipboard.setData(ClipboardData(text: _tx.displayReference));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -825,6 +834,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       type: _tx.type,
       transactionLink: _tx.transactionLink,
       accountNumber: _tx.accountNumber,
+      ownerAccountNumber: _tx.ownerAccountNumber,
       categoryId: _tx.categoryId,
       categoryIds: _tx.categoryIds,
       profileId: _tx.profileId,
@@ -833,6 +843,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       sourceType: _tx.sourceType,
       sourceMessageId: _tx.sourceMessageId,
       sourceFingerprint: _tx.sourceFingerprint,
+      sourceSubscriptionId: _tx.sourceSubscriptionId,
     );
   }
 
@@ -1302,16 +1313,18 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                     children: [
                       _DetailRow(
                         label: 'Reference',
-                        value: _tx.reference,
+                        value: _tx.displayReference,
                         marquee: true,
                         onTap: () {
                           unawaited(_handleReferenceTap());
                         },
                       ),
                       _DetailRow(label: 'Bank', value: _bankShortName),
-                      // if (_tx.accountNumber != null &&
-                      //     _tx.accountNumber!.isNotEmpty)
-                      //   _DetailRow(label: 'Account', value: _tx.accountNumber!),
+                      _DetailRow(
+                        label: 'Account',
+                        value: _accountLabel,
+                        marquee: true,
+                      ),
                       if (_formattedDate != null)
                         _DetailRow(
                             label: 'Date & Time', value: _formattedDate!),

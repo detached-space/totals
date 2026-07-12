@@ -4,6 +4,7 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/bank.dart';
+import 'package:totals/models/account.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:intl/intl.dart';
 import 'package:totals/screens/transactions_for_period_page.dart';
@@ -20,6 +21,7 @@ import 'package:totals/widgets/categorize_transaction_sheet.dart';
 import 'package:totals/widgets/category_filter_button.dart';
 import 'package:totals/widgets/category_filter_sheet.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
 
 class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});
@@ -46,6 +48,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   final Map<String, DateTime?> _transactionDateCache = {};
   final BankConfigService _bankConfigService = BankConfigService();
   List<Bank> _banks = [];
+  List<Account> _registeredAccounts = const <Account>[];
 
   @override
   void initState() {
@@ -186,46 +189,50 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     if (_selectedAccountFilter == null || _selectedBankFilter == null) {
       return null;
     }
-    if (accounts.isEmpty) return null;
-    return accounts.firstWhere(
-      (a) =>
-          a.accountNumber == _selectedAccountFilter &&
-          a.bankId == _selectedBankFilter,
-      orElse: () => accounts.firstWhere(
-        (a) => a.bankId == _selectedBankFilter,
-        orElse: () => accounts.first,
-      ),
-    );
+    for (final account in accounts) {
+      if (account.accountNumber == _selectedAccountFilter &&
+          account.bankId == _selectedBankFilter) {
+        return account;
+      }
+    }
+    return null;
   }
 
   bool _matchesSelectedAccount(
       Transaction transaction, AccountSummary account) {
     if (account.bankId == CashConstants.bankId) {
-      return transaction.bankId == CashConstants.bankId;
-    }
-    final txnAccount = transaction.accountNumber;
-    if (txnAccount == null || txnAccount.isEmpty) {
-      return transaction.bankId == account.bankId;
+      return transaction.bankId == CashConstants.bankId &&
+          transaction.accountNumber == account.accountNumber;
     }
 
-    try {
-      final bank = _banks.firstWhere((b) => b.id == account.bankId);
-
-      if (bank.uniformMasking == true && bank.maskPattern != null) {
-        return txnAccount.substring(txnAccount.length - bank.maskPattern!) ==
-            account.accountNumber
-                .substring(account.accountNumber.length - bank.maskPattern!);
-      } else if (bank.uniformMasking == false) {
-        // Match by bankId only
-        return transaction.bankId == account.bankId;
-      } else {
-        // Exact match (uniformMasking is null)
-        return txnAccount == account.accountNumber;
+    Bank? bank;
+    for (final candidate in _banks) {
+      if (candidate.id == account.bankId) {
+        bank = candidate;
+        break;
       }
-    } catch (e) {
-      // Bank not found in database, fallback to bankId match
-      return transaction.bankId == account.bankId;
     }
+    if (bank == null) return false;
+
+    Account? target;
+    for (final candidate in _registeredAccounts) {
+      if (candidate.bank == account.bankId &&
+          registeredAccountNumbersMatch(
+            bank,
+            candidate.accountNumber,
+            account.accountNumber,
+          )) {
+        target = candidate;
+        break;
+      }
+    }
+    if (target == null) return false;
+    return transactionBelongsToAccount(
+      transaction: transaction,
+      account: target,
+      bank: bank,
+      accounts: _registeredAccounts,
+    );
   }
 
   bool _hasMatchingAccount(
@@ -236,45 +243,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     if (bankId == null) return false;
     final bankAccounts = accountsByBank[bankId] ?? const <AccountSummary>[];
     if (bankAccounts.isEmpty) return false;
-    if (bankId == CashConstants.bankId) return true;
-
-    if (transaction.accountNumber != null &&
-        transaction.accountNumber!.isNotEmpty) {
-      for (final account in bankAccounts) {
-        bool matches = false;
-
-        try {
-          final bank = _banks.firstWhere((b) => b.id == account.bankId);
-
-          if (bank.uniformMasking == true && bank.maskPattern != null) {
-            // Match last N digits based on mask pattern
-            if (transaction.accountNumber!.length >= bank.maskPattern! &&
-                account.accountNumber.length >= bank.maskPattern!) {
-              matches = transaction.accountNumber!.substring(
-                      transaction.accountNumber!.length - bank.maskPattern!) ==
-                  account.accountNumber.substring(
-                      account.accountNumber.length - bank.maskPattern!);
-            }
-          } else if (bank.uniformMasking == false) {
-            // Match by bankId only
-            matches = true;
-          } else {
-            // Exact match (uniformMasking is null)
-            matches = transaction.accountNumber == account.accountNumber;
-          }
-        } catch (e) {
-          // Bank not found in database, fallback to exact match
-          matches = transaction.accountNumber == account.accountNumber;
-        }
-
-        if (matches) {
-          return true;
-        }
-      }
-      return false;
-    } else {
-      return bankAccounts.length == 1;
-    }
+    // Keep unresolved legacy SMS in bank-level analytics; account-specific
+    // filtering is applied separately with the ownership predicate above.
+    return true;
   }
 
   bool _matchesBaseFilters(
@@ -291,9 +262,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         transaction.bankId != _selectedBankFilter) {
       return false;
     }
-    if (selectedAccount != null &&
-        !_matchesSelectedAccount(transaction, selectedAccount)) {
-      return false;
+    if (_selectedAccountFilter != null) {
+      if (selectedAccount == null ||
+          !_matchesSelectedAccount(transaction, selectedAccount)) {
+        return false;
+      }
     }
     return true;
   }
@@ -677,6 +650,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         final allTransactions = provider.allTransactions;
         final bankSummaries = provider.bankSummaries;
         final accounts = provider.accountSummaries;
+        _registeredAccounts = provider.accounts;
         final baseDate = _getBaseDate();
         final accountsByBank = _groupAccountsByBank(accounts);
         final selectedAccount = _resolveSelectedAccount(accounts);

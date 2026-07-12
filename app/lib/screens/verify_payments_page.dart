@@ -1347,7 +1347,7 @@ class _TransactionCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          transaction.reference,
+                          transaction.displayReference,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontFamily: 'monospace',
                             color: colorScheme.onSurface,

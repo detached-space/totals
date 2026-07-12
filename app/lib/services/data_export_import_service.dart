@@ -30,7 +30,7 @@ bool _isLoanDebtManagedCategory(Category category) {
 }
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 8;
+  static const int currentSchemaVersion = 9;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -66,12 +66,17 @@ class DataExportImportService {
         'schemaVersion': currentSchemaVersion,
         'version': '1.0',
         'exportDate': DateTime.now().toIso8601String(),
-        'accounts': accounts.map((a) => a.toJson()).toList(),
+        'accounts': accounts
+            .map((account) => _portableAccountData(account.toJson()))
+            .toList(),
         'banks': banks.map((b) => b.toJson()).toList(),
         'budgets': budgets.map((b) => b.toJson()).toList(),
         'categories': categories.map((c) => c.toJson()).toList(),
         'userAccounts': userAccounts.map((a) => a.toJson()).toList(),
-        'transactions': transactions.map((t) => t.toJson()).toList(),
+        'transactions': transactions
+            .map(
+                (transaction) => _portableTransactionData(transaction.toJson()))
+            .toList(),
         'failedParses': failedParses.map((f) => f.toJson()).toList(),
         'autoCategoryRules':
             autoCategoryRules.map((rule) => rule.toJson()).toList(),
@@ -379,6 +384,7 @@ class DataExportImportService {
         }
 
         await _removeImportedDashenDuplicates();
+        await _removeImportedLegacySmsDuplicates();
       }
 
       // Import budgets (append, skip duplicates)
@@ -683,7 +689,9 @@ class DataExportImportService {
       'schemaVersion': schemaVersion,
       'version': raw['version'],
       'exportDate': raw['exportDate'],
-      'accounts': _readList(raw, 'accounts'),
+      'accounts': _readList(raw, 'accounts')
+          .map(_portableAccountEntry)
+          .toList(growable: false),
       'banks': _readList(raw, 'banks'),
       'budgets': _readList(raw, 'budgets'),
       'categories': _readList(raw, 'categories'),
@@ -692,7 +700,9 @@ class DataExportImportService {
         'userAccounts',
         aliases: const ['user_accounts'],
       ),
-      'transactions': _readList(raw, 'transactions'),
+      'transactions': _readList(raw, 'transactions')
+          .map(_portableTransactionEntry)
+          .toList(growable: false),
       'failedParses': _readList(
         raw,
         'failedParses',
@@ -735,6 +745,10 @@ class DataExportImportService {
     final explicit =
         _asInt(data['schemaVersion']) ?? _asInt(data['schema_version']);
     if (explicit != null) return explicit;
+
+    if (_containsTransactionOwnership(data)) {
+      return currentSchemaVersion;
+    }
 
     if (_hasAnySection(data, const [
       'loanDebtRepayments',
@@ -780,6 +794,42 @@ class DataExportImportService {
       if (value != null) return true;
     }
     return false;
+  }
+
+  static bool _containsTransactionOwnership(Map<String, dynamic> data) {
+    final transactions = _readList(data, 'transactions');
+    for (final transaction in transactions) {
+      if (transaction is Map && transaction.containsKey('ownerAccountNumber')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static dynamic _portableAccountEntry(dynamic value) {
+    if (value is! Map) return value;
+    return _portableAccountData(
+      Map<String, dynamic>.from(value.cast<String, dynamic>()),
+    );
+  }
+
+  static Map<String, dynamic> _portableAccountData(
+    Map<String, dynamic> value,
+  ) {
+    return Map<String, dynamic>.from(value)..remove('smsSubscriptionId');
+  }
+
+  static dynamic _portableTransactionEntry(dynamic value) {
+    if (value is! Map) return value;
+    return _portableTransactionData(
+      Map<String, dynamic>.from(value.cast<String, dynamic>()),
+    );
+  }
+
+  static Map<String, dynamic> _portableTransactionData(
+    Map<String, dynamic> value,
+  ) {
+    return Map<String, dynamic>.from(value)..remove('sourceSubscriptionId');
   }
 
   static List<dynamic> _readList(
@@ -1006,6 +1056,23 @@ class DataExportImportService {
     }
     await _transactionRepo.deleteTransactionsByReferences(
       dedupedPlans.values.expand((plan) => plan.duplicateReferences),
+    );
+  }
+
+  Future<void> _removeImportedLegacySmsDuplicates() async {
+    final plans = buildLegacySmsReferenceDeduplicationPlans(
+      transactions: await _transactionRepo.getTransactions(),
+    );
+    if (plans.isEmpty) return;
+
+    for (final plan in plans) {
+      await _transactionRepo.saveTransaction(
+        plan.mergedKeeper,
+        skipAutoCategorization: true,
+      );
+    }
+    await _transactionRepo.deleteTransactionsByReferences(
+      plans.expand((plan) => plan.duplicateReferences),
     );
   }
 

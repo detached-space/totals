@@ -9,6 +9,11 @@ class Account {
   final double? pendingCredit;
   final int? profileId;
 
+  /// Android SMS subscription used to route messages for SIM-backed accounts.
+  /// This is device-local metadata; the user-entered number remains the
+  /// durable account identity.
+  final int? smsSubscriptionId;
+
   Account({
     required this.accountNumber,
     required this.bank,
@@ -17,6 +22,7 @@ class Account {
     this.settledBalance,
     this.pendingCredit,
     this.profileId,
+    this.smsSubscriptionId,
   });
 
   factory Account.fromJson(Map<String, dynamic> json) {
@@ -28,6 +34,7 @@ class Account {
       settledBalance: json['settledBalance']?.toDouble(),
       pendingCredit: json['pendingCredit']?.toDouble(),
       profileId: json['profileId'] as int?,
+      smsSubscriptionId: _toNullableInt(json['smsSubscriptionId']),
     );
   }
 
@@ -41,6 +48,13 @@ class Account {
       'pendingCredit': pendingCredit,
       if (profileId != null) 'profileId': profileId,
     };
+  }
+
+  static int? _toNullableInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
   }
 
   static String encode(List<Account> accounts) => json.encode(

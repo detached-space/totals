@@ -1,12 +1,14 @@
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
+import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/data_sync/sync_enqueuer.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
 
 class AccountRepository {
   final ProfileRepository _profileRepo = ProfileRepository();
@@ -56,7 +58,7 @@ class AccountRepository {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
     await _ensureCashAccount(db, activeProfileId);
-    
+
     final List<Map<String, dynamic>> maps = activeProfileId != null
         ? await db.query(
             'accounts',
@@ -74,6 +76,7 @@ class AccountRepository {
         'settledBalance': map['settledBalance'],
         'pendingCredit': map['pendingCredit'],
         'profileId': map['profileId'],
+        'smsSubscriptionId': map['smsSubscriptionId'],
       });
     }).toList();
   }
@@ -81,23 +84,38 @@ class AccountRepository {
   Future<void> saveAccount(Account account) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
-    
+
     // Use account's profileId if provided, otherwise use active profile
     final profileId = account.profileId ?? activeProfileId;
 
-    await db.insert(
+    final existing = await db.query(
       'accounts',
-      {
-        'accountNumber': account.accountNumber,
-        'bank': account.bank,
-        'balance': account.balance,
-        'accountHolderName': account.accountHolderName,
-        'settledBalance': account.settledBalance,
-        'pendingCredit': account.pendingCredit,
-        'profileId': profileId,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      where: 'accountNumber = ? AND bank = ?',
+      whereArgs: [account.accountNumber, account.bank],
+      limit: 1,
     );
+    final data = <String, Object?>{
+      'accountNumber': account.accountNumber,
+      'bank': account.bank,
+      'balance': account.balance,
+      'accountHolderName': account.accountHolderName,
+      'settledBalance': account.settledBalance,
+      'pendingCredit': account.pendingCredit,
+      'profileId': profileId,
+      'smsSubscriptionId': account.smsSubscriptionId ??
+          (existing.isEmpty ? null : existing.first['smsSubscriptionId']),
+    };
+
+    if (existing.isEmpty) {
+      await db.insert('accounts', data);
+    } else {
+      await db.update(
+        'accounts',
+        data,
+        where: 'id = ?',
+        whereArgs: [existing.first['id']],
+      );
+    }
 
     await SyncEnqueuer.instance.onEntityWritten(
       entity: SyncEntity.accounts,
@@ -131,6 +149,7 @@ class AccountRepository {
           'settledBalance': account.settledBalance,
           'pendingCredit': account.pendingCredit,
           'profileId': profileId,
+          'smsSubscriptionId': account.smsSubscriptionId,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
@@ -151,23 +170,67 @@ class AccountRepository {
   }
 
   Future<bool> accountExists(String accountNumber, int bank) async {
+    final accounts = await getAccounts();
+    final banks = await BankConfigService().getBanks(allowRemoteFetch: false);
+    Bank? bankInfo;
+    for (final candidate in banks) {
+      if (candidate.id == bank) {
+        bankInfo = candidate;
+        break;
+      }
+    }
+    if (bankInfo == null) {
+      return accounts.any((account) =>
+          account.bank == bank && account.accountNumber == accountNumber);
+    }
+    return accounts.any((account) =>
+        account.bank == bank &&
+        registeredAccountNumbersMatch(
+          bankInfo!,
+          account.accountNumber,
+          accountNumber,
+        ));
+  }
+
+  /// Stores a learned device-local SMS subscription mapping without replacing
+  /// the account row or its user-entered name/number.
+  Future<bool> bindSmsSubscription({
+    required String accountNumber,
+    required int bank,
+    required int subscriptionId,
+  }) async {
+    if (subscriptionId < 0) return false;
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
-    
-    final result = activeProfileId != null
-        ? await db.query(
-            'accounts',
-            where: 'accountNumber = ? AND bank = ? AND profileId = ?',
-            whereArgs: [accountNumber, bank, activeProfileId],
-            limit: 1,
-          )
-        : await db.query(
-            'accounts',
-            where: 'accountNumber = ? AND bank = ?',
-            whereArgs: [accountNumber, bank],
-            limit: 1,
-          );
-    return result.isNotEmpty;
+    final conflictWhere = <String>['bank = ?', 'smsSubscriptionId = ?'];
+    final conflictArgs = <Object?>[bank, subscriptionId];
+    if (activeProfileId != null) {
+      conflictWhere.add('profileId = ?');
+      conflictArgs.add(activeProfileId);
+    }
+    final conflicts = await db.query(
+      'accounts',
+      columns: ['accountNumber'],
+      where: conflictWhere.join(' AND '),
+      whereArgs: conflictArgs,
+    );
+    if (conflicts.any((row) => row['accountNumber'] != accountNumber)) {
+      return false;
+    }
+
+    final where = <String>['accountNumber = ?', 'bank = ?'];
+    final args = <Object?>[accountNumber, bank];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      args.add(activeProfileId);
+    }
+    final changed = await db.update(
+      'accounts',
+      {'smsSubscriptionId': subscriptionId},
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
+    return changed > 0;
   }
 
   Future<void> clearAll() async {
@@ -196,43 +259,11 @@ class AccountRepository {
       return;
     }
 
-    // First, check if this is the only account for this bank
-    // If so, we should also delete transactions with NULL accountNumber for this bank
-    final bankAccounts = await db.query(
-      'accounts',
-      where: 'bank = ?',
-      whereArgs: [bank],
-    );
-    final isOnlyAccount = bankAccounts.length == 1;
-
-    // Delete associated transactions
+    // The repository uses the same ownership predicate as summaries and
+    // navigation. It deletes only rows with evidence for this owner; ambiguous
+    // activity remains available if the account is added again later.
     final transactionRepo = TransactionRepository();
     await transactionRepo.deleteTransactionsByAccount(accountNumber, bank);
-
-    // If this was the only account for this bank, also delete transactions with NULL accountNumber
-    // (This handles legacy data that was associated with this account)
-    // NOTE: Skip this for banks that match by bankId only (uniformMasking == false)
-    // because those banks don't use account numbers for matching
-    if (isOnlyAccount) {
-      try {
-        final bankConfigService = BankConfigService();
-        final banks = await bankConfigService.getBanks();
-        final bankInfo = banks.firstWhere((b) => b.id == bank);
-
-        // Only delete NULL accountNumber transactions for banks that match by account number
-        if (bankInfo.uniformMasking != false) {
-          await db.delete(
-            'transactions',
-            where: 'bankId = ? AND accountNumber IS NULL',
-            whereArgs: [bank],
-          );
-        }
-      } catch (e) {
-        // Bank not found in database, skip orphaned transactions deletion
-        print(
-            "debug: Bank not found when deleting account, skipping NULL transactions: $e");
-      }
-    }
 
     // Finally, delete the account itself
     await db.delete(

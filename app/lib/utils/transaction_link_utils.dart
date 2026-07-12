@@ -43,8 +43,31 @@ class TransactionLinkUtils {
 
     return inferTransactionLink(
       bankId: transaction.bankId,
-      reference: transaction.reference,
+      reference: transaction.displayReference,
     );
+  }
+
+  /// Extracts a bank reference embedded in a known receipt URL.
+  static String? extractReferenceFromLink(String? rawLink) {
+    final normalized = _normalizeHttpUrl(rawLink);
+    if (normalized == null) return null;
+    final uri = Uri.tryParse(normalized);
+    if (uri == null) return null;
+
+    for (final key in const ['id', 'reference', 'trx']) {
+      final value = uri.queryParameters[key]?.trim();
+      if (value != null && RegExp(r'^[A-Za-z0-9@.\-]+$').hasMatch(value)) {
+        return value;
+      }
+    }
+
+    final segments = uri.pathSegments;
+    for (var index = 0; index + 1 < segments.length; index++) {
+      if (segments[index].toLowerCase() != 'receipt') continue;
+      final value = segments[index + 1].trim();
+      if (RegExp(r'^[A-Za-z0-9@.\-]+$').hasMatch(value)) return value;
+    }
+    return null;
   }
 
   static String? inferTransactionLink({

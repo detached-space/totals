@@ -10,6 +10,22 @@ import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/data_sync/sync_enqueuer.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/models/account.dart';
+import 'package:totals/utils/account_identity.dart';
+
+class TransactionOwnershipUpdate {
+  final String reference;
+  final String? ownerAccountNumber;
+  final int? sourceSubscriptionId;
+  final String? sourceMessageId;
+
+  const TransactionOwnershipUpdate({
+    required this.reference,
+    required this.ownerAccountNumber,
+    this.sourceSubscriptionId,
+    this.sourceMessageId,
+  });
+}
 
 class TransactionRepository {
   final BankConfigService _bankConfigService = BankConfigService();
@@ -86,12 +102,14 @@ class TransactionRepository {
       'type': map['type'],
       'transactionLink': map['transactionLink'],
       'accountNumber': map['accountNumber'],
+      'ownerAccountNumber': map['ownerAccountNumber'],
       'categoryId': map['categoryId'],
       'categoryIds': map['categoryIds'],
       'profileId': map['profileId'],
       'sourceType': map['sourceType'],
       'sourceMessageId': map['sourceMessageId'],
       'sourceFingerprint': map['sourceFingerprint'],
+      'sourceSubscriptionId': map['sourceSubscriptionId'],
     });
   }
 
@@ -157,6 +175,7 @@ class TransactionRepository {
       'type': transactionToSave.type,
       'transactionLink': transactionToSave.transactionLink,
       'accountNumber': transactionToSave.accountNumber,
+      'ownerAccountNumber': transactionToSave.ownerAccountNumber,
       'categoryId': transactionToSave.categoryId,
       'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
           ? null
@@ -164,6 +183,7 @@ class TransactionRepository {
       'sourceType': transactionToSave.sourceType,
       'sourceMessageId': transactionToSave.sourceMessageId,
       'sourceFingerprint': transactionToSave.sourceFingerprint,
+      'sourceSubscriptionId': transactionToSave.sourceSubscriptionId,
       'year': year,
       'month': month,
       'day': day,
@@ -189,7 +209,8 @@ class TransactionRepository {
       entity: SyncEntity.transactions,
       entityRef: transactionToSave.reference,
       op: SyncOp.upsert,
-      row: Map<String, dynamic>.from(dataToSave),
+      row: Map<String, dynamic>.from(dataToSave)
+        ..remove('sourceSubscriptionId'),
     );
   }
 
@@ -253,6 +274,7 @@ class TransactionRepository {
           'type': transactionToSave.type,
           'transactionLink': transactionToSave.transactionLink,
           'accountNumber': transactionToSave.accountNumber,
+          'ownerAccountNumber': transactionToSave.ownerAccountNumber,
           'categoryId': transactionToSave.categoryId,
           'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
               ? null
@@ -261,6 +283,7 @@ class TransactionRepository {
           'sourceType': transactionToSave.sourceType,
           'sourceMessageId': transactionToSave.sourceMessageId,
           'sourceFingerprint': transactionToSave.sourceFingerprint,
+          'sourceSubscriptionId': transactionToSave.sourceSubscriptionId,
           'year': year,
           'month': month,
           'day': day,
@@ -279,6 +302,7 @@ class TransactionRepository {
         'sourceType': transactionToSave.sourceType,
         'sourceMessageId': transactionToSave.sourceMessageId,
         'sourceFingerprint': transactionToSave.sourceFingerprint,
+        'ownerAccountNumber': transactionToSave.ownerAccountNumber,
       }));
     }
 
@@ -288,6 +312,166 @@ class TransactionRepository {
       entity: SyncEntity.transactions,
       records: syncRecords,
     );
+  }
+
+  Future<bool> updateTransactionOwnership({
+    required String reference,
+    required String ownerAccountNumber,
+    int? sourceSubscriptionId,
+    String? sourceMessageId,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final where = <String>['reference = ?'];
+    final args = <Object?>[reference];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      args.add(activeProfileId);
+    }
+
+    final values = <String, Object?>{
+      'ownerAccountNumber': ownerAccountNumber,
+      if (sourceSubscriptionId != null && sourceSubscriptionId >= 0)
+        'sourceSubscriptionId': sourceSubscriptionId,
+      if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty)
+        'sourceMessageId': sourceMessageId.trim(),
+    };
+    final changed = await db.update(
+      'transactions',
+      values,
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
+    if (changed == 0) return false;
+
+    final currentRows = await db.query(
+      'transactions',
+      where: where.join(' AND '),
+      whereArgs: args,
+      limit: 1,
+    );
+    final syncRow = currentRows.isEmpty
+        ? <String, dynamic>{
+            'reference': reference,
+            'ownerAccountNumber': ownerAccountNumber,
+          }
+        : Map<String, dynamic>.from(currentRows.single)
+      ..remove('sourceSubscriptionId');
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.transactions,
+      entityRef: reference,
+      op: SyncOp.upsert,
+      row: syncRow,
+    );
+    return true;
+  }
+
+  Future<int> updateTransactionOwnerships(
+    Iterable<TransactionOwnershipUpdate> updates,
+  ) async {
+    final deduped = <String, TransactionOwnershipUpdate>{
+      for (final update in updates) update.reference: update,
+    };
+    if (deduped.isEmpty) return 0;
+
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final previousRowsByReference = <String, Map<String, dynamic>>{};
+    final references = deduped.keys.toList(growable: false);
+    const maxSqlVars = 900;
+    for (var start = 0; start < references.length; start += maxSqlVars) {
+      final candidateEnd = start + maxSqlVars;
+      final end =
+          candidateEnd < references.length ? candidateEnd : references.length;
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final where = StringBuffer('reference IN ($placeholders)');
+      final args = <Object?>[...chunk];
+      if (activeProfileId != null) {
+        where.write(' AND profileId = ?');
+        args.add(activeProfileId);
+      }
+      final rows = await db.query(
+        'transactions',
+        where: where.toString(),
+        whereArgs: args,
+      );
+      for (final row in rows) {
+        final reference = row['reference']?.toString();
+        if (reference == null || reference.isEmpty) continue;
+        previousRowsByReference[reference] = Map<String, dynamic>.from(row);
+      }
+    }
+    final batch = db.batch();
+    for (final update in deduped.values) {
+      final where = <String>['reference = ?'];
+      final args = <Object?>[update.reference];
+      if (activeProfileId != null) {
+        where.add('profileId = ?');
+        args.add(activeProfileId);
+      }
+      batch.update(
+        'transactions',
+        <String, Object?>{
+          'ownerAccountNumber': update.ownerAccountNumber,
+          // Clearing a disproven owner must also clear its SIM shortcut;
+          // otherwise read-time ownership would immediately assign it again.
+          if (update.ownerAccountNumber == null)
+            'sourceSubscriptionId': null
+          else if (update.sourceSubscriptionId != null &&
+              update.sourceSubscriptionId! >= 0)
+            'sourceSubscriptionId': update.sourceSubscriptionId,
+          if (update.sourceMessageId?.trim().isNotEmpty == true)
+            'sourceMessageId': update.sourceMessageId!.trim(),
+        },
+        where: where.join(' AND '),
+        whereArgs: args,
+      );
+    }
+    await batch.commit(noResult: true);
+
+    // A clear must remove a previously account-scoped remote copy. Queue the
+    // delete against the old snapshot first; the current-row upsert below will
+    // then recreate it only for broader rules that still match (for example,
+    // the whole bank).
+    for (final update in deduped.values) {
+      if (update.ownerAccountNumber != null) continue;
+      final previous = previousRowsByReference[update.reference];
+      if (previous == null) continue;
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.transactions,
+        entityRef: update.reference,
+        op: SyncOp.delete,
+        deleteSnapshot: Map<String, dynamic>.from(previous)
+          ..remove('sourceSubscriptionId'),
+      );
+    }
+
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    for (final update in deduped.values) {
+      final row = Map<String, dynamic>.from(
+        previousRowsByReference[update.reference] ??
+            <String, dynamic>{'reference': update.reference},
+      );
+      row['ownerAccountNumber'] = update.ownerAccountNumber;
+      if (update.ownerAccountNumber == null) {
+        row['sourceSubscriptionId'] = null;
+      } else if (update.sourceSubscriptionId != null &&
+          update.sourceSubscriptionId! >= 0) {
+        row['sourceSubscriptionId'] = update.sourceSubscriptionId;
+      }
+      if (update.sourceMessageId?.trim().isNotEmpty == true) {
+        row['sourceMessageId'] = update.sourceMessageId!.trim();
+      }
+      row.remove('sourceSubscriptionId');
+      syncRecords.add(MapEntry(update.reference, row));
+    }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: syncRecords,
+    );
+    return deduped.length;
   }
 
   Future<void> clearAll() async {
@@ -444,65 +628,53 @@ class TransactionRepository {
       return;
     }
 
-    final banks = await _bankConfigService.getBanks();
+    final banks = await _bankConfigService.getBanks(allowRemoteFetch: false);
     final currentBank = banks.firstWhere((b) => b.id == bank);
-
-    // Build where clause with profile filtering
-    final whereParts = <String>[];
-    final whereArgs = <dynamic>[];
-
+    final accountWhere = <String>['bank = ?'];
+    final accountArgs = <Object?>[bank];
     if (activeProfileId != null) {
-      whereParts.add('profileId = ?');
-      whereArgs.add(activeProfileId);
+      accountWhere.add('profileId = ?');
+      accountArgs.add(activeProfileId);
     }
+    final accountRows = await db.query(
+      'accounts',
+      where: accountWhere.join(' AND '),
+      whereArgs: accountArgs,
+    );
+    final bankAccounts = accountRows
+        .map((row) => Account.fromJson(Map<String, dynamic>.from(row)))
+        .toList(growable: false);
+    final targetMatches = bankAccounts
+        .where((account) => registeredAccountNumbersMatch(
+              currentBank,
+              account.accountNumber,
+              accountNumber,
+            ))
+        .toList(growable: false);
+    if (targetMatches.length != 1) return;
+    final target = targetMatches.single;
 
-    // For banks that match by bankId only (Awash=2, Telebirr=6), delete all transactions for that bank
-    if (currentBank.uniformMasking == false) {
-      whereParts.add('bankId = ?');
-      whereArgs.add(bank);
-
-      await _deleteTransactionsAndEnqueue(
-        db,
-        where: whereParts.join(' AND '),
-        whereArgs: whereArgs,
-      );
-      return;
+    final transactionWhere = <String>['bankId = ?'];
+    final transactionArgs = <Object?>[bank];
+    if (activeProfileId != null) {
+      transactionWhere.add('profileId = ?');
+      transactionArgs.add(activeProfileId);
     }
-
-    // For other banks, match by accountNumber substring logic
-    String? accountSuffix;
-
-    if (currentBank.uniformMasking == true) {
-      accountSuffix = accountNumber
-          .substring(accountNumber.length - currentBank.maskPattern!);
-    }
-
-    if (accountSuffix != null) {
-      whereParts.add('bankId = ?');
-      whereArgs.add(bank);
-      whereParts.add('accountNumber IS NOT NULL');
-      whereParts.add('accountNumber LIKE ?');
-      whereArgs.add('%$accountSuffix');
-
-      // Delete transactions where bankId matches and accountNumber ends with the suffix
-      // Using SQL LIKE pattern matching to match the suffix at the end
-      await _deleteTransactionsAndEnqueue(
-        db,
-        where: whereParts.join(' AND '),
-        whereArgs: whereArgs,
-      );
-    } else {
-      // Fallback: delete all transactions for this bank (except NULL accountNumber ones)
-      whereParts.add('bankId = ?');
-      whereArgs.add(bank);
-      whereParts.add('accountNumber IS NOT NULL');
-
-      await _deleteTransactionsAndEnqueue(
-        db,
-        where: whereParts.join(' AND '),
-        whereArgs: whereArgs,
-      );
-    }
+    final rows = await db.query(
+      'transactions',
+      where: transactionWhere.join(' AND '),
+      whereArgs: transactionArgs,
+    );
+    final references = rows
+        .map(_transactionFromMap)
+        .where((transaction) => transactionBelongsToAccount(
+              transaction: transaction,
+              account: target,
+              bank: currentBank,
+              accounts: bankAccounts,
+            ))
+        .map((transaction) => transaction.reference);
+    await deleteTransactionsByReferences(references);
   }
 
   Future<void> deleteTransactionsByReferences(

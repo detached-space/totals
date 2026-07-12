@@ -12,6 +12,7 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_sort.dart';
+import 'package:totals/utils/manual_transaction_selection.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showAddCashTransactionSheet({
@@ -58,6 +59,7 @@ class _AddCashTransactionContent extends StatefulWidget {
 class _AddCashTransactionContentState
     extends State<_AddCashTransactionContent> {
   late final TextEditingController _amountController;
+  late final TextEditingController _balanceAfterController;
   late final TextEditingController _noteController;
   final AccountRepository _accountRepo = AccountRepository();
   final BankConfigService _bankConfigService = BankConfigService();
@@ -72,6 +74,7 @@ class _AddCashTransactionContentState
   void initState() {
     super.initState();
     _amountController = TextEditingController();
+    _balanceAfterController = TextEditingController();
     _noteController = TextEditingController();
     _isDebit = widget.initialIsDebit;
     _selectedAccount = _initialSelectedAccount();
@@ -88,6 +91,7 @@ class _AddCashTransactionContentState
   @override
   void dispose() {
     _amountController.dispose();
+    _balanceAfterController.dispose();
     _noteController.dispose();
     super.dispose();
   }
@@ -102,6 +106,9 @@ class _AddCashTransactionContentState
     final summaries =
         List<AccountSummary>.from(widget.provider.accountSummaries)
           ..sort((a, b) {
+            if (a.bankId == b.bankId) {
+              return a.accountNumber.compareTo(b.accountNumber);
+            }
             if (a.bankId == CashConstants.bankId) return -1;
             if (b.bankId == CashConstants.bankId) return 1;
             return a.bankId.compareTo(b.bankId);
@@ -112,6 +119,17 @@ class _AddCashTransactionContentState
       summaries.insert(0, _cashAccountSummary());
     }
     return summaries;
+  }
+
+  List<AccountSummary> get _selectableBankRepresentatives {
+    return manualTransactionBankRepresentatives(_selectableAccounts);
+  }
+
+  List<AccountSummary> get _accountsForSelectedBank {
+    return manualTransactionAccountsForBank(
+      _selectableAccounts,
+      _selectedAccount.bankId,
+    );
   }
 
   AccountSummary _cashAccountSummary() {
@@ -167,8 +185,8 @@ class _AddCashTransactionContentState
     return _banksById[account.bankId] ??
         Bank(
           id: account.bankId,
-          name: account.accountHolderName,
-          shortName: account.bankId.toString(),
+          name: widget.provider.getBankName(account.bankId),
+          shortName: widget.provider.getBankShortName(account.bankId),
           codes: const [],
           image: '',
         );
@@ -215,14 +233,11 @@ class _AddCashTransactionContentState
           settledBalance: account.settledBalance,
           pendingCredit: account.pendingCredit,
           profileId: account.profileId,
+          smsSubscriptionId: account.smsSubscriptionId,
         ),
       );
       return;
     }
-  }
-
-  double _remainingBalanceAfter(AccountSummary account, double amount) {
-    return account.balance + (_isDebit ? -amount : amount);
   }
 
   String _manualReference(int bankId, int micros) {
@@ -232,7 +247,7 @@ class _AddCashTransactionContentState
     return 'manual_${bankId}_$micros';
   }
 
-  String _accountLabel(BuildContext context, AccountSummary account) {
+  String _bankLabel(BuildContext context, AccountSummary account) {
     if (account.bankId == CashConstants.bankId) {
       return context.l10nText('Cash Wallet');
     }
@@ -245,15 +260,36 @@ class _AddCashTransactionContentState
     return context.l10nText('Bank');
   }
 
-  Widget _buildAccountSelector(BuildContext context, Color accentColor) {
+  void _selectBank(AccountSummary account) {
+    if (_selectedAccount.bankId == account.bankId) return;
+    setState(() {
+      _selectedAccount = account;
+      _balanceAfterController.clear();
+    });
+  }
+
+  void _selectAccount(AccountSummary account) {
+    if (_sameAccount(account, _selectedAccount)) return;
+    setState(() {
+      _selectedAccount = account;
+      _balanceAfterController.clear();
+    });
+  }
+
+  Widget _buildBankAndAccountSelectors(
+    BuildContext context,
+    Color accentColor,
+  ) {
     final theme = Theme.of(context);
-    final accounts = _selectableAccounts;
+    final banks = _selectableBankRepresentatives;
+    final accounts = _accountsForSelectedBank;
+    final showAccountSection = _selectedAccount.bankId != CashConstants.bankId;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          context.l10nText('Account'),
+          context.l10nText('Bank'),
           style: theme.textTheme.labelMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w600,
@@ -264,20 +300,48 @@ class _AddCashTransactionContentState
           height: 76,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: accounts.length,
+            itemCount: banks.length,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, index) {
-              final account = accounts[index];
-              return _AccountSelectorChip(
+              final account = banks[index];
+              return _BankSelectorChip(
                 bank: _bankForAccount(account),
-                label: _accountLabel(context, account),
-                selected: _sameAccount(account, _selectedAccount),
+                label: _bankLabel(context, account),
+                selected: account.bankId == _selectedAccount.bankId,
                 accentColor: accentColor,
-                onTap: () => setState(() => _selectedAccount = account),
+                onTap: () => _selectBank(account),
               );
             },
           ),
         ),
+        if (showAccountSection) ...[
+          const SizedBox(height: 16),
+          Text(
+            context.l10nText('Account'),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 36,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: accounts
+                  .map(
+                    (account) => _CashCategoryChip(
+                      label: account.accountNumber,
+                      icon: null,
+                      selected: _sameAccount(account, _selectedAccount),
+                      accentColor: accentColor,
+                      onTap: () => _selectAccount(account),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -393,6 +457,23 @@ class _AddCashTransactionContentState
       return;
     }
 
+    final balanceAfterText = _balanceAfterController.text.trim();
+    final enteredBalanceAfter = _parseAmount(balanceAfterText);
+    if (balanceAfterText.isNotEmpty &&
+        (enteredBalanceAfter == null ||
+            (_selectedAccount.bankId == CashConstants.bankId &&
+                enteredBalanceAfter < 0))) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.l10nTextRead('Enter a valid balance')),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -403,7 +484,12 @@ class _AddCashTransactionContentState
 
       final now = DateTime.now();
       final note = _noteController.text.trim();
-      final remainingBalance = _remainingBalanceAfter(selectedAccount, amount);
+      final remainingBalance = resolveManualBalanceAfter(
+        currentBalance: selectedAccount.balance,
+        amount: amount,
+        isDebit: _isDebit,
+        enteredBalanceAfter: enteredBalanceAfter,
+      );
       final selectedCategoryIds =
           List<int>.from(_selectedCategoryIds, growable: false);
       await _updateStoredAccountBalance(selectedAccount, remainingBalance);
@@ -421,12 +507,20 @@ class _AddCashTransactionContentState
         type: _isDebit ? 'DEBIT' : 'CREDIT',
         currentBalance: remainingBalance.toStringAsFixed(2),
         accountNumber: selectedAccount.accountNumber,
+        ownerAccountNumber: selectedAccount.accountNumber,
         categoryId:
             selectedCategoryIds.isEmpty ? null : selectedCategoryIds.first,
         categoryIds: selectedCategoryIds.isEmpty ? null : selectedCategoryIds,
       );
 
       await widget.provider.addTransaction(transaction);
+      if (selectedAccount.bankId == CashConstants.bankId &&
+          enteredBalanceAfter != null) {
+        await widget.provider.setCashWalletBalance(
+          targetBalance: enteredBalanceAfter,
+          accountNumber: selectedAccount.accountNumber,
+        );
+      }
       if (mounted) {
         Navigator.pop(context);
       }
@@ -527,7 +621,7 @@ class _AddCashTransactionContentState
                             ),
                             const SizedBox(height: 24),
 
-                            _buildAccountSelector(context, accentColor),
+                            _buildBankAndAccountSelectors(context, accentColor),
                             const SizedBox(height: 24),
 
                             if (widget.showTypeSelector) ...[
@@ -614,6 +708,54 @@ class _AddCashTransactionContentState
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
                                     color: _isDebit ? Colors.red : Colors.green,
+                                    width: 2,
+                                  ),
+                                ),
+                                filled: true,
+                                fillColor: colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.3),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            TextField(
+                              controller: _balanceAfterController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                                signed: true,
+                              ),
+                              decoration: InputDecoration(
+                                labelText:
+                                    '${context.l10nText('Balance After')} '
+                                    '(${context.l10nText('Optional')})',
+                                hintText: '0.00',
+                                hintStyle: TextStyle(color: hintColor),
+                                labelStyle: TextStyle(color: hintColor),
+                                floatingLabelStyle: TextStyle(
+                                  color: hintColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                prefixText: '${context.l10nText('ETB')} ',
+                                prefixIcon: const Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  size: 20,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: colorScheme.outline.withValues(
+                                      alpha: 0.5,
+                                    ),
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: accentColor,
                                     width: 2,
                                   ),
                                 ),
@@ -855,14 +997,14 @@ class _TypeButton extends StatelessWidget {
   }
 }
 
-class _AccountSelectorChip extends StatelessWidget {
+class _BankSelectorChip extends StatelessWidget {
   final Bank bank;
   final String label;
   final bool selected;
   final Color accentColor;
   final VoidCallback onTap;
 
-  const _AccountSelectorChip({
+  const _BankSelectorChip({
     required this.bank,
     required this.label,
     required this.selected,

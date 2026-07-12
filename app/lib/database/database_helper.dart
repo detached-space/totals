@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 28,
+        version: 29,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV28Schema(db);
+      await _validateV29Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -110,6 +110,7 @@ class DatabaseHelper {
         type TEXT,
         transactionLink TEXT,
         accountNumber TEXT,
+        ownerAccountNumber TEXT,
         categoryId INTEGER,
         categoryIds TEXT,
         year INTEGER,
@@ -119,7 +120,8 @@ class DatabaseHelper {
         profileId INTEGER,
         sourceType TEXT,
         sourceMessageId TEXT,
-        sourceFingerprint TEXT
+        sourceFingerprint TEXT,
+        sourceSubscriptionId INTEGER
       )
     ''');
 
@@ -174,6 +176,7 @@ class DatabaseHelper {
         settledBalance REAL,
         pendingCredit REAL,
         profileId INTEGER,
+        smsSubscriptionId INTEGER,
         UNIQUE(accountNumber, bank)
       )
     ''');
@@ -309,6 +312,15 @@ class DatabaseHelper {
       'CREATE INDEX idx_transactions_sourceFingerprint ON transactions(sourceType, sourceFingerprint)',
     );
     await db.execute(
+      'CREATE INDEX idx_transactions_ownerAccount ON transactions(profileId, bankId, ownerAccountNumber, time)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_transactions_sourceSubscriptionId ON transactions(sourceType, sourceSubscriptionId)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_accounts_smsSubscriptionId ON accounts(bank, smsSubscriptionId)',
+    );
+    await db.execute(
       'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)',
     );
     await db.execute(
@@ -328,6 +340,14 @@ class DatabaseHelper {
     // path seeds modern category fields before those columns exist.
     if (oldVersion < 28) {
       await _migrateAnySchemaToV28(db);
+      if (newVersion >= 29) {
+        await _migrateV28ToV29(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 29) {
+      await _migrateV28ToV29(db);
       return;
     }
 
@@ -858,6 +878,34 @@ class DatabaseHelper {
       await _ensureTransactionSourceSchema(db);
       await _ensureSyncSchema(db);
     }
+  }
+
+  Future<void> _migrateV28ToV29(Database db) async {
+    await _runV28Stage('v29 account ownership columns', () async {
+      await _v28EnsureColumns(db, 'transactions', {
+        'ownerAccountNumber':
+            'ALTER TABLE transactions ADD COLUMN ownerAccountNumber TEXT',
+        'sourceSubscriptionId':
+            'ALTER TABLE transactions ADD COLUMN sourceSubscriptionId INTEGER',
+      });
+      await _v28EnsureColumns(db, 'accounts', {
+        'smsSubscriptionId':
+            'ALTER TABLE accounts ADD COLUMN smsSubscriptionId INTEGER',
+      });
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_ownerAccount '
+        'ON transactions(profileId, bankId, ownerAccountNumber, time)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_sourceSubscriptionId '
+        'ON transactions(sourceType, sourceSubscriptionId)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_accounts_smsSubscriptionId '
+        'ON accounts(bank, smsSubscriptionId)',
+      );
+    });
+    await _runV28Stage('v29 final validation', () => _validateV29Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -1723,6 +1771,28 @@ class DatabaseHelper {
     if (!categoryIndexes.contains('idx_categories_name_flow') ||
         !categoryIndexes.contains('idx_categories_builtInKey')) {
       throw StateError('v28 category uniqueness indexes are missing');
+    }
+  }
+
+  Future<void> _validateV29Schema(Database db) async {
+    await _validateV28Schema(db);
+    final transactionColumns = await _v28Columns(db, 'transactions');
+    const requiredTransactionColumns = {
+      'ownerAccountNumber',
+      'sourceSubscriptionId',
+    };
+    final missingTransactionColumns =
+        requiredTransactionColumns.difference(transactionColumns);
+    if (missingTransactionColumns.isNotEmpty) {
+      throw StateError(
+        'v29 invariant transactions missing '
+        '${missingTransactionColumns.join(', ')}',
+      );
+    }
+
+    final accountColumns = await _v28Columns(db, 'accounts');
+    if (!accountColumns.contains('smsSubscriptionId')) {
+      throw StateError('v29 invariant accounts missing smsSubscriptionId');
     }
   }
 
