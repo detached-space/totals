@@ -1029,6 +1029,7 @@ class NotificationService {
 
   Future<void> showAccountSyncProgress({
     required String accountNumber,
+    String? accountLabel,
     required int bankId,
     required String stage,
     required double progress,
@@ -1041,7 +1042,9 @@ class NotificationService {
       final clamped = progress.clamp(0.0, 1.0);
       final percent = (clamped * 100).round();
       final title = bankLabel == null ? 'Syncing account' : '$bankLabel sync';
-      final maskedAccount = _maskAccountNumber(accountNumber);
+      final maskedAccount = accountLabel?.trim().isNotEmpty == true
+          ? accountLabel!.trim()
+          : _maskAccountNumber(accountNumber);
       final progressStage = includePercentInBody
           ? _formatSyncProgressStage(stage, percent)
           : stage.trim();

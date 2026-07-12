@@ -3303,6 +3303,18 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                 _accountActionKey(account),
               ),
             ));
+    final otherTransactionsSyncStatus = isOverview
+        ? null
+        : syncStatusService.getSyncStatus(
+            AccountTransactionReparseTarget.unmatchedAccountKey,
+            _selectedBankId!,
+          );
+    final otherTransactionsSyncProgress = isOverview
+        ? null
+        : syncStatusService.getSyncProgress(
+            AccountTransactionReparseTarget.unmatchedAccountKey,
+            _selectedBankId!,
+          );
     final unmatchedTransactions = isOverview
         ? const <Transaction>[]
         : provider.unmatchedTransactionsForBank(_selectedBankId!);
@@ -3457,6 +3469,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   accountHolderName: accounts.length == 1
                       ? accounts.single.accountHolderName
                       : null,
+                  syncStatus: otherTransactionsSyncStatus,
+                  syncProgress: otherTransactionsSyncProgress,
                   onTap: () => _openUnmatchedTransactionsPage(
                     provider,
                     _selectedBankId!,
@@ -4040,6 +4054,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   ) async {
     if (accounts.isEmpty) return;
     final bankId = accounts.first.bankId;
+    final otherTransactions = provider.unmatchedTransactionsForBank(bankId);
     final selection = await showModalBottomSheet<_AccountReparseSelection>(
       context: context,
       isScrollControlled: true,
@@ -4047,6 +4062,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       builder: (_) => _ReparseAccountsSheet(
         accounts: accounts,
         bankName: bankName,
+        otherTransactionCount: otherTransactions.length,
       ),
     );
     if (!mounted || selection == null) return;
@@ -4059,7 +4075,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           ),
         )
         .toList(growable: false);
-    if (selectedAccounts.isEmpty) return;
+    if (selectedAccounts.isEmpty && !selection.refreshOtherTransactions) {
+      return;
+    }
 
     if (AccountSyncStatusService.instance.hasAnyAccountSyncing(bankId)) {
       messenger?.showSnackBar(
@@ -4084,7 +4102,14 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             transactions: _transactionsForAccount(provider, account),
           ),
         )
-        .toList(growable: false);
+        .toList(growable: true);
+    if (selection.refreshOtherTransactions) {
+      targets.add(
+        AccountTransactionReparseTarget.otherTransactions(
+          transactions: otherTransactions,
+        ),
+      );
+    }
 
     try {
       final result = await _accountTransactionReparseService
@@ -4099,9 +4124,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
       if (!mounted) return;
       final message = result.started
-          ? 'Reparse started for ${selectedAccounts.length} '
-              '${selectedAccounts.length == 1 ? 'account' : 'accounts'}. '
-              'Selected accounts will run one at a time.'
+          ? 'Reparse started for ${targets.length} '
+              '${targets.length == 1 ? 'selection' : 'selections'}. '
+              'Selected items will run one at a time.'
           : (result.errorMessage ?? 'Could not start reparse.');
       messenger?.showSnackBar(
         SnackBar(content: Text(context.l10nTextRead(message))),
@@ -14564,6 +14589,8 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
   final double totalDebit;
   final bool showAmounts;
   final String? accountHolderName;
+  final String? syncStatus;
+  final double? syncProgress;
   final VoidCallback onTap;
   final VoidCallback onAddAccount;
 
@@ -14573,6 +14600,8 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
     required this.totalDebit,
     required this.showAmounts,
     required this.accountHolderName,
+    required this.syncStatus,
+    required this.syncProgress,
     required this.onTap,
     required this.onAddAccount,
   });
@@ -14588,6 +14617,12 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
     final subtitle = holderName != null && holderName.isNotEmpty
         ? '${context.l10nText('Not assigned to')} $holderName'
         : context.l10nText('Not assigned to an account you added');
+    final normalizedProgress = syncProgress?.clamp(0.0, 1.0).toDouble();
+    final syncPercentLabel = normalizedProgress == null
+        ? '0%'
+        : '${(normalizedProgress * 100).round()}%';
+    final localizedSyncStatus =
+        syncStatus == null ? null : _localizedSyncStatus(context, syncStatus!);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -14600,156 +14635,195 @@ class _UnmatchedTransactionsCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryLight.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      AppIcons.help_outline_rounded,
-                      color: AppColors.primaryLight,
-                      size: 23,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          context.l10nText('Other transactions'),
-                          style: TextStyle(
-                            color: AppColors.textPrimary(context),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: AppColors.textSecondary(context),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: onAddAccount,
-                    tooltip: context.l10nText('Add account'),
-                    icon: const Icon(
-                      AppIcons.add_rounded,
-                      color: AppColors.primaryLight,
-                      size: 22,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Container(height: 1, color: AppColors.borderColor(context)),
-              const SizedBox(height: 12),
-              Row(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Row(
                     children: [
-                      Text(
-                        context.l10nText('TRANSACTIONS'),
-                        style: TextStyle(
-                          color: AppColors.textSecondary(context),
-                          fontSize: 10,
-                          letterSpacing: 0.8,
-                          fontWeight: FontWeight.w500,
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryLight.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          AppIcons.help_outline_rounded,
+                          color: AppColors.primaryLight,
+                          size: 23,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _formatCount(transactionCount),
-                        style: TextStyle(
-                          color: AppColors.textPrimary(context),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              context.l10nText('Other transactions'),
+                              style: TextStyle(
+                                color: AppColors.textPrimary(context),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              subtitle,
+                              style: TextStyle(
+                                color: AppColors.textSecondary(context),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (localizedSyncStatus != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                localizedSyncStatus,
+                                style: const TextStyle(
+                                  color: AppColors.primaryLight,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: onAddAccount,
+                        tooltip: context.l10nText('Add account'),
+                        icon: const Icon(
+                          AppIcons.add_rounded,
+                          color: AppColors.primaryLight,
+                          size: 22,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(width: 24),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          context.l10nText('INCOME & EXPENSE'),
-                          style: TextStyle(
-                            color: AppColors.textSecondary(context),
-                            fontSize: 10,
-                            letterSpacing: 0.8,
-                            fontWeight: FontWeight.w500,
-                          ),
+                  if (syncStatus != null) ...[
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 56),
+                      child: Text(
+                        syncPercentLabel,
+                        style: const TextStyle(
+                          color: AppColors.primaryLight,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 2),
-                        Wrap(
-                          spacing: 4,
-                          runSpacing: 2,
-                          crossAxisAlignment: WrapCrossAlignment.center,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Container(height: 1, color: AppColors.borderColor(context)),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            context.l10nText('TRANSACTIONS'),
+                            style: TextStyle(
+                              color: AppColors.textSecondary(context),
+                              fontSize: 10,
+                              letterSpacing: 0.8,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _formatCount(transactionCount),
+                            style: TextStyle(
+                              color: AppColors.textPrimary(context),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              creditLabel,
-                              style: const TextStyle(
-                                color: AppColors.incomeSuccess,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              '|',
+                              context.l10nText('INCOME & EXPENSE'),
                               style: TextStyle(
-                                color: AppColors.textTertiary(context),
-                                fontSize: 14,
+                                color: AppColors.textSecondary(context),
+                                fontSize: 10,
+                                letterSpacing: 0.8,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                            Text(
-                              debitLabel,
-                              style: const TextStyle(
-                                color: AppColors.red,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
+                            const SizedBox(height: 2),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 2,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  creditLabel,
+                                  style: const TextStyle(
+                                    color: AppColors.incomeSuccess,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  '|',
+                                  style: TextStyle(
+                                    color: AppColors.textTertiary(context),
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                Text(
+                                  debitLabel,
+                                  style: const TextStyle(
+                                    color: AppColors.red,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    context.l10nText(
+                      'Add the matching account and Totals will move these automatically.',
+                    ),
+                    style: TextStyle(
+                      color: AppColors.textSecondary(context),
+                      fontSize: 11,
+                      height: 1.35,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                context.l10nText(
-                  'Add the matching account and Totals will move these automatically.',
-                ),
-                style: TextStyle(
-                  color: AppColors.textSecondary(context),
-                  fontSize: 11,
-                  height: 1.35,
-                ),
+            ),
+            if (syncStatus != null)
+              LinearProgressIndicator(
+                value: normalizedProgress,
+                minHeight: 3,
+                backgroundColor: Colors.transparent,
+                valueColor:
+                    const AlwaysStoppedAnimation(AppColors.primaryLight),
               ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -16442,6 +16516,7 @@ class _AccountReparseSelection {
   final bool refreshExistingTransactions;
   final bool importMissedTransactions;
   final bool applyAutoCategorization;
+  final bool refreshOtherTransactions;
 
   const _AccountReparseSelection({
     required this.selectedAccountKeys,
@@ -16449,16 +16524,19 @@ class _AccountReparseSelection {
     this.refreshExistingTransactions = true,
     this.importMissedTransactions = true,
     this.applyAutoCategorization = true,
+    this.refreshOtherTransactions = false,
   });
 }
 
 class _ReparseAccountsSheet extends StatefulWidget {
   final List<AccountSummary> accounts;
   final String bankName;
+  final int otherTransactionCount;
 
   const _ReparseAccountsSheet({
     required this.accounts,
     required this.bankName,
+    required this.otherTransactionCount,
   });
 
   @override
@@ -16471,6 +16549,7 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
   bool _refreshExistingTransactions = true;
   bool _importMissedTransactions = true;
   bool _applyAutoCategorization = true;
+  bool _refreshOtherTransactions = false;
 
   bool get _hasSelectedAction =>
       _refreshExistingTransactions ||
@@ -16481,10 +16560,20 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
       widget.accounts.isNotEmpty &&
       _selectedAccountKeys.length == widget.accounts.length;
 
+  bool get _hasSelectedTarget =>
+      _selectedAccountKeys.isNotEmpty || _refreshOtherTransactions;
+
+  int get _selectedTargetCount =>
+      _selectedAccountKeys.length + (_refreshOtherTransactions ? 1 : 0);
+
+  int get _availableTargetCount =>
+      widget.accounts.length + (widget.otherTransactionCount > 0 ? 1 : 0);
+
   @override
   void initState() {
     super.initState();
     _selectedAccountKeys = widget.accounts.map(_accountSummaryKey).toSet();
+    _refreshOtherTransactions = widget.otherTransactionCount > 0;
   }
 
   void _toggleAllAccounts() {
@@ -16597,7 +16686,7 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
             const SizedBox(height: 12),
             Text(
               context.l10nText(
-                'Select the accounts to scan, then choose what the reparse should update. Selected accounts run one at a time.',
+                'Select accounts and optionally Other transactions, then choose what the reparse should update. Selected items run one at a time.',
               ),
               style: TextStyle(
                 color: hintColor,
@@ -16630,7 +16719,7 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                         ),
                       ),
                       Text(
-                        '${_selectedAccountKeys.length}/${widget.accounts.length} '
+                        '$_selectedTargetCount/$_availableTargetCount '
                         '${context.l10nText('selected')}',
                         style: TextStyle(
                           color: hintColor,
@@ -16679,9 +16768,24 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                 ),
               ),
             ),
-            if (_selectedAccountKeys.isEmpty) ...[
+            if (widget.otherTransactionCount > 0) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _ReparseOtherTransactionsTile(
+                  transactionCount: widget.otherTransactionCount,
+                  selected: _refreshOtherTransactions,
+                  onChanged: () => setState(
+                    () =>
+                        _refreshOtherTransactions = !_refreshOtherTransactions,
+                  ),
+                ),
+              ),
+            ],
+            if (!_hasSelectedTarget) ...[
               Text(
-                context.l10nText('Choose at least one account to reparse.'),
+                context.l10nText(
+                  'Choose at least one account or Other transactions to reparse.',
+                ),
                 style: TextStyle(
                   color: AppColors.red.withValues(alpha: 0.8),
                   fontSize: 12,
@@ -16842,8 +16946,7 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                 Expanded(
                   flex: 2,
                   child: ElevatedButton(
-                    onPressed: !_hasSelectedAction ||
-                            _selectedAccountKeys.isEmpty
+                    onPressed: !_hasSelectedAction || !_hasSelectedTarget
                         ? null
                         : () => Navigator.of(context).pop(
                               _AccountReparseSelection(
@@ -16857,6 +16960,8 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                                     _importMissedTransactions,
                                 applyAutoCategorization:
                                     _applyAutoCategorization,
+                                refreshOtherTransactions:
+                                    _refreshOtherTransactions,
                               ),
                             ),
                     style: ElevatedButton.styleFrom(
@@ -16870,11 +16975,9 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                     ),
                     child: Text(
                       '${context.l10nText('Reparse')} '
-                      '${_selectedAccountKeys.length} '
+                      '$_selectedTargetCount '
                       '${context.l10nText(
-                        _selectedAccountKeys.length == 1
-                            ? 'account'
-                            : 'accounts',
+                        _selectedTargetCount == 1 ? 'selection' : 'selections',
                       )}',
                       style: const TextStyle(
                         fontSize: 15,
@@ -16955,6 +17058,86 @@ class _ReparseAccountTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       '${_formatCount(account.totalTransactions.toInt())} '
+                      '${context.l10nText('transactions')}',
+                      style: TextStyle(
+                        color: AppColors.textTertiary(context),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Checkbox(
+                value: selected,
+                onChanged: (_) => onChanged(),
+                activeColor: AppColors.primaryDark,
+                checkColor: AppColors.white,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReparseOtherTransactionsTile extends StatelessWidget {
+  final int transactionCount;
+  final bool selected;
+  final VoidCallback onChanged;
+
+  const _ReparseOtherTransactionsTile({
+    required this.transactionCount,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surfaceColor(context),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onChanged,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? AppColors.primaryDark.withValues(alpha: 0.45)
+                  : AppColors.borderColor(context),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10nText('Other transactions'),
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      context.l10nText(
+                        'Refresh transactions that are not assigned to an account.',
+                      ),
+                      style: TextStyle(
+                        color: AppColors.textSecondary(context),
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_formatCount(transactionCount)} '
                       '${context.l10nText('transactions')}',
                       style: TextStyle(
                         color: AppColors.textTertiary(context),
