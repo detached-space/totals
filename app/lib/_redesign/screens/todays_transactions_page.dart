@@ -6,8 +6,11 @@ import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
+import 'package:totals/models/category.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
@@ -23,6 +26,7 @@ class TodaysTransactionsPage extends StatefulWidget {
 
 class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   final Set<String> _selectedRefs = {};
+  _TodayTransactionsFilter _filter = const _TodayTransactionsFilter();
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
 
@@ -37,6 +41,115 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   }
 
   void _clearSelection() => setState(() => _selectedRefs.clear());
+
+  List<Transaction> _filteredTransactions(
+    TransactionProvider provider,
+    List<Transaction> transactions,
+  ) {
+    return transactions.where((transaction) {
+      if (_filter.type != null && transaction.type != _filter.type) {
+        return false;
+      }
+      if (_filter.bankId != null && transaction.bankId != _filter.bankId) {
+        return false;
+      }
+      if (_filter.accountKey != null) {
+        final summary = provider.accountSummaryForTransaction(transaction);
+        final otherBankId = _todayOtherAccountBankId(_filter.accountKey!);
+        if (otherBankId != null) {
+          if (summary != null || transaction.bankId != otherBankId) {
+            return false;
+          }
+        } else if (summary == null ||
+            _todayAccountKey(summary) != _filter.accountKey) {
+          return false;
+        }
+      }
+      if (_filter.categoryId != null &&
+          !transaction.includesCategory(_filter.categoryId)) {
+        return false;
+      }
+      if (_filter.minAmount != null &&
+          transaction.amount < _filter.minAmount!) {
+        return false;
+      }
+      if (_filter.maxAmount != null &&
+          transaction.amount > _filter.maxAmount!) {
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
+  }
+
+  Future<void> _openFilterSheet(
+    TransactionProvider provider,
+    List<Transaction> transactions,
+  ) async {
+    final bankIds = <int>{};
+    final accountsByKey = <String, AccountSummary>{};
+    final unmatchedBankIds = <int>{};
+    final categoryIds = <int>{};
+
+    for (final transaction in transactions) {
+      final bankId = transaction.bankId;
+      if (bankId != null) bankIds.add(bankId);
+      final account = provider.accountSummaryForTransaction(transaction);
+      if (account != null) {
+        accountsByKey[_todayAccountKey(account)] = account;
+      } else if (bankId != null) {
+        unmatchedBankIds.add(bankId);
+      }
+      categoryIds.addAll(transaction.selectedCategoryIds);
+    }
+
+    final sortedBankIds = bankIds.toList(growable: true)
+      ..sort(
+        (left, right) => compareDisplayText(
+          context.l10nText(provider.getBankShortName(left)),
+          context.l10nText(provider.getBankShortName(right)),
+        ),
+      );
+    final accounts = accountsByKey.values.toList(growable: true)
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) =>
+              context.l10nText(provider.getBankShortName(bankId)),
+        ),
+      );
+    final categories = categoryIds
+        .map(provider.getCategoryById)
+        .whereType<Category>()
+        .toList(growable: true)
+      ..sort(
+        (left, right) => compareDisplayText(left.name, right.name),
+      );
+
+    final selected = await showModalBottomSheet<_TodayTransactionsFilter>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _TodayTransactionsFilterSheet(
+        currentFilter: _filter,
+        bankIds: sortedBankIds,
+        accounts: accounts,
+        unmatchedBankIds: unmatchedBankIds,
+        categories: categories,
+        bankLabel: (bankId) =>
+            context.l10nText(provider.getBankShortName(bankId)),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _filter = selected;
+      _selectedRefs.clear();
+    });
+  }
 
   Future<void> _openDetails(
       TransactionProvider provider, Transaction tx) async {
@@ -95,7 +208,8 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
 
     return Consumer<TransactionProvider>(
       builder: (context, provider, _) {
-        final transactions = provider.todayTransactions;
+        final allTransactions = provider.todayTransactions;
+        final transactions = _filteredTransactions(provider, allTransactions);
 
         String pageTitle;
         if (_isSelecting) {
@@ -131,11 +245,18 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
               ),
             ),
             actions: [
+              if (!_isSelecting)
+                _TodayFilterActionButton(
+                  activeCount: _filter.activeCount,
+                  onTap: () => _openFilterSheet(provider, allTransactions),
+                ),
               if (_isSelecting)
                 IconButton(
                   onPressed: () => _deleteSelected(provider),
-                  icon: Icon(AppIcons.delete_outline_rounded,
-                      color: AppColors.red),
+                  icon: const Icon(
+                    AppIcons.delete_outline_rounded,
+                    color: AppColors.red,
+                  ),
                 ),
             ],
           ),
@@ -151,7 +272,11 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        context.l10nText('No transactions today'),
+                        context.l10nText(
+                          allTransactions.isEmpty
+                              ? 'No transactions today'
+                              : 'No transactions match these filters',
+                        ),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: AppColors.textSecondary(context),
                           fontWeight: FontWeight.w500,
@@ -224,7 +349,553 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   }
 }
 
+class _TodayTransactionsFilter {
+  final String? type;
+  final int? bankId;
+  final String? accountKey;
+  final int? categoryId;
+  final double? minAmount;
+  final double? maxAmount;
+
+  const _TodayTransactionsFilter({
+    this.type,
+    this.bankId,
+    this.accountKey,
+    this.categoryId,
+    this.minAmount,
+    this.maxAmount,
+  });
+
+  int get activeCount {
+    var count = 0;
+    if (type != null) count++;
+    if (bankId != null) count++;
+    if (accountKey != null) count++;
+    if (categoryId != null) count++;
+    if (minAmount != null || maxAmount != null) count++;
+    return count;
+  }
+}
+
+class _TodayTransactionsFilterSheet extends StatefulWidget {
+  final _TodayTransactionsFilter currentFilter;
+  final List<int> bankIds;
+  final List<AccountSummary> accounts;
+  final Set<int> unmatchedBankIds;
+  final List<Category> categories;
+  final String Function(int bankId) bankLabel;
+
+  const _TodayTransactionsFilterSheet({
+    required this.currentFilter,
+    required this.bankIds,
+    required this.accounts,
+    required this.unmatchedBankIds,
+    required this.categories,
+    required this.bankLabel,
+  });
+
+  @override
+  State<_TodayTransactionsFilterSheet> createState() =>
+      _TodayTransactionsFilterSheetState();
+}
+
+class _TodayTransactionsFilterSheetState
+    extends State<_TodayTransactionsFilterSheet> {
+  late String? _selectedType;
+  late int? _selectedBankId;
+  late String? _selectedAccountKey;
+  late int? _selectedCategoryId;
+  late final TextEditingController _minAmountController;
+  late final TextEditingController _maxAmountController;
+  String? _amountError;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedType = widget.currentFilter.type;
+    _selectedBankId = widget.currentFilter.bankId;
+    _selectedAccountKey = widget.currentFilter.accountKey;
+    _selectedCategoryId = widget.currentFilter.categoryId;
+    _minAmountController = TextEditingController(
+      text: _formatAmount(widget.currentFilter.minAmount),
+    );
+    _maxAmountController = TextEditingController(
+      text: _formatAmount(widget.currentFilter.maxAmount),
+    );
+  }
+
+  @override
+  void dispose() {
+    _minAmountController.dispose();
+    _maxAmountController.dispose();
+    super.dispose();
+  }
+
+  List<AccountSummary> get _visibleAccounts => _selectedBankId == null
+      ? widget.accounts
+      : widget.accounts
+          .where((account) => account.bankId == _selectedBankId)
+          .toList(growable: false);
+
+  List<int> get _visibleUnmatchedBankIds => widget.unmatchedBankIds
+      .where(
+        (bankId) => _selectedBankId == null || bankId == _selectedBankId,
+      )
+      .toList(growable: false)
+    ..sort(
+      (left, right) => compareDisplayText(
+        widget.bankLabel(left),
+        widget.bankLabel(right),
+      ),
+    );
+
+  void _selectBank(int? bankId) {
+    setState(() {
+      _selectedBankId = bankId;
+      if (_selectedAccountKey == null) return;
+      final accountVisible = _visibleAccounts.any(
+        (account) => _todayAccountKey(account) == _selectedAccountKey,
+      );
+      final otherVisible = _visibleUnmatchedBankIds.any(
+        (candidate) => _todayOtherAccountKey(candidate) == _selectedAccountKey,
+      );
+      if (!accountVisible && !otherVisible) _selectedAccountKey = null;
+    });
+  }
+
+  void _clearAll() {
+    setState(() {
+      _selectedType = null;
+      _selectedBankId = null;
+      _selectedAccountKey = null;
+      _selectedCategoryId = null;
+      _minAmountController.clear();
+      _maxAmountController.clear();
+      _amountError = null;
+    });
+  }
+
+  void _apply() {
+    final min = _parseAmount(_minAmountController.text);
+    final max = _parseAmount(_maxAmountController.text);
+    final minInvalid =
+        _minAmountController.text.trim().isNotEmpty && min == null;
+    final maxInvalid =
+        _maxAmountController.text.trim().isNotEmpty && max == null;
+    if (minInvalid || maxInvalid) {
+      setState(() => _amountError = 'Enter a valid amount');
+      return;
+    }
+    if (min != null && max != null && max < min) {
+      setState(() => _amountError = 'Maximum must be at least minimum.');
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _TodayTransactionsFilter(
+        type: _selectedType,
+        bankId: _selectedBankId,
+        accountKey: _selectedAccountKey,
+        categoryId: _selectedCategoryId,
+        minAmount: min,
+        maxAmount: max,
+      ),
+    );
+  }
+
+  double? _parseAmount(String raw) {
+    final normalized = raw.trim().replaceAll(',', '');
+    return normalized.isEmpty ? null : double.tryParse(normalized);
+  }
+
+  String _formatAmount(double? amount) {
+    if (amount == null) return '';
+    if (amount == amount.roundToDouble()) return amount.toStringAsFixed(0);
+    return amount
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  String _accountLabel(AccountSummary account) {
+    final holder = account.accountHolderName.trim();
+    final identity = holder.isEmpty
+        ? account.accountNumber
+        : '$holder • ${account.accountNumber}';
+    return _selectedBankId == null
+        ? '${widget.bankLabel(account.bankId)} • $identity'
+        : identity;
+  }
+
+  String _otherLabel(int bankId) {
+    final other = context.l10nText('Other transactions');
+    return _selectedBankId == null
+        ? '${widget.bankLabel(bankId)} • $other'
+        : other;
+  }
+
+  Widget _sectionLabel(String label) {
+    return Text(
+      context.l10nText(label),
+      style: TextStyle(
+        color: AppColors.textSecondary(context),
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.7,
+      ),
+    );
+  }
+
+  Widget _chip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return ChoiceChip(
+      label: Text(context.l10nText(label)),
+      selected: selected,
+      showCheckmark: false,
+      onSelected: (_) => onTap(),
+      selectedColor: AppColors.primaryLight.withValues(alpha: 0.14),
+      backgroundColor: AppColors.surfaceColor(context),
+      side: BorderSide(
+        color:
+            selected ? AppColors.primaryLight : AppColors.borderColor(context),
+      ),
+      labelStyle: TextStyle(
+        color:
+            selected ? AppColors.primaryLight : AppColors.textPrimary(context),
+        fontSize: 13,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    );
+  }
+
+  Widget _amountField(
+    TextEditingController controller,
+    String hint, {
+    TextInputAction? textInputAction,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      textInputAction: textInputAction,
+      onChanged: (_) {
+        if (_amountError != null) setState(() => _amountError = null);
+      },
+      decoration: InputDecoration(
+        hintText: context.l10nText(hint),
+        isDense: true,
+        filled: true,
+        fillColor: AppColors.surfaceColor(context),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: AppColors.borderColor(context)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: AppColors.borderColor(context)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.primaryLight),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.86,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 10),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.slate400,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    context.l10nText('Filter Transactions'),
+                    style: TextStyle(
+                      color: AppColors.textPrimary(context),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _clearAll,
+                  child: Text(context.l10nText('Clear all')),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(AppIcons.close),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionLabel('TYPE'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _chip(
+                        label: 'All',
+                        selected: _selectedType == null,
+                        onTap: () => setState(() => _selectedType = null),
+                      ),
+                      _chip(
+                        label: 'Expense',
+                        selected: _selectedType == 'DEBIT',
+                        onTap: () => setState(() => _selectedType = 'DEBIT'),
+                      ),
+                      _chip(
+                        label: 'Income',
+                        selected: _selectedType == 'CREDIT',
+                        onTap: () => setState(() => _selectedType = 'CREDIT'),
+                      ),
+                    ],
+                  ),
+                  if (widget.bankIds.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('BANK'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _chip(
+                          label: 'All Banks',
+                          selected: _selectedBankId == null,
+                          onTap: () => _selectBank(null),
+                        ),
+                        for (final bankId in widget.bankIds)
+                          _chip(
+                            label: widget.bankLabel(bankId),
+                            selected: _selectedBankId == bankId,
+                            onTap: () => _selectBank(bankId),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (widget.accounts.isNotEmpty ||
+                      widget.unmatchedBankIds.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('ACCOUNT'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _chip(
+                          label: 'All account activity',
+                          selected: _selectedAccountKey == null,
+                          onTap: () =>
+                              setState(() => _selectedAccountKey = null),
+                        ),
+                        for (final account in _visibleAccounts)
+                          _chip(
+                            label: _accountLabel(account),
+                            selected: _selectedAccountKey ==
+                                _todayAccountKey(account),
+                            onTap: () => setState(
+                              () => _selectedAccountKey =
+                                  _todayAccountKey(account),
+                            ),
+                          ),
+                        for (final bankId in _visibleUnmatchedBankIds)
+                          _chip(
+                            label: _otherLabel(bankId),
+                            selected: _selectedAccountKey ==
+                                _todayOtherAccountKey(bankId),
+                            onTap: () => setState(
+                              () => _selectedAccountKey =
+                                  _todayOtherAccountKey(bankId),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (widget.categories.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('CATEGORY'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _chip(
+                          label: 'All',
+                          selected: _selectedCategoryId == null,
+                          onTap: () =>
+                              setState(() => _selectedCategoryId = null),
+                        ),
+                        for (final category in widget.categories)
+                          if (category.id != null)
+                            _chip(
+                              label: category.name,
+                              selected: _selectedCategoryId == category.id,
+                              onTap: () => setState(
+                                () => _selectedCategoryId = category.id,
+                              ),
+                            ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  _sectionLabel('AMOUNT RANGE'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _amountField(
+                          _minAmountController,
+                          'Min',
+                          textInputAction: TextInputAction.next,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _amountField(
+                          _maxAmountController,
+                          'Max',
+                          textInputAction: TextInputAction.done,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_amountError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      context.l10nText(_amountError!),
+                      style: const TextStyle(
+                        color: AppColors.red,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              10,
+              20,
+              16 + bottomPadding + viewInsets,
+            ),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _apply,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primaryLight,
+                  foregroundColor: AppColors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: Text(context.l10nText('Apply Filters')),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TodayFilterActionButton extends StatelessWidget {
+  final int activeCount;
+  final VoidCallback onTap;
+
+  const _TodayFilterActionButton({
+    required this.activeCount,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onTap,
+      tooltip: context.l10nText('Filter Transactions'),
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Icon(
+            AppIcons.filter_list,
+            color: activeCount > 0
+                ? AppColors.primaryLight
+                : AppColors.textSecondary(context),
+          ),
+          if (activeCount > 0)
+            Positioned(
+              right: -7,
+              top: -7,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: const BoxDecoration(
+                  color: AppColors.primaryLight,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '$activeCount',
+                  style: const TextStyle(
+                    color: AppColors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+String _todayAccountKey(AccountSummary account) {
+  return '${account.bankId}:${account.accountNumber}';
+}
+
+String _todayOtherAccountKey(int bankId) => 'other:$bankId';
+
+int? _todayOtherAccountBankId(String key) {
+  if (!key.startsWith('other:')) return null;
+  return int.tryParse(key.substring('other:'.length));
+}
 
 String _amountLabel(
   double amount, {

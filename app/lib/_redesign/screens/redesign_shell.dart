@@ -951,6 +951,10 @@ class RedesignShellState extends State<RedesignShell>
                           _sharedExpenseNavigationController.handleSystemBack();
                       if (handled) return false;
                     }
+                    if (_currentIndex != _homeIndex) {
+                      _onTabSelected(_homeIndex);
+                      return false;
+                    }
                     return true;
                   },
                   child: Scaffold(

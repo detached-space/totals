@@ -11127,7 +11127,7 @@ class _MoneyFlowRow extends StatelessWidget {
   }
 }
 
-class _SearchFilterRow extends StatelessWidget {
+class _SearchFilterRow extends StatefulWidget {
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final VoidCallback onFilterTap;
@@ -11141,52 +11141,104 @@ class _SearchFilterRow extends StatelessWidget {
   });
 
   @override
+  State<_SearchFilterRow> createState() => _SearchFilterRowState();
+}
+
+class _SearchFilterRowState extends State<_SearchFilterRow>
+    with WidgetsBindingObserver {
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _wasKeyboardVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _searchFocusNode.addListener(_handleFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _searchFocusNode.removeListener(_handleFocusChanged);
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final keyboardVisible = View.of(context).viewInsets.bottom > 0;
+    if (_wasKeyboardVisible && !keyboardVisible && _searchFocusNode.hasFocus) {
+      _searchFocusNode.unfocus();
+    }
+    _wasKeyboardVisible = keyboardVisible;
+  }
+
+  void _handleFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Expanded(
           child: SizedBox(
             height: 44,
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              style: TextStyle(
-                  fontSize: 14, color: AppColors.textPrimary(context)),
-              decoration: InputDecoration(
-                hintText: context.l10nText('Search Transactions'),
-                hintStyle: TextStyle(
-                  color: AppColors.textTertiary(context),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                ),
-                filled: true,
-                fillColor: AppColors.surfaceColor(context),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: AppColors.borderColor(context)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: AppColors.borderColor(context)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(
-                    color: AppColors.primaryLight,
-                    width: 1.3,
+            child: PopScope<void>(
+              canPop: !_searchFocusNode.hasFocus,
+              onPopInvokedWithResult: (didPop, _) {
+                if (!didPop && _searchFocusNode.hasFocus) {
+                  _searchFocusNode.unfocus();
+                }
+              },
+              child: TextField(
+                controller: widget.controller,
+                focusNode: _searchFocusNode,
+                textInputAction: TextInputAction.search,
+                onChanged: widget.onChanged,
+                onSubmitted: (_) => _searchFocusNode.unfocus(),
+                onTapOutside: (_) => _searchFocusNode.unfocus(),
+                style: TextStyle(
+                    fontSize: 14, color: AppColors.textPrimary(context)),
+                decoration: InputDecoration(
+                  hintText: context.l10nText('Search Transactions'),
+                  hintStyle: TextStyle(
+                    color: AppColors.textTertiary(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
                   ),
+                  filled: true,
+                  fillColor: AppColors.surfaceColor(context),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                        BorderSide(color: AppColors.borderColor(context)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                        BorderSide(color: AppColors.borderColor(context)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                      color: AppColors.primaryLight,
+                      width: 1.3,
+                    ),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  isDense: true,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                isDense: true,
               ),
             ),
           ),
         ),
         const SizedBox(width: 10),
         _FilterActionButton(
-          onTap: onFilterTap,
-          activeFilterCount: activeFilterCount,
+          onTap: widget.onFilterTap,
+          activeFilterCount: widget.activeFilterCount,
         ),
       ],
     );
