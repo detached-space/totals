@@ -32,6 +32,12 @@ typedef _ReparseProgressCallback = Future<void> Function(
 );
 
 const Duration _sourceAnchoredDuplicateWindow = Duration(minutes: 2);
+const String _unmatchedParsedMessagesKey = '__unmatched__';
+
+String _parsedMessagesTargetKey(Bank bank, String accountNumber) {
+  final canonical = canonicalAccountNumber(bank, accountNumber);
+  return 'account:${canonical ?? accountNumber.trim()}';
+}
 
 class AccountTransactionReparseResult {
   final bool unsupported;
@@ -165,15 +171,28 @@ class _ParsedBankSmsMessage {
 class _PreparedBankSmsScan {
   final int scannedMessages;
   final List<_ParsedBankSmsMessage> parsedMessages;
+  final Map<String, List<_ParsedBankSmsMessage>> parsedMessagesByTarget;
   final Set<String> obsoleteTelebirrCreditReferences;
   final Set<String> obsoleteTelebirrDebitReferences;
 
   const _PreparedBankSmsScan({
     required this.scannedMessages,
     required this.parsedMessages,
+    required this.parsedMessagesByTarget,
     required this.obsoleteTelebirrCreditReferences,
     required this.obsoleteTelebirrDebitReferences,
   });
+
+  List<_ParsedBankSmsMessage> messagesForTarget({
+    required Bank bank,
+    required String accountNumber,
+    required bool unmatchedOnly,
+  }) {
+    final key = unmatchedOnly
+        ? _unmatchedParsedMessagesKey
+        : _parsedMessagesTargetKey(bank, accountNumber);
+    return parsedMessagesByTarget[key] ?? const <_ParsedBankSmsMessage>[];
+  }
 }
 
 class _SourceDuplicateCleanupResult {
@@ -698,12 +717,14 @@ class AccountTransactionReparseService {
       return const _PreparedBankSmsScan(
         scannedMessages: 0,
         parsedMessages: <_ParsedBankSmsMessage>[],
+        parsedMessagesByTarget: <String, List<_ParsedBankSmsMessage>>{},
         obsoleteTelebirrCreditReferences: <String>{},
         obsoleteTelebirrDebitReferences: <String>{},
       );
     }
 
     final parsedMessages = <_ParsedBankSmsMessage>[];
+    final parsedMessagesByTarget = <String, List<_ParsedBankSmsMessage>>{};
     final obsoleteTelebirrCreditReferences = <String>{};
     final obsoleteTelebirrDebitReferences = <String>{};
     final totalMessages = messages.length;
@@ -796,18 +817,31 @@ class AccountTransactionReparseService {
         }
 
         final reparsed = Transaction.fromJson(details);
-        parsedMessages.add(
-          _ParsedBankSmsMessage(
-            message: message,
-            body: body,
-            address: address,
-            messageDate: messageDate,
-            details: Map<String, dynamic>.unmodifiable(details),
-            transaction: reparsed,
-            sourceKey: _sourceKeyFromDetails(details),
-            referenceKey: _logicalLegKey(reparsed),
-          ),
+        final parsedMessage = _ParsedBankSmsMessage(
+          message: message,
+          body: body,
+          address: address,
+          messageDate: messageDate,
+          details: Map<String, dynamic>.unmodifiable(details),
+          transaction: reparsed,
+          sourceKey: _sourceKeyFromDetails(details),
+          referenceKey: _logicalLegKey(reparsed),
         );
+        parsedMessages.add(parsedMessage);
+
+        if (parsedBankId == bank.id) {
+          final ownerAccountNumber =
+              _normalizeText(details['ownerAccountNumber']?.toString());
+          final targetKey = ownerAccountNumber == null
+              ? _unmatchedParsedMessagesKey
+              : _parsedMessagesTargetKey(bank, ownerAccountNumber);
+          parsedMessagesByTarget
+              .putIfAbsent(
+                targetKey,
+                () => <_ParsedBankSmsMessage>[],
+              )
+              .add(parsedMessage);
+        }
       } finally {
         final processedCount = index + 1;
         if (_shouldReportProgress(processedCount, totalMessages)) {
@@ -823,6 +857,15 @@ class AccountTransactionReparseService {
     return _PreparedBankSmsScan(
       scannedMessages: totalMessages,
       parsedMessages: List<_ParsedBankSmsMessage>.unmodifiable(parsedMessages),
+      parsedMessagesByTarget:
+          Map<String, List<_ParsedBankSmsMessage>>.unmodifiable(
+        parsedMessagesByTarget.map(
+          (key, value) => MapEntry(
+            key,
+            List<_ParsedBankSmsMessage>.unmodifiable(value),
+          ),
+        ),
+      ),
       obsoleteTelebirrCreditReferences:
           Set<String>.unmodifiable(obsoleteTelebirrCreditReferences),
       obsoleteTelebirrDebitReferences:
@@ -875,7 +918,11 @@ class AccountTransactionReparseService {
       await onProgress?.call('No bank messages found.', 1.0);
       return const AccountTransactionReparseResult();
     }
-    final parsedBankMessages = scan.parsedMessages;
+    final parsedBankMessages = scan.messagesForTarget(
+      bank: bank,
+      accountNumber: accountNumber,
+      unmatchedOnly: unmatchedOnly,
+    );
     await onProgress?.call(
       'Reconciling 0/${parsedBankMessages.length} parsed messages...',
       0.72,
@@ -892,6 +939,10 @@ class AccountTransactionReparseService {
     final obsoleteTelebirrDebitReferences =
         scan.obsoleteTelebirrDebitReferences;
     final repairedLegacyDirectionReferences = <String>{};
+    final legacyDirectionRepairIndex = LegacySmsDirectionRepairIndex(
+      bank: bank,
+      candidates: existingByReference.values,
+    );
 
     for (var index = 0; index < parsedBankMessages.length; index++) {
       try {
@@ -901,16 +952,6 @@ class AccountTransactionReparseService {
         final address = parsedMessage.address;
         final messageDate = parsedMessage.messageDate;
         final details = parsedMessage.details;
-
-        if (!_parsedMessageBelongsToTargetAccount(
-          bank,
-          accountNumber,
-          details,
-          bankAccounts,
-          unmatchedOnly: unmatchedOnly,
-        )) {
-          continue;
-        }
 
         final reparsed = parsedMessage.transaction;
         final referenceKey = parsedMessage.referenceKey;
@@ -928,11 +969,9 @@ class AccountTransactionReparseService {
 
         final existing =
             referenceKey == null ? null : existingByReference[referenceKey];
-        final legacyDirectionMismatch = findLegacySmsDirectionMismatch(
-          bank: bank,
+        final legacyDirectionMismatch = legacyDirectionRepairIndex.findMismatch(
           parsed: reparsed,
           messageDate: messageDate,
-          candidates: existingByReference.values,
         );
         if (legacyDirectionMismatch != null && referenceKey != null) {
           var repaired = _buildLegacyDirectionRepair(
@@ -962,6 +1001,7 @@ class AccountTransactionReparseService {
 
           final legacyKey = _logicalLegKey(legacyDirectionMismatch);
           if (legacyKey != null) existingByReference.remove(legacyKey);
+          legacyDirectionRepairIndex.remove(legacyDirectionMismatch);
           existingByReference[referenceKey] = repaired;
           matchedReferences.add(referenceKey);
           updatedReferences.add(referenceKey);
@@ -1141,7 +1181,7 @@ class AccountTransactionReparseService {
     await onProgress?.call('Finishing reparse...', 1.0);
     return AccountTransactionReparseResult(
       scannedMessages: scan.scannedMessages,
-      parsedMessages: parsedBankMessages.length,
+      parsedMessages: scan.parsedMessages.length,
       matchedTransactions: matchedReferences.length,
       updatedTransactions: updatedReferences.length,
       importedTransactions: importedReferences.length,

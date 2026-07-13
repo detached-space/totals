@@ -120,6 +120,46 @@ void main() {
       isNull,
     );
   });
+
+  test('indexed lookup finds one match in a large imported history', () {
+    final legacy = _legacyTransaction(messageDate: messageDate);
+    final unrelated = List<Transaction>.generate(4000, (index) {
+      final candidateDate = messageDate.add(Duration(minutes: index + 10));
+      return _legacyTransaction(
+        messageDate: candidateDate,
+        accountNumber: '${1000 + index}',
+        amount: 10 + index.toDouble(),
+        balance: '${100 + index}.00',
+      );
+    });
+    final index = LegacySmsDirectionRepairIndex(
+      bank: bank,
+      candidates: <Transaction>[...unrelated, legacy],
+    );
+
+    expect(
+      index.findMismatch(parsed: parsed, messageDate: messageDate),
+      same(legacy),
+    );
+  });
+
+  test('indexed lookup removes a repaired candidate during the same run', () {
+    final legacy = _legacyTransaction(messageDate: messageDate);
+    final index = LegacySmsDirectionRepairIndex(
+      bank: bank,
+      candidates: <Transaction>[legacy],
+    );
+
+    expect(
+      index.findMismatch(parsed: parsed, messageDate: messageDate),
+      same(legacy),
+    );
+    index.remove(legacy);
+    expect(
+      index.findMismatch(parsed: parsed, messageDate: messageDate),
+      isNull,
+    );
+  });
 }
 
 Transaction _legacyTransaction({
