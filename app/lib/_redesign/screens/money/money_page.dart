@@ -4556,13 +4556,13 @@ String _localizedTransactionCounterparty(
 
 String _localizedSyncStatus(BuildContext context, String status) {
   final progressMatch = RegExp(
-    r'^(Parsing|Reparsing)\s+(\d+)\s*/\s*(\d+)\s+messages\.\.\.$',
+    r'^(Parsing|Reparsing|Scanning|Reconciling)\s+(\d+)\s*/\s*(\d+)\s+(bank messages|parsed messages|messages)\.\.\.$',
   ).firstMatch(status);
   if (progressMatch != null) {
     final verb = context.l10nText(progressMatch.group(1)!);
     final current = progressMatch.group(2)!;
     final total = progressMatch.group(3)!;
-    final messages = context.l10nText('messages');
+    final messages = context.l10nText(progressMatch.group(4)!);
     return '$verb $current/$total $messages...';
   }
   return context.l10nText(status);

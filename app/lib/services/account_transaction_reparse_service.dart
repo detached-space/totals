@@ -21,6 +21,7 @@ import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/sms_handler/telephony.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
+import 'package:totals/utils/legacy_sms_direction_repair.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/utils/sms_transaction_source.dart';
 import 'package:totals/utils/sms_message_classifier.dart';
@@ -44,6 +45,7 @@ class AccountTransactionReparseResult {
   final int categorizedTransactions;
   final int addedReceiptLinks;
   final int removedDuplicateTransactions;
+  final int repairedLegacyDirections;
   final List<Transaction> importedTransactionDetails;
   final List<Transaction> removedDuplicateTransactionDetails;
 
@@ -59,6 +61,7 @@ class AccountTransactionReparseResult {
     this.categorizedTransactions = 0,
     this.addedReceiptLinks = 0,
     this.removedDuplicateTransactions = 0,
+    this.repairedLegacyDirections = 0,
     this.importedTransactionDetails = const <Transaction>[],
     this.removedDuplicateTransactionDetails = const <Transaction>[],
   });
@@ -134,6 +137,42 @@ class _ParsedSourceSmsTransaction {
     required this.sourceKey,
     required this.referenceKey,
     required this.messageDate,
+  });
+}
+
+class _ParsedBankSmsMessage {
+  final SmsMessage message;
+  final String body;
+  final String address;
+  final DateTime? messageDate;
+  final Map<String, dynamic> details;
+  final Transaction transaction;
+  final String? sourceKey;
+  final String? referenceKey;
+
+  const _ParsedBankSmsMessage({
+    required this.message,
+    required this.body,
+    required this.address,
+    required this.messageDate,
+    required this.details,
+    required this.transaction,
+    required this.sourceKey,
+    required this.referenceKey,
+  });
+}
+
+class _PreparedBankSmsScan {
+  final int scannedMessages;
+  final List<_ParsedBankSmsMessage> parsedMessages;
+  final Set<String> obsoleteTelebirrCreditReferences;
+  final Set<String> obsoleteTelebirrDebitReferences;
+
+  const _PreparedBankSmsScan({
+    required this.scannedMessages,
+    required this.parsedMessages,
+    required this.obsoleteTelebirrCreditReferences,
+    required this.obsoleteTelebirrDebitReferences,
   });
 }
 
@@ -431,6 +470,8 @@ class AccountTransactionReparseService {
     required bool applyAutoCategorization,
   }) async {
     final successfulResults = <AccountTransactionReparseResult>[];
+    _PreparedBankSmsScan? sharedBankSmsScan;
+    var bankWideCleanupPending = true;
     var failedAccounts = 0;
     String? firstFailureMessage;
 
@@ -449,6 +490,23 @@ class AccountTransactionReparseService {
                 : 'Starting selection ${index + 1} of ${targets.length}...',
             progress: 0.0,
           );
+          Future<void> reportProgress(String stage, double progress) =>
+              _reportBackgroundProgress(
+                accountNumber: target.accountNumber,
+                accountDisplayLabel:
+                    target.unmatchedOnly ? target.displayLabel : null,
+                bankId: bank.id,
+                bankLabel: bank.shortName,
+                stage: stage,
+                progress: progress,
+              );
+          sharedBankSmsScan ??= await _scanBankMessagesOnce(
+            bank: bank,
+            relevantPatterns: relevantPatterns,
+            bankAccounts: bankAccounts,
+            startDate: _normalizeStartDate(startDate),
+            onProgress: reportProgress,
+          );
           final result = await _executeReparse(
             bank: bank,
             relevantPatterns: relevantPatterns,
@@ -460,16 +518,11 @@ class AccountTransactionReparseService {
             refreshExistingTransactions: refreshExistingTransactions,
             importMissedTransactions: importMissedTransactions,
             applyAutoCategorization: applyAutoCategorization,
-            onProgress: (stage, progress) => _reportBackgroundProgress(
-              accountNumber: target.accountNumber,
-              accountDisplayLabel:
-                  target.unmatchedOnly ? target.displayLabel : null,
-              bankId: bank.id,
-              bankLabel: bank.shortName,
-              stage: stage,
-              progress: progress,
-            ),
+            bankSmsScan: sharedBankSmsScan,
+            performBankWideCleanup: bankWideCleanupPending,
+            onProgress: reportProgress,
           );
+          bankWideCleanupPending = false;
           successfulResults.add(result);
         } catch (e) {
           failedAccounts++;
@@ -545,6 +598,7 @@ class AccountTransactionReparseService {
     var categorizedTransactions = 0;
     var addedReceiptLinks = 0;
     var removedDuplicateTransactions = 0;
+    var repairedLegacyDirections = 0;
     final importedDetails = <Transaction>[];
     final removedDuplicateDetails = <Transaction>[];
     final importedKeys = <String>{};
@@ -576,6 +630,7 @@ class AccountTransactionReparseService {
       categorizedTransactions += result.categorizedTransactions;
       addedReceiptLinks += result.addedReceiptLinks;
       removedDuplicateTransactions += result.removedDuplicateTransactions;
+      repairedLegacyDirections += result.repairedLegacyDirections;
       addUniqueDetails(
         result.importedTransactionDetails,
         importedDetails,
@@ -597,6 +652,7 @@ class AccountTransactionReparseService {
       categorizedTransactions: categorizedTransactions,
       addedReceiptLinks: addedReceiptLinks,
       removedDuplicateTransactions: removedDuplicateTransactions,
+      repairedLegacyDirections: repairedLegacyDirections,
       importedTransactionDetails: importedDetails,
       removedDuplicateTransactionDetails: removedDuplicateDetails,
     );
@@ -628,56 +684,33 @@ class AccountTransactionReparseService {
     );
   }
 
-  Future<AccountTransactionReparseResult> _executeReparse({
+  Future<_PreparedBankSmsScan> _scanBankMessagesOnce({
     required Bank bank,
     required List<SmsPattern> relevantPatterns,
     required List<Account> bankAccounts,
-    required String accountNumber,
-    required List<Transaction> transactions,
-    bool unmatchedOnly = false,
-    DateTime? startDate,
-    required bool refreshExistingTransactions,
-    required bool importMissedTransactions,
-    required bool applyAutoCategorization,
+    required DateTime? startDate,
     _ReparseProgressCallback? onProgress,
   }) async {
-    await onProgress?.call('Loading transactions...', 0.08);
-
-    final existingByReference = await _buildExistingTransactionsByReference(
-      bank: bank,
-      accountNumber: accountNumber,
-      hintedTransactions: transactions,
-      bankAccounts: bankAccounts,
-      unmatchedOnly: unmatchedOnly,
-    );
-    final existingSourceMessageIds =
-        _sourceMessageIds(existingByReference.values);
-    final existingSourceFingerprints =
-        _sourceFingerprints(existingByReference.values);
-
-    await onProgress?.call('Fetching bank messages...', 0.2);
-    final normalizedStartDate = _normalizeStartDate(startDate);
-    final messages = await _loadBankMessages(
-      bank,
-      startDate: normalizedStartDate,
-    );
-    final totalMessages = messages.length;
-    if (totalMessages == 0) {
-      await onProgress?.call('No bank messages found.', 1.0);
-      return const AccountTransactionReparseResult();
+    await onProgress?.call('Fetching bank messages...', 0.08);
+    final messages = await _loadBankMessages(bank, startDate: startDate);
+    if (messages.isEmpty) {
+      await onProgress?.call('No bank messages found.', 0.7);
+      return const _PreparedBankSmsScan(
+        scannedMessages: 0,
+        parsedMessages: <_ParsedBankSmsMessage>[],
+        obsoleteTelebirrCreditReferences: <String>{},
+        obsoleteTelebirrDebitReferences: <String>{},
+      );
     }
 
-    await onProgress?.call('Reparsing 0/$totalMessages messages...', 0.24);
-    int parsedMessages = 0;
-    final matchedReferences = <String>{};
-    final updatedReferences = <String>{};
-    final importedReferences = <String>{};
-    final importedTransactionDetails = <Transaction>[];
-    final categorizedReferences = <String>{};
-    final linkAddedReferences = <String>{};
-    final parsedSourceSmsTransactions = <_ParsedSourceSmsTransaction>[];
+    final parsedMessages = <_ParsedBankSmsMessage>[];
     final obsoleteTelebirrCreditReferences = <String>{};
     final obsoleteTelebirrDebitReferences = <String>{};
+    final totalMessages = messages.length;
+    await onProgress?.call(
+      'Scanning 0/$totalMessages bank messages...',
+      0.1,
+    );
 
     for (var index = 0; index < messages.length; index++) {
       try {
@@ -685,6 +718,7 @@ class AccountTransactionReparseService {
         final body = message.body;
         final address = message.address;
         if (body == null || address == null) continue;
+
         if (bank.id == 6 &&
             SmsMessageClassifier.isTelebirrAtmAuthorization(body)) {
           final authorizationCode =
@@ -733,6 +767,7 @@ class AccountTransactionReparseService {
           bank: bank,
         );
         if (details == null) continue;
+
         final parsedBankId = (details['bankId'] as num?)?.toInt() ?? bank.id;
         final source = SmsTransactionSource.fromMessage(
           message: message,
@@ -759,7 +794,113 @@ class AccountTransactionReparseService {
           details['ownerAssignmentSource'] =
               Transaction.automaticOwnerAssignment;
         }
-        parsedMessages++;
+
+        final reparsed = Transaction.fromJson(details);
+        parsedMessages.add(
+          _ParsedBankSmsMessage(
+            message: message,
+            body: body,
+            address: address,
+            messageDate: messageDate,
+            details: Map<String, dynamic>.unmodifiable(details),
+            transaction: reparsed,
+            sourceKey: _sourceKeyFromDetails(details),
+            referenceKey: _logicalLegKey(reparsed),
+          ),
+        );
+      } finally {
+        final processedCount = index + 1;
+        if (_shouldReportProgress(processedCount, totalMessages)) {
+          final progress = 0.1 + (processedCount / totalMessages) * 0.6;
+          await onProgress?.call(
+            'Scanning $processedCount/$totalMessages bank messages...',
+            progress,
+          );
+        }
+      }
+    }
+
+    return _PreparedBankSmsScan(
+      scannedMessages: totalMessages,
+      parsedMessages: List<_ParsedBankSmsMessage>.unmodifiable(parsedMessages),
+      obsoleteTelebirrCreditReferences:
+          Set<String>.unmodifiable(obsoleteTelebirrCreditReferences),
+      obsoleteTelebirrDebitReferences:
+          Set<String>.unmodifiable(obsoleteTelebirrDebitReferences),
+    );
+  }
+
+  Future<AccountTransactionReparseResult> _executeReparse({
+    required Bank bank,
+    required List<SmsPattern> relevantPatterns,
+    required List<Account> bankAccounts,
+    required String accountNumber,
+    required List<Transaction> transactions,
+    bool unmatchedOnly = false,
+    DateTime? startDate,
+    required bool refreshExistingTransactions,
+    required bool importMissedTransactions,
+    required bool applyAutoCategorization,
+    _PreparedBankSmsScan? bankSmsScan,
+    bool performBankWideCleanup = true,
+    _ReparseProgressCallback? onProgress,
+  }) async {
+    await onProgress?.call(
+      'Loading transactions...',
+      bankSmsScan == null ? 0.02 : 0.72,
+    );
+
+    final existingByReference = await _buildExistingTransactionsByReference(
+      bank: bank,
+      accountNumber: accountNumber,
+      hintedTransactions: transactions,
+      bankAccounts: bankAccounts,
+      unmatchedOnly: unmatchedOnly,
+    );
+    final existingSourceMessageIds =
+        _sourceMessageIds(existingByReference.values);
+    final existingSourceFingerprints =
+        _sourceFingerprints(existingByReference.values);
+
+    final normalizedStartDate = _normalizeStartDate(startDate);
+    final scan = bankSmsScan ??
+        await _scanBankMessagesOnce(
+          bank: bank,
+          relevantPatterns: relevantPatterns,
+          bankAccounts: bankAccounts,
+          startDate: normalizedStartDate,
+          onProgress: onProgress,
+        );
+    if (scan.scannedMessages == 0) {
+      await onProgress?.call('No bank messages found.', 1.0);
+      return const AccountTransactionReparseResult();
+    }
+    final parsedBankMessages = scan.parsedMessages;
+    await onProgress?.call(
+      'Reconciling 0/${parsedBankMessages.length} parsed messages...',
+      0.72,
+    );
+    final matchedReferences = <String>{};
+    final updatedReferences = <String>{};
+    final importedReferences = <String>{};
+    final importedTransactionDetails = <Transaction>[];
+    final categorizedReferences = <String>{};
+    final linkAddedReferences = <String>{};
+    final parsedSourceSmsTransactions = <_ParsedSourceSmsTransaction>[];
+    final obsoleteTelebirrCreditReferences =
+        scan.obsoleteTelebirrCreditReferences;
+    final obsoleteTelebirrDebitReferences =
+        scan.obsoleteTelebirrDebitReferences;
+    final repairedLegacyDirectionReferences = <String>{};
+
+    for (var index = 0; index < parsedBankMessages.length; index++) {
+      try {
+        final parsedMessage = parsedBankMessages[index];
+        final message = parsedMessage.message;
+        final body = parsedMessage.body;
+        final address = parsedMessage.address;
+        final messageDate = parsedMessage.messageDate;
+        final details = parsedMessage.details;
 
         if (!_parsedMessageBelongsToTargetAccount(
           bank,
@@ -771,9 +912,9 @@ class AccountTransactionReparseService {
           continue;
         }
 
-        final reparsed = Transaction.fromJson(details);
-        final referenceKey = _logicalLegKey(reparsed);
-        final sourceKey = _sourceKeyFromDetails(details);
+        final reparsed = parsedMessage.transaction;
+        final referenceKey = parsedMessage.referenceKey;
+        final sourceKey = parsedMessage.sourceKey;
         if (sourceKey != null) {
           parsedSourceSmsTransactions.add(
             _ParsedSourceSmsTransaction(
@@ -787,6 +928,56 @@ class AccountTransactionReparseService {
 
         final existing =
             referenceKey == null ? null : existingByReference[referenceKey];
+        final legacyDirectionMismatch = findLegacySmsDirectionMismatch(
+          bank: bank,
+          parsed: reparsed,
+          messageDate: messageDate,
+          candidates: existingByReference.values,
+        );
+        if (legacyDirectionMismatch != null && referenceKey != null) {
+          var repaired = _buildLegacyDirectionRepair(
+            legacy: legacyDirectionMismatch,
+            parsed: reparsed,
+            existing: existing,
+          );
+          var didCategorize = false;
+          if (applyAutoCategorization) {
+            final categorized =
+                await _applyAutoCategorizationIfPossible(repaired);
+            if (categorized != null) {
+              repaired = categorized;
+              didCategorize = true;
+            }
+          }
+
+          await _transactionRepo.saveTransaction(
+            repaired,
+            skipAutoCategorization: true,
+          );
+          if (legacyDirectionMismatch.reference != repaired.reference) {
+            await _transactionRepo.deleteTransactionsByReferences(
+              <String>[legacyDirectionMismatch.reference],
+            );
+          }
+
+          final legacyKey = _logicalLegKey(legacyDirectionMismatch);
+          if (legacyKey != null) existingByReference.remove(legacyKey);
+          existingByReference[referenceKey] = repaired;
+          matchedReferences.add(referenceKey);
+          updatedReferences.add(referenceKey);
+          repairedLegacyDirectionReferences.add(referenceKey);
+          _trackSource(
+            repaired,
+            sourceMessageIds: existingSourceMessageIds,
+            sourceFingerprints: existingSourceFingerprints,
+          );
+          if (didCategorize) categorizedReferences.add(referenceKey);
+          if (!_hasText(legacyDirectionMismatch.transactionLink) &&
+              _hasText(repaired.transactionLink)) {
+            linkAddedReferences.add(referenceKey);
+          }
+          continue;
+        }
         if (existing != null) {
           if (!_matchesAccount(
             bank,
@@ -891,10 +1082,15 @@ class AccountTransactionReparseService {
         }
       } finally {
         final processedCount = index + 1;
-        if (_shouldReportProgress(processedCount, totalMessages)) {
-          final progress = 0.24 + (processedCount / totalMessages) * 0.66;
+        if (_shouldReportProgress(
+          processedCount,
+          parsedBankMessages.length,
+        )) {
+          final progress =
+              0.72 + (processedCount / parsedBankMessages.length) * 0.18;
           await onProgress?.call(
-            'Reparsing $processedCount/$totalMessages messages...',
+            'Reconciling $processedCount/${parsedBankMessages.length} '
+            'parsed messages...',
             progress,
           );
         }
@@ -905,9 +1101,9 @@ class AccountTransactionReparseService {
     final obsoleteAtmCashReferences = obsoleteTelebirrDebitReferences
         .map(CashConstants.buildAtmReference)
         .toSet();
-    final hasObsoleteTelebirrRows =
-        obsoleteTelebirrCreditReferences.isNotEmpty ||
-            obsoleteTelebirrDebitReferences.isNotEmpty;
+    final hasObsoleteTelebirrRows = performBankWideCleanup &&
+        (obsoleteTelebirrCreditReferences.isNotEmpty ||
+            obsoleteTelebirrDebitReferences.isNotEmpty);
     final obsoleteTransactions = !hasObsoleteTelebirrRows
         ? const <Transaction>[]
         : (await _transactionRepo.getTransactions()).where((transaction) {
@@ -944,8 +1140,8 @@ class AccountTransactionReparseService {
 
     await onProgress?.call('Finishing reparse...', 1.0);
     return AccountTransactionReparseResult(
-      scannedMessages: messages.length,
-      parsedMessages: parsedMessages,
+      scannedMessages: scan.scannedMessages,
+      parsedMessages: parsedBankMessages.length,
       matchedTransactions: matchedReferences.length,
       updatedTransactions: updatedReferences.length,
       importedTransactions: importedReferences.length,
@@ -954,6 +1150,7 @@ class AccountTransactionReparseService {
       removedDuplicateTransactions:
           sourceCleanupResult.removedDuplicateTransactions +
               obsoleteTransactions.length,
+      repairedLegacyDirections: repairedLegacyDirectionReferences.length,
       importedTransactionDetails: importedTransactionDetails,
       removedDuplicateTransactionDetails: <Transaction>[
         ...sourceCleanupResult.removedDuplicateTransactionDetails,
@@ -983,6 +1180,36 @@ class AccountTransactionReparseService {
       return const _SourceDuplicateCleanupResult();
     }
 
+    final parsedByMessageId = <String, List<_ParsedSourceSmsTransaction>>{};
+    final parsedByReferenceKey = <String, List<_ParsedSourceSmsTransaction>>{};
+    final parsedByLegacyFields = <String, List<_ParsedSourceSmsTransaction>>{};
+    for (final parsed in parsedBySourceKey.values) {
+      final messageId = parsed.transaction.sourceMessageId?.trim();
+      if (messageId != null && messageId.isNotEmpty) {
+        parsedByMessageId
+            .putIfAbsent(messageId, () => <_ParsedSourceSmsTransaction>[])
+            .add(parsed);
+      }
+      final referenceKey = parsed.referenceKey;
+      if (referenceKey != null) {
+        parsedByReferenceKey
+            .putIfAbsent(
+              referenceKey,
+              () => <_ParsedSourceSmsTransaction>[],
+            )
+            .add(parsed);
+      }
+      final legacyKey = _legacySourceLookupKey(parsed.transaction);
+      if (legacyKey != null) {
+        parsedByLegacyFields
+            .putIfAbsent(
+              legacyKey,
+              () => <_ParsedSourceSmsTransaction>[],
+            )
+            .add(parsed);
+      }
+    }
+
     final transactions = (await _transactionRepo.getTransactions())
         .where(
           (transaction) => unmatchedOnly
@@ -1009,17 +1236,69 @@ class AccountTransactionReparseService {
 
     final matchesBySourceKey = <String, List<Transaction>>{};
     for (final transaction in transactions) {
-      final matches = <_ParsedSourceSmsTransaction>[];
-      for (final parsed in parsedBySourceKey.values) {
-        if (_transactionMatchesParsedSmsSource(
-          transaction,
-          parsed,
-          bank: bank,
-          accountNumber: accountNumber,
-          bankAccounts: bankAccounts,
-          unmatchedOnly: unmatchedOnly,
-        )) {
-          matches.add(parsed);
+      var matches = <_ParsedSourceSmsTransaction>[];
+      final transactionSourceKey = _sourceKeyFromTransaction(transaction);
+      final directSourceMatch = transactionSourceKey == null
+          ? null
+          : parsedBySourceKey[transactionSourceKey];
+      if (directSourceMatch != null) {
+        matches = <_ParsedSourceSmsTransaction>[directSourceMatch];
+      } else {
+        final messageId = transaction.sourceMessageId?.trim();
+        final messageMatches = messageId == null || messageId.isEmpty
+            ? const <_ParsedSourceSmsTransaction>[]
+            : parsedByMessageId[messageId] ??
+                const <_ParsedSourceSmsTransaction>[];
+        if (messageMatches.isNotEmpty) {
+          matches = messageMatches
+              .where(
+                (parsed) =>
+                    _sameSourceMessageId(transaction, parsed.transaction),
+              )
+              .toList(growable: false);
+        }
+      }
+
+      if (matches.isEmpty) {
+        final referenceKey = _logicalLegKey(transaction);
+        if (referenceKey != null) {
+          matches = List<_ParsedSourceSmsTransaction>.from(
+            parsedByReferenceKey[referenceKey] ??
+                const <_ParsedSourceSmsTransaction>[],
+          );
+        }
+      }
+
+      // Legacy rows without durable source/reference identity use a compact
+      // bank/type/amount/balance index before the strict account-and-time
+      // check. This keeps large old imports near O(n) as well.
+      if (matches.isEmpty) {
+        final legacyCandidates = <String, _ParsedSourceSmsTransaction>{};
+        for (var amountOffset = -1; amountOffset <= 1; amountOffset++) {
+          for (var balanceOffset = -1; balanceOffset <= 1; balanceOffset++) {
+            final legacyKey = _legacySourceLookupKey(
+              transaction,
+              amountOffset: amountOffset,
+              balanceOffset: balanceOffset,
+            );
+            if (legacyKey == null) continue;
+            for (final parsed in parsedByLegacyFields[legacyKey] ??
+                const <_ParsedSourceSmsTransaction>[]) {
+              legacyCandidates[parsed.sourceKey] = parsed;
+            }
+          }
+        }
+        for (final parsed in legacyCandidates.values) {
+          if (_transactionMatchesParsedSmsSource(
+            transaction,
+            parsed,
+            bank: bank,
+            accountNumber: accountNumber,
+            bankAccounts: bankAccounts,
+            unmatchedOnly: unmatchedOnly,
+          )) {
+            matches.add(parsed);
+          }
         }
       }
       if (matches.length != 1) {
@@ -1324,6 +1603,19 @@ class AccountTransactionReparseService {
         (right ?? '').trim().toUpperCase();
   }
 
+  String? _legacySourceLookupKey(
+    Transaction transaction, {
+    int amountOffset = 0,
+    int balanceOffset = 0,
+  }) {
+    final balance = _parseBalance(transaction.currentBalance);
+    if (balance == null) return null;
+    final normalizedType = (transaction.type ?? '').trim().toUpperCase();
+    final amountUnits = (transaction.amount * 10000).round() + amountOffset;
+    final balanceUnits = (balance * 10000).round() + balanceOffset;
+    return '${transaction.bankId}|$normalizedType|$amountUnits|$balanceUnits';
+  }
+
   bool _sameParsedBalance(String? left, String? right) {
     final leftValue = _parseBalance(left);
     final rightValue = _parseBalance(right);
@@ -1414,6 +1706,9 @@ class AccountTransactionReparseService {
       if (result.removedDuplicateTransactions > 0)
         'removed ${result.removedDuplicateTransactions} duplicate'
             '${result.removedDuplicateTransactions == 1 ? '' : 's'}',
+      if (result.repairedLegacyDirections > 0)
+        'repaired ${result.repairedLegacyDirections} legacy direction'
+            '${result.repairedLegacyDirections == 1 ? '' : 's'}',
     ];
 
     if (actionParts.isEmpty) {
@@ -1877,6 +2172,96 @@ class AccountTransactionReparseService {
             ))
         .toList(growable: false);
     return matches.length == 1 ? matches.single : null;
+  }
+
+  Transaction _buildLegacyDirectionRepair({
+    required Transaction legacy,
+    required Transaction parsed,
+    Transaction? existing,
+  }) {
+    final existingOrLegacy = existing ?? legacy;
+    final manualOwner = legacy.hasManualOwnerAssignment
+        ? legacy
+        : existing?.hasManualOwnerAssignment == true
+            ? existing
+            : null;
+    final categoryIds = _mergedCategoryIds(existingOrLegacy, legacy);
+
+    return Transaction(
+      amount: parsed.amount,
+      reference: existing?.reference ?? parsed.reference,
+      creditor: _pickText(
+        existing?.creditor,
+        _pickText(legacy.creditor, parsed.creditor),
+      ),
+      receiver: _pickText(
+        existing?.receiver,
+        _pickText(legacy.receiver, parsed.receiver),
+      ),
+      note: _pickText(
+        legacy.note,
+        _pickText(existing?.note, parsed.note),
+      ),
+      // The legacy timestamp is source-anchored and is often more accurate
+      // than old parser date fallbacks embedded in the SMS body.
+      time: _pickText(
+        legacy.time,
+        _pickText(existing?.time, parsed.time),
+      ),
+      status: _pickText(
+        existing?.status,
+        _pickText(legacy.status, parsed.status),
+      ),
+      currentBalance: _pickText(
+        parsed.currentBalance,
+        _pickText(existing?.currentBalance, legacy.currentBalance),
+      ),
+      bankId: parsed.bankId ?? existing?.bankId ?? legacy.bankId,
+      type: parsed.type,
+      transactionLink: _pickTransactionLink(
+            existing?.transactionLink,
+            parsed.transactionLink,
+          ) ??
+          legacy.transactionLink,
+      accountNumber: _pickText(
+        parsed.accountNumber,
+        _pickText(existing?.accountNumber, legacy.accountNumber),
+      ),
+      ownerAccountNumber: manualOwner?.ownerAccountNumber ??
+          _pickText(
+            parsed.ownerAccountNumber,
+            _pickText(
+              existing?.ownerAccountNumber,
+              legacy.ownerAccountNumber,
+            ),
+          ),
+      ownerAssignmentSource: manualOwner?.ownerAssignmentSource ??
+          _pickText(
+            parsed.ownerAssignmentSource,
+            _pickText(
+              existing?.ownerAssignmentSource,
+              legacy.ownerAssignmentSource,
+            ),
+          ),
+      categoryId: existing?.categoryId ?? legacy.categoryId,
+      categoryIds: categoryIds,
+      profileId: existing?.profileId ?? legacy.profileId,
+      serviceCharge: _pickAmount(
+        parsed.serviceCharge,
+        _pickAmount(existing?.serviceCharge, legacy.serviceCharge),
+      ),
+      vat: _pickAmount(
+        parsed.vat,
+        _pickAmount(existing?.vat, legacy.vat),
+      ),
+      sourceType: parsed.sourceType,
+      sourceMessageId: parsed.sourceMessageId,
+      sourceFingerprint: parsed.sourceFingerprint,
+      sourceSubscriptionId: _pickSubscriptionId(
+        parsed.sourceSubscriptionId,
+        existing?.sourceSubscriptionId ?? legacy.sourceSubscriptionId,
+      ),
+    );
   }
 
   Transaction? _mergeParsedFields(Transaction existing, Transaction reparsed) {
