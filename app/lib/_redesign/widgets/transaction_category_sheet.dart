@@ -286,153 +286,182 @@ class _BatchTransactionCategorySheetState
     final credits = _credits;
     final hasMixedFlows = debits.isNotEmpty && credits.isNotEmpty;
     final mediaQuery = MediaQuery.of(context);
-    final bottomPadding = mediaQuery.padding.bottom + 16;
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final contentBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
 
     return AnimatedPadding(
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: mediaQuery.size.height * 0.78,
-        ),
-        decoration: BoxDecoration(
-          color: AppColors.cardColor(context),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.textTertiary(context),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+      padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
+      child: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final preferredMaxHeight = mediaQuery.size.height * 0.78;
+            final maxHeight = constraints.hasBoundedHeight &&
+                    constraints.maxHeight < preferredMaxHeight
+                ? constraints.maxHeight
+                : preferredMaxHeight;
+            return Container(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              decoration: BoxDecoration(
+                color: AppColors.cardColor(context),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-                child: Row(
-                  children: [
-                    Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.textTertiary(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                context.l10nText('Categorize transactions'),
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: AppColors.textPrimary(context),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                hasMixedFlows
+                                    ? context.l10nText(
+                                        'Choose a category to add to expenses and one to add to income.',
+                                      )
+                                    : '${widget.transactions.length} ${context.l10nText(widget.transactions.length == 1 ? 'transaction selected' : 'transactions selected')}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary(context),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _isCreatingCategory
+                              ? null
+                              : () => Navigator.pop(context),
+                          icon: const Icon(AppIcons.close, size: 20),
+                          color: AppColors.textSecondary(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        8,
+                        20,
+                        contentBottomPadding,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            context.l10nText('Categorize transactions'),
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: AppColors.textPrimary(context),
-                              fontWeight: FontWeight.w800,
+                          if (debits.isNotEmpty)
+                            _buildFlowSection(
+                              flow: 'expense',
+                              label: 'Expenses',
+                              count: debits.length,
+                              categories: _categoriesForFlow('expense'),
+                              selected: _debitCategory,
+                              onSelected: (category) =>
+                                  setState(() => _debitCategory = category),
                             ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            hasMixedFlows
-                                ? context.l10nText(
-                                    'Choose a category to add to expenses and one to add to income.',
-                                  )
-                                : '${widget.transactions.length} ${context.l10nText(widget.transactions.length == 1 ? 'transaction selected' : 'transactions selected')}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: AppColors.textSecondary(context),
+                          if (debits.isNotEmpty && credits.isNotEmpty)
+                            const SizedBox(height: 20),
+                          if (credits.isNotEmpty)
+                            _buildFlowSection(
+                              flow: 'income',
+                              label: 'Income',
+                              count: credits.length,
+                              categories: _categoriesForFlow('income'),
+                              selected: _creditCategory,
+                              onSelected: (category) =>
+                                  setState(() => _creditCategory = category),
                             ),
+                          const SizedBox(height: 16),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                AppIcons.info_outline_rounded,
+                                size: 15,
+                                color: AppColors.textTertiary(context),
+                              ),
+                              const SizedBox(width: 7),
+                              Expanded(
+                                child: Text(
+                                  context.l10nText(
+                                    'Loan and repayment categories are assigned individually so their links are preserved.',
+                                  ),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppColors.textSecondary(context),
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: _isCreatingCategory
-                          ? null
-                          : () => Navigator.pop(context),
-                      icon: const Icon(AppIcons.close, size: 20),
-                      color: AppColors.textSecondary(context),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (debits.isNotEmpty)
-                        _buildFlowSection(
-                          flow: 'expense',
-                          label: 'Expenses',
-                          count: debits.length,
-                          categories: _categoriesForFlow('expense'),
-                          selected: _debitCategory,
-                          onSelected: (category) =>
-                              setState(() => _debitCategory = category),
-                        ),
-                      if (debits.isNotEmpty && credits.isNotEmpty)
-                        const SizedBox(height: 20),
-                      if (credits.isNotEmpty)
-                        _buildFlowSection(
-                          flow: 'income',
-                          label: 'Income',
-                          count: credits.length,
-                          categories: _categoriesForFlow('income'),
-                          selected: _creditCategory,
-                          onSelected: (category) =>
-                              setState(() => _creditCategory = category),
-                        ),
-                      const SizedBox(height: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            AppIcons.info_outline_rounded,
-                            size: 15,
-                            color: AppColors.textTertiary(context),
-                          ),
-                          const SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              context.l10nText(
-                                'Loan and repayment categories are assigned individually so their links are preserved.',
-                              ),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: AppColors.textSecondary(context),
-                                height: 1.35,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ),
-                ),
-              ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(20, 8, 20, bottomPadding),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed:
-                        _canApply && !_isCreatingCategory ? _apply : null,
-                    icon: const Icon(AppIcons.category, size: 18),
-                    label: Text(context.l10nText('Apply category')),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primaryLight,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: AppColors.borderColor(context),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      actionTopGap,
+                      20,
+                      bottomSafeArea + actionBottomGap,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: const ValueKey<String>('batch-category-apply'),
+                        onPressed:
+                            _canApply && !_isCreatingCategory ? _apply : null,
+                        icon: const Icon(AppIcons.category, size: 18),
+                        label: Text(context.l10nText('Apply category')),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primaryLight,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              AppColors.borderColor(context),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

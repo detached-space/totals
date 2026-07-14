@@ -1106,7 +1106,8 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (_tabController.index == _selectedTabIndex) return;
-      _selectedTabIndex = _tabController.index;
+      if (!mounted) return;
+      setState(() => _selectedTabIndex = _tabController.index);
       if (_selectedTabIndex != 0) {
         FocusScope.of(context).unfocus();
       }
@@ -1180,11 +1181,13 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final theme = Theme.of(context);
-    final maxAvailableHeight = (media.size.height - media.viewInsets.bottom)
-        .clamp(240.0, media.size.height)
-        .toDouble();
-    final sheetHeight =
-        (media.size.height * 0.82).clamp(240.0, maxAvailableHeight).toDouble();
+    final keyboardInset = media.viewInsets.bottom;
+    final bottomSafeArea = media.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap =
+        keyboardInset > 0 ? 4.0 : (media.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final sheetHeight = media.size.height * 0.82;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -1192,9 +1195,11 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
       child: SafeArea(
         top: false,
         child: AnimatedPadding(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(
+            bottom: keyboardInset + keyboardLiftBuffer,
+          ),
           child: Container(
             height: sheetHeight,
             decoration: BoxDecoration(
@@ -1211,7 +1216,7 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
               ],
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1333,7 +1338,6 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                             searchController: _searchController,
                             query: _query,
                             onCopyAccount: widget.onCopyAccount,
-                            onManageAccounts: widget.onManageAccounts,
                           ),
                         ),
                         Padding(
@@ -1349,6 +1353,42 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                       ],
                     ),
                   ),
+                  if (_selectedTabIndex == 0) ...[
+                    SizedBox(height: actionTopGap),
+                    Padding(
+                      padding: EdgeInsets.only(
+                        bottom: bottomSafeArea + actionBottomGap,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          key: const ValueKey<String>(
+                            'quick-access-manage-accounts',
+                          ),
+                          onPressed: widget.onManageAccounts,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.primaryLight,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(
+                            context.l10nText(
+                              widget.quickAccessAccounts.isEmpty
+                                  ? 'Add Accounts'
+                                  : 'Manage Accounts',
+                            ),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ] else
+                    const SizedBox(height: 18),
                 ],
               ),
             ),
@@ -1366,7 +1406,6 @@ class _QuickAccessAccountsTab extends StatelessWidget {
   final TextEditingController searchController;
   final String query;
   final ValueChanged<UserAccount> onCopyAccount;
-  final VoidCallback onManageAccounts;
 
   const _QuickAccessAccountsTab({
     required this.accounts,
@@ -1375,7 +1414,6 @@ class _QuickAccessAccountsTab extends StatelessWidget {
     required this.searchController,
     required this.query,
     required this.onCopyAccount,
-    required this.onManageAccounts,
   });
 
   @override
@@ -1384,6 +1422,7 @@ class _QuickAccessAccountsTab extends StatelessWidget {
     final hasAccounts = accounts.isNotEmpty;
 
     return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.zero,
       children: [
         const SizedBox(height: 14),
@@ -1413,12 +1452,10 @@ class _QuickAccessAccountsTab extends StatelessWidget {
             if (index != accounts.length - 1) const SizedBox(height: 10),
           ]
         else
-          _EmptyAccountsState(
+          const _EmptyAccountsState(
             title: 'Nothing saved for quick access',
             subtitle:
                 'Add bank accounts from the Tools screen and they will show up here.',
-            actionLabel: 'Add Accounts',
-            onAction: onManageAccounts,
           ),
         if (hasAccounts) ...[
           const SizedBox(height: 12),
@@ -1429,24 +1466,6 @@ class _QuickAccessAccountsTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: onManageAccounts,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryLight,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              child: Text(
-                context.l10nText('Manage Accounts'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
         ],
       ],
     );

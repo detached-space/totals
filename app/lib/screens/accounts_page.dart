@@ -185,7 +185,7 @@ class _AccountsPageState extends State<AccountsPage> {
               color: Theme.of(context).scaffoldBackgroundColor,
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               child: AddUserAccountForm(
                 onAccountAdded: () {
                   _loadData();
