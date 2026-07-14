@@ -1783,6 +1783,46 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
   void _clearSelection() => setState(() => _selectedRefs.clear());
 
+  Future<void> _categorizeSelected(TransactionProvider provider) async {
+    if (_selectedRefs.isEmpty) return;
+    final selectedReferences = Set<String>.from(_selectedRefs);
+    final transactions = provider.allTransactions
+        .where(
+          (transaction) => selectedReferences.contains(transaction.reference),
+        )
+        .toList(growable: false);
+    try {
+      final changed = await showBatchTransactionCategorySheet(
+        context: context,
+        transactions: transactions,
+        provider: provider,
+      );
+      if (!mounted || changed == null) return;
+      _clearSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            changed == 0
+                ? context.l10nTextRead('Categories were already assigned.')
+                : '${context.l10nTextRead('Categorized')} $changed '
+                    '${context.l10nTextRead(changed == 1 ? 'transaction' : 'transactions')}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update category')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _deleteSelected(TransactionProvider provider) async {
     if (_selectedRefs.isEmpty) return;
     final count = _selectedRefs.length;
@@ -1917,17 +1957,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     final dynamicSlivers = <Widget>[
       if (_subTab == _SubTab.transactions) ...[
-        if (_isSelecting)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-              child: _SelectionBar(
-                count: _selectedRefs.length,
-                onDelete: () => _deleteSelected(provider),
-                onClear: _clearSelection,
-              ),
-            ),
-          ),
         // Keep rendering existing rows during provider reloads so
         // category updates do not collapse scroll extent and jump to top.
         if (flatItems.isEmpty && provider.isLoading)
@@ -2056,6 +2085,15 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                     const SizedBox(height: 12),
                     _ActivityTransactionsSummaryRow(
                       summary: activityTransactionsSummary,
+                    ),
+                  ],
+                  if (_isSelecting) ...[
+                    const SizedBox(height: 12),
+                    _SelectionBar(
+                      count: _selectedRefs.length,
+                      onCategorize: () => _categorizeSelected(provider),
+                      onDelete: () => _deleteSelected(provider),
+                      onClear: _clearSelection,
                     ),
                   ],
                 ] else if (_subTab == _SubTab.ledger) ...[
@@ -11500,11 +11538,13 @@ class _LedgerHeaderSummary extends StatelessWidget {
 
 class _SelectionBar extends StatelessWidget {
   final int count;
+  final VoidCallback onCategorize;
   final VoidCallback onDelete;
   final VoidCallback onClear;
 
   const _SelectionBar({
     required this.count,
+    required this.onCategorize,
     required this.onDelete,
     required this.onClear,
   });
@@ -11530,6 +11570,15 @@ class _SelectionBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          GestureDetector(
+            onTap: onCategorize,
+            child: const Icon(
+              AppIcons.category,
+              size: 20,
+              color: AppColors.primaryLight,
+            ),
+          ),
+          const SizedBox(width: 16),
           GestureDetector(
             onTap: onDelete,
             child: Icon(AppIcons.delete_outline_rounded,
@@ -11857,6 +11906,46 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   }
 
   void _clearSelection() => setState(() => _selectedRefs.clear());
+
+  Future<void> _categorizeSelected(TransactionProvider provider) async {
+    if (_selectedRefs.isEmpty) return;
+    final selectedReferences = Set<String>.from(_selectedRefs);
+    final transactions = provider.allTransactions
+        .where(
+          (transaction) => selectedReferences.contains(transaction.reference),
+        )
+        .toList(growable: false);
+    try {
+      final changed = await showBatchTransactionCategorySheet(
+        context: context,
+        transactions: transactions,
+        provider: provider,
+      );
+      if (!mounted || changed == null) return;
+      _clearSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            changed == 0
+                ? context.l10nTextRead('Categories were already assigned.')
+                : '${context.l10nTextRead('Categorized')} $changed '
+                    '${context.l10nTextRead(changed == 1 ? 'transaction' : 'transactions')}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update category')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   void _selectAll(Iterable<Transaction> transactions) {
     final references = transactions
@@ -12363,6 +12452,15 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
                 ),
               if (_isSelecting)
                 IconButton(
+                  onPressed: () => _categorizeSelected(provider),
+                  tooltip: context.l10nText('Categorize selected'),
+                  icon: const Icon(
+                    AppIcons.category,
+                    color: AppColors.primaryLight,
+                  ),
+                ),
+              if (_isSelecting)
+                IconButton(
                   onPressed: () => _deleteSelected(provider),
                   icon: const Icon(
                     AppIcons.delete_outline_rounded,
@@ -12410,6 +12508,8 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
                               const SizedBox(height: 12),
                               _SelectionBar(
                                 count: _selectedRefs.length,
+                                onCategorize: () =>
+                                    _categorizeSelected(provider),
                                 onDelete: () => _deleteSelected(provider),
                                 onClear: _clearSelection,
                               ),

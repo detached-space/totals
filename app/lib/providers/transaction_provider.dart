@@ -1669,6 +1669,104 @@ class TransactionProvider with ChangeNotifier {
     );
   }
 
+  /// Adds a category to many transactions in one database batch without
+  /// removing their existing categories. Mixed selections receive the
+  /// category matching their ledger flow.
+  Future<int> setCategoriesForTransactionsByType(
+    Iterable<Transaction> transactions, {
+    Category? debitCategory,
+    Category? creditCategory,
+  }) async {
+    final debitCategoryId = debitCategory?.id;
+    final creditCategoryId = creditCategory?.id;
+    if (debitCategoryId == null && creditCategoryId == null) return 0;
+    if (debitCategoryId != null &&
+        debitCategory!.flow.toLowerCase() != 'expense') {
+      throw ArgumentError.value(
+        debitCategory.flow,
+        'debitCategory.flow',
+        'Debit transactions require an expense category.',
+      );
+    }
+    if (creditCategoryId != null &&
+        creditCategory!.flow.toLowerCase() != 'income') {
+      throw ArgumentError.value(
+        creditCategory.flow,
+        'creditCategory.flow',
+        'Credit transactions require an income category.',
+      );
+    }
+
+    final originalsByReference = <String, Transaction>{
+      for (final transaction in transactions)
+        if (transaction.reference.trim().isNotEmpty)
+          transaction.reference: transaction,
+    };
+    final updates = <Transaction>[];
+    final previousTransactions = <Transaction>[];
+
+    for (final transaction in originalsByReference.values) {
+      final isDebit = transaction.type?.trim().toUpperCase() == 'DEBIT';
+      final isCredit = transaction.type?.trim().toUpperCase() == 'CREDIT';
+      final targetCategory = isDebit
+          ? debitCategory
+          : isCredit
+              ? creditCategory
+              : null;
+      final targetCategoryId = targetCategory?.id;
+      if (targetCategoryId == null) continue;
+
+      final nextCategoryIds = <int>[];
+      for (final categoryId in transaction.selectedCategoryIds) {
+        if (categoryId > 0 && !nextCategoryIds.contains(categoryId)) {
+          nextCategoryIds.add(categoryId);
+        }
+      }
+      if (nextCategoryIds.contains(targetCategoryId)) continue;
+      nextCategoryIds.add(targetCategoryId);
+
+      final currentPrimaryCategoryId = transaction.categoryId;
+      final nextPrimaryCategoryId = currentPrimaryCategoryId != null &&
+              nextCategoryIds.contains(currentPrimaryCategoryId)
+          ? currentPrimaryCategoryId
+          : targetCategoryId;
+      final updated = transaction.copyWith(
+        categoryId: nextPrimaryCategoryId,
+        categoryIds: nextCategoryIds,
+      );
+      updates.add(updated);
+      final previous = _replaceTransactionLocally(updated);
+      if (previous != null) previousTransactions.add(previous);
+    }
+
+    if (updates.isEmpty) return 0;
+    _notifyOptimisticChange();
+
+    try {
+      await _transactionRepo.updateTransactionCategories(updates);
+    } catch (error) {
+      for (final previous in previousTransactions) {
+        _replaceTransactionLocally(previous);
+      }
+      _filterTransactions(_allTransactions);
+      _notifyOptimisticChange();
+      rethrow;
+    }
+
+    final changedDebit = updates.any(
+      (transaction) => transaction.type?.trim().toUpperCase() == 'DEBIT',
+    );
+    unawaited(
+      _finalizeCategoryMutationAfterSave(
+        transactionType: changedDebit ? 'DEBIT' : null,
+        categoryIds: <int>[
+          if (changedDebit && debitCategoryId != null) debitCategoryId,
+        ],
+      ),
+    );
+    return updates.length;
+  }
+
   Future<Transaction> updateCategoriesForTransaction(
     Transaction transaction, {
     required List<int> categoryIds,

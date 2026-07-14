@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
@@ -318,6 +319,95 @@ class TransactionRepository {
       entity: SyncEntity.transactions,
       records: syncRecords,
     );
+  }
+
+  /// Updates category fields for existing transactions in one database batch.
+  /// All other transaction fields, including SMS source and account ownership,
+  /// are left untouched.
+  Future<int> updateTransactionCategories(
+    Iterable<Transaction> transactions,
+  ) async {
+    final deduped = <String, Transaction>{
+      for (final transaction in transactions)
+        if (transaction.reference.trim().isNotEmpty)
+          transaction.reference: transaction,
+    };
+    if (deduped.isEmpty) return 0;
+
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final previousRowsByReference = <String, Map<String, dynamic>>{};
+    final references = deduped.keys.toList(growable: false);
+    const maxSqlVars = 900;
+    for (var start = 0; start < references.length; start += maxSqlVars) {
+      final end = math.min(start + maxSqlVars, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final where = StringBuffer('reference IN ($placeholders)');
+      final args = <Object?>[...chunk];
+      if (activeProfileId != null) {
+        where.write(' AND profileId = ?');
+        args.add(activeProfileId);
+      }
+      final rows = await db.query(
+        'transactions',
+        where: where.toString(),
+        whereArgs: args,
+      );
+      for (final row in rows) {
+        final reference = row['reference']?.toString();
+        if (reference == null || reference.isEmpty) continue;
+        previousRowsByReference[reference] = Map<String, dynamic>.from(row);
+      }
+    }
+
+    final updates = deduped.values
+        .where(
+          (transaction) =>
+              previousRowsByReference.containsKey(transaction.reference),
+        )
+        .toList(growable: false);
+    if (updates.isEmpty) return 0;
+
+    final batch = db.batch();
+    for (final transaction in updates) {
+      final where = <String>['reference = ?'];
+      final args = <Object?>[transaction.reference];
+      if (activeProfileId != null) {
+        where.add('profileId = ?');
+        args.add(activeProfileId);
+      }
+      batch.update(
+        'transactions',
+        <String, Object?>{
+          'categoryId': transaction.categoryId,
+          'categoryIds': transaction.selectedCategoryIds.isEmpty
+              ? null
+              : jsonEncode(transaction.selectedCategoryIds),
+        },
+        where: where.join(' AND '),
+        whereArgs: args,
+      );
+    }
+    await batch.commit(noResult: true);
+
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    for (final transaction in updates) {
+      final row = Map<String, dynamic>.from(
+        previousRowsByReference[transaction.reference]!,
+      );
+      row['categoryId'] = transaction.categoryId;
+      row['categoryIds'] = transaction.selectedCategoryIds.isEmpty
+          ? null
+          : jsonEncode(transaction.selectedCategoryIds);
+      row.remove('sourceSubscriptionId');
+      syncRecords.add(MapEntry(transaction.reference, row));
+    }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: syncRecords,
+    );
+    return updates.length;
   }
 
   Future<bool> updateTransactionOwnership({

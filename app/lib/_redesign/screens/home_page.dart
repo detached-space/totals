@@ -185,6 +185,44 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     }
   }
 
+  Future<void> _categorizeSelected(TransactionProvider provider) async {
+    if (_selectedRefs.isEmpty) return;
+    final references = Set<String>.from(_selectedRefs);
+    final transactions = provider.allTransactions
+        .where((transaction) => references.contains(transaction.reference))
+        .toList(growable: false);
+    try {
+      final changed = await showBatchTransactionCategorySheet(
+        context: context,
+        transactions: transactions,
+        provider: provider,
+      );
+      if (!mounted || changed == null) return;
+      _clearSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            changed == 0
+                ? context.l10nTextRead('Categories were already assigned.')
+                : '${context.l10nTextRead('Categorized')} $changed '
+                    '${context.l10nTextRead(changed == 1 ? 'transaction' : 'transactions')}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update category')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -343,6 +381,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                 const SizedBox(height: 8),
                                 _SelectionBar(
                                   count: _selectedRefs.length,
+                                  onCategorize: () =>
+                                      _categorizeSelected(provider),
                                   onDelete: () => _deleteSelected(provider),
                                   onClear: _clearSelection,
                                 ),
@@ -2208,11 +2248,13 @@ class _StaticRangeToggleButton extends StatelessWidget {
 
 class _SelectionBar extends StatelessWidget {
   final int count;
+  final VoidCallback onCategorize;
   final VoidCallback onDelete;
   final VoidCallback onClear;
 
   const _SelectionBar({
     required this.count,
+    required this.onCategorize,
     required this.onDelete,
     required this.onClear,
   });
@@ -2238,6 +2280,15 @@ class _SelectionBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          GestureDetector(
+            onTap: onCategorize,
+            child: const Icon(
+              AppIcons.category,
+              size: 20,
+              color: AppColors.primaryLight,
+            ),
+          ),
+          const SizedBox(width: 16),
           GestureDetector(
             onTap: onDelete,
             child: const Icon(AppIcons.delete_outline_rounded,
