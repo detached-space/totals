@@ -4158,6 +4158,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         refreshExistingTransactions: selection.refreshExistingTransactions,
         importMissedTransactions: selection.importMissedTransactions,
         applyAutoCategorization: selection.applyAutoCategorization,
+        repairLegacyDirections: selection.repairLegacyDirections,
       );
 
       if (!mounted) return;
@@ -16616,6 +16617,7 @@ class _AccountReparseSelection {
   final bool refreshExistingTransactions;
   final bool importMissedTransactions;
   final bool applyAutoCategorization;
+  final bool repairLegacyDirections;
   final bool refreshOtherTransactions;
 
   const _AccountReparseSelection({
@@ -16624,6 +16626,7 @@ class _AccountReparseSelection {
     this.refreshExistingTransactions = true,
     this.importMissedTransactions = true,
     this.applyAutoCategorization = true,
+    this.repairLegacyDirections = false,
     this.refreshOtherTransactions = false,
   });
 }
@@ -16649,12 +16652,14 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
   bool _refreshExistingTransactions = true;
   bool _importMissedTransactions = true;
   bool _applyAutoCategorization = true;
+  bool _repairLegacyDirections = false;
   bool _refreshOtherTransactions = false;
 
   bool get _hasSelectedAction =>
       _refreshExistingTransactions ||
       _importMissedTransactions ||
-      _applyAutoCategorization;
+      _applyAutoCategorization ||
+      _repairLegacyDirections;
 
   bool get _allAccountsSelected =>
       widget.accounts.isNotEmpty &&
@@ -16933,6 +16938,18 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                 setState(() => _applyAutoCategorization = value);
               },
             ),
+            const SizedBox(height: 10),
+            _ReparseScopeTile(
+              title: 'Repair legacy transaction directions',
+              subtitle:
+                  'Fix incorrect credit or debit directions in old imports with generated references.',
+              enabledWarning:
+                  'Reparse may be slow for accounts with a large transaction history.',
+              value: _repairLegacyDirections,
+              onChanged: (value) {
+                setState(() => _repairLegacyDirections = value);
+              },
+            ),
             if (!_hasSelectedAction) ...[
               const SizedBox(height: 8),
               Text(
@@ -17060,6 +17077,8 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                                     _importMissedTransactions,
                                 applyAutoCategorization:
                                     _applyAutoCategorization,
+                                repairLegacyDirections:
+                                    _repairLegacyDirections,
                                 refreshOtherTransactions:
                                     _refreshOtherTransactions,
                               ),
@@ -17264,12 +17283,14 @@ class _ReparseOtherTransactionsTile extends StatelessWidget {
 class _ReparseScopeTile extends StatelessWidget {
   final String title;
   final String subtitle;
+  final String? enabledWarning;
   final bool value;
   final ValueChanged<bool> onChanged;
 
   const _ReparseScopeTile({
     required this.title,
     required this.subtitle,
+    this.enabledWarning,
     required this.value,
     required this.onChanged,
   });
@@ -17307,6 +17328,31 @@ class _ReparseScopeTile extends StatelessWidget {
                     height: 1.35,
                   ),
                 ),
+                if (value && enabledWarning != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        color: AppColors.amber,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          context.l10nText(enabledWarning!),
+                          style: const TextStyle(
+                            color: AppColors.amber,
+                            fontSize: 12,
+                            height: 1.35,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

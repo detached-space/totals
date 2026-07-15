@@ -230,6 +230,7 @@ class AccountTransactionReparseService {
     bool refreshExistingTransactions = true,
     bool importMissedTransactions = true,
     bool applyAutoCategorization = true,
+    bool repairLegacyDirections = false,
   }) async {
     if (_syncStatusService.hasAnyAccountSyncing(bankId)) {
       return const AccountTransactionReparseResult(
@@ -242,6 +243,7 @@ class AccountTransactionReparseService {
       refreshExistingTransactions: refreshExistingTransactions,
       importMissedTransactions: importMissedTransactions,
       applyAutoCategorization: applyAutoCategorization,
+      repairLegacyDirections: repairLegacyDirections,
     );
     if (preparation.failure != null) {
       return preparation.failure!;
@@ -270,6 +272,7 @@ class AccountTransactionReparseService {
         refreshExistingTransactions: refreshExistingTransactions,
         importMissedTransactions: importMissedTransactions,
         applyAutoCategorization: applyAutoCategorization,
+        repairLegacyDirections: repairLegacyDirections,
         onProgress: (stage, progress) async {
           _syncStatusService.setSyncStatus(
             accountNumber,
@@ -293,6 +296,7 @@ class AccountTransactionReparseService {
     bool refreshExistingTransactions = true,
     bool importMissedTransactions = true,
     bool applyAutoCategorization = true,
+    bool repairLegacyDirections = false,
   }) async {
     return startReparseAccountsInBackground(
       bankId: bankId,
@@ -306,6 +310,7 @@ class AccountTransactionReparseService {
       refreshExistingTransactions: refreshExistingTransactions,
       importMissedTransactions: importMissedTransactions,
       applyAutoCategorization: applyAutoCategorization,
+      repairLegacyDirections: repairLegacyDirections,
     );
   }
 
@@ -317,6 +322,7 @@ class AccountTransactionReparseService {
     bool refreshExistingTransactions = true,
     bool importMissedTransactions = true,
     bool applyAutoCategorization = true,
+    bool repairLegacyDirections = false,
   }) async {
     final uniqueTargets = <String, AccountTransactionReparseTarget>{};
     for (final target in targets) {
@@ -359,6 +365,7 @@ class AccountTransactionReparseService {
       refreshExistingTransactions: refreshExistingTransactions,
       importMissedTransactions: importMissedTransactions,
       applyAutoCategorization: applyAutoCategorization,
+      repairLegacyDirections: repairLegacyDirections,
     );
     if (preparation.failure != null) {
       return AccountTransactionReparseStartResult(
@@ -401,6 +408,7 @@ class AccountTransactionReparseService {
         refreshExistingTransactions: refreshExistingTransactions,
         importMissedTransactions: importMissedTransactions,
         applyAutoCategorization: applyAutoCategorization,
+        repairLegacyDirections: repairLegacyDirections,
       ),
     );
 
@@ -412,6 +420,7 @@ class AccountTransactionReparseService {
     required bool refreshExistingTransactions,
     required bool importMissedTransactions,
     required bool applyAutoCategorization,
+    required bool repairLegacyDirections,
   }) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       return _PreparedAccountTransactionReparse.failure(
@@ -428,7 +437,8 @@ class AccountTransactionReparseService {
     }
     if (!refreshExistingTransactions &&
         !importMissedTransactions &&
-        !applyAutoCategorization) {
+        !applyAutoCategorization &&
+        !repairLegacyDirections) {
       return _PreparedAccountTransactionReparse.failure(
         const AccountTransactionReparseResult(
           errorMessage: 'Choose at least one reparse action.',
@@ -487,6 +497,7 @@ class AccountTransactionReparseService {
     required bool refreshExistingTransactions,
     required bool importMissedTransactions,
     required bool applyAutoCategorization,
+    required bool repairLegacyDirections,
   }) async {
     final successfulResults = <AccountTransactionReparseResult>[];
     _PreparedBankSmsScan? sharedBankSmsScan;
@@ -537,6 +548,7 @@ class AccountTransactionReparseService {
             refreshExistingTransactions: refreshExistingTransactions,
             importMissedTransactions: importMissedTransactions,
             applyAutoCategorization: applyAutoCategorization,
+            repairLegacyDirections: repairLegacyDirections,
             bankSmsScan: sharedBankSmsScan,
             performBankWideCleanup: bankWideCleanupPending,
             onProgress: reportProgress,
@@ -884,6 +896,7 @@ class AccountTransactionReparseService {
     required bool refreshExistingTransactions,
     required bool importMissedTransactions,
     required bool applyAutoCategorization,
+    required bool repairLegacyDirections,
     _PreparedBankSmsScan? bankSmsScan,
     bool performBankWideCleanup = true,
     _ReparseProgressCallback? onProgress,
@@ -939,7 +952,9 @@ class AccountTransactionReparseService {
     final obsoleteTelebirrDebitReferences =
         scan.obsoleteTelebirrDebitReferences;
     final repairedLegacyDirectionReferences = <String>{};
-    final legacyDirectionRepairIndex = LegacySmsDirectionRepairIndex(
+    final legacyDirectionRepairIndex =
+        maybeCreateLegacySmsDirectionRepairIndex(
+      enabled: repairLegacyDirections,
       bank: bank,
       candidates: existingByReference.values,
     );
@@ -969,7 +984,8 @@ class AccountTransactionReparseService {
 
         final existing =
             referenceKey == null ? null : existingByReference[referenceKey];
-        final legacyDirectionMismatch = legacyDirectionRepairIndex.findMismatch(
+        final legacyDirectionMismatch =
+            legacyDirectionRepairIndex?.findMismatch(
           parsed: reparsed,
           messageDate: messageDate,
         );
@@ -1001,7 +1017,7 @@ class AccountTransactionReparseService {
 
           final legacyKey = _logicalLegKey(legacyDirectionMismatch);
           if (legacyKey != null) existingByReference.remove(legacyKey);
-          legacyDirectionRepairIndex.remove(legacyDirectionMismatch);
+          legacyDirectionRepairIndex?.remove(legacyDirectionMismatch);
           existingByReference[referenceKey] = repaired;
           matchedReferences.add(referenceKey);
           updatedReferences.add(referenceKey);

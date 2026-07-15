@@ -1911,6 +1911,12 @@ class AppLocalizations {
     "Apply auto-categorization": "ራስ-ሰር ምደባን ተግብር",
     "Run saved auto-category rules on uncategorized matched or newly imported transactions.":
         "በማይመደቡ ተዛማጅ ወይም አዲስ የገቡ ትራንዛክሽኖች ላይ የተቀመጡ ራስ-ሰር ምደባ ህጎችን ያስኬዳል።",
+    "Repair legacy transaction directions":
+        "የቆዩ ትራንዛክሽን አቅጣጫዎችን አስተካክል",
+    "Fix incorrect credit or debit directions in old imports with generated references.":
+        "በተፈጠሩ ማጣቀሻዎች የገቡ የቆዩ ትራንዛክሽኖች የተሳሳተ የገቢ ወይም የወጪ አቅጣጫን ያስተካክላል።",
+    "Reparse may be slow for accounts with a large transaction history.":
+        "ብዙ የትራንዛክሽን ታሪክ ላላቸው አካውንቶች ዳግም ትንታኔው ሊዘገይ ይችላል።",
     "Save Expense": "ወጪን አስቀምጥ",
     "Save Income": "ገቢን አስቀምጥ",
     "To": "ወደ",

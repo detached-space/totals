@@ -39,6 +39,19 @@ void main() {
     );
   });
 
+  test('disabled legacy repair skips preparing the history index', () {
+    expect(
+      maybeCreateLegacySmsDirectionRepairIndex(
+        enabled: false,
+        bank: bank,
+        candidates: <Transaction>[
+          _legacyTransaction(messageDate: messageDate),
+        ],
+      ),
+      isNull,
+    );
+  });
+
   test('does not treat a normal bank reference as a repair candidate', () {
     final legacy = _legacyTransaction(
       messageDate: messageDate,

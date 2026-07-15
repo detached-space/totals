@@ -135,6 +135,18 @@ class LegacySmsDirectionRepairIndex {
   }
 }
 
+LegacySmsDirectionRepairIndex? maybeCreateLegacySmsDirectionRepairIndex({
+  required bool enabled,
+  required Bank bank,
+  required Iterable<Transaction> candidates,
+}) {
+  if (!enabled) return null;
+  return LegacySmsDirectionRepairIndex(
+    bank: bank,
+    candidates: candidates,
+  );
+}
+
 Transaction? findLegacySmsDirectionMismatch({
   required Bank bank,
   required Transaction parsed,
