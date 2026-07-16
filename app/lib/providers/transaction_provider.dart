@@ -18,6 +18,7 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/services/auto_categorization_service.dart';
+import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/owned_account_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
@@ -1753,6 +1754,11 @@ class TransactionProvider with ChangeNotifier {
       rethrow;
     }
 
+    for (final transaction in updates) {
+      await NotificationService.instance
+          .dismissTransactionNotification(transaction);
+    }
+
     final changedDebit = updates.any(
       (transaction) => transaction.type?.trim().toUpperCase() == 'DEBIT',
     );
@@ -1803,6 +1809,10 @@ class TransactionProvider with ChangeNotifier {
           transaction.selectedCategoryIds,
         );
     if (!hasSelectionChanged) {
+      if (normalizedCategoryIds.isNotEmpty) {
+        await NotificationService.instance
+            .dismissTransactionNotification(transaction);
+      }
       return transaction;
     }
 
@@ -1822,6 +1832,11 @@ class TransactionProvider with ChangeNotifier {
         _notifyOptimisticChange();
       }
       rethrow;
+    }
+
+    if (updated.selectedCategoryIds.isNotEmpty) {
+      await NotificationService.instance
+          .dismissTransactionNotification(updated);
     }
 
     unawaited(

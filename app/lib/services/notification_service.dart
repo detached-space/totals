@@ -541,6 +541,17 @@ class NotificationService {
     }
   }
 
+  Future<void> dismissTransactionNotification(Transaction transaction) async {
+    try {
+      await ensureInitialized();
+      await _plugin.cancel(_notificationId(transaction));
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to dismiss transaction notification: $e');
+      }
+    }
+  }
+
   Future<bool> showTestTransactionNotification() async {
     try {
       final transaction = Transaction(
