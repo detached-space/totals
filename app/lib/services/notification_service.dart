@@ -50,7 +50,6 @@ class NotificationService {
   static const int weeklySpendingTestNotificationId = 9004;
   static const int monthlySpendingNotificationId = 9005;
   static const int monthlySpendingTestNotificationId = 9006;
-  static const int sharedExpenseDigestNotificationId = 9007;
   static const int dataSyncResultNotificationId = 9008;
 
   final FlutterLocalNotificationsPlugin _plugin =
@@ -1352,7 +1351,7 @@ class NotificationService {
               '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
 
       await _plugin.show(
-        _sharedExpenseNudgeNotificationId(nudgeId),
+        _sharedExpenseNotificationId(nudgeId),
         title,
         body,
         const NotificationDetails(
@@ -1362,6 +1361,7 @@ class NotificationService {
             channelDescription: 'Nudges and reminders from shared expenses',
             importance: Importance.high,
             priority: Priority.high,
+            onlyAlertOnce: true,
           ),
           iOS: DarwinNotificationDetails(),
         ),
@@ -1392,7 +1392,7 @@ class NotificationService {
       await ensureInitialized();
 
       await _plugin.show(
-        _sharedExpenseNudgeNotificationId(eventId),
+        _sharedExpenseNotificationId(eventId),
         title,
         body,
         const NotificationDetails(
@@ -1402,6 +1402,7 @@ class NotificationService {
             channelDescription: 'Notifications from shared expenses',
             importance: Importance.high,
             priority: Priority.high,
+            onlyAlertOnce: true,
           ),
           iOS: DarwinNotificationDetails(),
         ),
@@ -1419,59 +1420,23 @@ class NotificationService {
     }
   }
 
-  Future<bool> showSharedExpenseDigestNotification({
-    required int updateCount,
-    required int groupCount,
-    String? groupName,
-    String? groupId,
-  }) async {
+  /// Removes generic shared-expense fallbacks left by older app versions.
+  Future<void> dismissLegacySharedExpenseFallbacks() async {
     try {
-      if (updateCount <= 0) return false;
-      final enabled = await NotificationSettingsService.instance
-          .isSharedExpenseNotificationsEnabled();
-      if (!enabled) return false;
       await ensureInitialized();
-
-      final cleanGroupName = groupName?.trim() ?? '';
-      final hasSingleGroup = groupCount == 1 && cleanGroupName.isNotEmpty;
-      const title = 'Shared Expenses has a new update';
-      final body = hasSingleGroup
-          ? updateCount == 1
-              ? '$cleanGroupName has a new shared expense update to review.'
-              : '$cleanGroupName has $updateCount new shared expense updates to review.'
-          : 'You have $updateCount new shared expense '
-              '${updateCount == 1 ? 'update' : 'updates'}'
-              '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
-
-      await _plugin.show(
-        sharedExpenseDigestNotificationId,
-        title,
-        body,
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _sharedExpensesChannelId,
-            'Shared expenses',
-            channelDescription: 'Notifications from shared expenses',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
-          iOS: DarwinNotificationDetails(),
-        ),
-        payload: hasSingleGroup
-            ? _sharedExpensesNotificationPayload(groupId)
-            : _sharedExpensesPayload,
-      );
-      await _recordHistory(
-        channel: _sharedExpensesChannelId,
-        title: title,
-        body: body,
-      );
-      return true;
+      final activeNotifications = await _plugin.getActiveNotifications();
+      for (final notification in activeNotifications) {
+        final id = notification.id;
+        if (id == null) continue;
+        if (notification.title?.trim() != 'Shared Expenses has a new update') {
+          continue;
+        }
+        await _plugin.cancel(id, tag: notification.tag);
+      }
     } catch (e) {
       if (kDebugMode) {
-        print('debug: Failed to show shared expense digest notification: $e');
+        print('debug: Failed to dismiss legacy shared expense fallback: $e');
       }
-      return false;
     }
   }
 
@@ -1515,8 +1480,13 @@ class NotificationService {
     return 200000 + (reviewId.hashCode & 0x7fffffff);
   }
 
-  static int _sharedExpenseNudgeNotificationId(String nudgeId) {
-    return 300000 + (nudgeId.hashCode & 0x0fffffff);
+  static int _sharedExpenseNotificationId(String eventId) {
+    return 300000 + _stableNotificationHash(eventId);
+  }
+
+  @visibleForTesting
+  static int sharedExpenseNotificationIdForTesting(String eventId) {
+    return _sharedExpenseNotificationId(eventId);
   }
 
   static int _loanDebtReturnReminderNotificationId(String reference) {

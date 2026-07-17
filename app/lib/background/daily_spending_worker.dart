@@ -53,7 +53,7 @@ void callbackDispatcher() {
 
       if (task == sharedExpenseNotificationCatchupTask) {
         await SharedExpenseBackgroundNotificationService.instance
-            .sendMissedActivityDigestIfNeeded();
+            .sendMissedActivityNotificationsIfNeeded();
         return true;
       }
 

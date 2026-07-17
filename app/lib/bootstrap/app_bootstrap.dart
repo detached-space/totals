@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/_redesign/theme/theme.dart';
 import 'package:totals/_redesign/widgets/finance_lock_surface.dart';
@@ -13,6 +12,7 @@ import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/data_sync/data_sync_scheduler.dart';
 import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
+import 'package:totals/services/totals_engine_client.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/widget_service.dart';
@@ -256,7 +256,7 @@ class AppBootstrapper {
     await _runNonFatal(
       phase: BootstrapPhase.loadingEnvironment,
       onPhaseChanged: onPhaseChanged,
-      task: () => dotenv.load(fileName: '.env', isOptional: true),
+      task: TotalsEngineClient.ensureEnvironmentInitialized,
     );
 
     await _runCritical(

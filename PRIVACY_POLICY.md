@@ -62,7 +62,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 
 - Core SMS tracking: SMS contents used for normal transaction tracking stay on your device.
 - Payment verification: If you use the payment verification feature, the data you submit may be transmitted over HTTPS to our verification service hosted at `sms-parsing-visualizer.vercel.app` to process your request.
-- Shared expenses: If you use shared expenses, Totals may connect over HTTPS to the Totals Engine relay service, currently configured at `engine-staging.totals.detached.space` or another configured Totals Engine endpoint.
+- Shared expenses: If you use shared expenses, Totals may connect over HTTPS to the configured Totals Engine relay endpoint.
 - Shared expense contents: Group names, member display names, expense details, settlement records, and activity entries are encrypted on your device before being sent to the relay service. The relay service is designed to handle encrypted blobs and not read the plaintext contents.
 - Shared expense metadata: The relay service can receive metadata needed to operate the feature, such as device public keys, group IDs, group membership, sender public keys, payload IDs, delivery and acknowledgement status, timestamps, payload sizes, IP addresses, and operational logs.
 - Shared expense members: Approved members of a shared expense group can receive and decrypt the shared expense data for that group. If you split a local transaction into a group, the selected shared-expense details may be shared with those members; Totals does not automatically share the full SMS message or your full account balance unless you include that information in shared fields.
