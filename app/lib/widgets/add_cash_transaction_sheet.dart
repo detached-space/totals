@@ -330,19 +330,20 @@ class _AddCashTransactionContentState
           const SizedBox(height: 8),
           SizedBox(
             height: 36,
-            child: ListView(
+            child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              children: accounts
-                  .map(
-                    (account) => _CashCategoryChip(
-                      label: account.accountNumber,
-                      icon: null,
-                      selected: _sameAccount(account, _selectedAccount),
-                      accentColor: accentColor,
-                      onTap: () => _selectAccount(account),
-                    ),
-                  )
-                  .toList(growable: false),
+              itemCount: accounts.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (context, index) {
+                final account = accounts[index];
+                return _CashCategoryChip(
+                  label: account.accountNumber,
+                  icon: null,
+                  selected: _sameAccount(account, _selectedAccount),
+                  accentColor: accentColor,
+                  onTap: () => _selectAccount(account),
+                );
+              },
             ),
           ),
         ],
@@ -783,45 +784,42 @@ class _AddCashTransactionContentState
                               ),
                             ),
                             const SizedBox(height: 8),
-                            SizedBox(
-                              height: 36,
-                              child: ListView(
-                                scrollDirection: Axis.horizontal,
-                                children: [
-                                  _CashCategoryChip(
-                                    label: 'None',
-                                    icon: null,
-                                    selected: _selectedCategoryIds.isEmpty,
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _CashCategoryChip(
+                                  label: 'None',
+                                  icon: null,
+                                  selected: _selectedCategoryIds.isEmpty,
+                                  accentColor:
+                                      _isDebit ? Colors.red : Colors.green,
+                                  onTap: () =>
+                                      setState(_selectedCategoryIds.clear),
+                                ),
+                                ..._filteredCategories.map((cat) {
+                                  final categoryId = cat.id;
+                                  if (categoryId == null) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return _CashCategoryChip(
+                                    label: cat.name,
+                                    icon: iconForCategoryKey(cat.iconKey),
+                                    selected: _selectedCategoryIds
+                                        .contains(categoryId),
                                     accentColor:
                                         _isDebit ? Colors.red : Colors.green,
-                                    onTap: () =>
-                                        setState(_selectedCategoryIds.clear),
-                                  ),
-                                  ..._filteredCategories.map((cat) {
-                                    final categoryId = cat.id;
-                                    if (categoryId == null) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    return _CashCategoryChip(
-                                      label: cat.name,
-                                      icon: iconForCategoryKey(cat.iconKey),
-                                      selected: _selectedCategoryIds
-                                          .contains(categoryId),
-                                      accentColor:
-                                          _isDebit ? Colors.red : Colors.green,
-                                      onTap: () => setState(() {
-                                        if (_selectedCategoryIds
-                                            .contains(categoryId)) {
-                                          _selectedCategoryIds
-                                              .remove(categoryId);
-                                        } else {
-                                          _selectedCategoryIds.add(categoryId);
-                                        }
-                                      }),
-                                    );
-                                  }),
-                                ],
-                              ),
+                                    onTap: () => setState(() {
+                                      if (_selectedCategoryIds
+                                          .contains(categoryId)) {
+                                        _selectedCategoryIds.remove(categoryId);
+                                      } else {
+                                        _selectedCategoryIds.add(categoryId);
+                                      }
+                                    }),
+                                  );
+                                }),
+                              ],
                             ),
                             const SizedBox(height: 16),
 
@@ -1134,34 +1132,31 @@ class _CashCategoryChip extends StatelessWidget {
         : colorScheme.surfaceContainerHighest.withValues(alpha: 0.5);
     final fg = selected ? Colors.white : colorScheme.onSurfaceVariant;
 
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 14, color: fg),
-                const SizedBox(width: 4),
-              ],
-              Text(
-                context.l10nText(label),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: fg,
-                ),
-              ),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: fg),
+              const SizedBox(width: 4),
             ],
-          ),
+            Text(
+              context.l10nText(label),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ],
         ),
       ),
     );
