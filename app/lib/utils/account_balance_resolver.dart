@@ -16,8 +16,6 @@ double resolveDisplayedAccountBalance({
     return account.balance + cashBalanceDelta;
   }
 
-  // For banks with a single linked account, the latest SMS "balance after"
-  // is the most reliable remaining balance to show in the UI.
   if (bankAccountCount == 1) {
     final latestBalanceAfter = latestParsedBalanceAfter(accountTransactions);
     if (latestBalanceAfter != null) {
@@ -29,38 +27,35 @@ double resolveDisplayedAccountBalance({
 }
 
 double? latestParsedBalanceAfter(Iterable<Transaction> transactions) {
-  double? latestBalance;
-  DateTime? latestTime;
+  final sorted = List<Transaction>.from(transactions)
+    ..sort((a, b) {
+      final timeA = _parseTransactionTime(a.time);
+      final timeB = _parseTransactionTime(b.time);
+      if (timeA == null && timeB == null) return 0;
+      if (timeA == null) return -1;
+      if (timeB == null) return 1;
+      return timeA.compareTo(timeB);
+    });
 
-  for (final transaction in transactions) {
+  double? runningBalance;
+
+  for (final transaction in sorted) {
     final parsedBalance = _parseBalance(transaction.currentBalance);
-    if (parsedBalance == null) continue;
-
-    final transactionTime = _parseTransactionTime(transaction.time);
-    if (latestBalance == null) {
-      latestBalance = parsedBalance;
-      latestTime = transactionTime;
-      continue;
-    }
-
-    if (transactionTime == null && latestTime != null) {
-      continue;
-    }
-
-    if (transactionTime != null &&
-        (latestTime == null ||
-            !transactionTime.isBefore(latestTime))) {
-      latestBalance = parsedBalance;
-      latestTime = transactionTime;
-      continue;
-    }
-
-    if (transactionTime == null && latestTime == null) {
-      latestBalance = parsedBalance;
+    if (parsedBalance != null) {
+      runningBalance = parsedBalance;
+    } else if (runningBalance != null) {
+      final amount = transaction.amount;
+      final totalFee = transaction.totalFee ?? 0.0;
+      final total = amount + totalFee;
+      if (transaction.type == 'CREDIT') {
+        runningBalance = runningBalance! + total;
+      } else {
+        runningBalance = runningBalance! - total;
+      }
     }
   }
 
-  return latestBalance;
+  return runningBalance;
 }
 
 double? _parseBalance(String? raw) {
