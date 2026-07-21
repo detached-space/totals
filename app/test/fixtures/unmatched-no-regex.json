@@ -1,0 +1,106 @@
+[
+  {
+    "title": "Telebirr — TOR EVENTS ticket purchase (pay / outgoing)",
+    "example sms": "Dear Selamawit Tesfaye have paid ETB 350.00 for TOR EVENTS AND RECORDS PLC ticket purchase on 07/06/2026 14:32. Your transaction number is CFT1234XYZ. Your ticket Number is 4521. Your current balance is ETB 1,200.00.To download your payment information please click this link: https://pay.telebirr.et/receipt Thank you for using telebirr Ethio telecom",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+for\\s+TOR\\s+EVENTS\\s+AND\\s+RECORDS\\s+PLC\\s+ticket\\s+purchase\\s+on\\s+(?<date>[\\d/\\-]+)\\s+(?<time>[\\d:]+)\\.?\\s*Your\\s+transaction\\s+number\\s+is\\s+(?<reference>[A-Za-z0-9]+)\\.?\\s*Your\\s+ticket\\s+Number\\s+is\\s+(?<ticket_num>\\d+)\\.?\\s*Your\\s+current\\s+balance\\s+is\\s+(?<balance>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\.?\\s*To\\s+download.*?link:?\\s*(?<url>\\S+)",
+    "note": "Use case-insensitive matching; .*? before the URL absorbs minor wording drift in the download-link phrase."
+  },
+  {
+    "title": "Telebirr — withdraw from sinq saving account (withdraw / outgoing)",
+    "example sms": "Dear Meron Assefa have successfully withdraw ETB 1,000.00 from your sinq saving account on 2026-07-03 16:45. Your transaction number is CFT5643221.Your current sinq saving balance is ETB 2,300.00. Thank you for using telebirr Ethio telecom in partnership with CBE",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s+have\\s+successfully\\s+withdraw(?:n)?\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+from\\s+your\\s+sinq\\s+saving\\s+account\\s+on\\s+(?<date>[\\d/\\-]+)\\s+(?<time>[\\d:]+)\\.?\\s*Your\\s+transaction\\s+number\\s+is\\s+(?<reference>[A-Za-z0-9]+)\\.?\\s*Your\\s+current\\s+sinq\\s+saving\\s+balance\\s+is\\s+(?<balance>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})",
+    "note": "Case-insensitive; handles both slash and dash date formats seen across samples."
+  },
+  {
+    "title": "Dashen Bank — received from telebirr account (receive / incoming)",
+    "example sms": "Dear Betelhem Fikru, You have received ETB 750.00 from telebirr account number 251911223344 Ref No:CFT8890012 on 07/06/2026 at 12:00 to your bank account '1000****5544'. Your account balance is ETB 5,600.00. Dashen Bank - Always one step ahead!",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+received\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+from\\s+telebirr\\s+account\\s+number\\s+(?<phone>\\d+)\\s+Ref\\s*No:?\\s*(?<reference>\\d+)\\s+on\\s+(?<date>[\\d/\\-]+)\\s+at\\s+(?<time>[\\d:]+(?:\\s?[APap][Mm])?)\\s+to\\s+your\\s+bank\\s+account\\s+['\"]?(?<account>[\\d*]+)['\"]?\\.?\\s*Your\\s+account\\s+balance\\s+is\\s+(?<balance>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})",
+    "note": "Masked account digits and asterisks combined into a single `account` group; quotes around the account number are optional."
+  },
+  {
+    "title": "Telebirr — SMS OTP payment, CHUCHU SUPERMARKET (pay / outgoing)",
+    "example sms": "Dear Genet Wolde, You have paid ETB 450.00 by telebirr SMS OTP for CHUCHU SUPERMARKET, Chuchu Branch 02 on 06/07/2026 18:22:10. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=123456ABC1DE_XYZ-ABC1_20260706182210",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+SMS\\s+OTP\\s+for\\s+CHUCHU\\s+SUPERMARKET,?\\s+Chuchu\\s+Branch\\s+(?<branch_num>\\d+)\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)"
+  },
+  {
+    "title": "Telebirr — QR Code payment, SMASH BURGERS (pay / outgoing)",
+    "example sms": "Dear Nardos Bekele, You have paid ETB 320.00 by telebirr QR Code for SMASH BURGERS, Main office on 05/07/2026 19:40. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=987654XYZ1-12345-06 To download hulubeje app https://hbjee.download.et",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+QR\\s+Code\\s+for\\s+SMASH\\s+BURGERS,?\\s+Main\\s+office\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)(?:\\s+To\\s+download\\s+hulubeje\\s+app\\s+(?<url2>\\S+))?",
+    "note": "Second attachment URL is optional since not every sample includes the hulubeje link."
+  },
+  {
+    "title": "Telebirr — QR Code payment, YB GOOD TRADING PLC (pay / outgoing)",
+    "example sms": "Dear Dawit Alemayehu, You have paid ETB 275.50 by telebirr QR Code for YB GOOD TRADING PLC, Summit branch on 04/07/2026 15:12. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=554433ABCD-2026-07",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+QR\\s+Code\\s+for\\s+YB\\s+GOOD\\s+TRADING\\s+PLC,?\\s+Summit\\s+branch\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)"
+  },
+  {
+    "title": "Ethio telecom — bill paid, no receipt link (pay / outgoing)",
+    "example sms": "Dear Meseret Alene, You have paid 300.00 Birr as of 2026-07-05 for telecom bill of Account Number 100234567. Your remaining outstanding amount is 1,200.00 Birr. Thank you, Ethio telecom.",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[\\d,]+\\.\\d{2})\\s+Birr\\s+as\\s+of\\s+(?<date>[\\d\\-/]+)\\s+for\\s+telecom\\s+bill\\s+of\\s+Account\\s+Number\\s+(?<account>\\d+)\\.?\\s*Your\\s+remaining\\s+outstanding\\s+amount\\s+is\\s+(?<balance>[\\d,]+\\.\\d{2})\\s+Birr\\.?\\s*Thank\\s+you,?\\s+Ethio\\s+telecom\\.?"
+  },
+  {
+    "title": "Ethio telecom — bill paid, with receipt link (pay / outgoing)",
+    "example sms": "Dear Fitsum Getachew, You have paid 450.00 Birr as of 2026-07-04 for telecom bill of Account Number 100987654. Your remaining outstanding amount is 0.00 Birr. Your bill payment receipt link is https://ethiotelecom.et/receipt?id=778899&code=ABC123 You can download your receipt after 5 minutes. Thank you, Ethio telecom.",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[\\d,]+\\.\\d{2})\\s+Birr\\s+as\\s+of\\s+(?<date>[\\d\\-/]+)\\s+for\\s+telecom\\s+bill\\s+of\\s+Account\\s+Number\\s+(?<account>\\d+)\\.?\\s*Your\\s+remaining\\s+outstanding\\s+amount\\s+is\\s+(?<balance>[\\d,]+\\.\\d{2})\\s+Birr\\.?\\s*Your\\s+bill\\s+payment\\s+receipt\\s+link\\s+is\\s+(?<url>\\S+)\\s+You\\s+can\\s+download\\s+your\\s+receipt\\s+after\\s+(?<minutes>\\d+)\\s+minutes\\.?\\s*Thank\\s+you,?\\s+Ethio\\s+telecom\\.?"
+  },
+  {
+    "title": "Bank — account debited with service charge & VAT (debit / outgoing)",
+    "example sms": "Dear Tigist Mulugeta your Account 1000****2233 has been debited with ETB250.00 . Service charge of ETB5.00 and VAT(15%) of ETB0.75 with a total of ETB255.75.",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s+your\\s+Account\\s+(?<account>[\\d*]+)\\s+has\\s+been\\s+debited\\s+with\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s*\\.?\\s*Service\\s+charge\\s+of\\s+(?<service_charge>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s+and\\s+VAT\\s*\\(\\s*(?<vat_pct>\\d+)\\s*%\\s*\\)\\s+of\\s+(?<vat_amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s+with\\s+a\\s+total\\s+of\\s+(?<total>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\.?"
+  },
+  {
+    "title": "EBIRR/Coopay — money sent (send / outgoing)",
+    "example sms": "[-EBIRR-Coopay-] With Ref No:88213311 ETB120.00 sent to mardiya Tuma Amano(251933445566) at 06/07/2026 09:14, Your balance is ETB980.00.",
+    "regex": "\\[-EBIRR-Coopay-\\]\\s+With\\s+Ref\\s*No:?\\s*(?<reference>\\d+)\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s+sent\\s+to\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s*\\(\\s*(?<phone>\\d+)\\s*\\)\\s+at\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+),?\\s*Your\\s+balance\\s+is\\s+(?<balance>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\.?",
+    "note": "Case-insensitive matching covers both '-Coopay-' and '-COOPay-' casing variants; also reused for the near-identical 'sent to SELAMAWIT BEKELE GASHE' template."
+  },
+  {
+    "title": "EBIRR/COOPay — money received (receive / incoming)",
+    "example sms": "[-EBIRR-COOPay-] Ref:77102234 Confirmed. ETB300.00 Received from SELAMAWIT BEKELE GASHE (251911998877),Date: 05/07/2026 16:02, your new A/C balance is ETB1580.00",
+    "regex": "\\[-EBIRR-Coopay-\\]\\s+Ref:?\\s*(?<reference>\\d+)\\s+Confirmed\\.?\\s*(?<amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s+Received\\s+from\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s*\\(\\s*(?<phone>\\d+)\\s*\\),?\\s*Date:?\\s*(?<date>[\\d/]+)\\s+(?<time>[\\d:]+),?\\s*your\\s+new\\s+A/?C\\s+balance\\s+is\\s+(?<balance>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)",
+    "note": "Case-insensitive; also covers the alt-casing '-Coopay-' variant received-from-mardiya sample."
+  },
+  {
+    "title": "Telebirr — QR Code payment, ADDISANA FOOD PLC (pay / outgoing)",
+    "example sms": "Dear Aster Solomon, You have paid ETB 190.00 by telebirr QR Code for ADDISANA FOOD PLC, BISHOFTU on 03/07/2026 12:05. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=112233CD-556-01 To download hulubeje app https://hbjee.download.et",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+QR\\s+Code\\s+for\\s+ADDISANA\\s+FOOD\\s+PLC,?\\s+BISHOFTU\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)(?:\\s+To\\s+download\\s+hulubeje\\s+app\\s+(?<url2>\\S+))?"
+  },
+  {
+    "title": "Telebirr — QR Code payment, lebu restaurant (pay / outgoing)",
+    "example sms": "Dear Mahlet Zewdu, You have paid ETB 260.00 by telebirr QR Code for BESRATEGEBRYEL SAHILU GETANEH, lebu restaurant on 02/07/2026 20:15. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=889900XY-771-02 To download hulubeje app https://hbjee.download.et",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+QR\\s+Code\\s+for\\s+BESRATEGEBRYEL\\s+SAHILU\\s+GETANEH,?\\s+lebu\\s+restaurant\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)(?:\\s+To\\s+download\\s+hulubeje\\s+app\\s+(?<url2>\\S+))?"
+  },
+  {
+    "title": "Telebirr — QR Code payment, Michael Girma Coffee Processing (pay / outgoing)",
+    "example sms": "Dear Biniam Assefa, You have paid ETB 540.75 by telebirr QR Code for Michael Girma Coffee Processing, Atlas Branch on 01/07/2026 08:50. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=334455EF-882-03 To download hulubeje app https://hbjee.download.et",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+QR\\s+Code\\s+for\\s+Michael\\s+Girma\\s+Coffee\\s+Processing,?\\s+Atlas\\s+Branch\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)(?:\\s+To\\s+download\\s+hulubeje\\s+app\\s+(?<url2>\\S+))?"
+  },
+  {
+    "title": "Telebirr — SMS OTP payment, Nehco Trading Plc (pay / outgoing)",
+    "example sms": "Dear Elias Tesema, You have paid ETB 620.00 by telebirr SMS OTP for Nehco Trading Plc, Main Branch on 30/06/2026 17:35. For attachment: https://mp.telebirr.et/recpt?ReceiptNo=112200GH-993-04 To download hulubeje app https://hbjee.download.et",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+You\\s+have\\s+paid\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+\\.\\d{2})\\s+by\\s+telebirr\\s+SMS\\s+OTP\\s+for\\s+Nehco\\s+Trading\\s+Plc,?\\s+Main\\s+Branch\\s+on\\s+(?<date>[\\d/]+)\\s+(?<time>[\\d:]+)\\.?\\s*For\\s+attachment:?\\s*(?<url>\\S+)(?:\\s+To\\s+download\\s+hulubeje\\s+app\\s+(?<url2>\\S+))?"
+  },
+  {
+    "title": "EBIRR/COOPay — inbound interconnect wallet transfer (transfer / outgoing*)",
+    "example sms": "[-EBIRR-COOPay-] Transfer ID: 34567890, ETB500.00 received from Ayman Hasan Abdulahi(251944556677) via INTERCONNECT KAAFI MF WALLET, your balance is ETB2200.00 https://ebirr.et/r/34567890",
+    "regex": "\\[-EBIRR-Coopay-\\]\\s+Transfer\\s+ID:?\\s*(?<reference>\\d+),?\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s+received\\s+from\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s*\\(\\s*(?<phone>\\d+)\\s*\\)\\s+via\\s+INTERCONNECT\\s+KAAFI\\s+MF\\s+WALLET,?\\s+your\\s+balance\\s+is\\s+(?<balance>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s*(?<url>\\S+)?",
+    "note": "Direction is stored as 'outgoing' upstream despite this being an inbound amount — verify against your business logic, not the regex."
+  },
+  {
+    "title": "EBIRR/Coopay — airtime top-up received (transfer / outgoing*)",
+    "example sms": "[-EBIRR-Coopay-] Transfer ID: 11223344, You have received airtime top-up of ETB50.00 from 251955667788",
+    "regex": "\\[-EBIRR-Coopay-\\]\\s+Transfer\\s+ID:?\\s*(?<reference>\\d+),?\\s+You\\s+have\\s+received\\s+airtime\\s+top-?up\\s+of\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s+from\\s+(?<phone>\\d+)"
+  },
+  {
+    "title": "Bank — account debited, truncated message (debit / outgoing)",
+    "example sms": "Dear Solomon Bekele your Account 1000****4455 has been debited with ETB60.00 . Service",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*)\\s+your\\s+Account\\s+(?<account>[\\d*]+)\\s+has\\s+been\\s+debited\\s+with\\s+(?<amount>[A-Za-z]{3}\\s?[\\d,]+(?:\\.\\d{2})?)\\s*\\.?\\s*Service\\b",
+    "note": "Message is truncated in source data; regex intentionally stops at 'Service' as an end-of-guaranteed-content marker."
+  },
+  {
+    "title": "Berhan Bank — account credited (credit / incoming)",
+    "example sms": "Dear Kidist Yohannes, A/C No. 100223344 has been credited ETB 900.00 on 2026-07-02. Reference is FT66123. Balance is ETB 5,200.00. 1234567 - Deposit Account Active Credit . Berhan Stress Free Banking",
+    "regex": "Dear\\s+(?<name>[A-Za-z]+(?:\\s[A-Za-z]+)*),?\\s+A/?C\\s*No\\.?\\s*(?<account>[A-Za-z0-9]+)\\s+has\\s+been\\s+credited\\s+(?<amount>[A-Za-z0-9\\s,.]+?)\\s+on\\s+(?<date>[\\w\\-/]+)\\.?\\s*Reference\\s+is\\s+(?<reference>[A-Za-z0-9]*)\\.?\\s*Balance\\s+is\\s+(?<balance>[A-Za-z0-9\\s,.]+?)\\.?\\s*(?<acct_num>\\d+)?\\s*-?\\s*Deposit\\s+Account\\s+Active\\s+Credit\\s*\\.?\\s*Berhan\\s+Stress\\s+Free\\s+Banking",
+    "note": "`reference` may legitimately be empty since the source sample had a literal blank placeholder there."
+  }
+]
