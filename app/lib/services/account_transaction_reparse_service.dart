@@ -901,9 +901,7 @@ class AccountTransactionReparseService {
     Transaction candidate,
   ) {
     final categoryIds = _mergedCategoryIds(current, candidate);
-    return Transaction(
-      amount: current.amount,
-      reference: current.reference,
+    return current.copyWith(
       creditor: _pickText(current.creditor, candidate.creditor),
       receiver: _pickText(current.receiver, candidate.receiver),
       note: _pickText(current.note, candidate.note),
@@ -1431,6 +1429,7 @@ class AccountTransactionReparseService {
       serviceCharge:
           _pickAmount(existing.serviceCharge, reparsed.serviceCharge),
       vat: _pickAmount(existing.vat, reparsed.vat),
+      totalFee: _pickAmount(existing.totalFee, reparsed.totalFee),
       sourceType: _pickText(existing.sourceType, reparsed.sourceType),
       sourceMessageId:
           _pickText(existing.sourceMessageId, reparsed.sourceMessageId),

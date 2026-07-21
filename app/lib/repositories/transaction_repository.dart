@@ -92,6 +92,7 @@ class TransactionRepository {
       'sourceType': map['sourceType'],
       'sourceMessageId': map['sourceMessageId'],
       'sourceFingerprint': map['sourceFingerprint'],
+      'totalFee': map['totalFee'],
     });
   }
 
@@ -164,6 +165,7 @@ class TransactionRepository {
       'sourceType': transactionToSave.sourceType,
       'sourceMessageId': transactionToSave.sourceMessageId,
       'sourceFingerprint': transactionToSave.sourceFingerprint,
+      'totalFee': transactionToSave.totalFee,
       'year': year,
       'month': month,
       'day': day,
@@ -261,6 +263,7 @@ class TransactionRepository {
           'sourceType': transactionToSave.sourceType,
           'sourceMessageId': transactionToSave.sourceMessageId,
           'sourceFingerprint': transactionToSave.sourceFingerprint,
+          'totalFee': transactionToSave.totalFee,
           'year': year,
           'month': month,
           'day': day,
