@@ -3,7 +3,25 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 enum WidgetLaunchTarget {
-  budget,
+  budget('budget'),
+  addExpense('add_expense'),
+  addIncome('add_income'),
+  quickAccounts('quick_accounts'),
+  verifyPayments('verify_payments');
+
+  const WidgetLaunchTarget(this.wireValue);
+
+  final String wireValue;
+
+  static WidgetLaunchTarget? fromWireValue(dynamic rawTarget) {
+    final target = rawTarget?.toString().trim().toLowerCase();
+    if (target == null || target.isEmpty) return null;
+
+    for (final value in values) {
+      if (value.wireValue == target) return value;
+    }
+    return null;
+  }
 }
 
 class WidgetLaunchIntentService {
@@ -50,21 +68,13 @@ class WidgetLaunchIntentService {
     dynamic rawTarget, {
     bool emit = true,
   }) {
-    final target = _parseTarget(rawTarget);
+    final target = WidgetLaunchTarget.fromWireValue(rawTarget);
     if (target == null) return;
 
     _pendingTarget = target;
     if (!_controller.isClosed && emit) {
       _controller.add(target);
     }
-  }
-
-  WidgetLaunchTarget? _parseTarget(dynamic rawTarget) {
-    final target = rawTarget?.toString().trim().toLowerCase();
-    if (target == 'budget') {
-      return WidgetLaunchTarget.budget;
-    }
-    return null;
   }
 
   void dispose() {

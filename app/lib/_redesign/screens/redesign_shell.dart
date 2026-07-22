@@ -19,6 +19,7 @@ import 'package:totals/_redesign/screens/settings_page.dart';
 import 'package:totals/_redesign/screens/shared_expenses_page.dart';
 import 'package:totals/_redesign/widgets/redesign_bottom_nav.dart';
 import 'package:totals/screens/accounts_page.dart';
+import 'package:totals/screens/verify_payments_page.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/profile.dart';
 import 'package:totals/models/transaction.dart';
@@ -103,6 +104,7 @@ class RedesignShellState extends State<RedesignShell>
   bool _isAuthenticating = false;
   bool _hasInitializedSmsPermissions = false;
   bool _hasCheckedNotificationPermissions = false;
+  WidgetLaunchTarget? _pendingWidgetLaunchTarget;
   String? _pendingNotificationReference;
   OpenSharedExpensesIntent? _pendingSharedExpensesIntent;
   OpenAccountReparseResultIntent? _pendingReparseResultIntent;
@@ -128,8 +130,8 @@ class RedesignShellState extends State<RedesignShell>
 
     _widgetLaunchIntentSub = WidgetLaunchIntentService.instance.stream.listen(
       (target) {
-        if (target != WidgetLaunchTarget.budget) return;
-        _onTabSelected(_budgetIndex);
+        WidgetLaunchIntentService.instance.consumePendingTarget();
+        unawaited(_handleWidgetLaunchTarget(target));
       },
     );
 
@@ -203,8 +205,8 @@ class RedesignShellState extends State<RedesignShell>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final initialTarget =
           WidgetLaunchIntentService.instance.consumePendingTarget();
-      if (initialTarget != WidgetLaunchTarget.budget) return;
-      _onTabSelected(_budgetIndex);
+      if (initialTarget == null) return;
+      unawaited(_handleWidgetLaunchTarget(initialTarget));
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -349,6 +351,12 @@ class RedesignShellState extends State<RedesignShell>
     setState(() => _isAuthenticated = true);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      final pendingWidgetLaunchTarget = _pendingWidgetLaunchTarget;
+      if (pendingWidgetLaunchTarget != null) {
+        _pendingWidgetLaunchTarget = null;
+        await _openWidgetLaunchTarget(pendingWidgetLaunchTarget);
+      }
+
       final pendingReference = _pendingNotificationReference;
       if (pendingReference != null) {
         _pendingNotificationReference = null;
@@ -594,6 +602,68 @@ class RedesignShellState extends State<RedesignShell>
       provider: provider,
       accountNumber: _cashAccountNumber(provider),
       initialIsDebit: true,
+    );
+  }
+
+  Future<void> _handleWidgetLaunchTarget(WidgetLaunchTarget target) async {
+    if (!_isAuthenticated) {
+      _pendingWidgetLaunchTarget = target;
+      await _authenticateIfAvailable();
+      return;
+    }
+
+    await _openWidgetLaunchTarget(target);
+  }
+
+  Future<void> _openWidgetLaunchTarget(WidgetLaunchTarget target) async {
+    if (!mounted) return;
+
+    switch (target) {
+      case WidgetLaunchTarget.budget:
+        _onTabSelected(_budgetIndex);
+        return;
+      case WidgetLaunchTarget.addExpense:
+        await _showShortcutCashTransactionSheet(isDebit: true);
+        return;
+      case WidgetLaunchTarget.addIncome:
+        await _showShortcutCashTransactionSheet(isDebit: false);
+        return;
+      case WidgetLaunchTarget.quickAccounts:
+        unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const AccountsPage()),
+          ),
+        );
+        return;
+      case WidgetLaunchTarget.verifyPayments:
+        unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const VerifyPaymentsPage(),
+            ),
+          ),
+        );
+        return;
+    }
+  }
+
+  Future<void> _showShortcutCashTransactionSheet({
+    required bool isDebit,
+  }) async {
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
+    if (provider.dataVersion == 0) {
+      await provider.loadData();
+    }
+    if (!mounted) return;
+
+    unawaited(
+      showAddCashTransactionSheet(
+        context: context,
+        provider: provider,
+        accountNumber: _cashAccountNumber(provider),
+        initialIsDebit: isDebit,
+        showTypeSelector: false,
+      ),
     );
   }
 

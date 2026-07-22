@@ -10,6 +10,8 @@ class MainActivity : FlutterFragmentActivity() {
         const val CHANNEL_NAME = "detached.totals/widget_launch"
         const val EXTRA_LAUNCH_TARGET = "widget_launch_target"
         const val TARGET_BUDGET = "budget"
+        const val SHORTCUT_SCHEME = "totals"
+        const val SHORTCUT_HOST = "shortcut"
     }
 
     private var widgetLaunchChannel: MethodChannel? = null
@@ -41,10 +43,21 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun consumeLaunchTarget(sourceIntent: Intent?): String? {
-        val target = sourceIntent?.getStringExtra(EXTRA_LAUNCH_TARGET)
-        if (target != null) {
+        sourceIntent ?: return null
+
+        val extraTarget = sourceIntent.getStringExtra(EXTRA_LAUNCH_TARGET)
+        if (extraTarget != null) {
             sourceIntent.removeExtra(EXTRA_LAUNCH_TARGET)
+            return extraTarget
         }
-        return target
+
+        val shortcutUri = sourceIntent.data ?: return null
+        if (shortcutUri.scheme != SHORTCUT_SCHEME || shortcutUri.host != SHORTCUT_HOST) {
+            return null
+        }
+
+        val shortcutTarget = shortcutUri.pathSegments.firstOrNull()
+        sourceIntent.data = null
+        return shortcutTarget
     }
 }
