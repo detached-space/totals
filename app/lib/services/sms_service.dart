@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/services/enrichment_pipeline.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -80,6 +81,8 @@ onBackgroundMessage(SmsMessage message) async {
     WidgetsFlutterBinding.ensureInitialized();
     DartPluginRegistrant.ensureInitialized();
 
+    SmsService._registerEnrichers();
+
     print("debug: BG: Handler started.");
 
     final String? address = message.address;
@@ -135,6 +138,26 @@ class SmsService {
   static const Duration _canonicalInboxLookupFutureSlack =
       Duration(seconds: 15);
 
+  // Pipeline of post-extraction enrichers.
+  static final EnrichmentPipeline enrichmentPipeline = EnrichmentPipeline();
+
+  static bool _enrichersRegistered = false;
+
+  static void _registerEnrichers() {
+    if (_enrichersRegistered) return;
+    _enrichersRegistered = true;
+  }
+
+  @visibleForTesting
+  static void resetEnrichersForTesting() {
+    enrichmentPipeline.clear();
+    _enrichersRegistered = false;
+  }
+
+  static void addEnricher(TransactionEnricher enricher) {
+    enrichmentPipeline.add(enricher);
+  }
+
   // Callback for foreground-only UI updates.
   ValueChanged<Transaction>? onTransactionSaved;
 
@@ -146,6 +169,7 @@ class SmsService {
   }
 
   Future<void> init() async {
+    _registerEnrichers();
     final bool? result = await _telephony.requestSmsPermissions;
     if (result != null && result) {
       _registerIncomingSmsListener();
@@ -1250,9 +1274,8 @@ class SmsService {
     }
 
     // 5. Save Transaction
-    // Need to ensure details has all fields or handle parsing
-    // Transaction.fromJson expects Strings mostly?
     Transaction newTx = Transaction.fromJson(details);
+    newTx = await enrichmentPipeline.enrich(newTx, messageBody);
     await txRepo.saveTransaction(
       newTx,
       skipAutoCategorization: skipAutoCategorization,

@@ -1,0 +1,23 @@
+[
+  {
+    "title": "Telebirr — Mela contract repayment (credit / incoming)",
+    "example sms": "Dear Bereket Alemu have repaid 350.00 ETB, for your Mela 15 days contract. Your current unpaid credit amount is 1,250.00 ETB. Thank you for using telebirr Ethio telecom",
+  },
+  {
+    "title": "M-PESA — received from Dashen Bank B2C (receive / incoming)",
+    "example sms": "Dear Hana Girma, you have received 2,500.00 Birr from DASHEN BANK SHARE COMPANY- B2C - EYOSIAS TAMIRAT ADINEW on 05/07/2026 at 10:15 AM. Transaction number is MPX9081726. Your current M-PESA balance is 3,750.50 Birr."
+  },
+  {
+    "title": "Telebirr — deposit to Saving Account (deposit / incoming)",
+    "example sms": "Dear Yared Mekonnen have successfully deposited ETB 500.00 to your Saving Account on 03/07/2026 09:20. Your telebirr transaction number is CFT7788112. Your current Saving balance is ETB 4,500.00 and Your current telebirr Account balance is ETB 220.00. Thank you for using telebirr Ethio telecom"
+  },
+  {
+    "title": "Telebirr — endekise credit transaction (credit / incoming)",
+    "example sms": "Dear Robel Haile transaction is successfully completed using endekise. You have used ETB 5.00 credit amount on this transaction. The service fee is ETB 1.50. Your outstanding amount is ETB 6.50 with due date of 2026-07-20 00:00. Your Contract number is 481029. Thank you for using telebirr Ethio telecom in partnership with Dashen Bank"
+  },
+  {
+    "title": "CBE/Michu — account credited, Temporary Deposit (credit / incoming)",
+    "example sms": "Dear Wondwosen Girma your Account 1000****7788 has been Credited with ETB 800.00 Ref: CBE9081726 ON 05-Jul-2026 14:30BY Temporary Deposit Customer Account. Your Current Balance is ETB 3,400.00. Get loans at your fingertips! Download Michu 2.0 here https://michu.cbe.com.et/app"
+  },
+
+]

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:meta/meta.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -49,7 +50,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 28,
+        version: 29,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -119,7 +120,8 @@ class DatabaseHelper {
         profileId INTEGER,
         sourceType TEXT,
         sourceMessageId TEXT,
-        sourceFingerprint TEXT
+        sourceFingerprint TEXT,
+        totalFee REAL
       )
     ''');
 
@@ -144,7 +146,9 @@ class DatabaseHelper {
         type TEXT NOT NULL,
         description TEXT,
         refRequired INTEGER,
-        hasAccount INTEGER
+        hasAccount INTEGER,
+        hasFees INTEGER,
+        mapping TEXT
       )
     ''');
 
@@ -858,6 +862,24 @@ class DatabaseHelper {
       await _ensureTransactionSourceSchema(db);
       await _ensureSyncSchema(db);
     }
+
+    // v28 is immutable (shipped). Parser enrichment columns land in v29.
+    if (oldVersion < 29) {
+      try {
+        await db.execute(
+          'ALTER TABLE sms_patterns ADD COLUMN hasFees INTEGER',
+        );
+        await db.execute(
+          'ALTER TABLE sms_patterns ADD COLUMN mapping TEXT',
+        );
+        await db.execute(
+          'ALTER TABLE transactions ADD COLUMN totalFee REAL',
+        );
+        print("debug: v29: Added hasFees/mapping to sms_patterns and totalFee to transactions");
+      } catch (e) {
+        print("debug: Error adding v29 columns (might already exist): $e");
+      }
+    }
   }
 
   Future<void> _runV28Stage(
@@ -970,6 +992,7 @@ class DatabaseHelper {
           'ALTER TABLE transactions ADD COLUMN sourceMessageId TEXT',
       'sourceFingerprint':
           'ALTER TABLE transactions ADD COLUMN sourceFingerprint TEXT',
+      'totalFee': 'ALTER TABLE transactions ADD COLUMN totalFee REAL',
     });
 
     await db.execute('''
@@ -996,6 +1019,8 @@ class DatabaseHelper {
     await _v28EnsureColumns(db, 'sms_patterns', {
       'refRequired': 'ALTER TABLE sms_patterns ADD COLUMN refRequired INTEGER',
       'hasAccount': 'ALTER TABLE sms_patterns ADD COLUMN hasAccount INTEGER',
+      'hasFees': 'ALTER TABLE sms_patterns ADD COLUMN hasFees INTEGER',
+      'mapping': 'ALTER TABLE sms_patterns ADD COLUMN mapping TEXT',
     });
     await db.execute('''
       CREATE TABLE IF NOT EXISTS banks (
@@ -1086,6 +1111,9 @@ class DatabaseHelper {
       )
     ''');
   }
+
+  @visibleForTesting
+  Future<void> repairCoreV28(Database db) => _repairCoreV28(db);
 
   String _v28Flow(Object? value) {
     final flow = value?.toString().trim().toLowerCase();

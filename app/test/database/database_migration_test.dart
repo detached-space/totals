@@ -6,14 +6,18 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:totals/database/database_helper.dart';
 
 import 'database_fixture.dart';
+import '../helpers/sqlite_setup.dart';
 
-const _schemaVersion = 28;
+const _schemaVersion = 29;
 
 void main() {
   late Directory tempDirectory;
   late String databasePath;
 
-  setUpAll(sqfliteFfiInit);
+  setUpAll(() {
+    setupSqlite();
+    sqfliteFfiInit();
+  });
 
   setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -25,7 +29,7 @@ void main() {
   });
 
   tearDown(() async {
-    await databaseFactoryFfi.deleteDatabase(databasePath);
+    await databaseFactoryFfiNoIsolate.deleteDatabase(databasePath);
     if (await tempDirectory.exists()) {
       await tempDirectory.delete(recursive: true);
     }
@@ -50,7 +54,7 @@ void main() {
 
   test('exact v4 schema upgrades to v28 without losing sentinel data',
       () async {
-    await DatabaseFixture.createV4(databaseFactoryFfi, databasePath);
+    await DatabaseFixture.createV4(databaseFactoryFfiNoIsolate, databasePath);
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
@@ -311,7 +315,7 @@ Future<T> _withDatabase<T>(
 ) async {
   final helper = DatabaseHelper.forTesting(
     path: path,
-    databaseFactory: databaseFactoryFfi,
+    databaseFactory: databaseFactoryFfiNoIsolate,
   );
   final db = await helper.database;
   try {

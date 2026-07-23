@@ -1658,30 +1658,13 @@ class TransactionProvider with ChangeNotifier {
         normalizedCounterparty == null || normalizedCounterparty.isEmpty
             ? null
             : normalizedCounterparty;
-    final updated = Transaction(
-      amount: transaction.amount,
-      reference: transaction.reference,
-      creditor:
-          transaction.type == 'CREDIT' ? updatedValue : transaction.creditor,
-      receiver:
-          transaction.type == 'CREDIT' ? transaction.receiver : updatedValue,
-      note: transaction.note,
-      time: transaction.time,
-      status: transaction.status,
-      currentBalance: transaction.currentBalance,
-      bankId: transaction.bankId,
-      type: transaction.type,
-      transactionLink: transaction.transactionLink,
-      accountNumber: transaction.accountNumber,
-      categoryId: transaction.categoryId,
-      categoryIds: transaction.categoryIds,
-      profileId: transaction.profileId,
-      serviceCharge: transaction.serviceCharge,
-      vat: transaction.vat,
-      sourceType: transaction.sourceType,
-      sourceMessageId: transaction.sourceMessageId,
-      sourceFingerprint: transaction.sourceFingerprint,
-    );
+    // copyWith preserves all other fields (totalFee, serviceCharge, vat, etc.),
+    // unlike the field-by-field constructor that silently dropped totalFee to null.
+    // Only creditor or receiver changes depending on type — identical semantics
+    // to the original constructor, just safer against field drift.
+    final updated = transaction.type == 'CREDIT'
+        ? transaction.copyWith(creditor: updatedValue)
+        : transaction.copyWith(receiver: updatedValue);
 
     final previous = _replaceTransactionLocally(updated);
     if (previous != null) {

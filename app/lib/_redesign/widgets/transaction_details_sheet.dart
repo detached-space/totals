@@ -812,28 +812,13 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         normalizedCounterparty == null || normalizedCounterparty.isEmpty
             ? null
             : normalizedCounterparty;
-    return Transaction(
-      amount: _tx.amount,
-      reference: _tx.reference,
-      creditor: _isCredit ? updatedValue : _tx.creditor,
-      receiver: _isCredit ? _tx.receiver : updatedValue,
-      note: _tx.note,
-      time: _tx.time,
-      status: _tx.status,
-      currentBalance: _tx.currentBalance,
-      bankId: _tx.bankId,
-      type: _tx.type,
-      transactionLink: _tx.transactionLink,
-      accountNumber: _tx.accountNumber,
-      categoryId: _tx.categoryId,
-      categoryIds: _tx.categoryIds,
-      profileId: _tx.profileId,
-      serviceCharge: _tx.serviceCharge,
-      vat: _tx.vat,
-      sourceType: _tx.sourceType,
-      sourceMessageId: _tx.sourceMessageId,
-      sourceFingerprint: _tx.sourceFingerprint,
-    );
+    // copyWith preserves all other fields (totalFee, serviceCharge, vat, etc.),
+    // unlike the field-by-field constructor that silently dropped totalFee to null.
+    // Only creditor or receiver changes depending on type — identical semantics
+    // to the original field-by-field constructor, just safer against field drift.
+    return _isCredit
+        ? _tx.copyWith(creditor: updatedValue)
+        : _tx.copyWith(receiver: updatedValue);
   }
 
   Future<void> _saveCounterparty() async {
