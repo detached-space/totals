@@ -544,6 +544,11 @@ class AccountTransactionReparseService {
             continue;
           }
 
+          transactionToSave =
+              await SmsService.enrichmentPipeline.enrich(
+            transactionToSave,
+            cleanedBody,
+          );
           await _transactionRepo.saveTransaction(
             transactionToSave,
             skipAutoCategorization: true,
@@ -739,8 +744,12 @@ class AccountTransactionReparseService {
           .toList(growable: false);
 
       if (!_isSameTransaction(keeper, mergedKeeper)) {
-        await _transactionRepo.saveTransaction(
+        final enriched = await SmsService.enrichmentPipeline.enrich(
           mergedKeeper,
+          '',
+        );
+        await _transactionRepo.saveTransaction(
+          enriched,
           skipAutoCategorization: true,
         );
         updatedReferences.add(mergedKeeper.reference);
