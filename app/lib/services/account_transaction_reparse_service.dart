@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/account.dart';
@@ -929,6 +930,7 @@ class AccountTransactionReparseService {
       serviceCharge:
           _pickAmount(current.serviceCharge, candidate.serviceCharge),
       vat: _pickAmount(current.vat, candidate.vat),
+      totalFee: _pickAmount(current.totalFee, candidate.totalFee),
       sourceType: _pickText(current.sourceType, candidate.sourceType),
       sourceMessageId:
           _pickText(current.sourceMessageId, candidate.sourceMessageId),
@@ -1416,13 +1418,20 @@ class AccountTransactionReparseService {
     return trimmed.substring(trimmed.length - maskLength);
   }
 
+  @visibleForTesting
+  Transaction? mergeParsedFieldsForTest(
+          Transaction existing, Transaction reparsed) =>
+      _mergeParsedFields(existing, reparsed);
+
+  @visibleForTesting
+  Transaction mergeExistingTransactionFieldsForTest(
+          Transaction current, Transaction candidate) =>
+      _mergeExistingTransactionFields(current, candidate);
+
   Transaction? _mergeParsedFields(Transaction existing, Transaction reparsed) {
-    final updated = Transaction(
-      amount: existing.amount,
-      reference: existing.reference,
+    final updated = existing.copyWith(
       creditor: _pickText(existing.creditor, reparsed.creditor),
       receiver: _pickText(existing.receiver, reparsed.receiver),
-      note: existing.note,
       time: _pickText(existing.time, reparsed.time),
       status: _pickText(existing.status, reparsed.status),
       currentBalance:
@@ -1432,9 +1441,6 @@ class AccountTransactionReparseService {
       transactionLink: _pickTransactionLink(
           existing.transactionLink, reparsed.transactionLink),
       accountNumber: _pickText(existing.accountNumber, reparsed.accountNumber),
-      categoryId: existing.categoryId,
-      categoryIds: existing.categoryIds,
-      profileId: existing.profileId,
       serviceCharge:
           _pickAmount(existing.serviceCharge, reparsed.serviceCharge),
       vat: _pickAmount(existing.vat, reparsed.vat),
@@ -1489,6 +1495,7 @@ class AccountTransactionReparseService {
         a.profileId == b.profileId &&
         a.serviceCharge == b.serviceCharge &&
         a.vat == b.vat &&
+        a.totalFee == b.totalFee &&
         a.sourceType == b.sourceType &&
         a.sourceMessageId == b.sourceMessageId &&
         a.sourceFingerprint == b.sourceFingerprint;
@@ -1548,6 +1555,7 @@ class AccountTransactionReparseService {
     if (_hasText(transaction.time)) score += 1;
     if (_hasMeaningfulAmount(transaction.serviceCharge)) score += 1;
     if (_hasMeaningfulAmount(transaction.vat)) score += 1;
+    if (_hasMeaningfulAmount(transaction.totalFee)) score += 1;
     return score;
   }
 

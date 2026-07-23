@@ -136,6 +136,12 @@ class Transaction {
       return 0.0;
     }
 
+    double? toOptionalDouble(dynamic v) {
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v);
+      return null;
+    }
+
     int? toInt(dynamic value) {
       if (value is int) return value;
       if (value is num) return value.toInt();
@@ -159,9 +165,9 @@ class Transaction {
       categoryId: toInt(json['categoryId']),
       categoryIds: _decodeCategoryIds(json['categoryIds']),
       profileId: toInt(json['profileId']),
-      serviceCharge: toDouble(json['serviceCharge']),
-      vat: toDouble(json['vat']),
-      totalFee: toDouble(json['totalFee']),
+      serviceCharge: toOptionalDouble(json['serviceCharge']),
+      vat: toOptionalDouble(json['vat']),
+      totalFee: toOptionalDouble(json['totalFee']),
       sourceType: json['sourceType']?.toString(),
       sourceMessageId: json['sourceMessageId']?.toString(),
       sourceFingerprint: json['sourceFingerprint']?.toString(),
