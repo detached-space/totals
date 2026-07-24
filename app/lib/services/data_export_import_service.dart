@@ -215,7 +215,9 @@ class DataExportImportService {
     return 'Bank $bankId';
   }
 
-  Future<List<ExportBankSummary>> getExportBankSummaries() async {
+  Future<List<ExportBankSummary>> getExportBankSummaries({
+    bool includeQuickAccessAccounts = true,
+  }) async {
     final banks = await _getBanksFromDb();
     final accounts = await _accountRepo.getAccounts();
     final transactions = await _transactionRepo.getTransactions();
@@ -229,11 +231,13 @@ class DataExportImportService {
       accountCounts.update(account.bank, (count) => count + 1,
           ifAbsent: () => 1);
     }
-    for (final account in userAccounts) {
-      final key = '${account.bankId}::${account.accountNumber.trim()}';
-      if (!accountKeys.add(key)) continue;
-      accountCounts.update(account.bankId, (count) => count + 1,
-          ifAbsent: () => 1);
+    if (includeQuickAccessAccounts) {
+      for (final account in userAccounts) {
+        final key = '${account.bankId}::${account.accountNumber.trim()}';
+        if (!accountKeys.add(key)) continue;
+        accountCounts.update(account.bankId, (count) => count + 1,
+            ifAbsent: () => 1);
+      }
     }
 
     final transactionCounts = <int, int>{};

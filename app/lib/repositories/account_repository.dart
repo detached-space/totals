@@ -411,6 +411,19 @@ class AccountRepository {
     await db.delete('accounts');
   }
 
+  Future<void> clearBanks(Set<int> bankIds) async {
+    if (bankIds.isEmpty) return;
+
+    final db = await DatabaseHelper.instance.database;
+    final ids = bankIds.toList(growable: false);
+    final placeholders = List.filled(ids.length, '?').join(', ');
+    await db.delete(
+      'accounts',
+      where: 'bank IN ($placeholders)',
+      whereArgs: ids,
+    );
+  }
+
   Future<void> deleteAccount(String accountNumber, int bank) async {
     await SyncEnqueuer.instance.onEntityWritten(
       entity: SyncEntity.accounts,

@@ -1943,6 +1943,13 @@ class AppLocalizations {
     "Clear Data": "ዳታ አጽዳ",
     "Select what you want to clear. This action cannot be undone.":
         "ማጽዳት የሚፈልጉትን ይምረጡ። ይህን ድርጊት መመለስ አይቻልም።",
+    "Banks and wallets": "ባንኮች እና ዋሌቶች",
+    "Transactions and accounts from selected institutions will be permanently deleted.":
+        "ከተመረጡት ተቋማት የተገኙ ትራንዛክሽኖች እና አካውንቶች በቋሚነት ይሰረዛሉ።",
+    "No bank or wallet data was found.":
+        "የባንክ ወይም የዋሌት ዳታ አልተገኘም።",
+    "Clear all": "ሁሉንም አጽዳ",
+    "Additional data": "ተጨማሪ ዳታ",
     "Transactions & Accounts": "ትራንዛክሽኖች እና አካውንቶች",
     "All transaction history and bank accounts":
         "ሁሉም የትራንዛክሽን ታሪክ እና የባንክ አካውንቶች",
@@ -1957,8 +1964,10 @@ class AppLocalizations {
     "Loan, debt, and repayment tracking":
         "የብድር፣ የእዳ እና የክፍያ ክትትል",
     "Failed Parses": "ያልተሳኩ ትንታኔዎች",
+    "Failed message diagnostics": "ያልተሳኩ መልዕክቶች ምርመራ",
     "Failed SMS parsing records": "ያልተሳኩ የኤስኤምኤስ ትንታኔ መዝገቦች",
     "Please select at least one option": "እባክዎ ቢያንስ አንድ አማራጭ ይምረጡ",
+    "Clear selected": "የተመረጡትን አጽዳ",
     "Data cleared successfully": "ዳታ በተሳካ ሁኔታ ተጠርጓል",
     "Error clearing data": "ዳታን ማጽዳት አልተሳካም",
     "Camera By Feature": "ካሜራ በባህሪ",

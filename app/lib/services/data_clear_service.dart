@@ -8,6 +8,7 @@ import 'package:totals/services/auto_categorization_service.dart';
 
 class ClearDataSelection {
   final bool financialData;
+  final Set<int>? bankIds;
   final bool budgets;
   final bool quickAccessAccounts;
   final bool autoCategorization;
@@ -16,6 +17,7 @@ class ClearDataSelection {
 
   const ClearDataSelection({
     this.financialData = false,
+    this.bankIds,
     this.budgets = false,
     this.quickAccessAccounts = false,
     this.autoCategorization = false,
@@ -37,8 +39,14 @@ class DataClearService {
     if (!selection.hasSelection) return;
 
     if (selection.financialData) {
-      await TransactionRepository().clearAll();
-      await AccountRepository().clearAll();
+      final bankIds = selection.bankIds;
+      if (bankIds == null) {
+        await TransactionRepository().clearAll();
+        await AccountRepository().clearAll();
+      } else if (bankIds.isNotEmpty) {
+        await TransactionRepository().clearBanks(bankIds);
+        await AccountRepository().clearBanks(bankIds);
+      }
     }
     if (selection.budgets) {
       await BudgetRepository().clearAll();

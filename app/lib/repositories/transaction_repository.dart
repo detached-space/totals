@@ -604,6 +604,19 @@ class TransactionRepository {
     await db.delete('transactions');
   }
 
+  Future<void> clearBanks(Set<int> bankIds) async {
+    if (bankIds.isEmpty) return;
+
+    final db = await DatabaseHelper.instance.database;
+    final ids = bankIds.toList(growable: false);
+    final placeholders = List.filled(ids.length, '?').join(', ');
+    await db.delete(
+      'transactions',
+      where: 'bankId IN ($placeholders)',
+      whereArgs: ids,
+    );
+  }
+
   /// Get transactions by date range with optional filters
   /// Uses indexed date columns for fast queries
   Future<List<Transaction>> getTransactionsByDateRange(
