@@ -23,6 +23,8 @@ class AdvancedSettingsService {
   static const String _profileDoubleTapActionKey =
       'redesign_profile_double_tap_action';
   static const String _toolsFabItemsKey = 'redesign_tools_fab_items';
+  static const String _telegramBackupEnabledKey =
+      'advanced_telegram_backup_enabled';
   static const Set<ToolsFabItem> defaultToolsFabItems = {
     ToolsFabItem.quickAccounts,
     ToolsFabItem.verifyPayments,
@@ -35,16 +37,24 @@ class AdvancedSettingsService {
       ValueNotifier<ProfileDoubleTapAction>(ProfileDoubleTapAction.lock);
   final ValueNotifier<Set<ToolsFabItem>> toolsFabItems =
       ValueNotifier<Set<ToolsFabItem>>(defaultToolsFabItems);
+  final ValueNotifier<bool> telegramBackupEnabled = ValueNotifier<bool>(false);
 
   bool _loaded = false;
 
   Future<void> ensureLoaded() async {
     if (_loaded) return;
+    await reload();
+  }
+
+  Future<void> reload() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final raw = prefs.getString(_profileDoubleTapActionKey);
     profileDoubleTapAction.value = _fromStorage(raw);
     toolsFabItems.value =
         _toolsFabItemsFromStorage(prefs.getStringList(_toolsFabItemsKey));
+    telegramBackupEnabled.value =
+        prefs.getBool(_telegramBackupEnabledKey) ?? false;
     _loaded = true;
   }
 
@@ -66,6 +76,14 @@ class AdvancedSettingsService {
       _toolsFabItemsKey,
       normalized.map(_toolsFabItemToStorage).toList(growable: false),
     );
+  }
+
+  Future<void> setTelegramBackupEnabled(bool enabled) async {
+    await ensureLoaded();
+    if (telegramBackupEnabled.value == enabled) return;
+    telegramBackupEnabled.value = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_telegramBackupEnabledKey, enabled);
   }
 
   static ProfileDoubleTapAction _fromStorage(String? raw) {

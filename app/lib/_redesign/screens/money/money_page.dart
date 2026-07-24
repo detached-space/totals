@@ -14251,7 +14251,7 @@ class _AccountsBalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '$subtitle | ${_formatLocalizedCount(context, transactionCount, 'Txn', 'Txns')}',
+            '$subtitle | ${_formatLocalizedCount(context, transactionCount, 'Transaction', 'Transactions')}',
             style: TextStyle(
               color: AppColors.white.withValues(alpha: 0.8),
               fontSize: 13,

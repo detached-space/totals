@@ -1946,23 +1946,19 @@ class AppLocalizations {
     "Banks and wallets": "ባንኮች እና ዋሌቶች",
     "Transactions and accounts from selected institutions will be permanently deleted.":
         "ከተመረጡት ተቋማት የተገኙ ትራንዛክሽኖች እና አካውንቶች በቋሚነት ይሰረዛሉ።",
-    "No bank or wallet data was found.":
-        "የባንክ ወይም የዋሌት ዳታ አልተገኘም።",
+    "No bank or wallet data was found.": "የባንክ ወይም የዋሌት ዳታ አልተገኘም።",
     "Clear all": "ሁሉንም አጽዳ",
     "Additional data": "ተጨማሪ ዳታ",
     "Transactions & Accounts": "ትራንዛክሽኖች እና አካውንቶች",
     "All transaction history and bank accounts":
         "ሁሉም የትራንዛክሽን ታሪክ እና የባንክ አካውንቶች",
-    "Saved accounts belonging to other people":
-        "የሌሎች ሰዎች የተቀመጡ አካውንቶች",
+    "Saved accounts belonging to other people": "የሌሎች ሰዎች የተቀመጡ አካውንቶች",
     "Budgets": "በጀቶች",
     "All budget rules and limits": "ሁሉም የበጀት ህጎች እና ገደቦች",
     "Auto-categorization rules": "የራስ-ሰር ምደባ ህጎች",
-    "Learned rules and dismissed suggestions":
-        "የተማሩ ህጎች እና የተሰረዙ ጥቆማዎች",
+    "Learned rules and dismissed suggestions": "የተማሩ ህጎች እና የተሰረዙ ጥቆማዎች",
     "Loans and debts": "ብድሮች እና እዳዎች",
-    "Loan, debt, and repayment tracking":
-        "የብድር፣ የእዳ እና የክፍያ ክትትል",
+    "Loan, debt, and repayment tracking": "የብድር፣ የእዳ እና የክፍያ ክትትል",
     "Failed Parses": "ያልተሳኩ ትንታኔዎች",
     "Failed message diagnostics": "ያልተሳኩ መልዕክቶች ምርመራ",
     "Failed SMS parsing records": "ያልተሳኩ የኤስኤምኤስ ትንታኔ መዝገቦች",
@@ -2267,6 +2263,38 @@ class AppLocalizations {
     "Pink": "ሮዝ",
     "Brown": "ቡናማ",
     "Gray": "ግራጫ",
+    "Telegram Backup": "የTelegram ምትኬ",
+    "Show encrypted Telegram backups in Settings":
+        "የተመሰጠሩ የTelegram ምትኬዎችን በቅንብሮች አሳይ",
+    "Could not update the Telegram Backup setting.":
+        "የTelegram ምትኬ ቅንብርን ማዘመን አልተቻለም።",
+    "Connect your bot for encrypted backups": "ለተመሰጠሩ ምትኬዎች ቦትዎን ያገናኙ",
+    "Connected to": "ከዚህ ጋር ተገናኝቷል",
+    "Start the bot": "ቦቱን ያስጀምሩ",
+    "I tapped Start": "Startን ነካሁ",
+    "Recovery key needed": "የመመለሻ ቁልፍ ያስፈልጋል",
+    "Recovery key": "የመመለሻ ቁልፍ",
+    "Connect": "አገናኝ",
+    "Encrypted backup sent to Telegram": "የተመሰጠረ ምትኬ ወደ Telegram ተልኳል",
+    "Save your recovery key": "የመመለሻ ቁልፍዎን ያስቀምጡ",
+    "Recovery key copied": "የመመለሻ ቁልፉ ተቀድቷል",
+    "Recovery key saved": "የመመለሻ ቁልፉ ተቀምጧል",
+    "Disconnect Telegram Backup?": "የTelegram ምትኬን ይቋረጥ?",
+    "Disconnect Telegram Backup": "የTelegram ምትኬን አቋርጥ",
+    "Disconnect": "አቋርጥ",
+    "Automatic backups": "ራስ-ሰር ምትኬዎች",
+    "Schedule": "መርሐግብር",
+    "Manual": "በእጅ",
+    "Backups in Telegram": "በTelegram ውስጥ ያሉ ምትኬዎች",
+    "No backups yet": "እስካሁን ምትኬ የለም",
+    "Private chat": "የግል ውይይት",
+    "Last backup": "የመጨረሻ ምትኬ",
+    "Open Telegram": "Telegramን ክፈት",
+    "Refresh": "አድስ",
+    "Bot token": "የቦት ቶከን",
+    "Connect Telegram bot": "የTelegram ቦትን አገናኝ",
+    "Connect your bot": "ቦትዎን ያገናኙ",
+    "Back up now": "አሁን ምትኬ ያድርጉ",
   };
 
   static String translate(

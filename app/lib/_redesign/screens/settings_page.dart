@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/screens/tools_page.dart';
 import 'package:totals/_redesign/screens/advanced_settings_page.dart';
+import 'package:totals/_redesign/screens/telegram_backup_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/categories_page.dart';
@@ -19,6 +20,9 @@ import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/advanced_settings_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_settings_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/theme/app_font_option.dart';
@@ -62,11 +66,21 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
   final DataExportImportService _exportImportService =
       DataExportImportService();
   final SmsConfigService _smsConfigService = SmsConfigService();
+  late final Future<void> _telegramBackupSettingsLoad;
 
   bool _isExporting = false;
   bool _isImporting = false;
   bool _isFetchingSmsPatterns = false;
   bool _isCheckingForUpdates = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _telegramBackupSettingsLoad = Future.wait([
+      AdvancedSettingsService.instance.ensureLoaded(),
+      TelegramBackupSettingsService.instance.ensureLoaded(),
+    ]);
+  }
 
   Future<void> _checkForUpdates() async {
     if (_isCheckingForUpdates) return;
@@ -1442,6 +1456,45 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                       )
                     : null,
                 onTap: _isFetchingSmsPatterns ? null : _fetchSmsPatterns,
+              ),
+
+              FutureBuilder<void>(
+                future: _telegramBackupSettingsLoad,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const SizedBox.shrink();
+                  }
+                  return ValueListenableBuilder<bool>(
+                    valueListenable:
+                        AdvancedSettingsService.instance.telegramBackupEnabled,
+                    builder: (context, enabled, _) {
+                      if (!enabled) return const SizedBox.shrink();
+                      return ValueListenableBuilder<TelegramBackupConfig?>(
+                        valueListenable:
+                            TelegramBackupSettingsService.instance.config,
+                        builder: (context, config, _) {
+                          return _SettingTile(
+                            icon: Icons.send_rounded,
+                            iconColor: AppColors.primaryLight,
+                            title: context.l10nText('Telegram Backup'),
+                            subtitle: config == null
+                                ? context.l10nText(
+                                    'Connect your bot for encrypted backups',
+                                  )
+                                : '${context.l10nText('Connected to')} '
+                                    '@${config.botUsername}',
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const TelegramBackupPage(),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
               ),
 
               _SettingTile(
