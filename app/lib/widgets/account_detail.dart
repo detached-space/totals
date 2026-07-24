@@ -17,6 +17,7 @@ import 'package:totals/widgets/category_filter_sheet.dart';
 import 'package:totals/widgets/categorize_transaction_sheet.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 class AccountDetailPage extends StatefulWidget {
   final String accountNumber;
@@ -310,6 +311,22 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
     setState(() => _isReparsing = true);
 
     try {
+      final hasSmsPermission = await SmsPermissionPrompt.ensureGranted(
+        context,
+        userInitiated: true,
+      );
+      if (!mounted) return;
+      if (!hasSmsPermission) {
+        messenger?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'SMS permission is required to reparse transactions.',
+            ),
+          ),
+        );
+        return;
+      }
+
       final result = await _reparseService.reparseAccountTransactions(
         bankId: widget.bankId,
         accountNumber: widget.accountNumber,

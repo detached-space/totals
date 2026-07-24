@@ -459,6 +459,7 @@ class AppLocalizations {
     "Later": "በኋላ",
     "Allow": "ፍቀድ",
     "Not now": "አሁን አይደለም",
+    "Open settings": "ቅንብሮችን ክፈት",
     "No": "አይ",
     "Yes": "አዎ",
     "Skip": "ዘልለው ይለፉ",
@@ -812,8 +813,7 @@ class AppLocalizations {
     "Backup is paused": "ምትኬ ቆሟል",
     "Set a PIN so you can restore your groups on a new phone.":
         "ቡድኖችዎን በአዲስ ስልክ ላይ መመለስ እንዲችሉ PIN ያዘጋጁ።",
-    "Unlock with your PIN to resume backing up.":
-        "ምትኬውን ለመቀጠል በPINዎ ይክፈቱ።",
+    "Unlock with your PIN to resume backing up.": "ምትኬውን ለመቀጠል በPINዎ ይክፈቱ።",
     "Set up": "አዋቅር",
     "Unlock": "ክፈት",
     "Restore from another device": "ከሌላ መሳሪያ መልስ",
@@ -1736,7 +1736,15 @@ class AppLocalizations {
     "Lock app": "መተግበሪያውን ቆልፍ",
     "Your Data, Your Control": "የእርስዎ ዳታ፣ የእርስዎ ቁጥጥር",
     "No Ads or Analytics": "ምንም ማስታወቂያዎች ወይም ትንታኔዎች የሉም",
-    "SMS Stays On Device": "ኤስኤምኤስ በመሳሪያው ላይ ብቻ ይቆያል",
+    "Data Stays On Device": "ዳታዎ በመሳሪያው ላይ ይቆያል",
+    "Your full transaction history stays on this device and is not uploaded unless you explicitly enable Data Sync. Even then, you choose which records to send and which server receives them.":
+        "የተሟላ የትራንዛክሽን ታሪክዎ Data Syncን በግልጽ ካላነቁ በስተቀር በመሳሪያዎ ላይ ይቆያል እና አይሰቀልም። ያንን ሲያነቁም የትኞቹ መዝገቦች እንደሚላኩ እና የትኛው ሰርቨር እንደሚቀበላቸው እርስዎ ይመርጣሉ።",
+    "Your data stays on this device by default. Optional online features, including Shared Expenses and payment verification, send only the specific information you choose to use with that feature.":
+        "ዳታዎ በነባሪነት በዚህ መሳሪያ ላይ ይቆያል። Shared Expensesን እና የክፍያ ማረጋገጫን ጨምሮ አማራጭ የመስመር ላይ ባህሪያት ለዚያ ባህሪ ለመጠቀም የመረጡትን የተወሰነ መረጃ ብቻ ይልካሉ።",
+    "Your data stays on this device by default. Optional online features connect only when used. Payment verification sends only the images and transaction details you choose to submit; remote config only downloads app rules.":
+        "ዳታዎ በነባሪነት በዚህ መሳሪያ ላይ ይቆያል። አማራጭ የመስመር ላይ ባህሪያት ሲጠቀሙባቸው ብቻ ይገናኛሉ። የክፍያ ማረጋገጫ እርስዎ ለመላክ የመረጧቸውን ምስሎች እና የትራንዛክሽን ዝርዝሮች ብቻ ይልካል፤ የርቀት ውቅር የመተግበሪያውን ህጎች ብቻ ያወርዳል።",
+    "You can continue without SMS access and add transactions manually.":
+        "ያለ ኤስኤምኤስ መዳረሻ መቀጠል እና ትራንዛክሽኖችን በእጅ ማከል ይችላሉ።",
     "GETTING STARTED": "መጀመር",
     "Link a bank account so Totals can match your transactions. You can always add more later.":
         "Totals የእርስዎን ትራንዛክሽኖች ማዛመድ እንዲችል የባንክ አካውንት ያገናኙ። በኋላ ላይ ሁልጊዜ ተጨማሪ ማከል ይችላሉ።",
@@ -1911,8 +1919,7 @@ class AppLocalizations {
     "Apply auto-categorization": "ራስ-ሰር ምደባን ተግብር",
     "Run saved auto-category rules on uncategorized matched or newly imported transactions.":
         "በማይመደቡ ተዛማጅ ወይም አዲስ የገቡ ትራንዛክሽኖች ላይ የተቀመጡ ራስ-ሰር ምደባ ህጎችን ያስኬዳል።",
-    "Repair legacy transaction directions":
-        "የቆዩ ትራንዛክሽን አቅጣጫዎችን አስተካክል",
+    "Repair legacy transaction directions": "የቆዩ ትራንዛክሽን አቅጣጫዎችን አስተካክል",
     "Fix incorrect credit or debit directions in old imports with generated references.":
         "በተፈጠሩ ማጣቀሻዎች የገቡ የቆዩ ትራንዛክሽኖች የተሳሳተ የገቢ ወይም የወጪ አቅጣጫን ያስተካክላል።",
     "Reparse may be slow for accounts with a large transaction history.":

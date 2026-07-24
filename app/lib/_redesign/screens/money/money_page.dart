@@ -41,6 +41,7 @@ import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 class RedesignMoneyPage extends StatefulWidget {
   const RedesignMoneyPage({super.key});
@@ -459,6 +460,84 @@ class _ActivityTransactionsViewData {
     required this.totalPages,
     required this.safePage,
     required this.flatItems,
+    required this.summary,
+  });
+}
+
+class _BankTransactionsViewCacheKey {
+  final int dataVersion;
+  final String language;
+  final int bankId;
+  final String? accountNumber;
+  final bool unmatchedOnly;
+  final String searchQuery;
+  final String? type;
+  final String? accountKey;
+  final int? categoryId;
+  final double? minAmount;
+  final double? maxAmount;
+  final int? startDateMillis;
+  final int? endDateMillis;
+
+  const _BankTransactionsViewCacheKey({
+    required this.dataVersion,
+    required this.language,
+    required this.bankId,
+    required this.accountNumber,
+    required this.unmatchedOnly,
+    required this.searchQuery,
+    required this.type,
+    required this.accountKey,
+    required this.categoryId,
+    required this.minAmount,
+    required this.maxAmount,
+    required this.startDateMillis,
+    required this.endDateMillis,
+  });
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is _BankTransactionsViewCacheKey &&
+        other.dataVersion == dataVersion &&
+        other.language == language &&
+        other.bankId == bankId &&
+        other.accountNumber == accountNumber &&
+        other.unmatchedOnly == unmatchedOnly &&
+        other.searchQuery == searchQuery &&
+        other.type == type &&
+        other.accountKey == accountKey &&
+        other.categoryId == categoryId &&
+        other.minAmount == minAmount &&
+        other.maxAmount == maxAmount &&
+        other.startDateMillis == startDateMillis &&
+        other.endDateMillis == endDateMillis;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        dataVersion,
+        language,
+        bankId,
+        accountNumber,
+        unmatchedOnly,
+        searchQuery,
+        type,
+        accountKey,
+        categoryId,
+        minAmount,
+        maxAmount,
+        startDateMillis,
+        endDateMillis,
+      );
+}
+
+class _BankTransactionsViewData {
+  final List<Transaction> transactions;
+  final _ActivityTransactionsSummary summary;
+
+  const _BankTransactionsViewData({
+    required this.transactions,
     required this.summary,
   });
 }
@@ -4106,6 +4185,24 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     if (!mounted || selection == null) return;
 
     final messenger = ScaffoldMessenger.maybeOf(context);
+    final hasSmsPermission = await SmsPermissionPrompt.ensureGranted(
+      context,
+      userInitiated: true,
+    );
+    if (!mounted) return;
+    if (!hasSmsPermission) {
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'SMS permission is required to reparse transactions.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
     final selectedAccounts = accounts
         .where(
           (account) => selection.selectedAccountKeys.contains(
@@ -11886,6 +11983,8 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   String _searchQuery = '';
   _TransactionFilter _filter = _TransactionFilter();
   int _currentPage = 0;
+  _BankTransactionsViewCacheKey? _viewCacheKey;
+  _BankTransactionsViewData? _viewCache;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
 
@@ -12218,6 +12317,49 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     );
   }
 
+  _BankTransactionsViewData _resolveViewData(
+    TransactionProvider provider, {
+    required String language,
+  }) {
+    final cacheKey = _BankTransactionsViewCacheKey(
+      dataVersion: provider.dataVersion,
+      language: language,
+      bankId: widget.bankId,
+      accountNumber: widget.account?.accountNumber,
+      unmatchedOnly: widget.unmatchedOnly,
+      searchQuery: _searchQuery,
+      type: _filter.type,
+      accountKey: _filter.accountKey,
+      categoryId: _filter.categoryId,
+      minAmount: _filter.minAmount,
+      maxAmount: _filter.maxAmount,
+      startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
+      endDateMillis: _filter.endDate?.millisecondsSinceEpoch,
+    );
+    final cached = _viewCache;
+    if (_viewCacheKey == cacheKey && cached != null) return cached;
+
+    final transactions = _filterTransactions(
+      provider,
+      _bankTransactions(provider),
+    ).toList(growable: true)
+      ..sort((a, b) {
+        final aTime = _parseTransactionTime(a.time);
+        final bTime = _parseTransactionTime(b.time);
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
+    final result = _BankTransactionsViewData(
+      transactions: List<Transaction>.unmodifiable(transactions),
+      summary: _summarizeTransactions(provider, transactions),
+    );
+    _viewCacheKey = cacheKey;
+    _viewCache = result;
+    return result;
+  }
+
   List<Object> _buildFlatItems(List<Transaction> transactions) {
     final flatItems = <Object>[];
     String? lastDateKey;
@@ -12378,7 +12520,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<ThemeProvider>();
+    final themeProvider = context.watch<ThemeProvider>();
     final theme = Theme.of(context);
     final accountTitle = widget.account == null
         ? widget.unmatchedOnly
@@ -12389,18 +12531,12 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
 
     return Consumer<TransactionProvider>(
       builder: (context, provider, _) {
-        final bankTransactions = _bankTransactions(provider);
-        final filtered = _filterTransactions(provider, bankTransactions)
-            .toList(growable: true)
-          ..sort((a, b) {
-            final aTime = _parseTransactionTime(a.time);
-            final bTime = _parseTransactionTime(b.time);
-            if (aTime == null && bTime == null) return 0;
-            if (aTime == null) return 1;
-            if (bTime == null) return -1;
-            return bTime.compareTo(aTime);
-          });
-        final summary = _summarizeTransactions(provider, filtered);
+        final viewData = _resolveViewData(
+          provider,
+          language: themeProvider.appLanguage.storageValue,
+        );
+        final filtered = viewData.transactions;
+        final summary = viewData.summary;
         final totalPages =
             (filtered.length / _itemsPerPage).ceil().clamp(1, 999999);
         final safePage = _currentPage.clamp(0, totalPages - 1);
@@ -14237,7 +14373,9 @@ class _BankGridState extends State<_BankGrid> with WidgetsBindingObserver {
     super.didUpdateWidget(oldWidget);
     // Reload when the registered bank list changes (account added/removed)
     if (oldWidget.bankSummaries.length != widget.bankSummaries.length) {
-      _loadDetectedBanks(forceRefresh: true);
+      // Cached detection includes registered banks and is filtered against the
+      // latest accounts, so a full inbox rescan is unnecessary here.
+      _loadDetectedBanks();
     }
   }
 
@@ -14251,10 +14389,7 @@ class _BankGridState extends State<_BankGrid> with WidgetsBindingObserver {
 
   Future<void> _loadDetectedBanks({bool forceRefresh = false}) async {
     try {
-      var permissionStatus = await Permission.sms.status;
-      if (!permissionStatus.isGranted) {
-        permissionStatus = await Permission.sms.request();
-      }
+      final permissionStatus = await Permission.sms.status;
       if (!permissionStatus.isGranted) {
         _awaitingPermission = true;
         return;
@@ -17077,8 +17212,7 @@ class _ReparseAccountsSheetState extends State<_ReparseAccountsSheet> {
                                     _importMissedTransactions,
                                 applyAutoCategorization:
                                     _applyAutoCategorization,
-                                repairLegacyDirections:
-                                    _repairLegacyDirections,
+                                repairLegacyDirections: _repairLegacyDirections,
                                 refreshOtherTransactions:
                                     _refreshOtherTransactions,
                               ),

@@ -78,6 +78,7 @@ class DetectedBank {
 class BankDetectionService {
   static const String _cacheKey = 'detected_banks_cache';
   static const String _cacheTimestampKey = 'detected_banks_cache_timestamp';
+  static const Duration _cacheMaxAge = Duration(hours: 24);
 
   final Telephony _telephony = Telephony.instance;
   final AccountRepository _accountRepo = AccountRepository();
@@ -87,8 +88,17 @@ class BankDetectionService {
 
   bool _hasDetectedBanksCache(List<DetectedBank>? banks) {
     return banks != null &&
-        banks.isNotEmpty &&
         banks.every((bank) => bank.holderSuggestionsScanned);
+  }
+
+  Future<bool> _isCacheFresh() async {
+    final prefs = await SharedPreferences.getInstance();
+    final timestamp = prefs.getString(_cacheTimestampKey);
+    final cachedAt = timestamp == null ? null : DateTime.tryParse(timestamp);
+    if (cachedAt == null) return false;
+
+    final age = DateTime.now().difference(cachedAt);
+    return !age.isNegative && age <= _cacheMaxAge;
   }
 
   Future<Set<int>> _getSupportedBankIds() async {
@@ -107,8 +117,8 @@ class BankDetectionService {
 
   /// Scans the SMS inbox and returns banks that the user has messages from
   /// but hasn't registered an account for yet.
-  /// Uses cached results for faster loading. Scans SMS only when cache is empty
-  /// or forceRefresh is true.
+  /// Uses recent cached results for faster loading. Scans SMS when the cache is
+  /// missing, older than 24 hours, or forceRefresh is true.
   Future<List<DetectedBank>> detectUnregisteredBanks({
     bool forceRefresh = false,
   }) async {
@@ -120,7 +130,7 @@ class BankDetectionService {
       final supportedBankIds = await _getSupportedBankIds();
 
       // Try to get cached data first (unless force refresh)
-      if (!forceRefresh) {
+      if (!forceRefresh && await _isCacheFresh()) {
         final cachedBanks = await _getCachedBanks();
         if (_hasDetectedBanksCache(cachedBanks)) {
           // Filter out already registered banks from cache
@@ -335,7 +345,7 @@ class BankDetectionService {
   Future<List<DetectedBank>> detectAllBanks({bool forceRefresh = false}) async {
     try {
       // Try cache first
-      if (!forceRefresh) {
+      if (!forceRefresh && await _isCacheFresh()) {
         final cachedBanks = await _getCachedBanks();
         if (_hasDetectedBanksCache(cachedBanks)) {
           return cachedBanks!;

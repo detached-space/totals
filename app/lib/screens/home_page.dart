@@ -32,6 +32,7 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/services/bank_detection_startup_service.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -72,7 +73,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(BankDetectionStartupService.runOnAppOpen());
 
     _notificationIntentSub = NotificationIntentBus.instance.stream.listen(
       (intent) {
@@ -141,10 +141,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _initSmsPermissions();
-      if (mounted) {
-        _authenticateIfAvailable();
-      }
+      if (mounted) await _authenticateIfAvailable();
     });
   }
 
@@ -318,6 +315,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       unawaited(SmsConfigService().syncRemoteConfig());
       Provider.of<TransactionProvider>(context, listen: false).loadData();
+      if (_isAuthenticated && !_hasInitializedSmsPermissions) {
+        unawaited(_initSmsPermissions());
+      }
     }
   }
 
@@ -330,7 +330,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
 
-    await _initSmsPermissions();
     await _authenticateIfAvailable();
   }
 
@@ -341,8 +340,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
 
     if (value && !_hasInitializedPermissions) {
-      _hasInitializedPermissions = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_isAuthenticated) return;
+        if (_hasInitializedPermissions) return;
+        _hasInitializedPermissions = true;
         _initPermissions().catchError((error) {
           if (kDebugMode) {
             print('debug: _initPermissions failed: $error');
@@ -436,8 +437,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_hasInitializedSmsPermissions) return;
     _hasInitializedSmsPermissions = true;
     try {
+      final granted = await SmsPermissionPrompt.ensureGranted(context);
+      if (!granted) {
+        _hasInitializedSmsPermissions = false;
+        return;
+      }
       await _smsService.init();
     } catch (e) {
+      _hasInitializedSmsPermissions = false;
       if (kDebugMode) {
         print('debug: SMS permission init failed: $e');
       }
@@ -460,14 +467,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _initPermissions() async {
     try {
-      if (!_hasInitializedSmsPermissions) {
-        _hasInitializedSmsPermissions = true;
-        await _smsService.init();
-      }
+      if (!mounted || !_isAuthenticated) return;
+      await _initSmsPermissions();
 
-      if (mounted && !_hasCheckedNotificationPermissions) {
+      if (!mounted || !_isAuthenticated) return;
+      if (!_hasCheckedNotificationPermissions) {
         await _checkNotificationPermissions();
       }
+      if (!mounted || !_isAuthenticated) return;
+      unawaited(BankDetectionStartupService.runOnAppOpen());
     } catch (e) {
       if (kDebugMode) {
         print('debug: Error in _initPermissions: $e');
@@ -719,6 +727,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
 
     try {
+      final hasSmsPermission = await SmsPermissionPrompt.ensureGranted(
+        context,
+        userInitiated: true,
+      );
+      if (!hasSmsPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SMS permission denied.'),
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
       final result = await _smsService.syncTodayBankSms();
       if (!mounted) return;
 

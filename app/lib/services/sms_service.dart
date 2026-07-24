@@ -151,14 +151,16 @@ class SmsService {
   }
 
   Future<void> init() async {
-    final bool? result = await _telephony.requestSmsPermissions;
-    if (result != null && result) {
+    final permissionStatus = await Permission.sms.status;
+    if (permissionStatus.isGranted) {
       _registerIncomingSmsListener();
       unawaited(() async {
         try {
-          await AccountOwnershipService.instance.reconcile();
+          await AccountOwnershipService.instance.runPendingMigration();
         } catch (error) {
-          debugPrint('debug: Account ownership reconciliation failed: $error');
+          debugPrint(
+            'debug: Pending account ownership migration failed: $error',
+          );
         }
       }());
     } else {
@@ -191,8 +193,8 @@ class SmsService {
   }
 
   Future<TodaySmsSyncResult> syncTodayBankSms() async {
-    final bool? permissionGranted = await _telephony.requestSmsPermissions;
-    if (permissionGranted != true) {
+    final permissionStatus = await Permission.sms.status;
+    if (!permissionStatus.isGranted) {
       return const TodaySmsSyncResult(permissionDenied: true);
     }
 

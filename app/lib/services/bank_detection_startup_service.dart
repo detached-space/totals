@@ -31,9 +31,7 @@ class BankDetectionStartupService {
       // Ensure bank configuration exists before trying to match sender IDs.
       await BankConfigService().initializeBanks();
 
-      await BankDetectionService().detectUnregisteredBanks(
-        forceRefresh: true,
-      );
+      await BankDetectionService().detectUnregisteredBanks();
 
       if (kDebugMode) {
         print("debug: Startup bank detection completed");

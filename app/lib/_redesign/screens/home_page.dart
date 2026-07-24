@@ -30,6 +30,7 @@ import 'package:totals/_redesign/screens/todays_transactions_page.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -111,6 +112,21 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     setState(() => _isRefreshingTodaySms = true);
 
     try {
+      final hasSmsPermission = await SmsPermissionPrompt.ensureGranted(
+        context,
+        userInitiated: true,
+      );
+      if (!hasSmsPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.l10nTextRead('SMS permission denied.')),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
       final result = await _smsService.syncTodayBankSms();
       if (!mounted) return;
 
@@ -234,9 +250,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = Provider.of<TransactionProvider>(context, listen: false);
-      if (provider.dataVersion == 0) {
-        await provider.loadData();
-      }
+      await provider.ensureDataLoaded();
       if (mounted) {
         setState(() => _isBootstrapping = false);
       }

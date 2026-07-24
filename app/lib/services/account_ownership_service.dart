@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:another_telephony/telephony.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
 import 'package:totals/services/bank_config_service.dart';
@@ -35,13 +39,42 @@ class AccountOwnershipService {
   AccountOwnershipService._();
 
   static final AccountOwnershipService instance = AccountOwnershipService._();
+  static const String _completedMigrationVersionKeyPrefix =
+      'account_ownership_reconciliation_version_profile_';
+
+  // Increment only when an app update requires existing ownership data to be
+  // repaired again. Routine launches must not repeat the full inbox scan.
+  static const int _requiredMigrationVersion = 1;
 
   final AccountRepository _accountRepository = AccountRepository();
+  final ProfileRepository _profileRepository = ProfileRepository();
   final TransactionRepository _transactionRepository = TransactionRepository();
   final BankConfigService _bankConfigService = BankConfigService();
   Future<AccountOwnershipReconciliationResult>? _activeReconciliation;
+  Future<bool>? _activeMigration;
+  int? _activeMigrationProfileId;
+  Future<void>? _activeProfileSwitch;
 
-  Future<AccountOwnershipReconciliationResult> reconcile({int? bankId}) {
+  Future<AccountOwnershipReconciliationResult> reconcile({int? bankId}) async {
+    while (true) {
+      final active = _activeReconciliation;
+      if (active != null) return active;
+
+      // Wait outside the active-reconciliation slot. Registering a waiting
+      // reconciliation there would let an older migration join it and create
+      // a switch -> migration -> reconciliation -> switch cycle.
+      final activeProfileSwitch = _activeProfileSwitch;
+      if (activeProfileSwitch != null) {
+        await activeProfileSwitch;
+        continue;
+      }
+      return _startReconciliation(bankId: bankId);
+    }
+  }
+
+  Future<AccountOwnershipReconciliationResult> _startReconciliation({
+    int? bankId,
+  }) {
     final active = _activeReconciliation;
     if (active != null) return active;
     final future = _reconcile(bankId: bankId);
@@ -51,6 +84,144 @@ class AccountOwnershipService {
         _activeReconciliation = null;
       }
     });
+  }
+
+  Future<void> switchActiveProfile(int profileId) async {
+    final existingSwitch = _activeProfileSwitch;
+    if (existingSwitch != null) {
+      await existingSwitch;
+      return switchActiveProfile(profileId);
+    }
+
+    // Capture existing work before publishing the switch gate. New ownership
+    // repairs will wait on the gate and therefore run against the new profile.
+    final migrationToWaitFor = _activeMigration;
+    final reconciliationToWaitFor = _activeReconciliation;
+    final switchCompleter = Completer<void>();
+    final switchFuture = switchCompleter.future;
+    _activeProfileSwitch = switchFuture;
+
+    try {
+      try {
+        if (migrationToWaitFor != null) await migrationToWaitFor;
+        if (reconciliationToWaitFor != null) {
+          await reconciliationToWaitFor;
+        }
+      } catch (error) {
+        debugPrint(
+          'debug: Ownership repair failed before profile switch: $error',
+        );
+      }
+      await _profileRepository.setActiveProfile(profileId);
+    } finally {
+      switchCompleter.complete();
+      if (identical(_activeProfileSwitch, switchFuture)) {
+        _activeProfileSwitch = null;
+      }
+    }
+
+    unawaited(() async {
+      try {
+        await runPendingMigration();
+      } catch (error) {
+        debugPrint(
+          'debug: Pending ownership migration after profile switch failed: '
+          '$error',
+        );
+      }
+    }());
+  }
+
+  Future<bool> runPendingMigration() async {
+    while (true) {
+      final activeProfileSwitch = _activeProfileSwitch;
+      if (activeProfileSwitch != null) {
+        await activeProfileSwitch;
+        continue;
+      }
+
+      final requestedProfileId = await _profileRepository.getActiveProfileId();
+      if (_activeProfileSwitch != null) {
+        continue;
+      }
+
+      final activeMigration = _activeMigration;
+      if (activeMigration != null) {
+        if (_activeMigrationProfileId == requestedProfileId) {
+          return activeMigration;
+        }
+        await activeMigration;
+        if (identical(_activeMigration, activeMigration)) {
+          _activeMigration = null;
+          _activeMigrationProfileId = null;
+        }
+        continue;
+      }
+
+      final migration = _runPendingMigration(requestedProfileId);
+      _activeMigration = migration;
+      _activeMigrationProfileId = requestedProfileId;
+      try {
+        return await migration;
+      } finally {
+        if (identical(_activeMigration, migration)) {
+          _activeMigration = null;
+          _activeMigrationProfileId = null;
+        }
+      }
+    }
+  }
+
+  Future<bool> _runPendingMigration(int? activeProfileId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final migrationVersionKey = migrationVersionPreferenceKey(activeProfileId);
+    var completedVersion = prefs.getInt(migrationVersionKey) ?? 0;
+    if (completedVersion >= _requiredMigrationVersion) {
+      return false;
+    }
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+    final smsPermission = await Permission.sms.status;
+    if (!smsPermission.isGranted) {
+      return false;
+    }
+
+    // A bank-scoped repair may already be running after account registration.
+    // Let it finish, then still perform the full versioned migration.
+    final activeReconciliation = _activeReconciliation;
+    if (activeReconciliation != null) {
+      await activeReconciliation;
+      if (identical(_activeReconciliation, activeReconciliation)) {
+        _activeReconciliation = null;
+      }
+      completedVersion = prefs.getInt(migrationVersionKey) ?? 0;
+      if (completedVersion >= _requiredMigrationVersion) {
+        return false;
+      }
+    }
+
+    if (await _profileRepository.getActiveProfileId() != activeProfileId) {
+      return false;
+    }
+    await _startReconciliation();
+    if (await _profileRepository.getActiveProfileId() != activeProfileId) {
+      return false;
+    }
+    final permissionAfterRepair = await Permission.sms.status;
+    if (!permissionAfterRepair.isGranted) {
+      return false;
+    }
+    await prefs.setInt(
+      migrationVersionKey,
+      _requiredMigrationVersion,
+    );
+    return true;
+  }
+
+  @visibleForTesting
+  static String migrationVersionPreferenceKey(int? profileId) {
+    return '$_completedMigrationVersionKeyPrefix${profileId ?? 'default'}';
   }
 
   Future<AccountOwnershipReconciliationResult> _reconcile({int? bankId}) async {

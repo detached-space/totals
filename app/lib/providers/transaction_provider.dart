@@ -553,6 +553,14 @@ class TransactionProvider with ChangeNotifier {
     return future;
   }
 
+  /// Joins an in-flight initial load without scheduling another full pass.
+  /// Mutation paths should keep calling [loadData] so changes made during an
+  /// active load still queue a refresh.
+  Future<void> ensureDataLoaded() {
+    if (_dataVersion > 0) return Future<void>.value();
+    return _activeLoadDataFuture ?? loadData();
+  }
+
   Future<void> _loadDataUntilSettled() async {
     do {
       _reloadQueuedWhileLoading = false;

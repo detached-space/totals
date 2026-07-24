@@ -446,10 +446,7 @@ class AccountTransactionReparseService {
       );
     }
 
-    var permissionStatus = await Permission.sms.status;
-    if (!permissionStatus.isGranted) {
-      permissionStatus = await Permission.sms.request();
-    }
+    final permissionStatus = await Permission.sms.status;
     if (!permissionStatus.isGranted) {
       return _PreparedAccountTransactionReparse.failure(
         const AccountTransactionReparseResult(permissionDenied: true),
@@ -952,8 +949,7 @@ class AccountTransactionReparseService {
     final obsoleteTelebirrDebitReferences =
         scan.obsoleteTelebirrDebitReferences;
     final repairedLegacyDirectionReferences = <String>{};
-    final legacyDirectionRepairIndex =
-        maybeCreateLegacySmsDirectionRepairIndex(
+    final legacyDirectionRepairIndex = maybeCreateLegacySmsDirectionRepairIndex(
       enabled: repairLegacyDirections,
       bank: bank,
       candidates: existingByReference.values,

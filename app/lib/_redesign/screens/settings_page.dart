@@ -1949,7 +1949,7 @@ class _RedesignAboutPage extends StatelessWidget {
 
             _AboutFeatureCard(
               icon: AppIcons.sms_outlined,
-              title: context.l10nText('SMS Stays On Device'),
+              title: context.l10nText('Data Stays On Device'),
               description: context.l10nText(
                 'For core transaction tracking, Totals reads and parses supported bank SMS messages locally on your device. Those SMS contents are not sent to our servers.',
               ),
@@ -1958,7 +1958,7 @@ class _RedesignAboutPage extends StatelessWidget {
               icon: AppIcons.cloud_download,
               title: context.l10nText('Optional Online Features'),
               description: context.l10nText(
-                'Payment verification and remote config updates can connect to online services. Verification may transmit images, payment references, selected account numbers, and bank identifiers that you submit.',
+                'Your data stays on this device by default. Optional online features connect only when used. Payment verification sends only the images and transaction details you choose to submit; remote config only downloads app rules.',
               ),
             ),
             _AboutFeatureCard(

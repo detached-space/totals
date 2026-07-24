@@ -673,7 +673,7 @@ class DataExportImportService {
         await AccountOwnershipService.instance.reconcile();
       } catch (_) {
         // Import is already committed. Ownership repair is best-effort and
-        // will run again on SMS service initialization or account reparse.
+        // ambiguous rows remain available for a later account reparse.
       }
     } catch (e) {
       throw Exception('Failed to import data: $e');

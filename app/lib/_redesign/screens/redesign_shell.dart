@@ -29,12 +29,11 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
+import 'package:totals/services/account_ownership_service.dart';
 import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/account_reparse_result_service.dart';
 import 'package:totals/services/bank_detection_startup_service.dart';
 import 'package:totals/services/bank_config_service.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/shared_expense_notification_coordinator.dart';
@@ -54,6 +53,7 @@ import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 class RedesignShell extends StatefulWidget {
   const RedesignShell({super.key});
@@ -64,9 +64,6 @@ class RedesignShell extends StatefulWidget {
 
 class RedesignShellState extends State<RedesignShell>
     with WidgetsBindingObserver {
-  // Temporary kill switch for the automatic battery optimization prompt.
-  // Users can still request the exemption manually from notification settings.
-  static const bool _autoShowBatteryOptimizationPrompt = false;
   static const int _homeIndex = 0;
   static const int _moneyIndex = 1;
   static const int _budgetIndex = 2;
@@ -214,10 +211,7 @@ class RedesignShellState extends State<RedesignShell>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _checkNotificationPermissions();
-      await _initSmsPermissions();
-      unawaited(BankDetectionStartupService.runOnAppOpen());
-      if (mounted) _authenticateIfAvailable();
+      if (mounted) await _authenticateIfAvailable();
     });
   }
 
@@ -241,6 +235,9 @@ class RedesignShellState extends State<RedesignShell>
     if (state == AppLifecycleState.resumed) {
       unawaited(SmsConfigService().syncRemoteConfig());
       unawaited(SyncService.instance.requestDrain(reason: 'resume'));
+      if (_isAuthenticated && !_hasInitializedSmsPermissions) {
+        unawaited(_initSmsPermissions());
+      }
     }
 
     if (state == AppLifecycleState.resumed && _isAuthenticated) {
@@ -273,8 +270,14 @@ class RedesignShellState extends State<RedesignShell>
     _hasInitializedSmsPermissions = true;
 
     try {
+      final granted = await SmsPermissionPrompt.ensureGranted(context);
+      if (!granted) {
+        _hasInitializedSmsPermissions = false;
+        return;
+      }
       await _smsService.init();
     } catch (e) {
+      _hasInitializedSmsPermissions = false;
       if (kDebugMode) {
         print('debug: SMS permission init failed: $e');
       }
@@ -293,64 +296,17 @@ class RedesignShellState extends State<RedesignShell>
     }
   }
 
-  static const String _batteryOptDismissedKey =
-      'battery_optimization_prompt_dismissed';
-
-  Future<void> _checkBatteryOptimization() async {
-    if (!_autoShowBatteryOptimizationPrompt) return;
-    if (kIsWeb) return;
-    if (defaultTargetPlatform != TargetPlatform.android) return;
-    if (!mounted) return;
-
-    try {
-      final status = await Permission.ignoreBatteryOptimizations.status;
-      if (status.isGranted) return;
-
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_batteryOptDismissedKey) == true) return;
-
-      if (!mounted) return;
-
-      final shouldRequest = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(ctx.l10nText('Keep transaction alerts active')),
-          content: Text(
-            ctx.l10nText(
-              'To make sure you get notified instantly when a transaction happens, Totals needs to be excluded from battery optimization. Without this, your phone may stop delivering notifications in the background.',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                prefs.setBool(_batteryOptDismissedKey, true);
-                Navigator.pop(ctx, false);
-              },
-              child: Text(ctx.l10nText('Not now')),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(ctx.l10nText('Allow')),
-            ),
-          ],
-        ),
-      );
-
-      if (shouldRequest == true) {
-        await Permission.ignoreBatteryOptimizations.request();
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('debug: Battery optimization check failed: $e');
-      }
-    }
-  }
-
   void _onAuthSuccess() {
     if (!mounted) return;
     setState(() => _isAuthenticated = true);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      if (!mounted || !_isAuthenticated) return;
+      await _initSmsPermissions();
+      if (!mounted || !_isAuthenticated) return;
+      await _checkNotificationPermissions();
+      if (!mounted || !_isAuthenticated) return;
+      unawaited(BankDetectionStartupService.runOnAppOpen());
+
       final pendingWidgetLaunchTarget = _pendingWidgetLaunchTarget;
       if (pendingWidgetLaunchTarget != null) {
         _pendingWidgetLaunchTarget = null;
@@ -376,7 +332,6 @@ class RedesignShellState extends State<RedesignShell>
       }
 
       if (mounted) {
-        unawaited(_checkBatteryOptimization());
         unawaited(AppUpdateService.instance.checkOnLaunch(context));
       }
     });
@@ -864,7 +819,9 @@ class RedesignShellState extends State<RedesignShell>
     }
 
     final selected = profiles.where((p) => p.id == selectedProfileId).toList();
-    await _profileRepo.setActiveProfile(selectedProfileId);
+    await AccountOwnershipService.instance.switchActiveProfile(
+      selectedProfileId,
+    );
     if (!mounted) return;
 
     final txProvider = Provider.of<TransactionProvider>(context, listen: false);
