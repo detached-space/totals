@@ -125,9 +125,7 @@ class SmsPermissionPrompt {
         final shouldContinue = await showDialog<bool>(
               context: context,
               barrierDismissible: false,
-              builder: (_) => const SmsPermissionPrivacyDialog(
-                smsAlreadyGranted: true,
-              ),
+              builder: (_) => const ExistingSmsBatteryOptimizationDialog(),
             ) ??
             false;
         if (!shouldContinue) {
@@ -150,12 +148,10 @@ class SmsPermissionPrompt {
 
 class SmsPermissionPrivacyDialog extends StatelessWidget {
   final bool requiresSettings;
-  final bool smsAlreadyGranted;
 
   const SmsPermissionPrivacyDialog({
     super.key,
     this.requiresSettings = false,
-    this.smsAlreadyGranted = false,
   });
 
   @override
@@ -200,9 +196,7 @@ class SmsPermissionPrivacyDialog extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               context.l10nText(
-                smsAlreadyGranted
-                    ? 'SMS access is already enabled. You can continue without changing the battery setting.'
-                    : 'You can continue without SMS access and add transactions manually.',
+                'You can continue without SMS access and add transactions manually.',
               ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -220,13 +214,57 @@ class SmsPermissionPrivacyDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context, true),
           child: Text(
             context.l10nText(
-              requiresSettings
-                  ? 'Open settings'
-                  : smsAlreadyGranted
-                      ? 'Continue'
-                      : 'Allow',
+              requiresSettings ? 'Open settings' : 'Allow',
             ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class ExistingSmsBatteryOptimizationDialog extends StatelessWidget {
+  const ExistingSmsBatteryOptimizationDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Text(context.l10nText('Keep Totals Running Reliably')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10nText(
+              'SMS access is already enabled. Android battery optimization can still prevent Totals from processing new bank messages and delivering transaction alerts while the app is not open.',
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            context.l10nText(
+              'Allow Totals to be excluded from battery optimization for more reliable background transaction tracking.',
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            context.l10nText(
+              'This does not change how your data is handled. Your transaction data stays on your device unless you enable an optional online feature.',
+            ),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text(context.l10nText('Not now')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(context.l10nText('Continue')),
         ),
       ],
     );
