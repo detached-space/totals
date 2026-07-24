@@ -24,6 +24,8 @@ import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/theme/app_font_option.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
+import 'package:totals/widgets/data_export_options_sheet.dart';
+import 'package:totals/widgets/data_import_options_sheet.dart';
 
 // ── Support links ───────────────────────────────────────────────────────────
 Future<void> _openSupportLink() async {
@@ -849,6 +851,25 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
   Future<void> _exportData() async {
     if (!mounted) return;
 
+    late final DataExportOptions exportOptions;
+    try {
+      final banks = await _exportImportService.getExportBankSummaries();
+      if (!mounted) return;
+      final selectedOptions = await showDataExportOptionsSheet(
+        context: context,
+        banks: banks,
+      );
+      if (selectedOptions == null || !mounted) return;
+      exportOptions = selectedOptions;
+    } catch (e) {
+      if (mounted) {
+        _showErrorSnack(
+          '${context.l10nTextRead('Could not prepare export')}: $e',
+        );
+      }
+      return;
+    }
+
     final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -888,7 +909,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
 
     setState(() => _isExporting = true);
     try {
-      final jsonData = await _exportImportService.exportAllData();
+      final jsonData = await _exportImportService.exportAllData(
+        options: exportOptions,
+      );
       final timestamp =
           DateTime.now().toIso8601String().replaceAll(':', '-').split('.')[0];
       final fileName = 'totals_export_$timestamp.json';
@@ -1035,48 +1058,18 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
         final jsonData = await file.readAsString();
 
         if (!mounted) return;
-        final confirmed = await showDialog<bool>(
+        final summary =
+            DataExportImportService.inspectImportPayload(jsonData);
+        final importOptions = await showDataImportOptionsSheet(
           context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.cardColor(ctx),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              ctx.l10nText('Import Data'),
-              style: TextStyle(color: AppColors.textPrimary(ctx)),
-            ),
-            content: Text(
-              ctx.l10nText(
-                'This will add the imported data to your existing data. Duplicates will be skipped.',
-              ),
-              style: TextStyle(color: AppColors.textSecondary(ctx)),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(
-                  ctx.l10nText('Cancel'),
-                  style: TextStyle(color: AppColors.textSecondary(ctx)),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryDark,
-                  foregroundColor: AppColors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(ctx.l10nText('Import')),
-              ),
-            ],
-          ),
+          summary: summary,
         );
 
-        if (confirmed == true && mounted) {
-          await _exportImportService.importAllData(jsonData);
+        if (importOptions != null && mounted) {
+          await _exportImportService.importAllData(
+            jsonData,
+            options: importOptions,
+          );
           if (mounted) {
             Provider.of<TransactionProvider>(context, listen: false).loadData();
             _showSnack(context.l10nTextRead('Data imported successfully'));

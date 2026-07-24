@@ -1936,6 +1936,9 @@ class AppLocalizations {
         "አካውንትዎን በመጨመር ላይ ነን። መተግበሪያውን መዝጋት ይችላሉ፣ ሲጠናቀቅ እናሳውቅዎታለን።",
     "Import past transactions": "ያለፉ ትራንዛክሽኖችን አስገባ",
     "Nothing saved for quick access": "ለፈጣን መዳረሻ የተቀመጠ ነገር የለም",
+    "Quick Access accounts": "የፈጣን መዳረሻ አካውንቶች",
+    "Includes saved accounts belonging to other people.":
+        "የሌሎች ሰዎች የተቀመጡ አካውንቶችን ያካትታል።",
     "Do nothing": "ምንም አታድርግ",
     "Clear Data": "ዳታ አጽዳ",
     "Select what you want to clear. This action cannot be undone.":

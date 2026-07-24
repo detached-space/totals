@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart' hide Transaction;
+import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/auto_categorization.dart';
@@ -30,6 +31,159 @@ bool _isLoanDebtManagedCategory(Category category) {
   return isLoanDebtCategory(category) || isRepaymentCategory(category);
 }
 
+class DataExportOptions {
+  final Set<int>? bankIds;
+  final DateTime? transactionStart;
+  final DateTime? transactionEnd;
+  final bool includeBudgets;
+  final bool includeAutoCategorization;
+  final bool includeFailedParses;
+  final bool includeSmsPatterns;
+  final bool includeLoansAndDebts;
+  final bool includeQuickAccessAccounts;
+
+  const DataExportOptions({
+    this.bankIds,
+    this.transactionStart,
+    this.transactionEnd,
+    this.includeBudgets = true,
+    this.includeAutoCategorization = true,
+    this.includeFailedParses = true,
+    this.includeSmsPatterns = true,
+    this.includeLoansAndDebts = true,
+    this.includeQuickAccessAccounts = true,
+  });
+
+  bool get isFullBackup =>
+      bankIds == null &&
+      transactionStart == null &&
+      transactionEnd == null &&
+      includeBudgets &&
+      includeAutoCategorization &&
+      includeFailedParses &&
+      includeSmsPatterns &&
+      includeLoansAndDebts &&
+      includeQuickAccessAccounts;
+
+  bool get hasTransactionFilter =>
+      bankIds != null || transactionStart != null || transactionEnd != null;
+
+  bool includesBank(int? bankId) {
+    final selectedBankIds = bankIds;
+    if (selectedBankIds == null) return true;
+    return bankId != null && selectedBankIds.contains(bankId);
+  }
+
+  bool includesTransaction(Transaction transaction) {
+    if (!includesBank(transaction.bankId)) return false;
+    if (transactionStart == null && transactionEnd == null) return true;
+
+    final timestamp = DateTime.tryParse(transaction.time?.trim() ?? '');
+    // Preserve legacy rows whose timestamps cannot be interpreted. Dropping
+    // them silently would make a date-filtered backup unsafe as a backup.
+    if (timestamp == null) return true;
+    if (transactionStart != null && timestamp.isBefore(transactionStart!)) {
+      return false;
+    }
+    if (transactionEnd != null && timestamp.isAfter(transactionEnd!)) {
+      return false;
+    }
+    return true;
+  }
+
+  Map<String, dynamic> toJson() {
+    final selectedBanks = bankIds;
+    final selectedBankIds =
+        selectedBanks == null ? null : (selectedBanks.toList()..sort());
+    return {
+      'scope': isFullBackup ? 'full' : 'custom',
+      if (selectedBankIds != null) 'bankIds': selectedBankIds,
+      if (transactionStart != null)
+        'transactionStart': transactionStart!.toIso8601String(),
+      if (transactionEnd != null)
+        'transactionEnd': transactionEnd!.toIso8601String(),
+      'includeBudgets': includeBudgets,
+      'includeAutoCategorization': includeAutoCategorization,
+      'includeFailedParses': includeFailedParses,
+      'includeSmsPatterns': includeSmsPatterns,
+      'includeLoansAndDebts': includeLoansAndDebts,
+      'includeQuickAccessAccounts': includeQuickAccessAccounts,
+    };
+  }
+}
+
+class ExportBankSummary {
+  final int id;
+  final String name;
+  final String shortName;
+  final int accountCount;
+  final int transactionCount;
+
+  const ExportBankSummary({
+    required this.id,
+    required this.name,
+    required this.shortName,
+    required this.accountCount,
+    required this.transactionCount,
+  });
+}
+
+class DataImportOptions {
+  final Set<int>? bankIds;
+  final bool includeBudgets;
+  final bool includeAutoCategorization;
+  final bool includeFailedParses;
+  final bool includeSmsPatterns;
+  final bool includeLoansAndDebts;
+
+  const DataImportOptions({
+    this.bankIds,
+    this.includeBudgets = true,
+    this.includeAutoCategorization = true,
+    this.includeFailedParses = true,
+    this.includeSmsPatterns = true,
+    this.includeLoansAndDebts = true,
+  });
+
+  bool get isFullImport =>
+      bankIds == null &&
+      includeBudgets &&
+      includeAutoCategorization &&
+      includeFailedParses &&
+      includeSmsPatterns &&
+      includeLoansAndDebts;
+
+  bool includesBank(int? bankId) {
+    final selectedBankIds = bankIds;
+    if (selectedBankIds == null) return true;
+    return bankId != null && selectedBankIds.contains(bankId);
+  }
+}
+
+class BackupImportSummary {
+  final int schemaVersion;
+  final DateTime? exportDate;
+  final bool isFilteredExport;
+  final List<ExportBankSummary> banks;
+  final int budgetCount;
+  final int autoCategorizationRuleCount;
+  final int failedParseCount;
+  final int smsPatternCount;
+  final int loanDebtEntryCount;
+
+  const BackupImportSummary({
+    required this.schemaVersion,
+    required this.exportDate,
+    required this.isFilteredExport,
+    required this.banks,
+    required this.budgetCount,
+    required this.autoCategorizationRuleCount,
+    required this.failedParseCount,
+    required this.smsPatternCount,
+    required this.loanDebtEntryCount,
+  });
+}
+
 class DataExportImportService {
   static const int currentSchemaVersion = 9;
   static const int minimumSchemaVersion = 1;
@@ -45,8 +199,82 @@ class DataExportImportService {
       AutoCategorizationService.instance;
   final SmsConfigService _smsConfigService = SmsConfigService();
 
-  /// Export all data to JSON
-  Future<String> exportAllData() async {
+  static String _bankSummaryLabel(
+    int bankId,
+    String? preferredName,
+    String? alternateName,
+  ) {
+    if (bankId == CashConstants.bankId) return CashConstants.displayName;
+
+    final preferred = preferredName?.trim();
+    if (preferred != null && preferred.isNotEmpty) return preferred;
+
+    final alternate = alternateName?.trim();
+    if (alternate != null && alternate.isNotEmpty) return alternate;
+
+    return 'Bank $bankId';
+  }
+
+  Future<List<ExportBankSummary>> getExportBankSummaries() async {
+    final banks = await _getBanksFromDb();
+    final accounts = await _accountRepo.getAccounts();
+    final transactions = await _transactionRepo.getTransactions();
+    final userAccounts = await _userAccountRepo.getUserAccounts();
+
+    final accountKeys = <String>{};
+    final accountCounts = <int, int>{};
+    for (final account in accounts) {
+      final key = '${account.bank}::${account.accountNumber.trim()}';
+      if (!accountKeys.add(key)) continue;
+      accountCounts.update(account.bank, (count) => count + 1,
+          ifAbsent: () => 1);
+    }
+    for (final account in userAccounts) {
+      final key = '${account.bankId}::${account.accountNumber.trim()}';
+      if (!accountKeys.add(key)) continue;
+      accountCounts.update(account.bankId, (count) => count + 1,
+          ifAbsent: () => 1);
+    }
+
+    final transactionCounts = <int, int>{};
+    for (final transaction in transactions) {
+      final bankId = transaction.bankId;
+      if (bankId == null) continue;
+      transactionCounts.update(bankId, (count) => count + 1, ifAbsent: () => 1);
+    }
+
+    final banksById = {for (final bank in banks) bank.id: bank};
+    final ids = <int>{
+      ...accountCounts.keys,
+      ...transactionCounts.keys,
+    }.toList()
+      ..sort((a, b) {
+        final aBank = banksById[a];
+        final bBank = banksById[b];
+        final aName = _bankSummaryLabel(a, aBank?.name, aBank?.shortName)
+            .toLowerCase();
+        final bName = _bankSummaryLabel(b, bBank?.name, bBank?.shortName)
+            .toLowerCase();
+        final byName = aName.compareTo(bName);
+        return byName != 0 ? byName : a.compareTo(b);
+      });
+
+    return ids.map((id) {
+      final bank = banksById[id];
+      return ExportBankSummary(
+        id: id,
+        name: _bankSummaryLabel(id, bank?.name, bank?.shortName),
+        shortName: _bankSummaryLabel(id, bank?.shortName, bank?.name),
+        accountCount: accountCounts[id] ?? 0,
+        transactionCount: transactionCounts[id] ?? 0,
+      );
+    }).toList(growable: false);
+  }
+
+  /// Export data to JSON. Defaults remain a full backup for compatibility.
+  Future<String> exportAllData({
+    DataExportOptions options = const DataExportOptions(),
+  }) async {
     try {
       final accounts = await _accountRepo.getAccounts();
       final banks = await _getBanksFromDb();
@@ -63,31 +291,79 @@ class DataExportImportService {
       final loanDebtEntries = await _getLoanDebtEntriesFromDb();
       final loanDebtRepayments = await _getLoanDebtRepaymentsFromDb();
 
+      final scopedAccounts =
+          accounts.where((account) => options.includesBank(account.bank));
+      final scopedUserAccounts =
+          userAccounts.where((account) => options.includesBank(account.bankId));
+      final scopedTransactions =
+          transactions.where(options.includesTransaction).toList();
+      final scopedTransactionReferences = scopedTransactions
+          .map((transaction) => transaction.reference)
+          .toSet();
+      final scopedLoanDebtEntries = !options.includeLoansAndDebts
+          ? const <LoanDebtEntry>[]
+          : !options.hasTransactionFilter
+              ? loanDebtEntries
+              : loanDebtEntries.where(
+                  (entry) => scopedTransactionReferences.contains(
+                    entry.transactionReference,
+                  ),
+                );
+      final scopedLoanDebtRepayments = !options.includeLoansAndDebts
+          ? const <LoanDebtRepayment>[]
+          : !options.hasTransactionFilter
+              ? loanDebtRepayments
+              : loanDebtRepayments.where(
+                  (repayment) =>
+                      scopedTransactionReferences.contains(
+                        repayment.repaymentTransactionReference,
+                      ) &&
+                      scopedTransactionReferences.contains(
+                        repayment.loanDebtTransactionReference,
+                      ),
+                );
+
       final exportData = {
         'schemaVersion': currentSchemaVersion,
         'version': '1.0',
         'exportDate': DateTime.now().toIso8601String(),
-        'accounts': accounts
+        if (!options.isFullBackup) 'exportOptions': options.toJson(),
+        'accounts': scopedAccounts
             .map((account) => _portableAccountData(account.toJson()))
             .toList(),
+        // Keep the complete bank configuration even for a filtered export.
+        // Older Totals versions replace their bank table during import.
         'banks': banks.map((b) => b.toJson()).toList(),
-        'budgets': budgets.map((b) => b.toJson()).toList(),
+        'budgets': options.includeBudgets
+            ? budgets.map((b) => b.toJson()).toList()
+            : [],
+        // Categories are dependencies of transactions, budgets and rules.
         'categories': categories.map((c) => c.toJson()).toList(),
-        'userAccounts': userAccounts.map((a) => a.toJson()).toList(),
-        'transactions': transactions
+        'userAccounts': options.includeQuickAccessAccounts
+            ? scopedUserAccounts.map((a) => a.toJson()).toList()
+            : [],
+        'transactions': scopedTransactions
             .map(
                 (transaction) => _portableTransactionData(transaction.toJson()))
             .toList(),
-        'failedParses': failedParses.map((f) => f.toJson()).toList(),
-        'autoCategoryRules':
-            autoCategoryRules.map((rule) => rule.toJson()).toList(),
-        'autoCategoryPromptDismissals': autoCategoryPromptDismissals
-            .map((dismissal) => dismissal.toJson())
-            .toList(),
-        'smsPatterns': smsPatterns.map((p) => p.toJson()).toList(),
-        'loanDebtEntries': loanDebtEntries.map((e) => e.toJson()).toList(),
+        'failedParses': options.includeFailedParses
+            ? failedParses.map((f) => f.toJson()).toList()
+            : [],
+        'autoCategoryRules': options.includeAutoCategorization
+            ? autoCategoryRules.map((rule) => rule.toJson()).toList()
+            : [],
+        'autoCategoryPromptDismissals': options.includeAutoCategorization
+            ? autoCategoryPromptDismissals
+                .map((dismissal) => dismissal.toJson())
+                .toList()
+            : [],
+        'smsPatterns': options.includeSmsPatterns
+            ? smsPatterns.map((p) => p.toJson()).toList()
+            : [],
+        'loanDebtEntries':
+            scopedLoanDebtEntries.map((e) => e.toJson()).toList(),
         'loanDebtRepayments':
-            loanDebtRepayments.map((e) => e.toJson()).toList(),
+            scopedLoanDebtRepayments.map((e) => e.toJson()).toList(),
       };
 
       return jsonEncode(exportData);
@@ -96,10 +372,15 @@ class DataExportImportService {
     }
   }
 
-  /// Import all data from JSON (appends to existing data)
-  Future<void> importAllData(String jsonData) async {
+  /// Import data from JSON (appends to existing data).
+  ///
+  /// [options] defaults to the historical import-everything behavior.
+  Future<void> importAllData(
+    String jsonData, {
+    DataImportOptions options = const DataImportOptions(),
+  }) async {
     try {
-      final data = normalizeImportPayload(jsonData);
+      final data = prepareImportPayload(jsonData, options: options);
       final db = await DatabaseHelper.instance.database;
 
       final categoriesRaw = _asMapList(data['categories']);
@@ -703,6 +984,11 @@ class DataExportImportService {
       'schemaVersion': schemaVersion,
       'version': raw['version'],
       'exportDate': raw['exportDate'],
+      'exportOptions': raw['exportOptions'] is Map
+          ? Map<String, dynamic>.from(
+              (raw['exportOptions'] as Map).cast<String, dynamic>(),
+            )
+          : null,
       'accounts': _readList(raw, 'accounts')
           .map(_portableAccountEntry)
           .toList(growable: false),
@@ -753,6 +1039,167 @@ class DataExportImportService {
         aliases: const ['sms_patterns'],
       ),
     };
+  }
+
+  static BackupImportSummary inspectImportPayload(String jsonData) {
+    final data = normalizeImportPayload(jsonData);
+    final bankDefinitions = _asMapList(data['banks']);
+    final bankNames = <int, ({String name, String shortName})>{};
+    for (final bank in bankDefinitions) {
+      final id = _asInt(bank['id']);
+      if (id == null) continue;
+      final name = bank['name']?.toString().trim();
+      final shortName = bank['shortName']?.toString().trim();
+      bankNames[id] = (
+        name: _bankSummaryLabel(id, name, shortName),
+        shortName: _bankSummaryLabel(id, shortName, name),
+      );
+    }
+
+    final accountKeys = <String>{};
+    final accountCounts = <int, int>{};
+    for (final account in _asMapList(data['accounts'])) {
+      final bankId = _asInt(account['bank']);
+      if (bankId == null) continue;
+      final accountNumber = account['accountNumber']?.toString().trim() ?? '';
+      if (!accountKeys.add('$bankId::$accountNumber')) continue;
+      accountCounts.update(bankId, (count) => count + 1, ifAbsent: () => 1);
+    }
+    for (final account in _asMapList(data['userAccounts'])) {
+      final bankId = _asInt(account['bankId']);
+      if (bankId == null) continue;
+      final accountNumber = account['accountNumber']?.toString().trim() ?? '';
+      if (!accountKeys.add('$bankId::$accountNumber')) continue;
+      accountCounts.update(bankId, (count) => count + 1, ifAbsent: () => 1);
+    }
+
+    final transactionCounts = <int, int>{};
+    for (final transaction in _asMapList(data['transactions'])) {
+      final bankId = _asInt(transaction['bankId']);
+      if (bankId == null) continue;
+      transactionCounts.update(bankId, (count) => count + 1, ifAbsent: () => 1);
+    }
+
+    final ids = <int>{
+      ...accountCounts.keys,
+      ...transactionCounts.keys,
+    }.toList()
+      ..sort((a, b) {
+        final aName = _bankSummaryLabel(
+          a,
+          bankNames[a]?.name,
+          bankNames[a]?.shortName,
+        ).toLowerCase();
+        final bName = _bankSummaryLabel(
+          b,
+          bankNames[b]?.name,
+          bankNames[b]?.shortName,
+        ).toLowerCase();
+        final byName = aName.compareTo(bName);
+        return byName != 0 ? byName : a.compareTo(b);
+      });
+
+    final exportOptions = data['exportOptions'];
+    final scope = exportOptions is Map ? exportOptions['scope'] : null;
+    return BackupImportSummary(
+      schemaVersion: _asInt(data['schemaVersion']) ?? minimumSchemaVersion,
+      exportDate: DateTime.tryParse(data['exportDate']?.toString() ?? ''),
+      isFilteredExport: scope == 'custom',
+      banks: ids
+          .map(
+            (id) => ExportBankSummary(
+              id: id,
+              name: _bankSummaryLabel(
+                id,
+                bankNames[id]?.name,
+                bankNames[id]?.shortName,
+              ),
+              shortName: _bankSummaryLabel(
+                id,
+                bankNames[id]?.shortName,
+                bankNames[id]?.name,
+              ),
+              accountCount: accountCounts[id] ?? 0,
+              transactionCount: transactionCounts[id] ?? 0,
+            ),
+          )
+          .toList(growable: false),
+      budgetCount: _asMapList(data['budgets']).length,
+      autoCategorizationRuleCount: _asMapList(data['autoCategoryRules']).length,
+      failedParseCount: _asMapList(data['failedParses']).length,
+      smsPatternCount: _asMapList(data['smsPatterns']).length,
+      loanDebtEntryCount: _asMapList(data['loanDebtEntries']).length,
+    );
+  }
+
+  static Map<String, dynamic> prepareImportPayload(
+    String jsonData, {
+    DataImportOptions options = const DataImportOptions(),
+  }) {
+    return _filterImportPayload(normalizeImportPayload(jsonData), options);
+  }
+
+  static Map<String, dynamic> _filterImportPayload(
+    Map<String, dynamic> data,
+    DataImportOptions options,
+  ) {
+    if (options.isFullImport) return data;
+
+    final filtered = Map<String, dynamic>.from(data);
+    final transactions = _asMapList(data['transactions'])
+        .where((row) => options.includesBank(_asInt(row['bankId'])))
+        .toList(growable: false);
+    final transactionReferences = transactions
+        .map((row) => row['reference']?.toString().trim())
+        .whereType<String>()
+        .where((reference) => reference.isNotEmpty)
+        .toSet();
+
+    filtered['accounts'] = _asMapList(data['accounts'])
+        .where((row) => options.includesBank(_asInt(row['bank'])))
+        .toList(growable: false);
+    filtered['userAccounts'] = _asMapList(data['userAccounts'])
+        .where((row) => options.includesBank(_asInt(row['bankId'])))
+        .toList(growable: false);
+    filtered['transactions'] = transactions;
+    if (!options.includeBudgets) {
+      filtered['budgets'] = const <dynamic>[];
+    }
+    if (!options.includeAutoCategorization) {
+      filtered['autoCategoryRules'] = const <dynamic>[];
+      filtered['autoCategoryPromptDismissals'] = const <dynamic>[];
+      filtered['receiverCategoryMappings'] = const <dynamic>[];
+    }
+    if (!options.includeFailedParses) {
+      filtered['failedParses'] = const <dynamic>[];
+    }
+    if (!options.includeSmsPatterns) {
+      filtered['smsPatterns'] = const <dynamic>[];
+    }
+    if (!options.includeLoansAndDebts) {
+      filtered['loanDebtEntries'] = const <dynamic>[];
+      filtered['loanDebtRepayments'] = const <dynamic>[];
+    } else if (options.bankIds != null) {
+      filtered['loanDebtEntries'] = _asMapList(data['loanDebtEntries'])
+          .where(
+            (row) => transactionReferences.contains(
+              row['transactionReference']?.toString().trim(),
+            ),
+          )
+          .toList(growable: false);
+      filtered['loanDebtRepayments'] = _asMapList(data['loanDebtRepayments'])
+          .where(
+            (row) =>
+                transactionReferences.contains(
+                  row['repaymentTransactionReference']?.toString().trim(),
+                ) &&
+                transactionReferences.contains(
+                  row['loanDebtTransactionReference']?.toString().trim(),
+                ),
+          )
+          .toList(growable: false);
+    }
+    return filtered;
   }
 
   static int _resolveSchemaVersion(Map<String, dynamic> data) {

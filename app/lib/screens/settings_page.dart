@@ -19,6 +19,8 @@ import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/theme/app_font_option.dart';
+import 'package:totals/widgets/data_export_options_sheet.dart';
+import 'package:totals/widgets/data_import_options_sheet.dart';
 
 Future<void> _openSupportLink() async {
   final uri = Uri.parse('https://www.gurshaplus.com/detached');
@@ -184,6 +186,25 @@ class _SettingsPageState extends State<SettingsPage>
   Future<void> _exportData() async {
     if (!mounted) return;
 
+    late final DataExportOptions exportOptions;
+    try {
+      final banks = await _exportImportService.getExportBankSummaries();
+      if (!mounted) return;
+      final selectedOptions = await showDataExportOptionsSheet(
+        context: context,
+        banks: banks,
+      );
+      if (selectedOptions == null || !mounted) return;
+      exportOptions = selectedOptions;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not prepare export: $e')),
+        );
+      }
+      return;
+    }
+
     // Show dialog to choose between save and share - always show this dialog
     final action = await showDialog<String>(
       context: context,
@@ -212,7 +233,9 @@ class _SettingsPageState extends State<SettingsPage>
 
     setState(() => _isExporting = true);
     try {
-      final jsonData = await _exportImportService.exportAllData();
+      final jsonData = await _exportImportService.exportAllData(
+        options: exportOptions,
+      );
       final timestamp =
           DateTime.now().toIso8601String().replaceAll(':', '-').split('.')[0];
       final fileName = 'totals_export_$timestamp.json';
@@ -524,39 +547,19 @@ class _SettingsPageState extends State<SettingsPage>
         final file = File(result.files.single.path!);
         final jsonData = await file.readAsString();
 
-        // Show confirmation dialog
-        final confirmed = await showDialog<bool>(
+        if (!mounted) return;
+        final summary =
+            DataExportImportService.inspectImportPayload(jsonData);
+        final importOptions = await showDataImportOptionsSheet(
           context: context,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: const Text('Import Data'),
-            content: const Text(
-              'This will add the imported data to your existing data. Duplicates will be skipped.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text('Import'),
-              ),
-            ],
-          ),
+          summary: summary,
         );
 
-        if (confirmed == true) {
-          await _exportImportService.importAllData(jsonData);
+        if (importOptions != null) {
+          await _exportImportService.importAllData(
+            jsonData,
+            options: importOptions,
+          );
 
           // Reload data in provider
           if (mounted) {
