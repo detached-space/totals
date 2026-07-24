@@ -49,6 +49,11 @@ class UserAccountRepository {
     );
   }
 
+  Future<void> clearAll() async {
+    final db = await DatabaseHelper.instance.database;
+    await db.delete('user_accounts');
+  }
+
   Future<bool> userAccountExists(String accountNumber, int bankId) async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.query(

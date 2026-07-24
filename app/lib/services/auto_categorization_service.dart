@@ -317,6 +317,16 @@ class AutoCategorizationService {
     );
   }
 
+  Future<void> clearAll() async {
+    final db = await DatabaseHelper.instance.database;
+    await db.transaction((txn) async {
+      await txn.delete('auto_category_rules');
+      await txn.delete('auto_category_prompt_dismissals');
+      // Keep the legacy fallback in sync with the current rule store.
+      await txn.delete('receiver_category_mappings');
+    });
+  }
+
   Future<void> deleteRulesForCategory(int categoryId) async {
     final db = await DatabaseHelper.instance.database;
     await db.delete(

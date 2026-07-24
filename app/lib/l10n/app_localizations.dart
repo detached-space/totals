@@ -1946,8 +1946,16 @@ class AppLocalizations {
     "Transactions & Accounts": "ትራንዛክሽኖች እና አካውንቶች",
     "All transaction history and bank accounts":
         "ሁሉም የትራንዛክሽን ታሪክ እና የባንክ አካውንቶች",
+    "Saved accounts belonging to other people":
+        "የሌሎች ሰዎች የተቀመጡ አካውንቶች",
     "Budgets": "በጀቶች",
     "All budget rules and limits": "ሁሉም የበጀት ህጎች እና ገደቦች",
+    "Auto-categorization rules": "የራስ-ሰር ምደባ ህጎች",
+    "Learned rules and dismissed suggestions":
+        "የተማሩ ህጎች እና የተሰረዙ ጥቆማዎች",
+    "Loans and debts": "ብድሮች እና እዳዎች",
+    "Loan, debt, and repayment tracking":
+        "የብድር፣ የእዳ እና የክፍያ ክትትል",
     "Failed Parses": "ያልተሳኩ ትንታኔዎች",
     "Failed SMS parsing records": "ያልተሳኩ የኤስኤምኤስ ትንታኔ መዝገቦች",
     "Please select at least one option": "እባክዎ ቢያንስ አንድ አማራጭ ይምረጡ",
