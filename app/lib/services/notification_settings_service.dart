@@ -134,7 +134,7 @@ class NotificationSettingsService {
 
   Future<bool> isWeeklySummaryEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_kWeeklyEnabled) ?? false;
+    return prefs.getBool(_kWeeklyEnabled) ?? true;
   }
 
   Future<void> setWeeklySummaryEnabled(bool enabled) async {

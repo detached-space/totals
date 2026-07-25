@@ -1,9 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:workmanager/workmanager.dart';
-import 'package:totals/background/daily_spending_worker.dart';
 import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_settings_service.dart';
+
+const String telegramBackupCheckTask = 'telegramBackupCheck';
+const String telegramBackupCheckUniqueName = 'telegramBackupCheckUnique';
+const String telegramBackupAfterSummaryUniqueName =
+    'telegramBackupAfterSummaryUnique';
 
 class TelegramBackupScheduler {
   TelegramBackupScheduler._();
@@ -23,6 +27,19 @@ class TelegramBackupScheduler {
   static const ExistingPeriodicWorkPolicy existingWorkPolicy =
       ExistingPeriodicWorkPolicy.update;
 
+  @visibleForTesting
+  static const ExistingWorkPolicy summaryTriggerExistingWorkPolicy =
+      ExistingWorkPolicy.keep;
+
+  @visibleForTesting
+  static const Duration summaryTriggerBackoff = Duration(minutes: 1);
+
+  @visibleForTesting
+  static const Map<String, dynamic> summaryTriggerInputData = <String, dynamic>{
+    'trigger': 'summary',
+    'skipSmsCatchup': true,
+  };
+
   static Future<void> sync() async {
     if (kIsWeb) return;
     try {
@@ -38,6 +55,9 @@ class TelegramBackupScheduler {
       if (!shouldSchedule) {
         await Workmanager().cancelByUniqueName(
           telegramBackupCheckUniqueName,
+        );
+        await Workmanager().cancelByUniqueName(
+          telegramBackupAfterSummaryUniqueName,
         );
         return;
       }
@@ -57,6 +77,34 @@ class TelegramBackupScheduler {
       if (kDebugMode) {
         debugPrint(
           'debug: Failed to sync Telegram backup schedule: $error',
+        );
+      }
+    }
+  }
+
+  /// Requests a due backup immediately after a spending summary is delivered.
+  ///
+  /// This one-off task shares the periodic worker's durable due check and
+  /// device lock, so overlapping periodic and summary-triggered runs cannot
+  /// upload duplicate backups. A connected-network constraint lets the
+  /// summary notification remain independent of internet availability.
+  static Future<void> enqueueAfterSummary() async {
+    if (kIsWeb) return;
+    try {
+      await Workmanager().registerOneOffTask(
+        telegramBackupAfterSummaryUniqueName,
+        telegramBackupCheckTask,
+        inputData: summaryTriggerInputData,
+        existingWorkPolicy: summaryTriggerExistingWorkPolicy,
+        constraints: Constraints(networkType: requiredNetworkType),
+        backoffPolicy: BackoffPolicy.exponential,
+        backoffPolicyDelay: summaryTriggerBackoff,
+        outOfQuotaPolicy: OutOfQuotaPolicy.runAsNonExpeditedWorkRequest,
+      );
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          'debug: Failed to request Telegram backup after summary: $error',
         );
       }
     }

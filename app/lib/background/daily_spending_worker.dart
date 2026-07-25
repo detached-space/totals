@@ -13,6 +13,7 @@ import 'package:totals/services/widget_service.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_settings_service.dart';
 import 'package:totals/services/widget_refresh_state_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_service.dart';
 
 const String dailySpendingSummaryTask = 'dailySpendingSummary';
@@ -27,9 +28,6 @@ const String dataSyncDrainTask = 'dataSyncDrain';
 const String dataSyncDrainUniqueName = 'dataSyncDrainUnique';
 const String dataSyncImmediateDrainTask = 'dataSyncImmediateDrain';
 const String dataSyncImmediateDrainUniqueName = 'dataSyncImmediateDrainUnique';
-const String telegramBackupCheckTask = 'telegramBackupCheck';
-const String telegramBackupCheckUniqueName = 'telegramBackupCheckUnique';
-
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
@@ -69,8 +67,17 @@ void callbackDispatcher() {
 
       if (task == telegramBackupCheckTask) {
         try {
-          await _syncMissedBankSmsBestEffort(SmsService());
+          final skipSmsCatchup = inputData?['skipSmsCatchup'] == true;
+          if (!skipSmsCatchup) {
+            await _syncMissedBankSmsBestEffort(SmsService());
+          }
           final result = await TelegramBackupService.instance.backupIfDue();
+          if (kDebugMode) {
+            final trigger = inputData?['trigger'] as String? ?? 'periodic';
+            debugPrint(
+              'debug: Telegram backup $trigger check: ${result.name}',
+            );
+          }
           return result != TelegramBackupAttemptResult.retry;
         } catch (error) {
           if (kDebugMode) {
@@ -92,6 +99,7 @@ void callbackDispatcher() {
 
       if (!_isAfterOrEqualTimeOfDay(now, scheduledTime)) return true;
 
+      var summaryDelivered = false;
       final dailyEnabled = await settings.isDailySummaryEnabled();
       if (dailyEnabled) {
         final lastDailySent = await settings.getDailySummaryLastSentAt();
@@ -103,6 +111,7 @@ void callbackDispatcher() {
           );
           if (shown) {
             await settings.setDailySummaryLastSentAt(now);
+            summaryDelivered = true;
           }
         }
       }
@@ -123,6 +132,7 @@ void callbackDispatcher() {
           );
           if (shown) {
             await settings.setWeeklySummaryLastSentAt(now);
+            summaryDelivered = true;
           }
         }
       }
@@ -143,8 +153,13 @@ void callbackDispatcher() {
           );
           if (shown) {
             await settings.setMonthlySummaryLastSentAt(now);
+            summaryDelivered = true;
           }
         }
+      }
+
+      if (summaryDelivered) {
+        await TelegramBackupScheduler.enqueueAfterSummary();
       }
 
       return true;
