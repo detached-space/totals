@@ -1626,7 +1626,6 @@ class _QuickCashActions extends StatelessWidget {
             label: 'Income',
             icon: AppIcons.download_rounded,
             color: AppColors.incomeSuccess,
-            filled: true,
             onTap: onIncomeTap,
           ),
         ),
@@ -1639,7 +1638,6 @@ class _QuickCashActionButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final bool filled;
   final VoidCallback onTap;
 
   const _QuickCashActionButton({
@@ -1647,19 +1645,14 @@ class _QuickCashActionButton extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.onTap,
-    this.filled = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = filled
-        ? color.withValues(alpha: AppColors.isDark(context) ? 0.14 : 0.09)
-        : AppColors.cardColor(context);
-    final borderColor = filled
-        ? color.withValues(alpha: AppColors.isDark(context) ? 0.42 : 0.28)
-        : AppColors.borderColor(context).withValues(
-            alpha: AppColors.isDark(context) ? 0.72 : 0.9,
-          );
+    final backgroundColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context).withValues(
+      alpha: AppColors.isDark(context) ? 0.72 : 0.9,
+    );
 
     return CustomPaint(
       foregroundPainter: _DottedRoundedBorderPainter(
@@ -1685,11 +1678,9 @@ class _QuickCashActionButton extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: filled
-                          ? color
-                          : AppColors.textPrimary(context).withValues(
-                              alpha: AppColors.isDark(context) ? 0.9 : 0.76,
-                            ),
+                      color: AppColors.textPrimary(context).withValues(
+                        alpha: AppColors.isDark(context) ? 0.9 : 0.76,
+                      ),
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
