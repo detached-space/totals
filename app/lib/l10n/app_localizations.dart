@@ -1179,7 +1179,22 @@ class AppLocalizations {
     "Track who owes whom from transactions.": "ከትራንዛክሽኖች ማን ለማን እንዳለበት ይከታተሉ።",
     "Current balances": "የአሁኑ ቀሪ ሂሳቦች",
     "Linked loans and debts": "የተገናኙ ብድሮች እና እዳዎች",
+    "Unlinked": "ያልተገናኙ",
     "Unlinked debts and loans": "ያልተገናኙ እዳዎች እና ብድሮች",
+    "No people yet": "እስካሁን ሰዎች የሉም",
+    "Assign a person to an unlinked loan or debt to see them here.":
+        "እዚህ ለማየት ያልተገናኘውን ብድር ወይም እዳ ከአንድ ሰው ጋር ያገናኙ።",
+    "No linked transactions yet": "እስካሁን የተገናኙ ትራንዛክሽኖች የሉም",
+    "linked transaction": "የተገናኘ ትራንዛክሽን",
+    "linked transactions": "የተገናኙ ትራንዛክሽኖች",
+    "Assign a person to an unlinked loan or debt to see it here.":
+        "እዚህ ለማየት ያልተገናኘውን ብድር ወይም እዳ ከአንድ ሰው ጋር ያገናኙ።",
+    "No unlinked transactions": "ያልተገናኙ ትራንዛክሽኖች የሉም",
+    "unlinked transaction": "ያልተገናኘ ትራንዛክሽን",
+    "unlinked transactions": "ያልተገናኙ ትራንዛክሽኖች",
+    "Every loan and debt has been assigned to a person.":
+        "እያንዳንዱ ብድር እና እዳ ለአንድ ሰው ተመድቧል።",
+    "Page": "ገጽ",
     "Change the filter or choose another person.":
         "ማጣሪያውን ይቀይሩ ወይም ሌላ ሰው ይምረጡ።",
     "Change the filter to see other unlinked debts and loans.":
