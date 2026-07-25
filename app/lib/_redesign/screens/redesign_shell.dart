@@ -63,7 +63,7 @@ class RedesignShell extends StatefulWidget {
 }
 
 class RedesignShellState extends State<RedesignShell>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const int _homeIndex = 0;
   static const int _moneyIndex = 1;
   static const int _budgetIndex = 2;
@@ -81,6 +81,8 @@ class RedesignShellState extends State<RedesignShell>
       ValueNotifier<bool>(false);
   final PageController _pageController =
       PageController(initialPage: _homeIndex);
+  late final AnimationController _directPageTransitionController;
+  int _directPageTransitionDirection = 1;
   DateTime? _lastProfileTabTapAt;
   int _currentIndex = _homeIndex;
   int? _activeProfileId;
@@ -109,6 +111,11 @@ class RedesignShellState extends State<RedesignShell>
   @override
   void initState() {
     super.initState();
+    _directPageTransitionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+      value: 1,
+    );
     WidgetsBinding.instance.addObserver(this);
     BackgroundRefreshSignalService.instance.ensureListening();
     // Data Sync: listen for outbox nudges from background isolates, react to
@@ -226,6 +233,7 @@ class RedesignShellState extends State<RedesignShell>
     unawaited(SharedExpenseNotificationCoordinator.instance.stop());
     _homeToolsMenuOpenNotifier.dispose();
     _sharedExpenseFabController.dispose();
+    _directPageTransitionController.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -488,14 +496,28 @@ class RedesignShellState extends State<RedesignShell>
     }
 
     final previousIndex = _currentIndex;
+    if (previousIndex == index) return;
+
     setState(() {
       _currentIndex = index;
     });
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
-    );
+
+    final pageDistance = (index - previousIndex).abs();
+    // A distant PageView animation exposes every tab in between. Keep the
+    // native slide for neighbors and transition distant destinations directly.
+    if (pageDistance == 1) {
+      _directPageTransitionController.value = 1;
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _directPageTransitionDirection = index > previousIndex ? 1 : -1;
+      _pageController.jumpToPage(index);
+      _directPageTransitionController.forward(from: 0);
+    }
+
     if (index == _sharedIndex && previousIndex != _sharedIndex) {
       _sharedExpenseNavigationController.refresh();
     }
@@ -986,36 +1008,59 @@ class RedesignShellState extends State<RedesignShell>
                   },
                   child: Scaffold(
                     extendBody: true,
-                    body: PageView(
-                      controller: _pageController,
-                      physics: const PageScrollPhysics(),
-                      onPageChanged: (index) {
-                        _homeToolsMenuOpenNotifier.value = false;
-                        if (_currentIndex == index || !mounted) return;
-                        setState(() {
-                          _currentIndex = index;
-                        });
-                        if (index == _sharedIndex) {
-                          _sharedExpenseNavigationController.refresh();
-                        }
-                      },
-                      children: [
-                        RedesignHomePage(
-                          toolsMenuOpenNotifier: _homeToolsMenuOpenNotifier,
-                        ),
-                        RedesignMoneyPage(key: _moneyPageKey),
-                        RedesignBudgetPage(key: _budgetPageKey),
-                        RedesignSharedExpensesPage(
-                          navigationController:
-                              _sharedExpenseNavigationController,
-                          fabController: _sharedExpenseFabController,
-                        ),
-                        RedesignSettingsPage(
-                          key: ValueKey(
-                            'settings-${_activeProfileId ?? 'none'}',
+                    body: AnimatedBuilder(
+                      animation: _directPageTransitionController,
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const PageScrollPhysics(),
+                        onPageChanged: (index) {
+                          _homeToolsMenuOpenNotifier.value = false;
+                          if (_currentIndex == index || !mounted) return;
+                          setState(() {
+                            _currentIndex = index;
+                          });
+                          if (index == _sharedIndex) {
+                            _sharedExpenseNavigationController.refresh();
+                          }
+                        },
+                        children: [
+                          RedesignHomePage(
+                            toolsMenuOpenNotifier: _homeToolsMenuOpenNotifier,
                           ),
-                        ),
-                      ],
+                          RedesignMoneyPage(key: _moneyPageKey),
+                          RedesignBudgetPage(key: _budgetPageKey),
+                          RedesignSharedExpensesPage(
+                            navigationController:
+                                _sharedExpenseNavigationController,
+                            fabController: _sharedExpenseFabController,
+                          ),
+                          RedesignSettingsPage(
+                            key: ValueKey(
+                              'settings-${_activeProfileId ?? 'none'}',
+                            ),
+                          ),
+                        ],
+                      ),
+                      builder: (context, child) {
+                        final progress = Curves.easeOutCubic.transform(
+                          _directPageTransitionController.value,
+                        );
+
+                        return ClipRect(
+                          child: FractionalTranslation(
+                            translation: Offset(
+                              _directPageTransitionDirection *
+                                  (1 - progress) *
+                                  0.12,
+                              0,
+                            ),
+                            child: Opacity(
+                              opacity: 0.88 + (0.12 * progress),
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     floatingActionButtonLocation:
                         FloatingActionButtonLocation.endFloat,
