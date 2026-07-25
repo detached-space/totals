@@ -5,16 +5,19 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
@@ -120,7 +123,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
-      !_currentCategories.any(_isLoanDebtManagedCategory);
+      !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
 
@@ -546,6 +549,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return isLoanDebtCategory(category) || isRepaymentCategory(category);
   }
 
+  bool _isLinkManagedCategory(Category category) {
+    return _isLoanDebtManagedCategory(category) ||
+        isReimbursementCategory(category);
+  }
+
   bool _isSelfCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     if (category == null) return false;
@@ -559,7 +567,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   }
 
   bool _canAutoCategorizeCategoryId(int id) {
-    return !_isSelfCategoryId(id) && !_isLoanDebtManagedCategoryId(id);
+    final category = _provider.getCategoryById(id);
+    return !_isSelfCategoryId(id) &&
+        !_isLoanDebtManagedCategoryId(id) &&
+        (category == null || !isReimbursementCategory(category));
   }
 
   bool _transactionHasRepaymentCategory(Transaction transaction) {
@@ -572,6 +583,24 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _isRepaymentCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     return category != null && isRepaymentCategory(category);
+  }
+
+  bool _transactionHasReimbursementCategory(Transaction transaction) {
+    return transaction.selectedCategoryIds.any((id) {
+      final category = _provider.getCategoryById(id);
+      return category != null && isReimbursementCategory(category);
+    });
+  }
+
+  bool _isReimbursementCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    return category != null && isReimbursementCategory(category);
+  }
+
+  List<int> _categoryIdsWithoutReimbursement(Transaction transaction) {
+    return transaction.selectedCategoryIds
+        .where((id) => !_isReimbursementCategoryId(id))
+        .toList(growable: false);
   }
 
   List<int> _categoryIdsWithoutRepayment(Transaction transaction) {
@@ -615,6 +644,28 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
   }
 
+  Future<bool> _removeUnlinkedReimbursementCategory(
+    Transaction transaction,
+  ) async {
+    final nextCategoryIds = _categoryIdsWithoutReimbursement(transaction);
+    try {
+      await ReimbursementRepository().deleteForReimbursement(
+        transaction.reference,
+      );
+      final updated = await _provider.updateCategoriesForTransaction(
+        transaction,
+        categoryIds: nextCategoryIds,
+        primaryCategoryId: _primaryCategoryForIds(transaction, nextCategoryIds),
+      );
+      if (mounted) {
+        setState(() => _transaction = updated);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Transaction?> _applyCategorySelection({
     required List<int> categoryIds,
     int? primaryCategoryId,
@@ -625,8 +676,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final previousTransaction = _tx;
     final hadRepaymentCategory =
         _transactionHasRepaymentCategory(previousTransaction);
+    final hadReimbursementCategory =
+        _transactionHasReimbursementCategory(previousTransaction);
     final hasLoanDebtManagedCategory =
         categoryIds.any(_isLoanDebtManagedCategoryId);
+    final hasReimbursementCategory =
+        categoryIds.any(_isReimbursementCategoryId);
     final hadExistingRules = _provider
         .autoCategorizationRulesForTransaction(previousTransaction)
         .isNotEmpty;
@@ -635,6 +690,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     );
     final repaymentCleanupErrorMessage = context.l10nTextRead(
       'Category was saved, but repayment link could not be removed.',
+    );
+    final reimbursementCleanupErrorMessage = context.l10nTextRead(
+      'Category was saved, but reimbursement links could not be removed.',
     );
     _dismissComposerState(clearDraft: true);
     setState(() => _isApplyingCategory = true);
@@ -651,7 +709,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       );
       final shouldPersistAutoCategorization = shouldAutoCategorize &&
           nextAutoCategoryIds.isNotEmpty &&
-          !hasLoanDebtManagedCategory;
+          !hasLoanDebtManagedCategory &&
+          !hasReimbursementCategory;
       final removedRepaymentCategory =
           hadRepaymentCategory && !_transactionHasRepaymentCategory(updated);
       if (removedRepaymentCategory) {
@@ -664,6 +723,24 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
             messenger?.showSnackBar(
               SnackBar(
                 content: Text(repaymentCleanupErrorMessage),
+              ),
+            );
+          }
+        }
+      }
+      final removedReimbursementCategory = hadReimbursementCategory &&
+          !_transactionHasReimbursementCategory(updated);
+      if (removedReimbursementCategory) {
+        try {
+          await ReimbursementRepository().deleteForReimbursement(
+            updated.reference,
+          );
+          await _provider.refreshReimbursements();
+        } catch (_) {
+          if (mounted) {
+            messenger?.showSnackBar(
+              SnackBar(
+                content: Text(reimbursementCleanupErrorMessage),
               ),
             );
           }
@@ -732,6 +809,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       return;
     }
 
+    if (isReimbursementCategory(category)) {
+      nextIds.clear();
+    } else {
+      nextIds.removeWhere(_isReimbursementCategoryId);
+    }
+
     if (isRepaymentCategory(category)) {
       final unavailableMessage = context.l10nTextRead(
         'Add an active loan or debt first, then link a repayment.',
@@ -757,7 +840,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       primaryCategoryId: categoryId,
     );
     if (updated == null || !mounted) return;
-    if (isRepaymentCategory(category)) {
+    if (isReimbursementCategory(category)) {
+      await _openReimbursementLinkPrompt(updated);
+    } else if (isRepaymentCategory(category)) {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
@@ -1371,6 +1456,37 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         content: Text(removed ? rollbackMessage : rollbackErrorMessage),
       ),
     );
+  }
+
+  Future<void> _openReimbursementLinkPrompt(
+    Transaction transaction,
+  ) async {
+    final hostContext = widget.hostContext;
+    final rollbackMessage = context.l10nTextRead(
+      'Reimbursement was not linked, so the category was removed.',
+    );
+    final rollbackErrorMessage = context.l10nTextRead(
+      'Could not remove the unlinked reimbursement category.',
+    );
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    final outcome = await showReimbursementLinkSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
+    if (outcome != ReimbursementLinkOutcome.cancelled) {
+      return;
+    }
+    final removed = await _removeUnlinkedReimbursementCategory(transaction);
+    if (!hostContext.mounted) return;
+    ScaffoldMessenger.maybeOf(hostContext)?.showSnackBar(
+      SnackBar(
+        content: Text(removed ? rollbackMessage : rollbackErrorMessage),
+      ),
+    );
     if (removed) {
       unawaited(_provider.loadData());
     }
@@ -1574,6 +1690,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         _buildCategoryPicker(),
 
                       _buildNoteSection(),
+
+                      ReimbursementRelationshipsSection(
+                        transaction: _tx,
+                        provider: _provider,
+                        onTransactionUpdated: (updated) {
+                          if (!mounted) return;
+                          setState(() => _transaction = updated);
+                        },
+                      ),
 
                       const SizedBox(height: 20),
 

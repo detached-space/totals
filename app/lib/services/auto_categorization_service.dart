@@ -5,6 +5,7 @@ import 'package:totals/models/category.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/receiver_category_service.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 class AutoCategorizationService {
   AutoCategorizationService._();
@@ -407,7 +408,9 @@ class AutoCategorizationService {
     return rows
         .map(Category.fromDb)
         .where((category) =>
-            isLoanDebtCategory(category) || isRepaymentCategory(category))
+            isLoanDebtCategory(category) ||
+            isRepaymentCategory(category) ||
+            isReimbursementCategory(category))
         .map((category) => category.id)
         .whereType<int>()
         .toSet();

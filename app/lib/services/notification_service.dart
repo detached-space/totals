@@ -20,6 +20,7 @@ import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -231,6 +232,13 @@ class NotificationService {
         if (kDebugMode) {
           print('debug: Quick categorize: transaction not found');
         }
+        return;
+      }
+
+      final category = (await CategoryRepository().getCategories())
+          .where((candidate) => candidate.id == categoryId)
+          .firstOrNull;
+      if (category == null || isReimbursementCategory(category)) {
         return;
       }
 
@@ -650,7 +658,9 @@ class NotificationService {
       final List<models.Category> categories = [];
       for (final id in categoryIds) {
         final cat = allCategories.where((c) => c.id == id).firstOrNull;
-        if (cat != null) categories.add(cat);
+        if (cat != null && !isReimbursementCategory(cat)) {
+          categories.add(cat);
+        }
         if (categories.length >= 3) break;
       }
 

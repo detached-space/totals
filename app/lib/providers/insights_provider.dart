@@ -14,6 +14,7 @@ class InsightsProvider extends ChangeNotifier {
     _service = InsightsService(
       () => _txProvider.transactions,
       getCategoryById: _txProvider.getCategoryById,
+      isExcludedFromIncome: _txProvider.isReimbursementTransaction,
     );
     _txProvider.addListener(_onTxChange);
   }
@@ -30,6 +31,7 @@ class InsightsProvider extends ChangeNotifier {
     _service = InsightsService(
       () => _txProvider.transactions,
       getCategoryById: _txProvider.getCategoryById,
+      isExcludedFromIncome: _txProvider.isReimbursementTransaction,
     );
     _txProvider.addListener(_onTxChange);
     _service.invalidate(); // clear the cache

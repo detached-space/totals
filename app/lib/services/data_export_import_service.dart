@@ -10,6 +10,7 @@ import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/models/loan_debt_entry.dart';
+import 'package:totals/models/reimbursement_allocation.dart';
 import 'package:totals/models/sms_pattern.dart';
 import 'package:totals/models/user_account.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -18,17 +19,21 @@ import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/services/account_ownership_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 
 const int _dashenBankId = 4;
 
 bool _isLoanDebtManagedCategory(Category category) {
-  return isLoanDebtCategory(category) || isRepaymentCategory(category);
+  return isLoanDebtCategory(category) ||
+      isRepaymentCategory(category) ||
+      isReimbursementCategory(category);
 }
 
 class DataExportOptions {
@@ -185,7 +190,7 @@ class BackupImportSummary {
 }
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 9;
+  static const int currentSchemaVersion = 10;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -194,6 +199,7 @@ class DataExportImportService {
   final TransactionRepository _transactionRepo = TransactionRepository();
   final FailedParseRepository _failedParseRepo = FailedParseRepository();
   final LoanDebtRepository _loanDebtRepo = LoanDebtRepository();
+  final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
   final UserAccountRepository _userAccountRepo = UserAccountRepository();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
@@ -255,10 +261,10 @@ class DataExportImportService {
       ..sort((a, b) {
         final aBank = banksById[a];
         final bBank = banksById[b];
-        final aName = _bankSummaryLabel(a, aBank?.name, aBank?.shortName)
-            .toLowerCase();
-        final bName = _bankSummaryLabel(b, bBank?.name, bBank?.shortName)
-            .toLowerCase();
+        final aName =
+            _bankSummaryLabel(a, aBank?.name, aBank?.shortName).toLowerCase();
+        final bName =
+            _bankSummaryLabel(b, bBank?.name, bBank?.shortName).toLowerCase();
         final byName = aName.compareTo(bName);
         return byName != 0 ? byName : a.compareTo(b);
       });
@@ -294,6 +300,8 @@ class DataExportImportService {
           await _smsConfigService.getPatterns(allowRemoteFetch: false);
       final loanDebtEntries = await _getLoanDebtEntriesFromDb();
       final loanDebtRepayments = await _getLoanDebtRepaymentsFromDb();
+      final reimbursementAllocations =
+          await _reimbursementRepo.getAllocations();
 
       final scopedAccounts =
           accounts.where((account) => options.includesBank(account.bank));
@@ -326,6 +334,17 @@ class DataExportImportService {
                         repayment.loanDebtTransactionReference,
                       ),
                 );
+      final scopedReimbursementAllocations = !options.hasTransactionFilter
+          ? reimbursementAllocations
+          : reimbursementAllocations.where(
+              (allocation) =>
+                  scopedTransactionReferences.contains(
+                    allocation.reimbursementTransactionReference,
+                  ) &&
+                  scopedTransactionReferences.contains(
+                    allocation.expenseTransactionReference,
+                  ),
+            );
 
       final exportData = {
         'schemaVersion': currentSchemaVersion,
@@ -368,6 +387,8 @@ class DataExportImportService {
             scopedLoanDebtEntries.map((e) => e.toJson()).toList(),
         'loanDebtRepayments':
             scopedLoanDebtRepayments.map((e) => e.toJson()).toList(),
+        'reimbursementAllocations':
+            scopedReimbursementAllocations.map((e) => e.toJson()).toList(),
       };
 
       return jsonEncode(exportData);
@@ -674,6 +695,57 @@ class DataExportImportService {
 
         await _removeImportedDashenDuplicates();
         await _removeImportedLegacySmsDuplicates();
+      }
+
+      // Restore reimbursement links only after both sides of each relationship
+      // exist. Stable transaction references make this independent of row IDs,
+      // accounts, category renames, and the date the reimbursement arrived.
+      final reimbursementRaw = _asMapList(data['reimbursementAllocations']);
+      if (reimbursementRaw.isNotEmpty) {
+        final existingReferences = await _getExistingTransactionReferences(db);
+        final allocationsByReimbursement =
+            <String, List<ReimbursementAllocationDraft>>{};
+        for (final row in reimbursementRaw) {
+          final reimbursementReference =
+              row['reimbursementTransactionReference']?.toString().trim() ?? '';
+          final expenseReference =
+              row['expenseTransactionReference']?.toString().trim() ?? '';
+          final rawAmount = row['appliedAmount'];
+          final amount = rawAmount is num
+              ? rawAmount.toDouble()
+              : double.tryParse(rawAmount?.toString().trim() ?? '');
+          if (reimbursementReference.isEmpty ||
+              expenseReference.isEmpty ||
+              amount == null ||
+              !amount.isFinite ||
+              amount <= 0 ||
+              !existingReferences.contains(reimbursementReference) ||
+              !existingReferences.contains(expenseReference)) {
+            continue;
+          }
+          allocationsByReimbursement
+              .putIfAbsent(
+                reimbursementReference,
+                () => <ReimbursementAllocationDraft>[],
+              )
+              .add(
+                ReimbursementAllocationDraft(
+                  expenseTransactionReference: expenseReference,
+                  appliedAmount: amount,
+                ),
+              );
+        }
+        for (final entry in allocationsByReimbursement.entries) {
+          try {
+            await _reimbursementRepo.replaceForReimbursement(
+              reimbursementTransactionReference: entry.key,
+              allocations: entry.value,
+            );
+          } catch (_) {
+            // A malformed or stale relationship should not prevent the rest of
+            // an otherwise valid backup from being restored.
+          }
+        }
       }
 
       // Import budgets (append, skip duplicates)
@@ -1037,6 +1109,11 @@ class DataExportImportService {
         'loanDebtRepayments',
         aliases: const ['loan_debt_repayments'],
       ),
+      'reimbursementAllocations': _readList(
+        raw,
+        'reimbursementAllocations',
+        aliases: const ['reimbursement_allocations'],
+      ),
       'smsPatterns': _readList(
         raw,
         'smsPatterns',
@@ -1166,6 +1243,18 @@ class DataExportImportService {
         .where((row) => options.includesBank(_asInt(row['bankId'])))
         .toList(growable: false);
     filtered['transactions'] = transactions;
+    filtered['reimbursementAllocations'] =
+        _asMapList(data['reimbursementAllocations'])
+            .where(
+              (row) =>
+                  transactionReferences.contains(
+                    row['reimbursementTransactionReference']?.toString().trim(),
+                  ) &&
+                  transactionReferences.contains(
+                    row['expenseTransactionReference']?.toString().trim(),
+                  ),
+            )
+            .toList(growable: false);
     if (!options.includeBudgets) {
       filtered['budgets'] = const <dynamic>[];
     }
@@ -1213,6 +1302,13 @@ class DataExportImportService {
 
     if (_containsTransactionOwnership(data)) {
       return currentSchemaVersion;
+    }
+
+    if (_hasAnySection(data, const [
+      'reimbursementAllocations',
+      'reimbursement_allocations',
+    ])) {
+      return 10;
     }
 
     if (_hasAnySection(data, const [

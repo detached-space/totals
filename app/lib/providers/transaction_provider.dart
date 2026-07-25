@@ -7,11 +7,13 @@ import 'package:totals/models/auto_categorization.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/loan_debt_entry.dart';
+import 'package:totals/models/reimbursement_allocation.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -28,6 +30,7 @@ import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
 
@@ -171,6 +174,7 @@ class TransactionProvider with ChangeNotifier {
   final BankConfigService _bankConfigService = BankConfigService();
   final SharedExpenseRepository _sharedExpenseRepo = SharedExpenseRepository();
   final LoanDebtRepository _loanDebtRepo = LoanDebtRepository();
+  final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
   final BudgetAlertService _budgetAlertService = BudgetAlertService();
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
@@ -191,6 +195,9 @@ class TransactionProvider with ChangeNotifier {
   Map<int, String> _bankShortNamesById = {
     CashConstants.bankId: CashConstants.bankShortName,
   };
+  Map<int, String> _bankImagesById = {
+    CashConstants.bankId: CashConstants.bankImage,
+  };
 
   // Summaries
   AllSummary? _summary;
@@ -208,6 +215,11 @@ class TransactionProvider with ChangeNotifier {
   Set<String> _sharedExpenseLinkedRefs = {};
   final Set<String> _sharedExpenseSharingRefs = {};
   Map<String, String> _loanDebtPersonByReference = {};
+  List<ReimbursementAllocation> _reimbursementAllocations = const [];
+  Map<String, List<ReimbursementAllocation>> _reimbursementsByCreditReference =
+      const {};
+  Map<String, List<ReimbursementAllocation>> _reimbursementsByExpenseReference =
+      const {};
 
   // Redesign home cached metrics
   List<Transaction> _todayTransactions = [];
@@ -234,6 +246,8 @@ class TransactionProvider with ChangeNotifier {
   Set<String> get sharedExpenseSharingRefs =>
       Set.unmodifiable(_sharedExpenseSharingRefs);
   List<Category> get categories => _categories;
+  List<ReimbursementAllocation> get reimbursementAllocations =>
+      _reimbursementAllocations;
   List<AutoCategorizationRule> get autoCategorizationRules =>
       _autoCategorizationRules;
   List<AutoCategoryPromptDismissal> get autoCategoryPromptDismissals =>
@@ -324,6 +338,12 @@ class TransactionProvider with ChangeNotifier {
   int get dataVersion => _dataVersion;
   Map<int, String> get bankNamesById => _bankNamesById;
   Map<int, String> get bankShortNamesById => _bankShortNamesById;
+
+  String getBankImage(int? bankId) {
+    if (bankId == null) return '';
+    if (bankId == CashConstants.bankId) return CashConstants.bankImage;
+    return _bankImagesById[bankId] ?? '';
+  }
 
   String getBankName(int? bankId) {
     if (bankId == null) return 'Bank';
@@ -521,6 +541,86 @@ class TransactionProvider with ChangeNotifier {
     return _isSelfTransfer(transaction);
   }
 
+  bool isReimbursementTransaction(Transaction transaction) {
+    final reference = transaction.reference.trim();
+    if (reference.isNotEmpty &&
+        (_reimbursementsByCreditReference[reference]?.isNotEmpty ?? false)) {
+      return true;
+    }
+    return transaction.selectedCategoryIds.any((categoryId) {
+      final category = _categoryById[categoryId];
+      return category != null && isReimbursementCategory(category);
+    });
+  }
+
+  List<ReimbursementAllocation> reimbursementsForCredit(
+    String reference,
+  ) {
+    return _reimbursementsByCreditReference[reference.trim()] ??
+        const <ReimbursementAllocation>[];
+  }
+
+  List<ReimbursementAllocation> reimbursementsForExpense(
+    String reference,
+  ) {
+    return _reimbursementsByExpenseReference[reference.trim()] ??
+        const <ReimbursementAllocation>[];
+  }
+
+  double allocatedReimbursementAmount(Transaction transaction) {
+    return reimbursementsForCredit(transaction.reference).fold<double>(
+      0.0,
+      (sum, allocation) => sum + allocation.appliedAmount,
+    );
+  }
+
+  double reimbursedExpenseAmount(Transaction transaction) {
+    return reimbursementsForExpense(transaction.reference).fold<double>(
+      0.0,
+      (sum, allocation) => sum + allocation.appliedAmount,
+    );
+  }
+
+  double incomeAmountForTransaction(Transaction transaction) {
+    if (transaction.type != 'CREDIT') return 0.0;
+    return transactionIncomeAmount(
+      transaction,
+      isSelfTransfer: _isSelfTransfer(transaction),
+      excludeFromIncome: isReimbursementTransaction(transaction),
+    );
+  }
+
+  double budgetExpenseAmountForTransaction(Transaction transaction) {
+    final gross = transactionDebitOutflow(transaction);
+    final reimbursed = reimbursedExpenseAmount(transaction);
+    final net = gross - reimbursed;
+    return net <= 0 ? 0.0 : net;
+  }
+
+  Future<void> refreshReimbursements() async {
+    await _reloadReimbursementState();
+    _dataVersion += 1;
+    notifyListeners();
+  }
+
+  Future<Transaction?> unlinkReimbursementAllocation(int allocationId) async {
+    final updated =
+        await _transactionRepo.unlinkReimbursementAllocation(allocationId);
+    if (updated != null) {
+      _replaceTransactionLocally(updated);
+    }
+    await _reloadReimbursementState();
+    if (updated == null) {
+      _dataVersion += 1;
+      notifyListeners();
+      return null;
+    }
+
+    await _recomputeAfterTransactionMutation();
+    unawaited(WidgetService.refreshExpenseWidget());
+    return updated;
+  }
+
   bool isDetectedSelfTransfer(Transaction transaction) {
     return _selfTransferLabelByReference.containsKey(transaction.reference);
   }
@@ -588,6 +688,7 @@ class TransactionProvider with ChangeNotifier {
       await _reloadAutoCategorizationState();
 
       _allTransactions = await _transactionRepo.getTransactions();
+      await _reloadReimbursementState();
       try {
         _sharedExpenseLinkedRefs =
             await _sharedExpenseRepo.getAllLinkedTxRefs();
@@ -608,6 +709,10 @@ class TransactionProvider with ChangeNotifier {
       _bankShortNamesById = {
         CashConstants.bankId: CashConstants.bankShortName,
         for (final bank in banks) bank.id: bank.shortName,
+      };
+      _bankImagesById = {
+        CashConstants.bankId: CashConstants.bankImage,
+        for (final bank in banks) bank.id: bank.image,
       };
       _rebuildSelfTransferLabels(_allTransactions, banks);
 
@@ -636,6 +741,53 @@ class TransactionProvider with ChangeNotifier {
         debugPrint('debug: Could not load loan/debt person labels: $error');
       }
       _loanDebtPersonByReference = {};
+    }
+  }
+
+  Future<void> _reloadReimbursementState() async {
+    try {
+      final allocations = await _reimbursementRepo.getAllocations();
+      final byCredit = <String, List<ReimbursementAllocation>>{};
+      final byExpense = <String, List<ReimbursementAllocation>>{};
+      for (final allocation in allocations) {
+        final credit = allocation.reimbursementTransactionReference.trim();
+        final expense = allocation.expenseTransactionReference.trim();
+        if (credit.isNotEmpty) {
+          byCredit
+              .putIfAbsent(
+                credit,
+                () => <ReimbursementAllocation>[],
+              )
+              .add(allocation);
+        }
+        if (expense.isNotEmpty) {
+          byExpense
+              .putIfAbsent(
+                expense,
+                () => <ReimbursementAllocation>[],
+              )
+              .add(allocation);
+        }
+      }
+      _reimbursementAllocations =
+          List<ReimbursementAllocation>.unmodifiable(allocations);
+      _reimbursementsByCreditReference =
+          Map<String, List<ReimbursementAllocation>>.unmodifiable({
+        for (final entry in byCredit.entries)
+          entry.key: List<ReimbursementAllocation>.unmodifiable(entry.value),
+      });
+      _reimbursementsByExpenseReference =
+          Map<String, List<ReimbursementAllocation>>.unmodifiable({
+        for (final entry in byExpense.entries)
+          entry.key: List<ReimbursementAllocation>.unmodifiable(entry.value),
+      });
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('debug: Could not load reimbursements: $error');
+      }
+      _reimbursementAllocations = const [];
+      _reimbursementsByCreditReference = const {};
+      _reimbursementsByExpenseReference = const {};
     }
   }
 
@@ -773,10 +925,7 @@ class TransactionProvider with ChangeNotifier {
         if (t.type == 'DEBIT') {
           feesAndVat += feeAmount;
         }
-        totalCredit += transactionIncomeAmount(
-          t,
-          isSelfTransfer: isSelfTransfer,
-        );
+        totalCredit += incomeAmountForTransaction(t);
         totalDebit += transactionExpenseAmount(
           t,
           isSelfTransfer: isSelfTransfer,
@@ -1207,10 +1356,7 @@ class TransactionProvider with ChangeNotifier {
       final isDebit = transaction.type == 'DEBIT';
       if (!isCredit && !isDebit) continue;
 
-      final incomeAmount = transactionIncomeAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      final incomeAmount = incomeAmountForTransaction(transaction);
       final expenseAmount = transactionExpenseAmount(
         transaction,
         isSelfTransfer: isSelfTransfer,
@@ -1786,6 +1932,15 @@ class TransactionProvider with ChangeNotifier {
     required List<int> categoryIds,
     int? primaryCategoryId,
   }) async {
+    bool hasReimbursementCategory(Iterable<int> ids) {
+      return ids.any((categoryId) {
+        final category = _categoryById[categoryId];
+        return category != null && isReimbursementCategory(category);
+      });
+    }
+
+    final hadReimbursementCategory =
+        hasReimbursementCategory(transaction.selectedCategoryIds);
     final normalizedCategoryIds = <int>[];
     for (final categoryId in categoryIds) {
       if (categoryId <= 0 || normalizedCategoryIds.contains(categoryId)) {
@@ -1847,10 +2002,29 @@ class TransactionProvider with ChangeNotifier {
           .dismissTransactionNotification(updated);
     }
 
+    final removedReimbursementCategory = hadReimbursementCategory &&
+        !hasReimbursementCategory(updated.selectedCategoryIds);
+    if (removedReimbursementCategory) {
+      try {
+        await _reimbursementRepo.deleteForReimbursement(
+          updated.reference,
+        );
+        await _reloadReimbursementState();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint(
+            'debug: Could not remove reimbursement links after '
+            'category change: $error',
+          );
+        }
+      }
+    }
+
     unawaited(
       _finalizeCategoryMutationAfterSave(
         transactionType: transaction.type,
         categoryIds: updated.selectedCategoryIds,
+        refreshBudgetWidget: removedReimbursementCategory,
       ),
     );
 
@@ -2010,10 +2184,15 @@ class TransactionProvider with ChangeNotifier {
   Future<void> _finalizeCategoryMutationAfterSave({
     required String? transactionType,
     Iterable<int> categoryIds = const <int>[],
+    bool refreshBudgetWidget = false,
   }) async {
     try {
       await _recomputeAfterTransactionMutation();
-      await WidgetService.refreshWidget();
+      if (transactionType == 'DEBIT' || refreshBudgetWidget) {
+        await WidgetService.refreshWidget();
+      } else {
+        await WidgetService.refreshExpenseWidget();
+      }
     } catch (e) {
       debugPrint("debug: Error recomputing state after categorizing: $e");
     }

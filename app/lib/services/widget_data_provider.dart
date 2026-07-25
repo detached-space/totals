@@ -2,10 +2,12 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/owned_account_transfer_service.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
 
 class CategoryExpense {
@@ -35,6 +37,7 @@ class WidgetDataProvider {
   final CategoryRepository _categoryRepository;
   final BankConfigService _bankConfigService;
   final OwnedAccountTransferService _ownedAccountTransferService;
+  final ReimbursementRepository _reimbursementRepository;
 
   static const List<String> _rankColors = [
     '#5AC8FA',
@@ -48,13 +51,16 @@ class WidgetDataProvider {
     CategoryRepository? categoryRepository,
     BankConfigService? bankConfigService,
     OwnedAccountTransferService? ownedAccountTransferService,
+    ReimbursementRepository? reimbursementRepository,
   })  : _transactionRepository =
             transactionRepository ?? TransactionRepository(),
         _accountRepository = accountRepository ?? AccountRepository(),
         _categoryRepository = categoryRepository ?? CategoryRepository(),
         _bankConfigService = bankConfigService ?? BankConfigService(),
         _ownedAccountTransferService =
-            ownedAccountTransferService ?? OwnedAccountTransferService();
+            ownedAccountTransferService ?? OwnedAccountTransferService(),
+        _reimbursementRepository =
+            reimbursementRepository ?? ReimbursementRepository();
 
   Future<List<Transaction>> _getTransactionsByTypeForRange(
     String type,
@@ -305,10 +311,25 @@ class WidgetDataProvider {
   /// Get today's total income (CREDIT transactions only)
   Future<double> getTodayIncome() async {
     final transactions = await _getTodayCreditTransactions();
+    final reimbursementCategoryIds = (await _categoryRepository.getCategories())
+        .where(isReimbursementCategory)
+        .map((category) => category.id)
+        .whereType<int>()
+        .toSet();
+    final linkedReferences =
+        await _reimbursementRepository.getLinkedReimbursementReferences(
+      transactions.map((transaction) => transaction.reference),
+    );
 
     return transactions.fold<double>(
       0.0,
-      (sum, tx) => sum + tx.amount,
+      (sum, transaction) {
+        final isReimbursement =
+            linkedReferences.contains(transaction.reference.trim()) ||
+                transaction.selectedCategoryIds
+                    .any(reimbursementCategoryIds.contains);
+        return sum + (isReimbursement ? 0.0 : transaction.amount);
+      },
     );
   }
 

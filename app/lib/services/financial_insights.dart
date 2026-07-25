@@ -15,14 +15,18 @@ class InsightsService {
 
   // function that maps categoryId to Category? (nullable Category)
   final Category? Function(int? categoryId)? _getCategoryById;
+  final bool Function(Transaction transaction)? _isExcludedFromIncome;
 
   // small memoization cache, will be cleared
   // when transactions change
   Map<String, dynamic>? _cache;
 
-  InsightsService(this._getTransactions,
-      {Category? Function(int? categoryId)? getCategoryById})
-      : _getCategoryById = getCategoryById;
+  InsightsService(
+    this._getTransactions, {
+    Category? Function(int? categoryId)? getCategoryById,
+    bool Function(Transaction transaction)? isExcludedFromIncome,
+  })  : _getCategoryById = getCategoryById,
+        _isExcludedFromIncome = isExcludedFromIncome;
 
   void invalidate() => _cache = null;
 
@@ -33,14 +37,12 @@ class InsightsService {
 
     // use the existing type + sign approach
     // to split income/expense
-    final income = transactions.where(_isIncome).toList();
+    final income = transactions.where(_isEarnedIncome).toList();
     final totalIncome = MathUtils.findTransactionSum(income);
 
-    final expenses = transactions.where((t) => !_isIncome(t)).toList();
-    final expensesAbs = transactions
-        .where((t) => !_isIncome(t))
-        .map((t) => t.amount.abs())
-        .toList();
+    final expenses = transactions.where(_isExpense).toList();
+    final expensesAbs =
+        transactions.where(_isExpense).map((t) => t.amount.abs()).toList();
 
     final categoryBreakdown = _computeCategorySpend(transactions);
     final totalExpense = MathUtils.findSum(expensesAbs);
@@ -319,6 +321,11 @@ class InsightsService {
     return t.amount >= 0;
   }
 
+  bool _isEarnedIncome(Transaction transaction) {
+    return _isIncome(transaction) &&
+        !(_isExcludedFromIncome?.call(transaction) ?? false);
+  }
+
   /// Log coverage metrics for production tracking
   /// This helps us understand user categorization patterns and coverage levels
   void _logCoverageMetrics({
@@ -393,24 +400,21 @@ class InsightsService {
       byRef.putIfAbsent(key, () => []).add(tx);
     }
 
-    return byRef.entries
-        .where((exp) => exp.value.length >= 3)
-        .map(
-          (exp) {
-            // Calculate average using absolute values since these are expenses
-            final total = exp.value.fold<double>(
-              0.0,
-              (sum, tx) => sum + tx.amount.abs(),
-            );
-            final avg = total / exp.value.length;
-            return {
-              'label': _generateRecurringLabel(exp.value),
-              'count': exp.value.length,
-              'avg': avg,
-            };
-          },
-        )
-        .toList();
+    return byRef.entries.where((exp) => exp.value.length >= 3).map(
+      (exp) {
+        // Calculate average using absolute values since these are expenses
+        final total = exp.value.fold<double>(
+          0.0,
+          (sum, tx) => sum + tx.amount.abs(),
+        );
+        final avg = total / exp.value.length;
+        return {
+          'label': _generateRecurringLabel(exp.value),
+          'count': exp.value.length,
+          'avg': avg,
+        };
+      },
+    ).toList();
   }
 
   /// Generates a user-friendly label for recurring expenses.
@@ -420,55 +424,55 @@ class InsightsService {
     final creditorCounts = <String, int>{};
     final receiverCounts = <String, int>{};
     final categoryCounts = <String, int>{};
-    
+
     for (final tx in transactions) {
       if (tx.creditor != null && tx.creditor!.trim().isNotEmpty) {
-        creditorCounts[tx.creditor!.trim()] = 
+        creditorCounts[tx.creditor!.trim()] =
             (creditorCounts[tx.creditor!.trim()] ?? 0) + 1;
       }
       if (tx.receiver != null && tx.receiver!.trim().isNotEmpty) {
-        receiverCounts[tx.receiver!.trim()] = 
+        receiverCounts[tx.receiver!.trim()] =
             (receiverCounts[tx.receiver!.trim()] ?? 0) + 1;
       }
       if (tx.categoryId != null && _getCategoryById != null) {
         final category = _getCategoryById(tx.categoryId);
         if (category != null && category.name.trim().isNotEmpty) {
-          categoryCounts[category.name] = 
+          categoryCounts[category.name] =
               (categoryCounts[category.name] ?? 0) + 1;
         }
       }
     }
-    
+
     // Find most common creditor
     if (creditorCounts.isNotEmpty) {
-      final mostCommonCreditor = creditorCounts.entries
-          .reduce((a, b) => a.value > b.value ? a : b);
+      final mostCommonCreditor =
+          creditorCounts.entries.reduce((a, b) => a.value > b.value ? a : b);
       // Only use if it appears in majority of transactions (>= 50%)
       if (mostCommonCreditor.value >= transactions.length * 0.5) {
         return mostCommonCreditor.key;
       }
     }
-    
+
     // Find most common receiver
     if (receiverCounts.isNotEmpty) {
-      final mostCommonReceiver = receiverCounts.entries
-          .reduce((a, b) => a.value > b.value ? a : b);
+      final mostCommonReceiver =
+          receiverCounts.entries.reduce((a, b) => a.value > b.value ? a : b);
       // Only use if it appears in majority of transactions (>= 50%)
       if (mostCommonReceiver.value >= transactions.length * 0.5) {
         return mostCommonReceiver.key;
       }
     }
-    
+
     // Find most common category
     if (categoryCounts.isNotEmpty) {
-      final mostCommonCategory = categoryCounts.entries
-          .reduce((a, b) => a.value > b.value ? a : b);
+      final mostCommonCategory =
+          categoryCounts.entries.reduce((a, b) => a.value > b.value ? a : b);
       // Only use if it appears in majority of transactions (>= 50%)
       if (mostCommonCategory.value >= transactions.length * 0.5) {
         return mostCommonCategory.key;
       }
     }
-    
+
     // Fallback to bank name if available
     if (transactions.isNotEmpty && transactions.first.bankId != null) {
       if (transactions.first.bankId == CashConstants.bankId) {
@@ -480,7 +484,7 @@ class InsightsService {
         }
       }
     }
-    
+
     // Last resort: use reference prefix (original behavior)
     final refPrefix = (transactions.first.reference ?? '').split('-').first;
     return refPrefix.isEmpty ? 'Recurring Expense' : refPrefix;

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:intl/intl.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/account.dart';
@@ -14,6 +15,7 @@ import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/manual_transaction_selection.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showAddCashTransactionSheet({
@@ -23,6 +25,7 @@ Future<void> showAddCashTransactionSheet({
   bool? initialIsDebit,
   bool showTypeSelector = true,
 }) async {
+  final hostContext = context;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -30,6 +33,7 @@ Future<void> showAddCashTransactionSheet({
     backgroundColor: Theme.of(context).colorScheme.surface,
     builder: (context) {
       return _AddCashTransactionContent(
+        hostContext: hostContext,
         provider: provider,
         accountNumber: accountNumber,
         initialIsDebit: initialIsDebit ?? true,
@@ -40,12 +44,14 @@ Future<void> showAddCashTransactionSheet({
 }
 
 class _AddCashTransactionContent extends StatefulWidget {
+  final BuildContext hostContext;
   final TransactionProvider provider;
   final String accountNumber;
   final bool initialIsDebit;
   final bool showTypeSelector;
 
   const _AddCashTransactionContent({
+    required this.hostContext,
     required this.provider,
     required this.accountNumber,
     required this.initialIsDebit,
@@ -497,6 +503,11 @@ class _AddCashTransactionContentState
       );
       final selectedCategoryIds =
           List<int>.from(_selectedCategoryIds, growable: false);
+      final isReimbursement = !_isDebit &&
+          selectedCategoryIds.any((categoryId) {
+            final category = widget.provider.getCategoryById(categoryId);
+            return category != null && isReimbursementCategory(category);
+          });
       await _updateStoredAccountBalance(selectedAccount, remainingBalance);
       final reference = _manualReference(
         selectedAccount.bankId,
@@ -530,8 +541,41 @@ class _AddCashTransactionContentState
       if (mounted) {
         Navigator.pop(context);
       }
+      if (isReimbursement) {
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+        if (!widget.hostContext.mounted) return;
+        final outcome = await showReimbursementLinkSheet(
+          context: widget.hostContext,
+          transaction: transaction,
+          provider: widget.provider,
+        );
+        if (outcome == ReimbursementLinkOutcome.cancelled) {
+          final nextCategoryIds = selectedCategoryIds.where((categoryId) {
+            final category = widget.provider.getCategoryById(categoryId);
+            return category == null || !isReimbursementCategory(category);
+          }).toList(growable: false);
+          await widget.provider.updateCategoriesForTransaction(
+            transaction,
+            categoryIds: nextCategoryIds,
+            primaryCategoryId:
+                nextCategoryIds.isEmpty ? null : nextCategoryIds.first,
+          );
+          if (!widget.hostContext.mounted) return;
+          ScaffoldMessenger.maybeOf(widget.hostContext)?.showSnackBar(
+            SnackBar(
+              content: Text(
+                widget.hostContext.l10nTextRead(
+                  'Reimbursement was not linked, so the category was removed.',
+                ),
+              ),
+            ),
+          );
+        }
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -814,6 +858,20 @@ class _AddCashTransactionContentState
                                           .contains(categoryId)) {
                                         _selectedCategoryIds.remove(categoryId);
                                       } else {
+                                        if (isReimbursementCategory(cat)) {
+                                          _selectedCategoryIds.clear();
+                                        } else {
+                                          _selectedCategoryIds.removeWhere(
+                                            (selectedId) {
+                                              final selected = widget.provider
+                                                  .getCategoryById(selectedId);
+                                              return selected != null &&
+                                                  isReimbursementCategory(
+                                                    selected,
+                                                  );
+                                            },
+                                          );
+                                        }
                                         _selectedCategoryIds.add(categoryId);
                                       }
                                     }),

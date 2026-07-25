@@ -7,14 +7,21 @@ double transactionFeeAmount(Transaction transaction) {
 
 double transactionDebitOutflow(Transaction transaction) {
   if (transaction.type != 'DEBIT') return 0.0;
-  return _principalAmount(transaction) + transactionFeeAmount(transaction);
+  return transactionDebitOutflowFromValues(
+    amount: transaction.amount,
+    serviceCharge: transaction.serviceCharge,
+    vat: transaction.vat,
+  );
 }
 
 double transactionIncomeAmount(
   Transaction transaction, {
   required bool isSelfTransfer,
+  bool excludeFromIncome = false,
 }) {
-  if (transaction.type != 'CREDIT' || isSelfTransfer) return 0.0;
+  if (transaction.type != 'CREDIT' || isSelfTransfer || excludeFromIncome) {
+    return 0.0;
+  }
   return _principalAmount(transaction);
 }
 
@@ -45,4 +52,15 @@ double _nonNegative(double? value) {
 double _principalAmount(Transaction transaction) {
   final amount = transaction.amount.abs();
   return amount.isFinite ? amount : 0.0;
+}
+
+double transactionDebitOutflowFromValues({
+  required double amount,
+  double? serviceCharge,
+  double? vat,
+}) {
+  final principal = amount.abs();
+  return (principal.isFinite ? principal : 0.0) +
+      _nonNegative(serviceCharge) +
+      _nonNegative(vat);
 }

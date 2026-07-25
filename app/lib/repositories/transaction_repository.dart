@@ -13,6 +13,7 @@ import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 class TransactionOwnershipUpdate {
   final String reference;
@@ -610,10 +611,11 @@ class TransactionRepository {
     final db = await DatabaseHelper.instance.database;
     final ids = bankIds.toList(growable: false);
     final placeholders = List.filled(ids.length, '?').join(', ');
-    await db.delete(
-      'transactions',
+    await _deleteTransactionsMatching(
+      db,
       where: 'bankId IN ($placeholders)',
       whereArgs: ids,
+      enqueueSyncChanges: false,
     );
   }
 
@@ -838,66 +840,317 @@ class TransactionRepository {
 
   Future<void> deleteTransactionsByReferences(
       Iterable<String> references) async {
-    final refs = references.toSet();
+    final refs = references
+        .map((reference) => reference.trim())
+        .where((reference) => reference.isNotEmpty)
+        .toSet();
     if (refs.isEmpty) return;
 
-    const maxSqlVars = 900;
-    final refList = refs.toList();
+    final refList = refs.toList(growable: false);
     final db = await DatabaseHelper.instance.database;
+    final categorySyncRecords =
+        await _deleteReferencesWithReimbursementCleanup(db, refList);
+    await _enqueueTransactionDeletionChanges(
+      deletedReferences: refList,
+      categorySyncRecords: categorySyncRecords,
+    );
+  }
 
-    for (var i = 0; i < refList.length; i += maxSqlVars) {
-      final chunkEnd =
-          (i + maxSqlVars) > refList.length ? refList.length : i + maxSqlVars;
-      final chunk = refList.sublist(i, chunkEnd);
-      final placeholders = List.filled(chunk.length, '?').join(', ');
-      await db.delete(
-        'transactions',
-        where: 'reference IN ($placeholders)',
-        whereArgs: chunk,
-      );
-    }
+  /// Removes one reimbursement link and, when it was the credit's final link,
+  /// removes the built-in reimbursement category in the same transaction.
+  Future<Transaction?> unlinkReimbursementAllocation(int allocationId) async {
+    if (allocationId <= 0) return null;
 
-    for (final ref in refList) {
-      await SyncEnqueuer.instance.onEntityWritten(
-        entity: SyncEntity.transactions,
-        entityRef: ref,
-        op: SyncOp.delete,
-        deleteSnapshot: {'reference': ref},
+    final db = await DatabaseHelper.instance.database;
+    List<MapEntry<String, Map<String, dynamic>>> categorySyncRecords = const [];
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'reimbursement_allocations',
+        columns: const ['reimbursementTransactionReference'],
+        where: 'id = ?',
+        whereArgs: [allocationId],
+        limit: 1,
       );
-    }
+      if (rows.isEmpty) return;
+
+      final reimbursementReference =
+          rows.single['reimbursementTransactionReference']?.toString().trim();
+      await txn.delete(
+        'reimbursement_allocations',
+        where: 'id = ?',
+        whereArgs: [allocationId],
+      );
+      if (reimbursementReference == null || reimbursementReference.isEmpty) {
+        return;
+      }
+      categorySyncRecords = await _removeCategoryFromOrphanedReimbursements(
+        txn,
+        <String>{reimbursementReference},
+      );
+    });
+
+    await _enqueueTransactionDeletionChanges(
+      deletedReferences: const <String>[],
+      categorySyncRecords: categorySyncRecords,
+    );
+    if (categorySyncRecords.isEmpty) return null;
+    return _transactionFromMap(categorySyncRecords.single.value);
   }
 
   /// Deletes transactions matching [where]/[whereArgs] and, when Data Sync is
-  /// enabled, enqueues a delete for each removed reference. The reference
-  /// lookup is skipped entirely when sync is off so the delete path stays cheap.
+  /// enabled, enqueues a delete for each removed reference.
   Future<void> _deleteTransactionsAndEnqueue(
     Database db, {
     required String where,
     required List<dynamic> whereArgs,
   }) async {
+    await _deleteTransactionsMatching(
+      db,
+      where: where,
+      whereArgs: whereArgs,
+      enqueueSyncChanges: true,
+    );
+  }
+
+  Future<void> _deleteTransactionsMatching(
+    Database db, {
+    required String where,
+    required List<dynamic> whereArgs,
+    required bool enqueueSyncChanges,
+  }) async {
     List<String> refs = const [];
+    List<MapEntry<String, Map<String, dynamic>>> categorySyncRecords = const [];
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'transactions',
+        columns: ['reference'],
+        where: where,
+        whereArgs: whereArgs,
+      );
+      refs = rows
+          .map((row) => row['reference'] as String?)
+          .whereType<String>()
+          .toList(growable: false);
+      // Capture the credits before deleting their allocations so only
+      // reimbursements orphaned by this specific deletion are repaired.
+      final affectedReimbursements =
+          await _findReimbursementsLinkedToExpenses(txn, refs);
+      await txn.delete(
+        'transactions',
+        where: where,
+        whereArgs: whereArgs,
+      );
+      await _deleteAllocationsForTransactionReferences(txn, refs);
+      categorySyncRecords = await _removeCategoryFromOrphanedReimbursements(
+        txn,
+        affectedReimbursements,
+      );
+    });
+
+    if (!enqueueSyncChanges) return;
+    await _enqueueTransactionDeletionChanges(
+      deletedReferences: refs,
+      categorySyncRecords: categorySyncRecords,
+    );
+  }
+
+  Future<List<MapEntry<String, Map<String, dynamic>>>>
+      _deleteReferencesWithReimbursementCleanup(
+    Database db,
+    List<String> references,
+  ) {
+    return db.transaction((txn) async {
+      final affectedReimbursements =
+          await _findReimbursementsLinkedToExpenses(txn, references);
+      for (var start = 0;
+          start < references.length;
+          start += _maxSqlVariables) {
+        final end = math.min(start + _maxSqlVariables, references.length);
+        final chunk = references.sublist(start, end);
+        final placeholders = List.filled(chunk.length, '?').join(', ');
+        await txn.delete(
+          'transactions',
+          where: 'reference IN ($placeholders)',
+          whereArgs: chunk,
+        );
+      }
+      await _deleteAllocationsForTransactionReferences(txn, references);
+      return _removeCategoryFromOrphanedReimbursements(
+        txn,
+        affectedReimbursements,
+      );
+    });
+  }
+
+  static const int _maxSqlVariables = 900;
+
+  Future<void> _deleteAllocationsForTransactionReferences(
+    DatabaseExecutor executor,
+    Iterable<String> transactionReferences,
+  ) async {
+    final references = transactionReferences
+        .map((reference) => reference.trim())
+        .where((reference) => reference.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    for (var start = 0; start < references.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      await executor.delete(
+        'reimbursement_allocations',
+        where: 'reimbursementTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      await executor.delete(
+        'reimbursement_allocations',
+        where: 'expenseTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+    }
+  }
+
+  Future<Set<String>> _findReimbursementsLinkedToExpenses(
+    DatabaseExecutor executor,
+    Iterable<String> expenseReferences,
+  ) async {
+    final references = expenseReferences
+        .map((reference) => reference.trim())
+        .where((reference) => reference.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (references.isEmpty) return <String>{};
+
+    final reimbursements = <String>{};
+    for (var start = 0; start < references.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'reimbursement_allocations',
+        columns: ['reimbursementTransactionReference'],
+        where: 'expenseTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+        distinct: true,
+      );
+      for (final row in rows) {
+        final reference =
+            row['reimbursementTransactionReference']?.toString().trim();
+        if (reference != null && reference.isNotEmpty) {
+          reimbursements.add(reference);
+        }
+      }
+    }
+    return reimbursements;
+  }
+
+  Future<List<MapEntry<String, Map<String, dynamic>>>>
+      _removeCategoryFromOrphanedReimbursements(
+    DatabaseExecutor executor,
+    Set<String> reimbursementReferences,
+  ) async {
+    if (reimbursementReferences.isEmpty) return const [];
+
+    final stillLinked = <String>{};
+    final references = reimbursementReferences.toList(growable: false);
+    for (var start = 0; start < references.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'reimbursement_allocations',
+        columns: ['reimbursementTransactionReference'],
+        where: 'reimbursementTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+        distinct: true,
+      );
+      for (final row in rows) {
+        final reference =
+            row['reimbursementTransactionReference']?.toString().trim();
+        if (reference != null && reference.isNotEmpty) {
+          stillLinked.add(reference);
+        }
+      }
+    }
+
+    final orphanedReferences = reimbursementReferences.difference(stillLinked);
+    if (orphanedReferences.isEmpty) return const [];
+
+    final categoryRows = await executor.query(
+      'categories',
+      columns: ['id'],
+      where: 'builtInKey = ?',
+      whereArgs: const [reimbursementBuiltInKey],
+    );
+    final reimbursementCategoryIds =
+        categoryRows.map((row) => row['id']).whereType<int>().toSet();
+    if (reimbursementCategoryIds.isEmpty) return const [];
+
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    final orphaned = orphanedReferences.toList(growable: false);
+    for (var start = 0; start < orphaned.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, orphaned.length);
+      final chunk = orphaned.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'transactions',
+        where: 'reference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      for (final row in rows) {
+        final transaction = _transactionFromMap(row);
+        if (transaction.type?.trim().toUpperCase() != 'CREDIT') continue;
+        // A reimbursement can also carry another income category. Remove only
+        // the stable built-in category and promote a surviving category.
+        final remainingCategoryIds = transaction.selectedCategoryIds
+            .where((id) => !reimbursementCategoryIds.contains(id))
+            .toList(growable: false);
+        if (remainingCategoryIds.length ==
+            transaction.selectedCategoryIds.length) {
+          continue;
+        }
+
+        final currentPrimary = transaction.categoryId;
+        final nextPrimary = currentPrimary != null &&
+                remainingCategoryIds.contains(currentPrimary)
+            ? currentPrimary
+            : (remainingCategoryIds.isEmpty
+                ? null
+                : remainingCategoryIds.first);
+        final encodedCategoryIds = remainingCategoryIds.isEmpty
+            ? null
+            : jsonEncode(remainingCategoryIds);
+        await executor.update(
+          'transactions',
+          {
+            'categoryId': nextPrimary,
+            'categoryIds': encodedCategoryIds,
+          },
+          where: 'reference = ?',
+          whereArgs: [transaction.reference],
+        );
+
+        final syncRow = Map<String, dynamic>.from(row)
+          ..['categoryId'] = nextPrimary
+          ..['categoryIds'] = encodedCategoryIds
+          ..remove('sourceSubscriptionId');
+        syncRecords.add(MapEntry(transaction.reference, syncRow));
+      }
+    }
+    return syncRecords;
+  }
+
+  Future<void> _enqueueTransactionDeletionChanges({
+    required Iterable<String> deletedReferences,
+    required List<MapEntry<String, Map<String, dynamic>>> categorySyncRecords,
+  }) async {
     bool syncOn = false;
     try {
       syncOn = await DataSyncSettingsService.readEnabledFromPrefs();
     } catch (_) {}
-    if (syncOn) {
-      try {
-        final rows = await db.query(
-          'transactions',
-          columns: ['reference'],
-          where: where,
-          whereArgs: whereArgs,
-        );
-        refs = rows
-            .map((r) => r['reference'] as String?)
-            .whereType<String>()
-            .toList(growable: false);
-      } catch (_) {}
-    }
+    if (!syncOn) return;
 
-    await db.delete('transactions', where: where, whereArgs: whereArgs);
-
-    for (final ref in refs) {
+    for (final ref in deletedReferences) {
       await SyncEnqueuer.instance.onEntityWritten(
         entity: SyncEntity.transactions,
         entityRef: ref,
@@ -905,5 +1158,9 @@ class TransactionRepository {
         deleteSnapshot: {'reference': ref},
       );
     }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: categorySyncRecords,
+    );
   }
 }

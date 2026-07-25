@@ -177,12 +177,7 @@ class IncomeExpenseCards extends StatelessWidget {
                     t.categoryId, selectedIncomeCategoryIds))
             .fold(
               0.0,
-              (sum, t) =>
-                  sum +
-                  transactionIncomeAmount(
-                    t,
-                    isSelfTransfer: provider.isSelfTransfer(t),
-                  ),
+              (sum, t) => sum + provider.incomeAmountForTransaction(t),
             );
         final periodExpenses = periodFiltered
             .where((t) =>

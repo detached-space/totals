@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 31,
+        version: 32,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV31Schema(db);
+      await _validateV32Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -337,6 +337,7 @@ class DatabaseHelper {
     );
 
     await _ensureLoanDebtSchema(db);
+    await _ensureReimbursementSchema(db);
 
     await _seedBuiltInCategories(db);
     await _ensureSyncSchema(db);
@@ -358,6 +359,9 @@ class DatabaseHelper {
       if (newVersion >= 31) {
         await _migrateV30ToV31(db);
       }
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
       return;
     }
 
@@ -369,6 +373,9 @@ class DatabaseHelper {
       if (newVersion >= 31) {
         await _migrateV30ToV31(db);
       }
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
       return;
     }
 
@@ -377,11 +384,22 @@ class DatabaseHelper {
       if (newVersion >= 31) {
         await _migrateV30ToV31(db);
       }
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
       return;
     }
 
     if (oldVersion < 31) {
       await _migrateV30ToV31(db);
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 32) {
+      await _migrateV31ToV32(db);
       return;
     }
 
@@ -987,6 +1005,18 @@ class DatabaseHelper {
     await _runV28Stage('v31 final validation', () => _validateV31Schema(db));
   }
 
+  Future<void> _migrateV31ToV32(Database db) async {
+    await _runV28Stage(
+      'v32 reimbursements',
+      () async {
+        await _ensureReimbursementSchema(db);
+        await _ensureReimbursementBuiltInCategory(db);
+        await _refineRefundCategoryDescription(db);
+      },
+    );
+    await _runV28Stage('v32 final validation', () => _validateV32Schema(db));
+  }
+
   Future<void> _runV28Stage(
     String stage,
     Future<void> Function() action,
@@ -1450,7 +1480,9 @@ class DatabaseHelper {
         orderBy: 'id ASC',
         limit: 1,
       );
-      if (matches.isNotEmpty && matches.first['builtInKey'] == null) {
+      if (key != 'income_reimbursement' &&
+          matches.isNotEmpty &&
+          matches.first['builtInKey'] == null) {
         await db.update(
           'categories',
           {'builtIn': 1, 'builtInKey': key},
@@ -1906,6 +1938,154 @@ class DatabaseHelper {
     if (!accountIndexes.contains('idx_accounts_one_default_per_bank')) {
       throw StateError('v31 invariant default-account index missing');
     }
+  }
+
+  Future<void> _validateV32Schema(Database db) async {
+    await _validateV31Schema(db);
+    if (!await _v28TableExists(db, 'reimbursement_allocations')) {
+      throw StateError(
+        'v32 invariant missing table reimbursement_allocations',
+      );
+    }
+    final columns = await _v28Columns(db, 'reimbursement_allocations');
+    const requiredColumns = {
+      'id',
+      'reimbursementTransactionReference',
+      'expenseTransactionReference',
+      'appliedAmount',
+      'createdAt',
+      'updatedAt',
+    };
+    final missingColumns = requiredColumns.difference(columns);
+    if (missingColumns.isNotEmpty) {
+      throw StateError(
+        'v32 invariant reimbursement_allocations missing '
+        '${missingColumns.join(', ')}',
+      );
+    }
+    final indexes = (await db.rawQuery(
+      "PRAGMA index_list('reimbursement_allocations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    const requiredIndexes = {
+      'idx_reimbursement_allocations_reimbursement',
+      'idx_reimbursement_allocations_expense',
+      'idx_reimbursement_allocations_pair',
+    };
+    if (!indexes.containsAll(requiredIndexes)) {
+      throw StateError('v32 reimbursement allocation indexes are missing');
+    }
+  }
+
+  Future<void> _ensureReimbursementSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS reimbursement_allocations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reimbursementTransactionReference TEXT NOT NULL,
+        expenseTransactionReference TEXT NOT NULL,
+        appliedAmount REAL NOT NULL CHECK(appliedAmount > 0),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reimbursement_allocations_reimbursement
+      ON reimbursement_allocations(reimbursementTransactionReference)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reimbursement_allocations_expense
+      ON reimbursement_allocations(expenseTransactionReference)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursement_allocations_pair
+      ON reimbursement_allocations(
+        reimbursementTransactionReference,
+        expenseTransactionReference
+      )
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_reimbursement_allocations_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM reimbursement_allocations
+        WHERE reimbursementTransactionReference = OLD.reference
+           OR expenseTransactionReference = OLD.reference;
+      END
+    ''');
+  }
+
+  Future<void> _ensureReimbursementBuiltInCategory(Database db) async {
+    const builtInKey = 'income_reimbursement';
+    final keyedRows = await db.query(
+      'categories',
+      columns: ['id'],
+      where: 'builtInKey = ?',
+      whereArgs: [builtInKey],
+      limit: 1,
+    );
+    if (keyedRows.isNotEmpty) {
+      await db.update(
+        'categories',
+        {'builtIn': 1, 'flow': 'income'},
+        where: 'builtInKey = ?',
+        whereArgs: [builtInKey],
+      );
+      return;
+    }
+
+    final definition = models.BuiltInCategories.all.firstWhere(
+      (category) => category.builtInKey == builtInKey,
+    );
+    var name = definition.name;
+    var suffix = 1;
+    while ((await db.query(
+      'categories',
+      columns: ['id'],
+      where: 'name = ? COLLATE NOCASE AND flow = ?',
+      whereArgs: [name, definition.flow],
+      limit: 1,
+    ))
+        .isNotEmpty) {
+      name = suffix == 1
+          ? '${definition.name} (Totals)'
+          : '${definition.name} (Totals $suffix)';
+      suffix++;
+    }
+    await db.insert('categories', {
+      'name': name,
+      'essential': definition.essential ? 1 : 0,
+      'uncategorized': definition.uncategorized ? 1 : 0,
+      'iconKey': definition.iconKey,
+      'colorKey': definition.colorKey,
+      'description': definition.description,
+      'flow': definition.flow,
+      'recurring': definition.recurring ? 1 : 0,
+      'builtIn': 1,
+      'builtInKey': builtInKey,
+    });
+  }
+
+  Future<void> _refineRefundCategoryDescription(Database db) async {
+    final definition = models.BuiltInCategories.all.firstWhere(
+      (category) => category.builtInKey == 'income_refund',
+    );
+    await db.update(
+      'categories',
+      {'description': definition.description},
+      where: '''
+        builtInKey = ?
+        AND (
+          description IS NULL
+          OR TRIM(description) = ''
+          OR description = ?
+        )
+      ''',
+      whereArgs: const [
+        'income_refund',
+        'Refunds and reimbursements',
+      ],
+    );
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {

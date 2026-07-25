@@ -5,17 +5,44 @@ import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 /// Handler for summary-related API endpoints
 class SummaryHandler {
   final AccountRepository _accountRepo = AccountRepository();
   final TransactionRepository _transactionRepo = TransactionRepository();
+  final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
   final BankConfigService _bankConfigService = BankConfigService();
   List<Bank>? _cachedBanks;
+
+  Future<Set<String>> _reimbursementReferences(
+    Iterable<Transaction> transactions,
+  ) async {
+    final references =
+        await _reimbursementRepo.getLinkedReimbursementReferences(
+      transactions.map((transaction) => transaction.reference),
+    );
+    final reimbursementCategoryIds =
+        (await CategoryRepository().getCategories())
+            .where(isReimbursementCategory)
+            .map((category) => category.id)
+            .whereType<int>()
+            .toSet();
+    for (final transaction in transactions) {
+      if (transaction.selectedCategoryIds
+          .any(reimbursementCategoryIds.contains)) {
+        references.add(transaction.reference.trim());
+      }
+    }
+    references.remove('');
+    return references;
+  }
 
   /// Returns a configured router with all summary routes
   Router get router {
@@ -63,6 +90,8 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final reimbursementReferences =
+          await _reimbursementReferences(transactions);
 
       // Calculate totals
       double totalBalance = 0;
@@ -84,7 +113,8 @@ class SummaryHandler {
       double totalDebit = 0;
 
       for (var t in transactions) {
-        if (t.type == 'CREDIT') {
+        if (t.type == 'CREDIT' &&
+            !reimbursementReferences.contains(t.reference.trim())) {
           totalCredit += t.amount.abs();
         } else if (t.type == 'DEBIT') {
           totalDebit += t.amount.abs();
@@ -119,6 +149,8 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final reimbursementReferences =
+          await _reimbursementReferences(transactions);
 
       // Group accounts by bank
       final Map<int, List<Account>> accountsByBank = {};
@@ -162,7 +194,8 @@ class SummaryHandler {
           double totalDebit = 0;
 
           for (var t in bankTransactions) {
-            if (t.type == 'CREDIT') {
+            if (t.type == 'CREDIT' &&
+                !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
             } else if (t.type == 'DEBIT') {
               totalDebit += t.amount.abs();
@@ -201,6 +234,8 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final reimbursementReferences =
+          await _reimbursementReferences(transactions);
 
       final accountSummaries = await Future.wait(
         accounts.map((account) async {
@@ -226,7 +261,8 @@ class SummaryHandler {
           double totalDebit = 0;
 
           for (var t in accountTransactions) {
-            if (t.type == 'CREDIT') {
+            if (t.type == 'CREDIT' &&
+                !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
             } else if (t.type == 'DEBIT') {
               totalDebit += t.amount.abs();

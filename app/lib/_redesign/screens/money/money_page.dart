@@ -2706,10 +2706,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       totalFees += transactionFeeAmount(transaction);
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final incomeAmount = transactionIncomeAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      final incomeAmount = provider.incomeAmountForTransaction(transaction);
       final expenseAmount = transactionExpenseAmount(
         transaction,
         isSelfTransfer: isSelfTransfer,
@@ -2859,10 +2856,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
       final amount = showIncome
-          ? transactionIncomeAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            )
+          ? provider.incomeAmountForTransaction(transaction)
           : transactionExpenseAmount(
               transaction,
               isSelfTransfer: isSelfTransfer,
@@ -2919,10 +2913,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       }
 
       final amount = showIncome
-          ? transactionIncomeAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            )
+          ? provider.incomeAmountForTransaction(transaction)
           : transactionExpenseAmount(
               transaction,
               isSelfTransfer: isSelfTransfer,
@@ -2976,10 +2967,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     for (final transaction in transactions) {
       totalTransactions += 1;
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final incomeAmount = transactionIncomeAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      final incomeAmount = provider.incomeAmountForTransaction(transaction);
       final expenseAmount = transactionExpenseAmount(
         transaction,
         isSelfTransfer: isSelfTransfer,
@@ -3340,10 +3328,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      totalIncome += transactionIncomeAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      totalIncome += provider.incomeAmountForTransaction(transaction);
       totalExpense += transactionExpenseAmount(
         transaction,
         isSelfTransfer: isSelfTransfer,
@@ -3439,10 +3424,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var unmatchedDebit = 0.0;
     for (final transaction in unmatchedTransactions) {
       if (transaction.type == 'CREDIT') {
-        unmatchedCredit += transactionIncomeAmount(
-          transaction,
-          isSelfTransfer: provider.isSelfTransfer(transaction),
-        );
+        unmatchedCredit += provider.incomeAmountForTransaction(transaction);
       } else if (transaction.type == 'DEBIT') {
         unmatchedDebit += transactionExpenseAmount(
           transaction,
@@ -7662,10 +7644,10 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   double _heatmapDelta(Transaction transaction) {
     final isSelfTransfer =
         context.read<TransactionProvider>().isSelfTransfer(transaction);
-    final incomeAmount = transactionIncomeAmount(
-      transaction,
-      isSelfTransfer: isSelfTransfer,
-    );
+    final incomeAmount =
+        context.read<TransactionProvider>().incomeAmountForTransaction(
+              transaction,
+            );
     final expenseAmount = transactionExpenseAmount(
       transaction,
       isSelfTransfer: isSelfTransfer,
@@ -9153,10 +9135,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
       if (dt == null) continue;
       final isSelfTransfer = provider.isSelfTransfer(transaction);
       final amount = transaction.type == 'CREDIT'
-          ? transactionIncomeAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            )
+          ? provider.incomeAmountForTransaction(transaction)
           : transactionExpenseAmount(
               transaction,
               isSelfTransfer: isSelfTransfer,
@@ -9845,10 +9824,7 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       if (mode == _AnalyticsHeatmapMode.expense && !isExpense) continue;
       final isSelfTransfer = provider.isSelfTransfer(transaction);
       final amount = isIncome
-          ? transactionIncomeAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            )
+          ? provider.incomeAmountForTransaction(transaction)
           : transactionExpenseAmount(
               transaction,
               isSelfTransfer: isSelfTransfer,
@@ -12300,10 +12276,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
 
     for (final transaction in transactions) {
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      totalIncome += transactionIncomeAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      totalIncome += provider.incomeAmountForTransaction(transaction);
       totalExpense += transactionExpenseAmount(
         transaction,
         isSelfTransfer: isSelfTransfer,
@@ -13828,10 +13801,7 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     var expenseTotal = 0.0;
     for (final transaction in transactions) {
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      incomeTotal += transactionIncomeAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      incomeTotal += provider.incomeAmountForTransaction(transaction);
       expenseTotal += transactionExpenseAmount(
         transaction,
         isSelfTransfer: isSelfTransfer,

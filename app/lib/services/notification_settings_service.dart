@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 class NotificationSettingsService {
   NotificationSettingsService._();
@@ -268,7 +269,8 @@ class NotificationSettingsService {
           (category) =>
               category.id != null &&
               category.flow.toLowerCase() == flow &&
-              !category.uncategorized,
+              !category.uncategorized &&
+              !isReimbursementCategory(category),
         )
         .toList(growable: false);
 

@@ -403,6 +403,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       if (_selectedCard == 'Income' && transaction.type != 'CREDIT') {
         continue;
       }
+      if (_selectedCard == 'Income' &&
+          provider.isReimbursementTransaction(transaction)) {
+        continue;
+      }
       if (_selectedCard == 'Expense' && transaction.type != 'DEBIT') {
         continue;
       }
@@ -422,9 +426,20 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   List<ChartDataPoint> _getChartData(
     List<Transaction> transactions,
     DateTime baseDate,
+    TransactionProvider provider,
   ) {
+    final chartTransactions = _selectedCard == 'Income'
+        ? transactions
+            .map(
+              (transaction) => transaction.copyWith(
+                amount: provider.incomeAmountForTransaction(transaction),
+              ),
+            )
+            .where((transaction) => transaction.amount > 0)
+            .toList(growable: false)
+        : transactions;
     return ChartDataUtils.getChartData(
-      transactions,
+      chartTransactions,
       _selectedPeriod,
       baseDate,
       dateForTransaction: _resolveTransactionDate,
@@ -676,7 +691,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         final pnlTransactions = _filterByCategorySelections(
             _filterTransactionsForPnl(allTransactions, selectedAccount));
 
-        final chartData = _getChartData(filteredTransactions, baseDate);
+        final chartData =
+            _getChartData(filteredTransactions, baseDate, provider);
         final chartDataByOffset = <int, List<ChartDataPoint>>{};
 
         List<ChartDataPoint> getChartDataForOffset(int offset) {
@@ -686,7 +702,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               categoryFilteredBase,
               offsetDate,
             );
-            return _getChartData(periodFiltered, offsetDate);
+            return _getChartData(periodFiltered, offsetDate, provider);
           });
         }
 

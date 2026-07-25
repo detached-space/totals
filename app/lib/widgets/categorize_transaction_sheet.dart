@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_sort.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 Future<void> showCategorizeTransactionSheet({
   required BuildContext context,
   required TransactionProvider provider,
   required Transaction transaction,
 }) async {
+  final hostContext = context;
   final desiredFlow = transaction.type == 'CREDIT' ? 'income' : 'expense';
   final filtered = provider.categories
       .where((c) => c.flow.toLowerCase() == desiredFlow)
@@ -79,7 +82,36 @@ Future<void> showCategorizeTransactionSheet({
                         if (c.id == null) return;
                         Navigator.pop(context);
                         await provider.setCategoryForTransaction(
-                            transaction, c);
+                          transaction,
+                          c,
+                        );
+                        if (!isReimbursementCategory(c) ||
+                            !hostContext.mounted) {
+                          return;
+                        }
+                        final updated = provider.transactionByReference(
+                              transaction.reference,
+                            ) ??
+                            transaction.copyWith(
+                              categoryId: c.id,
+                              categoryIds: <int>[c.id!],
+                            );
+                        final outcome = await showReimbursementLinkSheet(
+                          context: hostContext,
+                          transaction: updated,
+                          provider: provider,
+                        );
+                        if (outcome == ReimbursementLinkOutcome.cancelled) {
+                          await provider.clearCategoryForTransaction(updated);
+                          if (!hostContext.mounted) return;
+                          ScaffoldMessenger.maybeOf(hostContext)?.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Reimbursement was not linked, so the category was removed.',
+                              ),
+                            ),
+                          );
+                        }
                       },
                     );
                   },
