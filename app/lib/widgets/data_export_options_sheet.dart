@@ -238,6 +238,14 @@ class _DataExportOptionsSheetState extends State<DataExportOptionsSheet> {
                         ),
                   onTap: _pickTransactionRange,
                 ),
+                Text(
+                  context.l10nText(
+                    'Original source SMS messages available on this device are included with the selected transactions.',
+                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Text(
                   context.l10nText('Additional data'),

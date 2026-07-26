@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 32,
+        version: 33,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV32Schema(db);
+      await _validateV33Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -338,6 +338,7 @@ class DatabaseHelper {
 
     await _ensureLoanDebtSchema(db);
     await _ensureReimbursementSchema(db);
+    await _ensureTransactionSourceSmsSchema(db);
 
     await _seedBuiltInCategories(db);
     await _ensureSyncSchema(db);
@@ -362,6 +363,9 @@ class DatabaseHelper {
       if (newVersion >= 32) {
         await _migrateV31ToV32(db);
       }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
       return;
     }
 
@@ -376,6 +380,9 @@ class DatabaseHelper {
       if (newVersion >= 32) {
         await _migrateV31ToV32(db);
       }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
       return;
     }
 
@@ -387,6 +394,9 @@ class DatabaseHelper {
       if (newVersion >= 32) {
         await _migrateV31ToV32(db);
       }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
       return;
     }
 
@@ -395,11 +405,22 @@ class DatabaseHelper {
       if (newVersion >= 32) {
         await _migrateV31ToV32(db);
       }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
       return;
     }
 
     if (oldVersion < 32) {
       await _migrateV31ToV32(db);
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 33) {
+      await _migrateV32ToV33(db);
       return;
     }
 
@@ -1015,6 +1036,14 @@ class DatabaseHelper {
       },
     );
     await _runV28Stage('v32 final validation', () => _validateV32Schema(db));
+  }
+
+  Future<void> _migrateV32ToV33(Database db) async {
+    await _runV28Stage(
+      'v33 transaction source SMS',
+      () => _ensureTransactionSourceSmsSchema(db),
+    );
+    await _runV28Stage('v33 final validation', () => _validateV33Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -1976,6 +2005,57 @@ class DatabaseHelper {
     if (!indexes.containsAll(requiredIndexes)) {
       throw StateError('v32 reimbursement allocation indexes are missing');
     }
+  }
+
+  Future<void> _validateV33Schema(Database db) async {
+    await _validateV32Schema(db);
+    if (!await _v28TableExists(db, 'transaction_source_sms')) {
+      throw StateError('v33 invariant missing table transaction_source_sms');
+    }
+    final columns = await _v28Columns(db, 'transaction_source_sms');
+    const requiredColumns = {
+      'transactionReference',
+      'body',
+      'senderAddress',
+      'receivedAt',
+      'messageId',
+    };
+    final missingColumns = requiredColumns.difference(columns);
+    if (missingColumns.isNotEmpty) {
+      throw StateError(
+        'v33 invariant transaction_source_sms missing '
+        '${missingColumns.join(', ')}',
+      );
+    }
+    final triggers = await db.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'trg_transaction_source_sms_tx_delete'
+    ''');
+    if (triggers.isEmpty) {
+      throw StateError('v33 transaction source SMS delete trigger is missing');
+    }
+  }
+
+  Future<void> _ensureTransactionSourceSmsSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS transaction_source_sms (
+        transactionReference TEXT PRIMARY KEY NOT NULL,
+        body TEXT NOT NULL,
+        senderAddress TEXT,
+        receivedAt TEXT,
+        messageId TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_transaction_source_sms_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM transaction_source_sms
+        WHERE transactionReference = OLD.reference;
+      END
+    ''');
   }
 
   Future<void> _ensureReimbursementSchema(Database db) async {

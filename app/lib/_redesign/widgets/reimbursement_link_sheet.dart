@@ -306,14 +306,21 @@ class _ReimbursementLinkSheetState extends State<_ReimbursementLinkSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    final bottomSafeArea = MediaQuery.paddingOf(context).bottom;
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
     final theme = Theme.of(context);
 
     return AnimatedPadding(
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: keyboardInset),
+      padding: EdgeInsets.only(
+        bottom: keyboardInset + keyboardLiftBuffer,
+      ),
       child: FractionallySizedBox(
         heightFactor: 0.92,
         child: Material(
@@ -414,7 +421,7 @@ class _ReimbursementLinkSheetState extends State<_ReimbursementLinkSheet> {
                   20,
                   12,
                   20,
-                  math.max(12.0, bottomSafeArea),
+                  bottomSafeArea + actionBottomGap,
                 ),
                 decoration: BoxDecoration(
                   color: AppColors.cardColor(context),

@@ -567,7 +567,8 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
                 context.l10nText(
                   'Totals encrypts each backup on this device before it is '
                   'sent. Telegram and the bot owner cannot read the contents '
-                  'without your recovery key.',
+                  'without your recovery key. Full backups include original '
+                  'source SMS messages retained for your transactions.',
                 ),
                 style: TextStyle(
                   color: AppColors.textSecondary(context),
@@ -744,6 +745,18 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
                             : 'Back up now',
                       ),
                     ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  context.l10nText(
+                    'Full backups include original source SMS messages '
+                    'retained for your transactions.',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.textSecondary(context),
+                    fontSize: 12,
                   ),
                 ),
                 if (config.lastBackupAt != null) ...[

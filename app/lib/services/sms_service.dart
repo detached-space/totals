@@ -12,7 +12,9 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/failed_parse.dart';
+import 'package:totals/models/transaction_source_sms.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
+import 'package:totals/repositories/transaction_source_sms_repository.dart';
 import 'package:flutter/widgets.dart';
 import 'package:totals/services/failed_parse_review_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
@@ -936,6 +938,32 @@ class SmsService {
     return null;
   }
 
+  static Future<void> _captureTransactionSourceSms({
+    required String transactionReference,
+    required String body,
+    required String senderAddress,
+    required DateTime? receivedAt,
+    required int? messageId,
+  }) async {
+    final reference = transactionReference.trim();
+    if (reference.isEmpty || body.trim().isEmpty) return;
+    try {
+      await TransactionSourceSmsRepository().upsert(
+        TransactionSourceSms(
+          transactionReference: reference,
+          body: body,
+          senderAddress: senderAddress.trim(),
+          receivedAt: receivedAt,
+          messageId: messageId?.toString(),
+        ),
+      );
+    } catch (error) {
+      debugPrint(
+        'debug: Could not retain source SMS for $reference: $error',
+      );
+    }
+  }
+
   // Static processing logic so it can be used by background handler too.
   static Future<Transaction?> processMessage(
     String messageBody,
@@ -1274,6 +1302,13 @@ class SmsService {
           sourceMessageId: sourceMessageId?.toString(),
         );
       }
+      await _captureTransactionSourceSms(
+        transactionReference: smsSourceDuplicate.reference,
+        body: messageBody,
+        senderAddress: senderAddress,
+        receivedAt: messageDate,
+        messageId: sourceMessageId,
+      );
       print("debug: Duplicate SMS source skipped");
       return const ParseResult(
         status: ParseStatus.duplicate,
@@ -1296,6 +1331,13 @@ class SmsService {
           sourceMessageId: sourceMessageId?.toString(),
         );
       }
+      await _captureTransactionSourceSms(
+        transactionReference: newRef,
+        body: messageBody,
+        senderAddress: senderAddress,
+        receivedAt: messageDate,
+        messageId: sourceMessageId,
+      );
       if (_isAtmWithdrawal(details, messageBody)) {
         try {
           final existing = existingTx
@@ -1359,6 +1401,13 @@ class SmsService {
     );
     final savedTx =
         await txRepo.getTransactionByReference(newTx.reference) ?? newTx;
+    await _captureTransactionSourceSms(
+      transactionReference: savedTx.reference,
+      body: messageBody,
+      senderAddress: senderAddress,
+      receivedAt: messageDate,
+      messageId: sourceMessageId,
+    );
 
     print("debug: New transaction saved: ${savedTx.reference}");
 

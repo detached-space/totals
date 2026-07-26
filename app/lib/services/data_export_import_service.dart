@@ -17,6 +17,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/repositories/transaction_source_sms_repository.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/reimbursement_repository.dart';
@@ -24,6 +25,7 @@ import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/services/account_ownership_service.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
@@ -190,13 +192,15 @@ class BackupImportSummary {
 }
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 10;
+  static const int currentSchemaVersion = 11;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
   final BudgetRepository _budgetRepo = BudgetRepository();
   final CategoryRepository _categoryRepo = CategoryRepository();
   final TransactionRepository _transactionRepo = TransactionRepository();
+  final TransactionSourceSmsRepository _transactionSourceSmsRepo =
+      TransactionSourceSmsRepository();
   final FailedParseRepository _failedParseRepo = FailedParseRepository();
   final LoanDebtRepository _loanDebtRepo = LoanDebtRepository();
   final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
@@ -204,6 +208,8 @@ class DataExportImportService {
   final AutoCategorizationService _autoCategorizationService =
       AutoCategorizationService.instance;
   final SmsConfigService _smsConfigService = SmsConfigService();
+  final TransactionSmsSourceService _transactionSmsSourceService =
+      TransactionSmsSourceService();
 
   static String _bankSummaryLabel(
     int bankId,
@@ -312,6 +318,13 @@ class DataExportImportService {
       final scopedTransactionReferences = scopedTransactions
           .map((transaction) => transaction.reference)
           .toSet();
+      await _transactionSmsSourceService.captureAvailableSources(
+        scopedTransactions,
+      );
+      final scopedTransactionSourceSms =
+          await _transactionSourceSmsRepo.getForTransactionReferences(
+        scopedTransactionReferences,
+      );
       final scopedLoanDebtEntries = !options.includeLoansAndDebts
           ? const <LoanDebtEntry>[]
           : !options.hasTransactionFilter
@@ -368,6 +381,9 @@ class DataExportImportService {
         'transactions': scopedTransactions
             .map(
                 (transaction) => _portableTransactionData(transaction.toJson()))
+            .toList(),
+        'transactionSourceSms': scopedTransactionSourceSms
+            .map((sourceSms) => sourceSms.toJson())
             .toList(),
         'failedParses': options.includeFailedParses
             ? failedParses.map((f) => f.toJson()).toList()
@@ -695,6 +711,21 @@ class DataExportImportService {
 
         await _removeImportedDashenDuplicates();
         await _removeImportedLegacySmsDuplicates();
+      }
+
+      // Source messages are restored independently so an existing transaction
+      // can gain its original SMS even when the transaction itself was skipped
+      // as a duplicate during an append import.
+      final transactionSourceSmsRaw = _asMapList(data['transactionSourceSms']);
+      if (transactionSourceSmsRaw.isNotEmpty) {
+        final existingReferences = await _getExistingTransactionReferences(db);
+        final sourceMessages = transactionSourceSmsRaw
+            .map(TransactionSourceSms.fromJson)
+            .where(
+              (sourceSms) =>
+                  existingReferences.contains(sourceSms.transactionReference),
+            );
+        await _transactionSourceSmsRepo.upsertAll(sourceMessages);
       }
 
       // Restore reimbursement links only after both sides of each relationship
@@ -1079,6 +1110,15 @@ class DataExportImportService {
       'transactions': _readList(raw, 'transactions')
           .map(_portableTransactionEntry)
           .toList(growable: false),
+      'transactionSourceSms': _readList(
+        raw,
+        'transactionSourceSms',
+        aliases: const [
+          'transaction_source_sms',
+          'sourceSms',
+          'source_sms',
+        ],
+      ),
       'failedParses': _readList(
         raw,
         'failedParses',
@@ -1243,6 +1283,13 @@ class DataExportImportService {
         .where((row) => options.includesBank(_asInt(row['bankId'])))
         .toList(growable: false);
     filtered['transactions'] = transactions;
+    filtered['transactionSourceSms'] = _asMapList(data['transactionSourceSms'])
+        .where(
+          (row) => transactionReferences.contains(
+            row['transactionReference']?.toString().trim(),
+          ),
+        )
+        .toList(growable: false);
     filtered['reimbursementAllocations'] =
         _asMapList(data['reimbursementAllocations'])
             .where(
@@ -1299,6 +1346,15 @@ class DataExportImportService {
     final explicit =
         _asInt(data['schemaVersion']) ?? _asInt(data['schema_version']);
     if (explicit != null) return explicit;
+
+    if (_hasAnySection(data, const [
+      'transactionSourceSms',
+      'transaction_source_sms',
+      'sourceSms',
+      'source_sms',
+    ])) {
+      return 11;
+    }
 
     if (_containsTransactionOwnership(data)) {
       return currentSchemaVersion;
