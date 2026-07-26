@@ -25,6 +25,9 @@ class AdvancedSettingsService {
   static const String _toolsFabItemsKey = 'redesign_tools_fab_items';
   static const String _telegramBackupEnabledKey =
       'advanced_telegram_backup_enabled';
+  static const String _telegramBackupConsentVersionKey =
+      'advanced_telegram_backup_consent_version';
+  static const int currentTelegramBackupConsentVersion = 1;
   static const Set<ToolsFabItem> defaultToolsFabItems = {
     ToolsFabItem.quickAccounts,
     ToolsFabItem.verifyPayments,
@@ -38,6 +41,7 @@ class AdvancedSettingsService {
   final ValueNotifier<Set<ToolsFabItem>> toolsFabItems =
       ValueNotifier<Set<ToolsFabItem>>(defaultToolsFabItems);
   final ValueNotifier<bool> telegramBackupEnabled = ValueNotifier<bool>(false);
+  final ValueNotifier<int> telegramBackupConsentVersion = ValueNotifier<int>(0);
 
   bool _loaded = false;
 
@@ -55,6 +59,8 @@ class AdvancedSettingsService {
         _toolsFabItemsFromStorage(prefs.getStringList(_toolsFabItemsKey));
     telegramBackupEnabled.value =
         prefs.getBool(_telegramBackupEnabledKey) ?? false;
+    telegramBackupConsentVersion.value =
+        prefs.getInt(_telegramBackupConsentVersionKey) ?? 0;
     _loaded = true;
   }
 
@@ -81,9 +87,27 @@ class AdvancedSettingsService {
   Future<void> setTelegramBackupEnabled(bool enabled) async {
     await ensureLoaded();
     if (telegramBackupEnabled.value == enabled) return;
+    if (enabled && !hasTelegramBackupConsent) {
+      throw StateError(
+        'Telegram Backup cannot be enabled before consent is recorded.',
+      );
+    }
     telegramBackupEnabled.value = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_telegramBackupEnabledKey, enabled);
+  }
+
+  bool get hasTelegramBackupConsent =>
+      telegramBackupConsentVersion.value >= currentTelegramBackupConsentVersion;
+
+  Future<void> recordTelegramBackupConsent() async {
+    await ensureLoaded();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _telegramBackupConsentVersionKey,
+      currentTelegramBackupConsentVersion,
+    );
+    telegramBackupConsentVersion.value = currentTelegramBackupConsentVersion;
   }
 
   static ProfileDoubleTapAction _fromStorage(String? raw) {

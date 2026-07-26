@@ -4,6 +4,8 @@ import 'package:totals/models/transaction.dart';
 class TransactionLinkUtils {
   static final RegExp _urlPattern =
       RegExp(r'''https?://[^\s<>"']+''', caseSensitive: false);
+  static final RegExp _telebirrReceiptReferencePattern =
+      RegExp(r'^[A-Za-z0-9@.\-]+$');
 
   static String? extractTransactionLinkFromMessage({
     required String messageBody,
@@ -84,6 +86,16 @@ class TransactionLinkUtils {
       case 5:
         return 'https://share.zemenbank.com/rt/'
             '${Uri.encodeComponent(normalizedReference)}/pdf';
+      case 6:
+        final receiptReference = normalizedReference.replaceFirst(
+          RegExp(r'[.,;:]+$'),
+          '',
+        );
+        if (!_telebirrReceiptReferencePattern.hasMatch(receiptReference)) {
+          return null;
+        }
+        return 'https://transactioninfo.ethiotelecom.et/receipt/'
+            '${Uri.encodeComponent(receiptReference)}';
       default:
         return null;
     }

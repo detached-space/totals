@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_home_page.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_widgets.dart';
+import 'package:totals/_redesign/screens/telegram_backup_consent_page.dart';
 import 'package:totals/_redesign/screens/telegram_backup_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -43,6 +44,15 @@ class _RedesignAdvancedSettingsPageState
   }
 
   Future<void> _setTelegramBackupEnabled(bool enabled) async {
+    if (enabled) {
+      final accepted = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => const TelegramBackupConsentPage(),
+        ),
+      );
+      if (!mounted || accepted != true) return;
+    }
+
     setState(() => _telegramBackupEnabled = enabled);
     try {
       await AdvancedSettingsService.instance.setTelegramBackupEnabled(enabled);

@@ -12,7 +12,7 @@ export 'package:totals/models/transaction_source_sms.dart';
 /// Resolves a transaction's durable SMS source identity back to the Android
 /// inbox and persists a portable copy for export and restore.
 class TransactionSmsSourceService {
-  final Telephony _telephony;
+  final Telephony? _telephonyOverride;
   final BankConfigService _bankConfigService;
   final TransactionSourceSmsRepository _sourceSmsRepository;
 
@@ -20,10 +20,12 @@ class TransactionSmsSourceService {
     Telephony? telephony,
     BankConfigService? bankConfigService,
     TransactionSourceSmsRepository? sourceSmsRepository,
-  })  : _telephony = telephony ?? Telephony.instance,
+  })  : _telephonyOverride = telephony,
         _bankConfigService = bankConfigService ?? BankConfigService(),
         _sourceSmsRepository =
             sourceSmsRepository ?? TransactionSourceSmsRepository();
+
+  Telephony get _telephony => _telephonyOverride ?? Telephony.instance;
 
   static bool hasSmsSource(Transaction transaction) {
     final sourceType = transaction.sourceType?.trim().toLowerCase();
