@@ -45,7 +45,6 @@ class DataExportOptions {
   final bool includeBudgets;
   final bool includeAutoCategorization;
   final bool includeFailedParses;
-  final bool includeSmsPatterns;
   final bool includeLoansAndDebts;
   final bool includeQuickAccessAccounts;
 
@@ -56,7 +55,6 @@ class DataExportOptions {
     this.includeBudgets = true,
     this.includeAutoCategorization = true,
     this.includeFailedParses = true,
-    this.includeSmsPatterns = true,
     this.includeLoansAndDebts = true,
     this.includeQuickAccessAccounts = true,
   });
@@ -68,7 +66,6 @@ class DataExportOptions {
       includeBudgets &&
       includeAutoCategorization &&
       includeFailedParses &&
-      includeSmsPatterns &&
       includeLoansAndDebts &&
       includeQuickAccessAccounts;
 
@@ -112,7 +109,6 @@ class DataExportOptions {
       'includeBudgets': includeBudgets,
       'includeAutoCategorization': includeAutoCategorization,
       'includeFailedParses': includeFailedParses,
-      'includeSmsPatterns': includeSmsPatterns,
       'includeLoansAndDebts': includeLoansAndDebts,
       'includeQuickAccessAccounts': includeQuickAccessAccounts,
     };
@@ -302,8 +298,6 @@ class DataExportImportService {
       final autoCategoryRules = await _autoCategorizationService.getRules();
       final autoCategoryPromptDismissals =
           await _autoCategorizationService.getDismissals();
-      final smsPatterns =
-          await _smsConfigService.getPatterns(allowRemoteFetch: false);
       final loanDebtEntries = await _getLoanDebtEntriesFromDb();
       final loanDebtRepayments = await _getLoanDebtRepaymentsFromDb();
       final reimbursementAllocations =
@@ -395,9 +389,6 @@ class DataExportImportService {
             ? autoCategoryPromptDismissals
                 .map((dismissal) => dismissal.toJson())
                 .toList()
-            : [],
-        'smsPatterns': options.includeSmsPatterns
-            ? smsPatterns.map((p) => p.toJson()).toList()
             : [],
         'loanDebtEntries':
             scopedLoanDebtEntries.map((e) => e.toJson()).toList(),

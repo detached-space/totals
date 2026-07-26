@@ -32,7 +32,6 @@ class _DataExportOptionsSheetState extends State<DataExportOptionsSheet> {
   bool _includeBudgets = true;
   bool _includeAutoCategorization = true;
   bool _includeFailedParses = true;
-  bool _includeSmsPatterns = true;
   bool _includeLoansAndDebts = true;
   bool _includeQuickAccessAccounts = true;
 
@@ -86,7 +85,6 @@ class _DataExportOptionsSheetState extends State<DataExportOptionsSheet> {
         includeBudgets: _includeBudgets,
         includeAutoCategorization: _includeAutoCategorization,
         includeFailedParses: _includeFailedParses,
-        includeSmsPatterns: _includeSmsPatterns,
         includeLoansAndDebts: _includeLoansAndDebts,
         includeQuickAccessAccounts: _includeQuickAccessAccounts,
       ),
@@ -291,13 +289,6 @@ class _DataExportOptionsSheetState extends State<DataExportOptionsSheet> {
                   value: _includeLoansAndDebts,
                   onChanged: (value) =>
                       setState(() => _includeLoansAndDebts = value),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(context.l10nText('SMS parsing configuration')),
-                  value: _includeSmsPatterns,
-                  onChanged: (value) =>
-                      setState(() => _includeSmsPatterns = value),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
