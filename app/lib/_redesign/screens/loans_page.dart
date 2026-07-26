@@ -71,10 +71,12 @@ Future<void> openLoansPersonPage({
 
 class LoansPage extends StatefulWidget {
   final String? initialPersonName;
+  final LoanDebtRepository? repository;
 
   const LoansPage({
     super.key,
     this.initialPersonName,
+    this.repository,
   });
 
   @override
@@ -121,10 +123,9 @@ class _LoanDebtFilterSelection {
 }
 
 class _LoansPageState extends State<LoansPage> {
-  static const int _transactionsPageSize = 20;
-  static const double _stickyPaginationHeight = 62;
+  static const int _transactionsBatchSize = 20;
 
-  final LoanDebtRepository _repository = LoanDebtRepository();
+  late final LoanDebtRepository _repository;
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _overviewKey = GlobalKey();
   final TextEditingController _linkedSearchController = TextEditingController();
@@ -137,8 +138,12 @@ class _LoansPageState extends State<LoansPage> {
   _LoansMainTab _selectedMainTab = _LoansMainTab.people;
   String _linkedSearchQuery = '';
   String _unlinkedSearchQuery = '';
-  int _linkedPage = 0;
-  int _unlinkedPage = 0;
+  int _linkedVisibleCount = _transactionsBatchSize;
+  int _unlinkedVisibleCount = _transactionsBatchSize;
+  int _linkedAvailableCount = 0;
+  int _unlinkedAvailableCount = 0;
+  bool _isAppendingTransactions = false;
+  bool _loadMoreCheckScheduled = false;
   String? _selectedPerson;
   _LoanDebtTransactionFilter _transactionFilter =
       _LoanDebtTransactionFilter.all;
@@ -159,6 +164,7 @@ class _LoansPageState extends State<LoansPage> {
   @override
   void initState() {
     super.initState();
+    _repository = widget.repository ?? LoanDebtRepository();
     _pendingInitialPersonName = normalizeLoanDebtPersonName(
       widget.initialPersonName ?? '',
     );
@@ -166,7 +172,7 @@ class _LoansPageState extends State<LoansPage> {
       _pendingInitialPersonName = null;
     }
     _loanDebtDataFuture = _loadLoanDebtData();
-    _scrollController.addListener(_syncPinnedHeaderDivider);
+    _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _syncPinnedHeaderDivider();
@@ -175,7 +181,7 @@ class _LoansPageState extends State<LoansPage> {
 
   @override
   void dispose() {
-    _scrollController.removeListener(_syncPinnedHeaderDivider);
+    _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
     _linkedSearchController.dispose();
     _unlinkedSearchController.dispose();
@@ -197,6 +203,63 @@ class _LoansPageState extends State<LoansPage> {
     final shouldShow = pixels > _pinnedHeaderStartOffset;
     if (_showPinnedHeaderDivider.value == shouldShow) return;
     _showPinnedHeaderDivider.value = shouldShow;
+  }
+
+  void _handleScroll() {
+    _syncPinnedHeaderDivider();
+    if (_isNearTransactionListEnd) {
+      _scheduleLoadMoreCheck();
+    }
+  }
+
+  bool get _isNearTransactionListEnd {
+    if (!_scrollController.hasClients ||
+        _selectedMainTab == _LoansMainTab.people) {
+      return false;
+    }
+    final position = _scrollController.position;
+    final loadThreshold = math.max(320.0, position.viewportDimension * 0.75);
+    return position.extentAfter <= loadThreshold;
+  }
+
+  void _scheduleLoadMoreCheck() {
+    if (_loadMoreCheckScheduled) return;
+    _loadMoreCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadMoreCheckScheduled = false;
+      if (!mounted) return;
+      _loadMoreTransactionsIfNeeded();
+    });
+  }
+
+  void _loadMoreTransactionsIfNeeded() {
+    if (_isAppendingTransactions || !_isNearTransactionListEnd) {
+      return;
+    }
+
+    final isLinked = _selectedMainTab == _LoansMainTab.linked;
+    final visibleCount = isLinked ? _linkedVisibleCount : _unlinkedVisibleCount;
+    final availableCount =
+        isLinked ? _linkedAvailableCount : _unlinkedAvailableCount;
+    if (visibleCount >= availableCount) return;
+
+    _isAppendingTransactions = true;
+    setState(() {
+      final nextVisibleCount = math.min(
+        visibleCount + _transactionsBatchSize,
+        availableCount,
+      );
+      if (isLinked) {
+        _linkedVisibleCount = nextVisibleCount;
+      } else {
+        _unlinkedVisibleCount = nextVisibleCount;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isAppendingTransactions = false;
+      if (!mounted) return;
+      _scheduleLoadMoreCheck();
+    });
   }
 
   Future<_LoanDebtData> _loadLoanDebtData() async {
@@ -324,7 +387,7 @@ class _LoansPageState extends State<LoansPage> {
       _maxAmount = selected.maxAmount;
       _startDate = selected.startDate;
       _endDate = selected.endDate;
-      _linkedPage = 0;
+      _linkedVisibleCount = _transactionsBatchSize;
     });
   }
 
@@ -356,7 +419,7 @@ class _LoansPageState extends State<LoansPage> {
       _unassignedMaxAmount = selected.maxAmount;
       _unassignedStartDate = selected.startDate;
       _unassignedEndDate = selected.endDate;
-      _unlinkedPage = 0;
+      _unlinkedVisibleCount = _transactionsBatchSize;
     });
   }
 
@@ -381,46 +444,14 @@ class _LoansPageState extends State<LoansPage> {
   void _setLinkedSearchQuery(String value) {
     setState(() {
       _linkedSearchQuery = value;
-      _linkedPage = 0;
+      _linkedVisibleCount = _transactionsBatchSize;
     });
   }
 
   void _setUnlinkedSearchQuery(String value) {
     setState(() {
       _unlinkedSearchQuery = value;
-      _unlinkedPage = 0;
-    });
-  }
-
-  void _setTransactionPage({
-    required bool linked,
-    required int page,
-  }) {
-    final currentPage = linked ? _linkedPage : _unlinkedPage;
-    if (currentPage == page) return;
-    setState(() {
-      if (linked) {
-        _linkedPage = page;
-      } else {
-        _unlinkedPage = page;
-      }
-    });
-    HapticFeedback.selectionClick();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final target = _pinnedHeaderStartOffset;
-      if (!target.isFinite) return;
-      final targetOffset = target
-          .clamp(
-            _scrollController.position.minScrollExtent,
-            _scrollController.position.maxScrollExtent,
-          )
-          .toDouble();
-      _scrollController.animateTo(
-        targetOffset,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-      );
+      _unlinkedVisibleCount = _transactionsBatchSize;
     });
   }
 
@@ -554,17 +585,14 @@ class _LoansPageState extends State<LoansPage> {
     required List<int> unassignedBankIds,
     required int linkedResultCount,
     required int linkedTotalCount,
-    required _LoanDebtPage<_LoanDebtTimelineRow> linkedPage,
     required int unlinkedResultCount,
     required int unlinkedTotalCount,
-    required _LoanDebtPage<_LoanDebtItem> unlinkedPage,
   }) {
     final isLinked = _selectedMainTab == _LoansMainTab.linked;
     final isUnlinked = _selectedMainTab == _LoansMainTab.unlinked;
     final isSearchable = isLinked || isUnlinked;
     final resultCount = isLinked ? linkedResultCount : unlinkedResultCount;
     final totalCount = isLinked ? linkedTotalCount : unlinkedTotalCount;
-    final page = isLinked ? linkedPage : unlinkedPage;
 
     return DecoratedBox(
       decoration: BoxDecoration(color: AppColors.background(context)),
@@ -606,8 +634,6 @@ class _LoansPageState extends State<LoansPage> {
                     linked: isLinked,
                     resultCount: resultCount,
                     totalCount: totalCount,
-                    currentPage: page.safePage,
-                    totalPages: page.totalPages,
                   ),
                 ],
               ],
@@ -683,7 +709,7 @@ class _LoansPageState extends State<LoansPage> {
   List<Widget> _buildLinkedTab({
     required BuildContext context,
     required _LoanDebtDashboard dashboard,
-    required _LoanDebtPage<_LoanDebtTimelineRow> page,
+    required List<_LoanDebtTimelineRow> items,
   }) {
     final hasLinkedTransactions = dashboard.assignedItems.isNotEmpty ||
         dashboard.repaymentItems.isNotEmpty;
@@ -691,7 +717,7 @@ class _LoansPageState extends State<LoansPage> {
         _linkedSearchQuery.trim().isNotEmpty;
 
     return [
-      if (page.items.isEmpty)
+      if (items.isEmpty)
         _EmptyPanel(
           icon: isNarrowed ? AppIcons.filter_list : AppIcons.debts,
           title: context.l10nText(
@@ -706,7 +732,7 @@ class _LoansPageState extends State<LoansPage> {
           ),
         )
       else
-        for (final section in _loanDebtTimelineSections(page.items)) ...[
+        for (final section in _loanDebtTimelineSections(items)) ...[
           _LoanDebtDayHeader(date: section.date),
           for (final row in section.rows)
             if (row.loanDebtItem != null)
@@ -725,13 +751,13 @@ class _LoansPageState extends State<LoansPage> {
 
   List<Widget> _buildUnlinkedTab({
     required BuildContext context,
-    required _LoanDebtPage<_LoanDebtItem> page,
+    required List<_LoanDebtItem> items,
   }) {
     final isNarrowed = _unassignedFilterSelection.activeCount > 0 ||
         _unlinkedSearchQuery.trim().isNotEmpty;
 
     return [
-      if (page.items.isEmpty)
+      if (items.isEmpty)
         _EmptyPanel(
           icon:
               isNarrowed ? AppIcons.filter_list : AppIcons.check_circle_rounded,
@@ -749,7 +775,7 @@ class _LoansPageState extends State<LoansPage> {
       else
         for (final section in _loanDebtTimelineSections(
           _loanDebtTimelineRows(
-            loanDebtItems: page.items,
+            loanDebtItems: items,
             repaymentItems: const <_LoanDebtRepaymentItem>[],
           ),
         )) ...[
@@ -810,10 +836,10 @@ class _LoansPageState extends State<LoansPage> {
                   final searchedTimelineRows = timelineRows
                       .where((row) => _matchesLinkedSearch(row, provider))
                       .toList(growable: false);
-                  final linkedPage = _paginateLoanDebtItems(
+                  _linkedAvailableCount = searchedTimelineRows.length;
+                  final linkedItems = _visibleLoanDebtItems(
                     searchedTimelineRows,
-                    requestedPage: _linkedPage,
-                    pageSize: _transactionsPageSize,
+                    visibleCount: _linkedVisibleCount,
                   );
                   final filteredUnassignedItems = _filteredLoanDebtItems(
                     dashboard.unassignedItems,
@@ -827,10 +853,10 @@ class _LoansPageState extends State<LoansPage> {
                   final searchedUnassignedItems = filteredUnassignedItems
                       .where((item) => _matchesUnlinkedSearch(item, provider))
                       .toList(growable: false);
-                  final unlinkedPage = _paginateLoanDebtItems(
+                  _unlinkedAvailableCount = searchedUnassignedItems.length;
+                  final unlinkedItems = _visibleLoanDebtItems(
                     searchedUnassignedItems,
-                    requestedPage: _unlinkedPage,
-                    pageSize: _transactionsPageSize,
+                    visibleCount: _unlinkedVisibleCount,
                   );
                   final assignedBankIds = _bankIdsForTimelineRows(
                     items: dashboard.assignedItems,
@@ -847,110 +873,66 @@ class _LoansPageState extends State<LoansPage> {
                     _LoansMainTab.linked => _buildLinkedTab(
                         context: context,
                         dashboard: dashboard,
-                        page: linkedPage,
+                        items: linkedItems,
                       ),
                     _LoansMainTab.unlinked => _buildUnlinkedTab(
                         context: context,
-                        page: unlinkedPage,
+                        items: unlinkedItems,
                       ),
                   };
-                  final paginationIsLinked =
-                      _selectedMainTab == _LoansMainTab.linked;
-                  final activePage =
-                      paginationIsLinked ? linkedPage : unlinkedPage;
-                  final showsPagination =
-                      (_selectedMainTab == _LoansMainTab.linked &&
-                              linkedPage.items.isNotEmpty &&
-                              linkedPage.totalPages > 1) ||
-                          (_selectedMainTab == _LoansMainTab.unlinked &&
-                              unlinkedPage.items.isNotEmpty &&
-                              unlinkedPage.totalPages > 1);
+                  final hasMoreTransactions = switch (_selectedMainTab) {
+                    _LoansMainTab.people => false,
+                    _LoansMainTab.linked =>
+                      linkedItems.length < searchedTimelineRows.length,
+                    _LoansMainTab.unlinked =>
+                      unlinkedItems.length < searchedUnassignedItems.length,
+                  };
+                  if (hasMoreTransactions) {
+                    _scheduleLoadMoreCheck();
+                  }
 
-                  return Stack(
-                    children: [
-                      RefreshIndicator(
-                        color: AppColors.primaryLight,
-                        onRefresh: () async {
-                          await provider.loadData();
-                          _refreshEntries();
-                          await _loanDebtDataFuture;
-                        },
-                        child: CustomScrollView(
-                          controller: _scrollController,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          slivers: [
-                            SliverToBoxAdapter(
-                              child: Padding(
-                                key: _overviewKey,
-                                padding:
-                                    const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                                child: _LoansSummaryRow(dashboard: dashboard),
-                              ),
-                            ),
-                            PinnedHeaderSliver(
-                              child: _buildPinnedHeader(
-                                people: people,
-                                assignedBankIds: assignedBankIds,
-                                unassignedBankIds: unassignedBankIds,
-                                linkedResultCount: searchedTimelineRows.length,
-                                linkedTotalCount:
-                                    dashboard.assignedItems.length +
-                                        dashboard.repaymentItems.length,
-                                linkedPage: linkedPage,
-                                unlinkedResultCount:
-                                    searchedUnassignedItems.length,
-                                unlinkedTotalCount:
-                                    dashboard.unassignedItems.length,
-                                unlinkedPage: unlinkedPage,
-                              ),
-                            ),
-                            SliverPadding(
-                              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                              sliver: SliverList(
-                                delegate:
-                                    SliverChildListDelegate(mainTabContent),
-                              ),
-                            ),
-                            SliverPadding(
-                              padding: EdgeInsets.only(
-                                bottom: 28 +
-                                    (showsPagination
-                                        ? _stickyPaginationHeight
-                                        : 0),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (showsPagination)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: AppColors.background(context),
-                              border: Border(
-                                top: BorderSide(
-                                  color: AppColors.borderColor(context),
-                                ),
-                              ),
-                            ),
-                            child: SafeArea(
-                              top: false,
-                              minimum: const EdgeInsets.fromLTRB(20, 6, 20, 6),
-                              child: _LoanDebtPaginationBar(
-                                currentPage: activePage.safePage,
-                                totalPages: activePage.totalPages,
-                                onPageChanged: (page) => _setTransactionPage(
-                                  linked: paginationIsLinked,
-                                  page: page,
-                                ),
-                              ),
-                            ),
+                  return RefreshIndicator(
+                    color: AppColors.primaryLight,
+                    onRefresh: () async {
+                      await provider.loadData();
+                      _refreshEntries();
+                      await _loanDebtDataFuture;
+                    },
+                    child: CustomScrollView(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            key: _overviewKey,
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                            child: _LoansSummaryRow(dashboard: dashboard),
                           ),
                         ),
-                    ],
+                        PinnedHeaderSliver(
+                          child: _buildPinnedHeader(
+                            people: people,
+                            assignedBankIds: assignedBankIds,
+                            unassignedBankIds: unassignedBankIds,
+                            linkedResultCount: searchedTimelineRows.length,
+                            linkedTotalCount: dashboard.assignedItems.length +
+                                dashboard.repaymentItems.length,
+                            unlinkedResultCount: searchedUnassignedItems.length,
+                            unlinkedTotalCount:
+                                dashboard.unassignedItems.length,
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                          sliver: SliverList(
+                            delegate: SliverChildListDelegate(mainTabContent),
+                          ),
+                        ),
+                        const SliverPadding(
+                          padding: EdgeInsets.only(bottom: 28),
+                        ),
+                      ],
+                    ),
                   );
                 },
               ),
@@ -1854,15 +1836,11 @@ class _LoanDebtResultsSummary extends StatelessWidget {
   final bool linked;
   final int resultCount;
   final int totalCount;
-  final int currentPage;
-  final int totalPages;
 
   const _LoanDebtResultsSummary({
     required this.linked,
     required this.resultCount,
     required this.totalCount,
-    required this.currentPage,
-    required this.totalPages,
   });
 
   @override
@@ -1881,29 +1859,17 @@ class _LoanDebtResultsSummary extends StatelessWidget {
         resultCount == totalCount ? '$resultCount' : '$resultCount/$totalCount';
     final countLabel = '$count $transactionLabel';
 
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            countLabel,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: AppColors.textSecondary(context),
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-        ),
-        if (totalPages > 1)
-          Text(
-            '${context.l10nText('Page')} ${currentPage + 1} '
-            '${context.l10nText('of')} $totalPages',
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: AppColors.textSecondary(context),
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-      ],
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        countLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: AppColors.textSecondary(context),
+              fontWeight: FontWeight.w700,
+            ),
+      ),
     );
   }
 }
@@ -2321,177 +2287,6 @@ class _LoanDebtFilterActionButton extends StatelessWidget {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-const int _loanDebtPaginationVisiblePageCount = 5;
-const double _loanDebtPaginationButtonSize = 34;
-const double _loanDebtPaginationButtonMargin = 3;
-const double _loanDebtPaginationStripWidth =
-    _loanDebtPaginationVisiblePageCount *
-        (_loanDebtPaginationButtonSize + (_loanDebtPaginationButtonMargin * 2));
-
-class _LoanDebtPaginationBar extends StatelessWidget {
-  final int currentPage;
-  final int totalPages;
-  final ValueChanged<int> onPageChanged;
-
-  const _LoanDebtPaginationBar({
-    required this.currentPage,
-    required this.totalPages,
-    required this.onPageChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _LoanDebtPaginationArrow(
-              icon: AppIcons.chevron_left_rounded,
-              enabled: currentPage > 0,
-              onTap: () => onPageChanged(currentPage - 1),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: _loanDebtPaginationStripWidth,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: _buildPageButtons(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _LoanDebtPaginationArrow(
-              icon: AppIcons.chevron_right_rounded,
-              enabled: currentPage < totalPages - 1,
-              onTap: () => onPageChanged(currentPage + 1),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _buildPageButtons() {
-    if (totalPages <= _loanDebtPaginationVisiblePageCount) {
-      return [
-        for (var page = 0; page < totalPages; page++)
-          _LoanDebtPaginationPage(
-            page: page,
-            selected: page == currentPage,
-            onTap: () => onPageChanged(page),
-          ),
-      ];
-    }
-
-    const middlePageCount = _loanDebtPaginationVisiblePageCount - 2;
-    final middleStart = math.min(
-      math.max(1, currentPage - (middlePageCount ~/ 2)),
-      totalPages - middlePageCount - 1,
-    );
-
-    return [
-      _LoanDebtPaginationPage(
-        page: 0,
-        selected: currentPage == 0,
-        onTap: () => onPageChanged(0),
-      ),
-      for (var page = middleStart; page < middleStart + middlePageCount; page++)
-        _LoanDebtPaginationPage(
-          page: page,
-          selected: page == currentPage,
-          onTap: () => onPageChanged(page),
-        ),
-      _LoanDebtPaginationPage(
-        page: totalPages - 1,
-        selected: currentPage == totalPages - 1,
-        onTap: () => onPageChanged(totalPages - 1),
-      ),
-    ];
-  }
-}
-
-class _LoanDebtPaginationArrow extends StatelessWidget {
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  const _LoanDebtPaginationArrow({
-    required this.icon,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(8),
-      child: SizedBox(
-        width: _loanDebtPaginationButtonSize,
-        height: _loanDebtPaginationButtonSize,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: enabled
-                ? AppColors.primaryLight.withValues(alpha: 0.1)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: enabled
-                ? AppColors.primaryLight
-                : AppColors.textTertiary(context),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LoanDebtPaginationPage extends StatelessWidget {
-  final int page;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _LoanDebtPaginationPage({
-    required this.page,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: selected ? null : onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: _loanDebtPaginationButtonSize,
-        height: _loanDebtPaginationButtonSize,
-        margin: const EdgeInsets.symmetric(
-          horizontal: _loanDebtPaginationButtonMargin,
-        ),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primaryLight : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          '${page + 1}',
-          style: TextStyle(
-            color:
-                selected ? AppColors.white : AppColors.textSecondary(context),
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-          ),
-        ),
       ),
     );
   }
@@ -7053,34 +6848,12 @@ class _LoanDebtRepaymentItem {
   }
 }
 
-class _LoanDebtPage<T> {
-  final List<T> items;
-  final int safePage;
-  final int totalPages;
-
-  const _LoanDebtPage({
-    required this.items,
-    required this.safePage,
-    required this.totalPages,
-  });
-}
-
-_LoanDebtPage<T> _paginateLoanDebtItems<T>(
+List<T> _visibleLoanDebtItems<T>(
   List<T> items, {
-  required int requestedPage,
-  required int pageSize,
+  required int visibleCount,
 }) {
-  final totalPages =
-      items.isEmpty ? 1 : ((items.length + pageSize - 1) ~/ pageSize);
-  final safePage = requestedPage.clamp(0, totalPages - 1).toInt();
-  final startIndex = safePage * pageSize;
-  final endIndex = math.min(startIndex + pageSize, items.length);
-
-  return _LoanDebtPage<T>(
-    items: List<T>.unmodifiable(items.sublist(startIndex, endIndex)),
-    safePage: safePage,
-    totalPages: totalPages,
-  );
+  if (visibleCount >= items.length) return items;
+  return List<T>.unmodifiable(items.take(visibleCount));
 }
 
 bool _matchesLoanDebtSearch({
