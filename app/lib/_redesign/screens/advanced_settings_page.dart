@@ -57,6 +57,7 @@ class _RedesignAdvancedSettingsPageState
     try {
       await AdvancedSettingsService.instance.setTelegramBackupEnabled(enabled);
       await TelegramBackupScheduler.sync();
+      if (enabled && mounted) _openTelegramBackup();
     } catch (_) {
       if (!mounted) return;
       setState(() {

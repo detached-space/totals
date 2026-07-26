@@ -20,7 +20,7 @@ class ReconciliationLedgerFilter {
   final ReconciliationDifferenceDirection? direction;
 
   const ReconciliationLedgerFilter({
-    this.sort = ReconciliationLedgerSort.newest,
+    this.sort = ReconciliationLedgerSort.largestDifference,
     this.startDate,
     this.endDate,
     this.bankIds = const <int>{},
@@ -32,7 +32,7 @@ class ReconciliationLedgerFilter {
 
   int get activeCount {
     var count = 0;
-    if (sort != ReconciliationLedgerSort.newest) count++;
+    if (sort != ReconciliationLedgerSort.largestDifference) count++;
     if (startDate != null || endDate != null) count++;
     if (bankIds.isNotEmpty) count++;
     if (accountKey != null) count++;

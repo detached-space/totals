@@ -13241,7 +13241,7 @@ class _ReconciliationLedgerFilterSheetState
 
   void _clearAll() {
     setState(() {
-      _sort = ReconciliationLedgerSort.newest;
+      _sort = ReconciliationLedgerSort.largestDifference;
       _startDate = null;
       _endDate = null;
       _selectedBankIds = <int>{};

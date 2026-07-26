@@ -462,10 +462,22 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
   Future<void> _openBot() async {
     final config = _config;
     if (config == null) return;
-    final uri = Uri.https('t.me', '/${config.botUsername}');
+    await _openTelegramChat(config.botUsername);
+  }
+
+  Future<void> _openBotFather() => _openTelegramChat('BotFather');
+
+  Future<void> _openTelegramChat(String username) async {
+    final normalizedUsername = username.trim().replaceFirst(RegExp(r'^@'), '');
+    if (normalizedUsername.isEmpty) return;
+    final uri = Uri.https('t.me', '/$normalizedUsername');
     try {
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        await launchUrl(uri);
+      var opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened) opened = await launchUrl(uri);
+      if (!opened && mounted) {
+        _showError(
+          context.l10nTextRead('Could not open Telegram.'),
+        );
       }
     } catch (_) {
       if (mounted) {
@@ -589,6 +601,9 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
                 text: context.l10nText(
                   'Create a new private bot with @BotFather in Telegram.',
                 ),
+                linkedText: '@BotFather',
+                linkKey: const Key('telegram-backup-botfather-link'),
+                onLinkedTextTap: _openBotFather,
               ),
               const SizedBox(height: 12),
               _SetupStep(
@@ -1076,14 +1091,62 @@ class _TelegramBackupsPageState extends State<TelegramBackupsPage> {
 class _SetupStep extends StatelessWidget {
   final int number;
   final String text;
+  final String? linkedText;
+  final Key? linkKey;
+  final VoidCallback? onLinkedTextTap;
 
   const _SetupStep({
     required this.number,
     required this.text,
+    this.linkedText,
+    this.linkKey,
+    this.onLinkedTextTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final textStyle = TextStyle(
+      color: AppColors.textSecondary(context),
+      height: 1.4,
+    );
+    final linkStart = linkedText == null ? -1 : text.indexOf(linkedText!);
+    final textWidget = linkStart < 0
+        ? Text(text, style: textStyle)
+        : Text.rich(
+            TextSpan(
+              style: textStyle,
+              children: [
+                TextSpan(text: text.substring(0, linkStart)),
+                TextSpan(
+                  text: linkedText,
+                  style: const TextStyle(
+                    color: AppColors.primaryLight,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+                TextSpan(
+                  text: text.substring(linkStart + linkedText!.length),
+                ),
+              ],
+            ),
+          );
+    final linkedTextWidget = onLinkedTextTap == null || linkStart < 0
+        ? textWidget
+        : Semantics(
+            link: true,
+            label: text,
+            child: InkWell(
+              key: linkKey,
+              onTap: onLinkedTextTap,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: textWidget,
+              ),
+            ),
+          );
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1105,15 +1168,7 @@ class _SetupStep extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              color: AppColors.textSecondary(context),
-              height: 1.4,
-            ),
-          ),
-        ),
+        Expanded(child: linkedTextWidget),
       ],
     );
   }
