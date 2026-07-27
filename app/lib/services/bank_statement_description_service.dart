@@ -1,0 +1,155 @@
+import 'package:totals/models/sms_pattern.dart';
+import 'package:totals/models/transaction.dart';
+import 'package:totals/repositories/transaction_source_sms_repository.dart';
+import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/transaction_sms_source_service.dart';
+
+/// Resolves human-readable statement descriptions from the SMS pattern that
+/// originally parsed each transaction.
+class BankStatementDescriptionService {
+  final SmsConfigService _smsConfigService;
+  final TransactionSourceSmsRepository _sourceSmsRepository;
+  final TransactionSmsSourceService _transactionSmsSourceService;
+
+  BankStatementDescriptionService({
+    SmsConfigService? smsConfigService,
+    TransactionSourceSmsRepository? sourceSmsRepository,
+    TransactionSmsSourceService? transactionSmsSourceService,
+  })  : _smsConfigService = smsConfigService ?? SmsConfigService(),
+        _sourceSmsRepository =
+            sourceSmsRepository ?? TransactionSourceSmsRepository(),
+        _transactionSmsSourceService =
+            transactionSmsSourceService ?? TransactionSmsSourceService();
+
+  Future<Map<String, String>> resolveDescriptions(
+    Iterable<Transaction> transactions,
+  ) async {
+    final candidates = transactions
+        .where((transaction) => transaction.reference.trim().isNotEmpty)
+        .toList(growable: false);
+    if (candidates.isEmpty) return const <String, String>{};
+
+    // Older transactions may not have their source SMS captured yet. This is
+    // a no-op when SMS access is unavailable and must never block a statement.
+    try {
+      await _transactionSmsSourceService.captureAvailableSources(candidates);
+    } catch (_) {
+      // Pattern names are optional metadata; type labels remain available.
+    }
+
+    var sourceMessages = const <TransactionSourceSms>[];
+    try {
+      sourceMessages = await _sourceSmsRepository.getForTransactionReferences(
+        candidates.map((transaction) => transaction.reference),
+      );
+    } catch (_) {
+      return const <String, String>{};
+    }
+    if (sourceMessages.isEmpty) return const <String, String>{};
+
+    var patterns = const <SmsPattern>[];
+    try {
+      patterns = await _smsConfigService.getPatterns(allowRemoteFetch: false);
+    } catch (_) {
+      return const <String, String>{};
+    }
+    final compiledPatterns = _compileStatementPatterns(patterns);
+
+    final sourceByReference = {
+      for (final source in sourceMessages)
+        source.transactionReference: source.body,
+    };
+    final descriptions = <String, String>{};
+    for (final transaction in candidates) {
+      final patternName = _findCompiledPatternName(
+        bankId: transaction.bankId,
+        messageBody: sourceByReference[transaction.reference],
+        patterns: compiledPatterns,
+      );
+      if (patternName != null) {
+        descriptions[transaction.reference] = patternName;
+      }
+    }
+    return Map<String, String>.unmodifiable(descriptions);
+  }
+}
+
+String? findBankStatementPatternName({
+  required int? bankId,
+  required String? messageBody,
+  required Iterable<SmsPattern> patterns,
+}) {
+  return _findCompiledPatternName(
+    bankId: bankId,
+    messageBody: messageBody,
+    patterns: _compileStatementPatterns(patterns),
+  );
+}
+
+List<_CompiledStatementPattern> _compileStatementPatterns(
+  Iterable<SmsPattern> patterns,
+) {
+  final compiled = <_CompiledStatementPattern>[];
+  for (final pattern in patterns) {
+    try {
+      final name = cleanBankStatementPatternName(pattern.description);
+      compiled.add(
+        _CompiledStatementPattern(
+          bankId: pattern.bankId,
+          regex: RegExp(
+            pattern.regex,
+            caseSensitive: false,
+            multiLine: true,
+            dotAll: true,
+          ),
+          name: name.isEmpty ? null : name,
+        ),
+      );
+    } on FormatException {
+      // Ignore malformed remote patterns and continue checking the rest.
+    }
+  }
+  return compiled;
+}
+
+String? _findCompiledPatternName({
+  required int? bankId,
+  required String? messageBody,
+  required Iterable<_CompiledStatementPattern> patterns,
+}) {
+  final body = messageBody?.trim();
+  if (bankId == null || body == null || body.isEmpty) return null;
+
+  for (final pattern in patterns) {
+    if (pattern.bankId == bankId && pattern.regex.firstMatch(body) != null) {
+      return pattern.name;
+    }
+  }
+  return null;
+}
+
+String cleanBankStatementPatternName(String value) {
+  return value
+      .trim()
+      .replaceFirst(
+        RegExp(
+          r'^fallback\b[\s:–—-]*',
+          caseSensitive: false,
+        ),
+        '',
+      )
+      .trim()
+      .replaceAll(RegExp(r'\s+'), ' ');
+}
+
+class _CompiledStatementPattern {
+  final int bankId;
+  final RegExp regex;
+  final String? name;
+
+  const _CompiledStatementPattern({
+    required this.bankId,
+    required this.regex,
+    required this.name,
+  });
+}

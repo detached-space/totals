@@ -1,10 +1,16 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
@@ -20,6 +26,8 @@ import 'package:totals/services/account_registration_service.dart';
 import 'package:totals/services/account_transaction_reparse_service.dart';
 import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/services/bank_detection_service.dart';
+import 'package:totals/services/bank_statement_description_service.dart';
+import 'package:totals/services/bank_statement_pdf_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
@@ -42,6 +50,7 @@ import 'package:totals/theme/app_language_option.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class RedesignMoneyPage extends StatefulWidget {
   const RedesignMoneyPage({super.key});
@@ -57,8 +66,13 @@ enum _SubTab { transactions, analytics, ledger }
 enum _AccountMenuAction {
   viewTransactions,
   reparse,
+  generateStatement,
   delete,
 }
+
+enum _BankStatementDatePreset { allTime, thisYear, thisMonth, thisWeek }
+
+enum _BankStatementOutputAction { save, share }
 
 enum _AnalyticsHeatmapMode { all, expense, income }
 
@@ -665,6 +679,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   _LedgerViewSummary? _ledgerViewCache;
   final ValueNotifier<bool> _showActivityPinnedHeaderDivider =
       ValueNotifier<bool>(false);
+  bool _isGeneratingBankStatement = false;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
 
@@ -4017,9 +4032,411 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           provider.getBankName(account.bankId),
         );
         break;
+      case _AccountMenuAction.generateStatement:
+        await _generateBankStatement(provider, account);
+        break;
       case _AccountMenuAction.delete:
         _showDeleteConfirmation(account);
         break;
+    }
+  }
+
+  Future<void> _generateBankStatement(
+    TransactionProvider provider,
+    AccountSummary account,
+  ) async {
+    if (_isGeneratingBankStatement) return;
+
+    final transactions = provider.transactionsForAccount(
+      account.bankId,
+      account.accountNumber,
+    );
+    final transactionDates = transactions
+        .map((transaction) => _parseTransactionTime(transaction.time))
+        .whereType<DateTime>()
+        .map((date) => DateTime(date.year, date.month, date.day))
+        .toList(growable: false)
+      ..sort();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final earliestDate = transactionDates.isEmpty
+        ? DateTime(today.year - 1, today.month, today.day)
+        : transactionDates.first;
+    final latestActivityDate =
+        transactionDates.isEmpty ? today : transactionDates.last;
+    final allTimeStartDate =
+        earliestDate.isBefore(today) ? earliestDate : today;
+    final isEthiopianCalendar = _usesEthiopianCalendar;
+    final currentYearStart = _bankStatementYearStart(
+      today,
+      isEthiopianCalendar: isEthiopianCalendar,
+    );
+    final currentWeekStart = _bankStatementWeekStart(today);
+    final earliestPresetStart = currentWeekStart.isBefore(currentYearStart)
+        ? currentWeekStart
+        : currentYearStart;
+    final firstDate = allTimeStartDate.isBefore(earliestPresetStart)
+        ? allTimeStartDate
+        : earliestPresetStart;
+    final lastDate =
+        latestActivityDate.isAfter(today) ? latestActivityDate : today;
+    final initialEnd = latestActivityDate;
+    final thirtyDaysBefore = initialEnd.subtract(const Duration(days: 29));
+    final initialStart =
+        thirtyDaysBefore.isAfter(firstDate) ? thirtyDaysBefore : firstDate;
+
+    final selectedRange = await showModalBottomSheet<DateTimeRange>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BankStatementDateSheet(
+        firstDate: firstDate,
+        lastDate: lastDate,
+        allTimeStartDate: allTimeStartDate,
+        today: today,
+        isEthiopianCalendar: isEthiopianCalendar,
+        initialStartDate: initialStart,
+        initialEndDate: initialEnd,
+      ),
+    );
+    if (!mounted || selectedRange == null) return;
+
+    _isGeneratingBankStatement = true;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    final loadingRoute = DialogRoute<void>(
+      context: context,
+      themes: InheritedTheme.capture(
+        from: context,
+        to: rootNavigator.context,
+      ),
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.56),
+      barrierLabel: 'Generating bank statement',
+      builder: (_) => const _BankStatementLoadingDialog(),
+    );
+    var loadingRouteWasPushed = false;
+    var loadingRouteWasDismissed = false;
+
+    Future<void> dismissLoading() async {
+      if (loadingRouteWasDismissed || !loadingRouteWasPushed) return;
+      loadingRouteWasDismissed = true;
+      if (loadingRoute.isActive && rootNavigator.mounted) {
+        rootNavigator.removeRoute(loadingRoute);
+      }
+      await loadingRoute.completed;
+    }
+
+    try {
+      unawaited(rootNavigator.push(loadingRoute));
+      loadingRouteWasPushed = true;
+      await WidgetsBinding.instance.endOfFrame;
+
+      final bankName = provider.getBankName(account.bankId);
+      final rangeEndExclusive = DateTime(
+        selectedRange.end.year,
+        selectedRange.end.month,
+        selectedRange.end.day + 1,
+      );
+      final statementTransactions = transactions.where((transaction) {
+        final occurredAt = _parseTransactionTime(transaction.time);
+        return occurredAt != null &&
+            !occurredAt.isBefore(selectedRange.start) &&
+            occurredAt.isBefore(rangeEndExclusive);
+      }).toList(growable: false);
+      final descriptionsByReference =
+          await BankStatementDescriptionService().resolveDescriptions(
+        statementTransactions,
+      );
+      final statement = BankStatementData.fromTransactions(
+        bankName: bankName,
+        bankShortName: provider.getBankShortName(account.bankId),
+        bankIconAssetPath: _getBankImage(account.bankId),
+        accountNumber: account.accountNumber,
+        accountHolderName: account.accountHolderName,
+        startDate: selectedRange.start,
+        endDate: selectedRange.end,
+        generatedAt: DateTime.now(),
+        currentAccountBalance: account.balance,
+        transactions: transactions,
+        descriptionsByReference: descriptionsByReference,
+      );
+      final bytes = await BankStatementPdfService().generate(statement);
+
+      await dismissLoading();
+      if (!mounted) return;
+      final outputAction =
+          await showModalBottomSheet<_BankStatementOutputAction>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _BankStatementReadySheet(
+          fileName: statement.fileName,
+        ),
+      );
+      if (!mounted || outputAction == null) return;
+
+      switch (outputAction) {
+        case _BankStatementOutputAction.save:
+          await _saveBankStatementPdf(
+            bytes: bytes,
+            fileName: statement.fileName,
+          );
+        case _BankStatementOutputAction.share:
+          await _shareBankStatementPdf(
+            bytes: bytes,
+            fileName: statement.fileName,
+            bankName: bankName,
+            bankShortName: statement.bankShortName,
+          );
+      }
+    } catch (error) {
+      await dismissLoading();
+      if (!mounted) return;
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not generate statement')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      await dismissLoading();
+      _isGeneratingBankStatement = false;
+    }
+  }
+
+  Future<void> _saveBankStatementPdf({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    try {
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save bank statement',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+        bytes: bytes,
+      );
+      if (path == null || path.isEmpty) return;
+
+      // Mobile platforms write [bytes] through the system document picker.
+      // Desktop implementations return a path for the app to write itself.
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        await File(path).writeAsBytes(bytes, flush: true);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(context.l10nTextRead('Bank statement saved')),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: context.l10nTextRead('Open'),
+            onPressed: () {
+              unawaited(
+                _openBankStatementPdf(
+                  savedPath: path,
+                  bytes: bytes,
+                  fileName: fileName,
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not save statement')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openBankStatementPdf({
+    required String savedPath,
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    try {
+      var pathToOpen = savedPath;
+      if (Platform.isAndroid || Platform.isIOS) {
+        final temporaryDirectory = await getTemporaryDirectory();
+        final openableFile = File('${temporaryDirectory.path}/$fileName');
+        await openableFile.writeAsBytes(bytes, flush: true);
+        pathToOpen = openableFile.path;
+      }
+
+      final result = await OpenFilex.open(
+        pathToOpen,
+        type: 'application/pdf',
+      );
+      if (result.type == ResultType.done || !mounted) return;
+      if (await _openBankStatementPdfInBrowser(
+        bytes: bytes,
+        fileName: fileName,
+      )) {
+        return;
+      }
+      if (!mounted) return;
+
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not open statement')}: '
+            '${result.message}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on MissingPluginException {
+      // A newly added native plugin is unavailable until the Android/iOS app
+      // is rebuilt. Keep Open useful during that stale hot-reload session.
+      final openedInBrowser = await _openBankStatementPdfInBrowser(
+        bytes: bytes,
+        fileName: fileName,
+      );
+      if (openedInBrowser || !mounted) return;
+
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'Could not open statement. Restart Totals and try again.',
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not open statement')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<bool> _openBankStatementPdfInBrowser({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    HttpServer? server;
+    Timer? shutdownTimer;
+
+    try {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final random = math.Random.secure();
+      final accessToken = List.generate(
+        16,
+        (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ).join();
+      final pdfPath = '/statement-$accessToken/$fileName';
+
+      server.listen((request) async {
+        try {
+          if (request.uri.path != pdfPath) {
+            request.response.statusCode = HttpStatus.notFound;
+            await request.response.close();
+            return;
+          }
+
+          request.response.headers
+            ..set(HttpHeaders.contentTypeHeader, 'application/pdf')
+            ..set(
+              'content-disposition',
+              'inline; filename="$fileName"',
+            )
+            ..set(HttpHeaders.cacheControlHeader, 'no-store');
+
+          if (request.method == 'HEAD') {
+            await request.response.close();
+            return;
+          }
+          if (request.method != 'GET') {
+            request.response.statusCode = HttpStatus.methodNotAllowed;
+            await request.response.close();
+            return;
+          }
+
+          request.response.add(bytes);
+          await request.response.close();
+        } catch (_) {
+          try {
+            await request.response.close();
+          } catch (_) {
+            // The browser may close a request after it has enough PDF data.
+          }
+        }
+      });
+
+      shutdownTimer = Timer(const Duration(minutes: 2), () {
+        unawaited(server?.close(force: true));
+      });
+      final uri = Uri(
+        scheme: 'http',
+        host: InternetAddress.loopbackIPv4.address,
+        port: server.port,
+        path: pdfPath,
+      );
+      final opened = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (opened) return true;
+
+      shutdownTimer.cancel();
+      await server.close(force: true);
+      return false;
+    } catch (_) {
+      shutdownTimer?.cancel();
+      await server?.close(force: true);
+      return false;
+    }
+  }
+
+  Future<void> _shareBankStatementPdf({
+    required Uint8List bytes,
+    required String fileName,
+    required String bankName,
+    required String bankShortName,
+  }) async {
+    try {
+      final temporaryDirectory = await getTemporaryDirectory();
+      final statementFile = File('${temporaryDirectory.path}/$fileName');
+      await statementFile.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+
+      await Share.shareXFiles(
+        [
+          XFile(
+            statementFile.path,
+            mimeType: 'application/pdf',
+          ),
+        ],
+        subject: '$bankShortName account statement',
+        text: '$bankName account statement generated by Totals.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not share statement')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -15379,6 +15796,16 @@ class _AccountActionsSheetState extends State<_AccountActionsSheet> {
                   ? null
                   : _setDefault,
             ),
+            _AccountActionTile(
+              icon: AppIcons.download_rounded,
+              label: 'Generate bank statement',
+              onTap: _isUpdating
+                  ? null
+                  : () => _select(
+                        context,
+                        _AccountMenuAction.generateStatement,
+                      ),
+            ),
             Divider(color: AppColors.borderColor(context), height: 20),
             _AccountActionTile(
               icon: AppIcons.delete_outline_rounded,
@@ -17471,6 +17898,680 @@ class _ReparseScopeTile extends StatelessWidget {
       ),
     );
   }
+}
+
+DateTime _bankStatementYearStart(
+  DateTime date, {
+  required bool isEthiopianCalendar,
+}) {
+  if (isEthiopianCalendar) {
+    try {
+      final ec =
+          Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+      final gc = Kenat.fromEthiopian(ec['year']!, 1, 1).getGregorian();
+      return DateTime(gc['year']!, gc['month']!, gc['day']!);
+    } catch (_) {
+      // Fall through to the Gregorian boundary.
+    }
+  }
+  return DateTime(date.year, 1, 1);
+}
+
+DateTime _bankStatementMonthStart(
+  DateTime date, {
+  required bool isEthiopianCalendar,
+}) {
+  if (isEthiopianCalendar) {
+    try {
+      final ec =
+          Kenat.fromGregorian(date.year, date.month, date.day).getEthiopian();
+      final gc =
+          Kenat.fromEthiopian(ec['year']!, ec['month']!, 1).getGregorian();
+      return DateTime(gc['year']!, gc['month']!, gc['day']!);
+    } catch (_) {
+      // Fall through to the Gregorian boundary.
+    }
+  }
+  return DateTime(date.year, date.month, 1);
+}
+
+DateTime _bankStatementWeekStart(DateTime date) {
+  final day = DateTime(date.year, date.month, date.day);
+  return day.subtract(Duration(days: day.weekday - DateTime.monday));
+}
+
+class _BankStatementReadySheet extends StatelessWidget {
+  final String fileName;
+
+  const _BankStatementReadySheet({
+    required this.fileName,
+  });
+
+  void _select(BuildContext context, _BankStatementOutputAction action) {
+    Navigator.of(context).pop(action);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + bottomPadding),
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(24),
+        ),
+        border: Border(
+          top: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 38,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.textTertiary(context).withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: Image.asset(
+                  'assets/icon/totals_icon.png',
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10nText('Statement ready'),
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      context.l10nText(
+                        'Save a copy to your device or share it.',
+                      ),
+                      style: TextStyle(
+                        color: AppColors.textSecondary(context),
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: context.l10nText('Close'),
+                onPressed: () => Navigator.of(context).pop(),
+                icon: Icon(
+                  AppIcons.close,
+                  color: AppColors.textSecondary(context),
+                  size: 21,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceColor(context),
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: AppColors.borderColor(context)),
+            ),
+            child: Text(
+              fileName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColors.textSecondary(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: FilledButton.icon(
+              onPressed: () =>
+                  _select(context, _BankStatementOutputAction.save),
+              icon: const Icon(AppIcons.download_rounded, size: 20),
+              label: Text(context.l10nText('Save to device')),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primaryDark,
+                foregroundColor: AppColors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  _select(context, _BankStatementOutputAction.share),
+              icon: const Icon(AppIcons.share_outline, size: 19),
+              label: Text(context.l10nText('Share')),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textPrimary(context),
+                side: BorderSide(color: AppColors.borderColor(context)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BankStatementLoadingDialog extends StatelessWidget {
+  const _BankStatementLoadingDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = AppColors.isDark(context)
+        ? AppColors.primaryLight
+        : AppColors.primaryDark;
+    return PopScope(
+      canPop: false,
+      child: Semantics(
+        container: true,
+        liveRegion: true,
+        label: context.l10nText('Generating bank statement'),
+        child: Dialog(
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 34),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(24, 26, 24, 22),
+            decoration: BoxDecoration(
+              color: AppColors.cardColor(context),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: AppColors.borderColor(context)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.16),
+                  blurRadius: 30,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 68,
+                  height: 68,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 64,
+                        height: 64,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: accent,
+                          backgroundColor: accent.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.asset(
+                          'assets/icon/totals_icon.png',
+                          width: 44,
+                          height: 44,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  context.l10nText('Creating your statement'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  context.l10nText(
+                    'Matching transaction details and preparing your PDF.',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.textSecondary(context),
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BankStatementDateSheet extends StatefulWidget {
+  final DateTime firstDate;
+  final DateTime lastDate;
+  final DateTime allTimeStartDate;
+  final DateTime today;
+  final bool isEthiopianCalendar;
+  final DateTime initialStartDate;
+  final DateTime initialEndDate;
+
+  const _BankStatementDateSheet({
+    required this.firstDate,
+    required this.lastDate,
+    required this.allTimeStartDate,
+    required this.today,
+    required this.isEthiopianCalendar,
+    required this.initialStartDate,
+    required this.initialEndDate,
+  });
+
+  @override
+  State<_BankStatementDateSheet> createState() =>
+      _BankStatementDateSheetState();
+}
+
+class _BankStatementDateSheetState extends State<_BankStatementDateSheet> {
+  late DateTime _startDate;
+  late DateTime _endDate;
+  _BankStatementDatePreset? _selectedPreset;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startDate = widget.initialStartDate;
+    _endDate = widget.initialEndDate;
+    _selectedPreset = _matchingPreset(_startDate, _endDate);
+  }
+
+  DateTime _clampDate(DateTime date) {
+    if (date.isBefore(widget.firstDate)) return widget.firstDate;
+    if (date.isAfter(widget.lastDate)) return widget.lastDate;
+    return date;
+  }
+
+  DateTimeRange _rangeForPreset(_BankStatementDatePreset preset) {
+    final today = _clampDate(widget.today);
+    final DateTime start;
+    final DateTime end;
+    switch (preset) {
+      case _BankStatementDatePreset.allTime:
+        start = _clampDate(widget.allTimeStartDate);
+        end = widget.lastDate;
+      case _BankStatementDatePreset.thisYear:
+        start = _clampDate(
+          _bankStatementYearStart(
+            widget.today,
+            isEthiopianCalendar: widget.isEthiopianCalendar,
+          ),
+        );
+        end = today;
+      case _BankStatementDatePreset.thisMonth:
+        start = _clampDate(
+          _bankStatementMonthStart(
+            widget.today,
+            isEthiopianCalendar: widget.isEthiopianCalendar,
+          ),
+        );
+        end = today;
+      case _BankStatementDatePreset.thisWeek:
+        start = _clampDate(_bankStatementWeekStart(widget.today));
+        end = today;
+    }
+    return DateTimeRange(
+      start: start.isAfter(end) ? end : start,
+      end: end,
+    );
+  }
+
+  _BankStatementDatePreset? _matchingPreset(
+    DateTime start,
+    DateTime end,
+  ) {
+    for (final preset in _BankStatementDatePreset.values) {
+      final range = _rangeForPreset(preset);
+      if (_isSameStatementDay(start, range.start) &&
+          _isSameStatementDay(end, range.end)) {
+        return preset;
+      }
+    }
+    return null;
+  }
+
+  void _selectPreset(_BankStatementDatePreset preset) {
+    final range = _rangeForPreset(preset);
+    HapticFeedback.selectionClick();
+    setState(() {
+      _startDate = range.start;
+      _endDate = range.end;
+      _selectedPreset = preset;
+    });
+  }
+
+  String _presetLabel(_BankStatementDatePreset preset) {
+    switch (preset) {
+      case _BankStatementDatePreset.allTime:
+        return 'All time';
+      case _BankStatementDatePreset.thisYear:
+        return 'This year';
+      case _BankStatementDatePreset.thisMonth:
+        return 'This month';
+      case _BankStatementDatePreset.thisWeek:
+        return 'This week';
+    }
+  }
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final firstDate = isStart ? widget.firstDate : _startDate;
+    final lastDate = isStart ? _endDate : widget.lastDate;
+    var initialDate = isStart ? _startDate : _endDate;
+    if (initialDate.isBefore(firstDate)) initialDate = firstDate;
+    if (initialDate.isAfter(lastDate)) initialDate = lastDate;
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      builder: (pickerContext, child) {
+        final dark = AppColors.isDark(pickerContext);
+        return Theme(
+          data: Theme.of(pickerContext).copyWith(
+            colorScheme: dark
+                ? const ColorScheme.dark(
+                    primary: AppColors.primaryLight,
+                    onPrimary: AppColors.white,
+                    surface: AppColors.darkCard,
+                    onSurface: AppColors.white,
+                  )
+                : const ColorScheme.light(
+                    primary: AppColors.primaryDark,
+                    onPrimary: AppColors.white,
+                    surface: AppColors.white,
+                    onSurface: AppColors.slate900,
+                  ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      if (isStart) {
+        _startDate = picked;
+      } else {
+        _endDate = picked;
+      }
+      _selectedPreset = _matchingPreset(_startDate, _endDate);
+    });
+  }
+
+  Future<void> _generate() async {
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    Navigator.of(context).pop(
+      DateTimeRange(start: _startDate, end: _endDate),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cardColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Align(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.slate400,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      context.l10nText('Generate bank statement'),
+                      style: TextStyle(
+                        color: AppColors.textPrimary(context),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: Icon(
+                      AppIcons.close,
+                      color: AppColors.textSecondary(context),
+                    ),
+                    splashRadius: 20,
+                  ),
+                ],
+              ),
+              Text(
+                context.l10nText(
+                  'Choose the starting and ending dates for your statement.',
+                ),
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                context.l10nText('QUICK SELECT'),
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              IgnorePointer(
+                ignoring: _isSubmitting,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final preset in _BankStatementDatePreset.values)
+                      _FilterChip(
+                        label: _presetLabel(preset),
+                        selected: _selectedPreset == preset,
+                        onTap: () => _selectPreset(preset),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                context.l10nText('DATE RANGE'),
+                style: TextStyle(
+                  color: AppColors.textSecondary(context),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DatePickerField(
+                      hint: 'Start date',
+                      value: _formatDateHeader(_startDate, context),
+                      onTap: () => _pickDate(isStart: true),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DatePickerField(
+                      hint: 'End date',
+                      value: _formatDateHeader(_endDate, context),
+                      onTap: () => _pickDate(isStart: false),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textSecondary(context),
+                        side: BorderSide(
+                          color: AppColors.borderColor(context),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: Text(
+                        context.l10nText('Cancel'),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _isSubmitting ? null : _generate,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryDark,
+                        disabledBackgroundColor:
+                            AppColors.primaryDark.withValues(alpha: 0.78),
+                        foregroundColor: AppColors.white,
+                        disabledForegroundColor: AppColors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
+                        child: _isSubmitting
+                            ? Row(
+                                key: const ValueKey('statement-preparing'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 9),
+                                  Text(
+                                    context.l10nText('Preparing...'),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                key: const ValueKey('statement-generate'),
+                                context.l10nText('Generate'),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+bool _isSameStatementDay(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
 }
 
 // ─── Filter Bottom Sheet ──────────────────────────────────────────
