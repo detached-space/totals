@@ -720,7 +720,7 @@ class _ReimbursementLinkSheetState extends State<_ReimbursementLinkSheet> {
     if (creditor != null && creditor.isNotEmpty) return creditor;
     final note = transaction.note?.trim();
     if (note != null && note.isNotEmpty) return note;
-    return context.l10nText('Expense');
+    return context.l10nTextRead('Expense');
   }
 }
 

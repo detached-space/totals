@@ -59,7 +59,7 @@ class BudgetService {
     final budgets = await _budgetRepository.getActiveBudgets(
       calendar: calendar,
     );
-    return _getStatusesForBudgets(budgets);
+    return _getStatusesForCurrentBudgets(budgets);
   }
 
   // Get budgets by type with status
@@ -71,7 +71,7 @@ class BudgetService {
       type,
       calendar: calendar,
     );
-    return _getStatusesForBudgets(budgets);
+    return _getStatusesForCurrentBudgets(budgets);
   }
 
   // Get category budgets with status
@@ -81,7 +81,18 @@ class BudgetService {
     final budgets = await _budgetRepository.getCategoryBudgets(
       calendar: calendar,
     );
-    return _getStatusesForBudgets(budgets);
+    return _getStatusesForCurrentBudgets(budgets);
+  }
+
+  Future<List<BudgetStatus>> _getStatusesForCurrentBudgets(
+    List<Budget> budgets,
+  ) {
+    final now = DateTime.now();
+    return _getStatusesForBudgets(
+      budgets
+          .where((budget) => budget.isEffectiveOn(now))
+          .toList(growable: false),
+    );
   }
 
   Future<List<BudgetStatus>> _getStatusesForBudgets(
@@ -189,10 +200,19 @@ class BudgetService {
     int categoryId, {
     String? calendar,
   }) async {
-    return await _budgetRepository.getBudgetsByCategory(
+    final budgets = await _budgetRepository.getBudgetsByCategory(
       categoryId,
       calendar: calendar,
     );
+    final now = DateTime.now();
+    return budgets
+        .where((budget) => budget.isEffectiveOn(now))
+        .toList(growable: false);
+  }
+
+  Future<BudgetStatus?> getCurrentBudgetStatus(Budget budget) async {
+    if (!budget.isEffectiveOn(DateTime.now())) return null;
+    return getBudgetStatus(budget);
   }
 
   // Check if budget is exceeded or approaching limit
