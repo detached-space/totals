@@ -1,4 +1,6 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+import 'dart:isolate';
+
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -7,6 +9,33 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/utils/transaction_amounts.dart';
 
 const String totalsStatementUrl = 'https://totals.detached.space/';
+
+enum BankStatementPdfProgressStage {
+  loadingAssets,
+  preparingDocument,
+  processingTransactions,
+  layingOutPages,
+  finalizingDocument,
+  complete,
+}
+
+class BankStatementPdfProgress {
+  final double value;
+  final BankStatementPdfProgressStage stage;
+  final int? processed;
+  final int? total;
+
+  const BankStatementPdfProgress({
+    required this.value,
+    required this.stage,
+    this.processed,
+    this.total,
+  });
+}
+
+typedef BankStatementPdfProgressCallback = void Function(
+  BankStatementPdfProgress progress,
+);
 
 class BankStatementEntry {
   final Transaction transaction;
@@ -211,30 +240,155 @@ class BankStatementPdfService {
   static const _debit = PdfColor(0.94, 0.27, 0.27);
   static const _credit = PdfColor(0.13, 0.67, 0.35);
 
-  Future<Uint8List> generate(BankStatementData statement) async {
+  Future<Uint8List> generate(
+    BankStatementData statement, {
+    BankStatementPdfProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(
+      const BankStatementPdfProgress(
+        value: 0,
+        stage: BankStatementPdfProgressStage.loadingAssets,
+      ),
+    );
     final iconBytes = await Future.wait<Uint8List?>([
       _loadAssetBytes(statement.bankIconAssetPath),
       _loadAssetBytes('assets/icon/totals_icon.png'),
     ]);
-    return compute(
-      _renderBankStatementPdf,
+    onProgress?.call(
+      const BankStatementPdfProgress(
+        value: 0.08,
+        stage: BankStatementPdfProgressStage.preparingDocument,
+      ),
+    );
+    return _renderInBackground(
       _BankStatementPdfRenderRequest(
         statement: statement,
         bankIconBytes: iconBytes[0],
         totalsIconBytes: iconBytes[1],
       ),
-      debugLabel: 'bank-statement-pdf',
+      onProgress: onProgress,
     );
+  }
+
+  Future<Uint8List> _renderInBackground(
+    _BankStatementPdfRenderRequest request, {
+    BankStatementPdfProgressCallback? onProgress,
+  }) async {
+    final receivePort = ReceivePort();
+    final errorPort = ReceivePort();
+    final completer = Completer<Uint8List>();
+
+    final messageSubscription = receivePort.listen((dynamic message) {
+      if (message is! List<Object?> || message.isEmpty) return;
+      final messageType = message[0];
+
+      if (messageType == _pdfProgressMessage &&
+          message.length >= 5 &&
+          message[1] is num &&
+          message[2] is int) {
+        final stageIndex = message[2]! as int;
+        if (stageIndex < 0 ||
+            stageIndex >= BankStatementPdfProgressStage.values.length) {
+          return;
+        }
+        onProgress?.call(
+          BankStatementPdfProgress(
+            value: (message[1]! as num).toDouble(),
+            stage: BankStatementPdfProgressStage.values[stageIndex],
+            processed: message[3] as int?,
+            total: message[4] as int?,
+          ),
+        );
+        return;
+      }
+
+      if (messageType == _pdfResultMessage &&
+          message.length >= 2 &&
+          message[1] is TransferableTypedData) {
+        if (!completer.isCompleted) {
+          final data = message[1]! as TransferableTypedData;
+          completer.complete(data.materialize().asUint8List());
+        }
+        return;
+      }
+
+      if (messageType == _pdfErrorMessage && message.length >= 3) {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            StateError(message[1]?.toString() ?? 'PDF generation failed.'),
+            StackTrace.fromString(message[2]?.toString() ?? ''),
+          );
+        }
+      }
+    });
+    final errorSubscription = errorPort.listen((dynamic error) {
+      if (completer.isCompleted) return;
+      final values = error is List ? error : const <dynamic>[];
+      completer.completeError(
+        StateError(
+          values.isEmpty
+              ? 'PDF generation isolate failed.'
+              : values.first.toString(),
+        ),
+        StackTrace.fromString(
+          values.length > 1 ? values[1].toString() : '',
+        ),
+      );
+    });
+
+    Isolate? isolate;
+    try {
+      isolate = await Isolate.spawn(
+        _renderBankStatementPdfInIsolate,
+        _BankStatementPdfIsolateRequest(
+          renderRequest: request,
+          replyPort: receivePort.sendPort,
+        ),
+        debugName: 'bank-statement-pdf',
+        errorsAreFatal: true,
+        onError: errorPort.sendPort,
+      );
+      return await completer.future;
+    } finally {
+      isolate?.kill(priority: Isolate.immediate);
+      await messageSubscription.cancel();
+      await errorSubscription.cancel();
+      receivePort.close();
+      errorPort.close();
+    }
   }
 
   Future<Uint8List> _render(
     _BankStatementPdfRenderRequest request,
+    BankStatementPdfProgressCallback onProgress,
   ) async {
     final statement = request.statement;
     final bankIcon = _memoryImage(request.bankIconBytes);
     final totalsIcon = _memoryImage(request.totalsIconBytes);
     final document = pw.Document();
+    var lastProgress = 0.08;
+    var pageGenerationComplete = false;
+    var lastReportedPage = 0;
 
+    void report(
+      BankStatementPdfProgressStage stage,
+      double value, {
+      int? processed,
+      int? total,
+    }) {
+      final monotonicValue = value.clamp(lastProgress, 1.0).toDouble();
+      lastProgress = monotonicValue;
+      onProgress(
+        BankStatementPdfProgress(
+          value: monotonicValue,
+          stage: stage,
+          processed: processed,
+          total: total,
+        ),
+      );
+    }
+
+    report(BankStatementPdfProgressStage.preparingDocument, 0.1);
     document.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -244,11 +398,25 @@ class BankStatementPdfService {
           base: pw.Font.helvetica(),
           bold: pw.Font.helveticaBold(),
         ),
-        footer: (context) => _buildFooter(
-          context,
-          statement: statement,
-          totalsIcon: totalsIcon,
-        ),
+        footer: (context) {
+          if (pageGenerationComplete && context.pageNumber > lastReportedPage) {
+            lastReportedPage = context.pageNumber;
+            final totalPages = context.pagesCount;
+            final pageRatio =
+                totalPages <= 0 ? 1.0 : context.pageNumber / totalPages;
+            report(
+              BankStatementPdfProgressStage.layingOutPages,
+              0.78 + (pageRatio * 0.18),
+              processed: context.pageNumber,
+              total: totalPages,
+            );
+          }
+          return _buildFooter(
+            context,
+            statement: statement,
+            totalsIcon: totalsIcon,
+          );
+        },
         build: (context) => [
           _buildHeader(statement, bankIcon),
           pw.SizedBox(height: 20),
@@ -257,12 +425,34 @@ class BankStatementPdfService {
           if (statement.entries.isEmpty)
             _buildEmptyState()
           else
-            _buildTransactionTable(statement),
+            _buildTransactionTable(
+              statement,
+              onProgress: (processed, total) {
+                final rowRatio = total <= 0 ? 1.0 : processed / total;
+                report(
+                  BankStatementPdfProgressStage.processingTransactions,
+                  0.14 + (rowRatio * 0.6),
+                  processed: processed,
+                  total: total,
+                );
+              },
+            ),
         ],
       ),
     );
 
-    return Uint8List.fromList(await document.save());
+    pageGenerationComplete = true;
+    final totalPages = document.document.pdfPageList.pages.length;
+    report(
+      BankStatementPdfProgressStage.layingOutPages,
+      0.78,
+      processed: 0,
+      total: totalPages,
+    );
+    final bytes = await document.save();
+    report(BankStatementPdfProgressStage.finalizingDocument, 0.99);
+    report(BankStatementPdfProgressStage.complete, 1);
+    return Uint8List.fromList(bytes);
   }
 
   Future<Uint8List?> _loadAssetBytes(String assetPath) async {
@@ -436,7 +626,37 @@ class BankStatementPdfService {
     );
   }
 
-  pw.Widget _buildTransactionTable(BankStatementData statement) {
+  pw.Widget _buildTransactionTable(
+    BankStatementData statement, {
+    required void Function(int processed, int total) onProgress,
+  }) {
+    final total = statement.entries.length;
+    final progressInterval = total <= 80 ? 1 : (total / 80).ceil();
+    final rows = <pw.TableRow>[
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(
+          border: pw.Border(
+            bottom: pw.BorderSide(color: _divider, width: 1.5),
+          ),
+        ),
+        children: [
+          _tableHeader('Date'),
+          _tableHeader('Description'),
+          _tableHeader('Reference'),
+          _tableHeader('Type'),
+          _tableHeader('Amount', alignRight: true),
+          _tableHeader('Balance', alignRight: true),
+        ],
+      ),
+    ];
+    for (var index = 0; index < total; index++) {
+      rows.add(_transactionRow(statement.entries[index], index));
+      final processed = index + 1;
+      if (processed == total || processed % progressInterval == 0) {
+        onProgress(processed, total);
+      }
+    }
+
     return pw.Table(
       columnWidths: const {
         0: pw.FixedColumnWidth(65),
@@ -446,25 +666,7 @@ class BankStatementPdfService {
         4: pw.FixedColumnWidth(65),
         5: pw.FixedColumnWidth(72),
       },
-      children: [
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(
-            border: pw.Border(
-              bottom: pw.BorderSide(color: _divider, width: 1.5),
-            ),
-          ),
-          children: [
-            _tableHeader('Date'),
-            _tableHeader('Description'),
-            _tableHeader('Reference'),
-            _tableHeader('Type'),
-            _tableHeader('Amount', alignRight: true),
-            _tableHeader('Balance', alignRight: true),
-          ],
-        ),
-        for (var index = 0; index < statement.entries.length; index++)
-          _transactionRow(statement.entries[index], index),
-      ],
+      children: rows,
     );
   }
 
@@ -626,10 +828,47 @@ class BankStatementPdfService {
       '${_dateLabel(start)} - ${_dateLabel(end)}';
 }
 
-Future<Uint8List> _renderBankStatementPdf(
-  _BankStatementPdfRenderRequest request,
-) {
-  return BankStatementPdfService()._render(request);
+const int _pdfProgressMessage = 0;
+const int _pdfResultMessage = 1;
+const int _pdfErrorMessage = 2;
+
+void _renderBankStatementPdfInIsolate(
+  _BankStatementPdfIsolateRequest request,
+) async {
+  try {
+    final bytes = await BankStatementPdfService()._render(
+      request.renderRequest,
+      (progress) {
+        request.replyPort.send([
+          _pdfProgressMessage,
+          progress.value,
+          progress.stage.index,
+          progress.processed,
+          progress.total,
+        ]);
+      },
+    );
+    request.replyPort.send([
+      _pdfResultMessage,
+      TransferableTypedData.fromList([bytes]),
+    ]);
+  } catch (error, stackTrace) {
+    request.replyPort.send([
+      _pdfErrorMessage,
+      error.toString(),
+      stackTrace.toString(),
+    ]);
+  }
+}
+
+class _BankStatementPdfIsolateRequest {
+  final _BankStatementPdfRenderRequest renderRequest;
+  final SendPort replyPort;
+
+  const _BankStatementPdfIsolateRequest({
+    required this.renderRequest,
+    required this.replyPort,
+  });
 }
 
 class _BankStatementPdfRenderRequest {

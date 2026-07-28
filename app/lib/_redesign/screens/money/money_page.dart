@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -73,6 +74,80 @@ enum _AccountMenuAction {
 enum _BankStatementDatePreset { allTime, thisYear, thisMonth, thisWeek }
 
 enum _BankStatementOutputAction { save, share }
+
+class _BankStatementGenerationRequest {
+  final DateTimeRange range;
+  final String accountHolderName;
+
+  const _BankStatementGenerationRequest({
+    required this.range,
+    required this.accountHolderName,
+  });
+}
+
+enum _BankStatementGenerationStage {
+  preparingTransactions,
+  capturingSources,
+  loadingReferences,
+  loadingPatterns,
+  matchingDescriptions,
+  loadingAssets,
+  preparingDocument,
+  processingTransactions,
+  layingOutPages,
+  finalizingDocument,
+  complete,
+}
+
+class _BankStatementGenerationProgress {
+  final double value;
+  final _BankStatementGenerationStage stage;
+  final int? processed;
+  final int? total;
+
+  const _BankStatementGenerationProgress({
+    required this.value,
+    required this.stage,
+    this.processed,
+    this.total,
+  });
+}
+
+_BankStatementGenerationStage _generationStageForDescription(
+  BankStatementDescriptionProgressStage stage,
+) {
+  switch (stage) {
+    case BankStatementDescriptionProgressStage.capturingSources:
+      return _BankStatementGenerationStage.capturingSources;
+    case BankStatementDescriptionProgressStage.loadingReferences:
+      return _BankStatementGenerationStage.loadingReferences;
+    case BankStatementDescriptionProgressStage.loadingPatterns:
+      return _BankStatementGenerationStage.loadingPatterns;
+    case BankStatementDescriptionProgressStage.matchingPatterns:
+      return _BankStatementGenerationStage.matchingDescriptions;
+    case BankStatementDescriptionProgressStage.complete:
+      return _BankStatementGenerationStage.preparingTransactions;
+  }
+}
+
+_BankStatementGenerationStage _generationStageForPdf(
+  BankStatementPdfProgressStage stage,
+) {
+  switch (stage) {
+    case BankStatementPdfProgressStage.loadingAssets:
+      return _BankStatementGenerationStage.loadingAssets;
+    case BankStatementPdfProgressStage.preparingDocument:
+      return _BankStatementGenerationStage.preparingDocument;
+    case BankStatementPdfProgressStage.processingTransactions:
+      return _BankStatementGenerationStage.processingTransactions;
+    case BankStatementPdfProgressStage.layingOutPages:
+      return _BankStatementGenerationStage.layingOutPages;
+    case BankStatementPdfProgressStage.finalizingDocument:
+      return _BankStatementGenerationStage.finalizingDocument;
+    case BankStatementPdfProgressStage.complete:
+      return _BankStatementGenerationStage.complete;
+  }
+}
 
 enum _AnalyticsHeatmapMode { all, expense, income }
 
@@ -4085,11 +4160,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final initialStart =
         thirtyDaysBefore.isAfter(firstDate) ? thirtyDaysBefore : firstDate;
 
-    final selectedRange = await showModalBottomSheet<DateTimeRange>(
+    final request = await showModalBottomSheet<_BankStatementGenerationRequest>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _BankStatementDateSheet(
+        accountHolderName: account.accountHolderName,
         firstDate: firstDate,
         lastDate: lastDate,
         allTimeStartDate: allTimeStartDate,
@@ -4099,9 +4175,31 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         initialEndDate: initialEnd,
       ),
     );
-    if (!mounted || selectedRange == null) return;
+    if (!mounted || request == null) return;
 
     _isGeneratingBankStatement = true;
+    final generationProgress = ValueNotifier(
+      const _BankStatementGenerationProgress(
+        value: 0.03,
+        stage: _BankStatementGenerationStage.preparingTransactions,
+      ),
+    );
+
+    void updateProgress(
+      double value,
+      _BankStatementGenerationStage stage, {
+      int? processed,
+      int? total,
+    }) {
+      final current = generationProgress.value;
+      generationProgress.value = _BankStatementGenerationProgress(
+        value: value.clamp(current.value, 1.0).toDouble(),
+        stage: stage,
+        processed: processed,
+        total: total,
+      );
+    }
+
     final messenger = ScaffoldMessenger.maybeOf(context);
     final rootNavigator = Navigator.of(context, rootNavigator: true);
     final loadingRoute = DialogRoute<void>(
@@ -4113,7 +4211,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.56),
       barrierLabel: 'Generating bank statement',
-      builder: (_) => const _BankStatementLoadingDialog(),
+      builder: (_) => _BankStatementLoadingDialog(
+        progressListenable: generationProgress,
+      ),
     );
     var loadingRouteWasPushed = false;
     var loadingRouteWasDismissed = false;
@@ -4132,36 +4232,71 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       loadingRouteWasPushed = true;
       await WidgetsBinding.instance.endOfFrame;
 
+      updateProgress(
+        0.06,
+        _BankStatementGenerationStage.preparingTransactions,
+      );
       final bankName = provider.getBankName(account.bankId);
       final rangeEndExclusive = DateTime(
-        selectedRange.end.year,
-        selectedRange.end.month,
-        selectedRange.end.day + 1,
+        request.range.end.year,
+        request.range.end.month,
+        request.range.end.day + 1,
       );
       final statementTransactions = transactions.where((transaction) {
         final occurredAt = _parseTransactionTime(transaction.time);
         return occurredAt != null &&
-            !occurredAt.isBefore(selectedRange.start) &&
+            !occurredAt.isBefore(request.range.start) &&
             occurredAt.isBefore(rangeEndExclusive);
       }).toList(growable: false);
       final descriptionsByReference =
           await BankStatementDescriptionService().resolveDescriptions(
         statementTransactions,
+        onProgress: (progress) {
+          updateProgress(
+            0.08 + (progress.value * 0.32),
+            _generationStageForDescription(progress.stage),
+            processed: progress.processed,
+            total: progress.total,
+          );
+        },
       );
+      updateProgress(
+        0.43,
+        _BankStatementGenerationStage.preparingTransactions,
+        processed: statementTransactions.length,
+        total: statementTransactions.length,
+      );
+      await Future<void>.delayed(Duration.zero);
       final statement = BankStatementData.fromTransactions(
         bankName: bankName,
         bankShortName: provider.getBankShortName(account.bankId),
         bankIconAssetPath: _getBankImage(account.bankId),
         accountNumber: account.accountNumber,
-        accountHolderName: account.accountHolderName,
-        startDate: selectedRange.start,
-        endDate: selectedRange.end,
+        accountHolderName: request.accountHolderName,
+        startDate: request.range.start,
+        endDate: request.range.end,
         generatedAt: DateTime.now(),
         currentAccountBalance: account.balance,
         transactions: transactions,
         descriptionsByReference: descriptionsByReference,
       );
-      final bytes = await BankStatementPdfService().generate(statement);
+      updateProgress(
+        0.47,
+        _BankStatementGenerationStage.loadingAssets,
+      );
+      final bytes = await BankStatementPdfService().generate(
+        statement,
+        onProgress: (progress) {
+          updateProgress(
+            0.47 + (progress.value * 0.52),
+            _generationStageForPdf(progress.stage),
+            processed: progress.processed,
+            total: progress.total,
+          );
+        },
+      );
+      updateProgress(1, _BankStatementGenerationStage.complete);
+      await WidgetsBinding.instance.endOfFrame;
 
       await dismissLoading();
       if (!mounted) return;
@@ -4203,6 +4338,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       );
     } finally {
       await dismissLoading();
+      generationProgress.dispose();
       _isGeneratingBankStatement = false;
     }
   }
@@ -18100,100 +18236,226 @@ class _BankStatementReadySheet extends StatelessWidget {
 }
 
 class _BankStatementLoadingDialog extends StatelessWidget {
-  const _BankStatementLoadingDialog();
+  final ValueListenable<_BankStatementGenerationProgress> progressListenable;
+
+  const _BankStatementLoadingDialog({
+    required this.progressListenable,
+  });
+
+  String _stageLabel(_BankStatementGenerationStage stage) {
+    switch (stage) {
+      case _BankStatementGenerationStage.preparingTransactions:
+        return 'Preparing transactions';
+      case _BankStatementGenerationStage.capturingSources:
+        return 'Finding transaction details';
+      case _BankStatementGenerationStage.loadingReferences:
+        return 'Loading references';
+      case _BankStatementGenerationStage.loadingPatterns:
+        return 'Loading transaction patterns';
+      case _BankStatementGenerationStage.matchingDescriptions:
+        return 'Matching transaction descriptions';
+      case _BankStatementGenerationStage.loadingAssets:
+        return 'Loading statement branding';
+      case _BankStatementGenerationStage.preparingDocument:
+        return 'Building the statement layout';
+      case _BankStatementGenerationStage.processingTransactions:
+        return 'Adding transactions to the PDF';
+      case _BankStatementGenerationStage.layingOutPages:
+        return 'Laying out PDF pages';
+      case _BankStatementGenerationStage.finalizingDocument:
+        return 'Finalizing your PDF';
+      case _BankStatementGenerationStage.complete:
+        return 'Statement ready';
+    }
+  }
+
+  String? _progressDetail(
+    BuildContext context,
+    _BankStatementGenerationProgress progress,
+  ) {
+    final processed = progress.processed;
+    final total = progress.total;
+    if (processed == null || total == null || total <= 0) return null;
+
+    switch (progress.stage) {
+      case _BankStatementGenerationStage.matchingDescriptions:
+      case _BankStatementGenerationStage.processingTransactions:
+      case _BankStatementGenerationStage.preparingTransactions:
+        return '${_formatCount(processed)} / ${_formatCount(total)} '
+            '${context.l10nText('transactions')}';
+      case _BankStatementGenerationStage.layingOutPages:
+        if (processed <= 0) {
+          return '${_formatCount(total)} ${context.l10nText('pages')}';
+        }
+        return '${context.l10nText('Page')} '
+            '${_formatCount(processed)} / ${_formatCount(total)}';
+      case _BankStatementGenerationStage.capturingSources:
+      case _BankStatementGenerationStage.loadingReferences:
+      case _BankStatementGenerationStage.loadingPatterns:
+      case _BankStatementGenerationStage.loadingAssets:
+      case _BankStatementGenerationStage.preparingDocument:
+      case _BankStatementGenerationStage.finalizingDocument:
+      case _BankStatementGenerationStage.complete:
+        return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final accent = AppColors.isDark(context)
         ? AppColors.primaryLight
         : AppColors.primaryDark;
-    return PopScope(
-      canPop: false,
-      child: Semantics(
-        container: true,
-        liveRegion: true,
-        label: context.l10nText('Generating bank statement'),
-        child: Dialog(
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 34),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(24, 26, 24, 22),
-            decoration: BoxDecoration(
-              color: AppColors.cardColor(context),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: AppColors.borderColor(context)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.16),
-                  blurRadius: 30,
-                  offset: const Offset(0, 14),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 68,
-                  height: 68,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox(
-                        width: 64,
-                        height: 64,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          color: accent,
-                          backgroundColor: accent.withValues(alpha: 0.12),
-                        ),
+    return ValueListenableBuilder<_BankStatementGenerationProgress>(
+      valueListenable: progressListenable,
+      builder: (context, progress, _) {
+        return TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0, end: progress.value),
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          builder: (context, displayedProgress, _) {
+            final percentage = (displayedProgress * 100).round();
+            final stageLabel = context.l10nText(
+              _stageLabel(progress.stage),
+            );
+            final detail = _progressDetail(context, progress);
+
+            return PopScope(
+              canPop: false,
+              child: Semantics(
+                container: true,
+                liveRegion: true,
+                label: '${context.l10nText('Generating bank statement')}. '
+                    '$stageLabel',
+                value: '$percentage%',
+                child: Dialog(
+                  elevation: 0,
+                  backgroundColor: Colors.transparent,
+                  insetPadding: const EdgeInsets.symmetric(horizontal: 34),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(24, 26, 24, 22),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardColor(context),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                        color: AppColors.borderColor(context),
                       ),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.asset(
-                          'assets/icon/totals_icon.png',
-                          width: 44,
-                          height: 44,
-                          fit: BoxFit.cover,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.16),
+                          blurRadius: 30,
+                          offset: const Offset(0, 14),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 68,
+                          height: 68,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              SizedBox(
+                                width: 64,
+                                height: 64,
+                                child: CircularProgressIndicator(
+                                  value: displayedProgress,
+                                  strokeWidth: 3.5,
+                                  strokeCap: StrokeCap.round,
+                                  color: accent,
+                                  backgroundColor:
+                                      accent.withValues(alpha: 0.12),
+                                ),
+                              ),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.asset(
+                                  'assets/icon/totals_icon.png',
+                                  width: 44,
+                                  height: 44,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          context.l10nText('Creating your statement'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: AppColors.textPrimary(context),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          child: Text(
+                            stageLabel,
+                            key: ValueKey(progress.stage),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppColors.textSecondary(context),
+                              fontSize: 13,
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: displayedProgress,
+                            minHeight: 6,
+                            color: accent,
+                            backgroundColor: accent.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        const SizedBox(height: 9),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: detail == null
+                                  ? const SizedBox.shrink()
+                                  : Text(
+                                      detail,
+                                      style: TextStyle(
+                                        color: AppColors.textTertiary(context),
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '$percentage%',
+                              style: TextStyle(
+                                color: accent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  context.l10nText('Creating your statement'),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppColors.textPrimary(context),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  context.l10nText(
-                    'Matching transaction details and preparing your PDF.',
-                  ),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppColors.textSecondary(context),
-                    fontSize: 13,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
 
 class _BankStatementDateSheet extends StatefulWidget {
+  final String accountHolderName;
   final DateTime firstDate;
   final DateTime lastDate;
   final DateTime allTimeStartDate;
@@ -18203,6 +18465,7 @@ class _BankStatementDateSheet extends StatefulWidget {
   final DateTime initialEndDate;
 
   const _BankStatementDateSheet({
+    required this.accountHolderName,
     required this.firstDate,
     required this.lastDate,
     required this.allTimeStartDate,
@@ -18218,6 +18481,7 @@ class _BankStatementDateSheet extends StatefulWidget {
 }
 
 class _BankStatementDateSheetState extends State<_BankStatementDateSheet> {
+  late final TextEditingController _fullNameController;
   late DateTime _startDate;
   late DateTime _endDate;
   _BankStatementDatePreset? _selectedPreset;
@@ -18226,9 +18490,16 @@ class _BankStatementDateSheetState extends State<_BankStatementDateSheet> {
   @override
   void initState() {
     super.initState();
+    _fullNameController = TextEditingController();
     _startDate = widget.initialStartDate;
     _endDate = widget.initialEndDate;
     _selectedPreset = _matchingPreset(_startDate, _endDate);
+  }
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    super.dispose();
   }
 
   DateTime _clampDate(DateTime date) {
@@ -18356,211 +18627,344 @@ class _BankStatementDateSheetState extends State<_BankStatementDateSheet> {
 
   Future<void> _generate() async {
     if (_isSubmitting) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _isSubmitting = true);
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
+    final enteredName = _fullNameController.text.trim();
     Navigator.of(context).pop(
-      DateTimeRange(start: _startDate, end: _endDate),
+      _BankStatementGenerationRequest(
+        range: DateTimeRange(start: _startDate, end: _endDate),
+        accountHolderName:
+            enteredName.isEmpty ? widget.accountHolderName.trim() : enteredName,
+      ),
+    );
+  }
+
+  void _cancel() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.of(context).pop();
+  }
+
+  Widget _buildActions(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _isSubmitting ? null : _cancel,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.textSecondary(context),
+              side: BorderSide(
+                color: AppColors.borderColor(context),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              context.l10nText('Cancel'),
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 2,
+          child: ElevatedButton(
+            onPressed: _isSubmitting ? null : _generate,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryDark,
+              disabledBackgroundColor:
+                  AppColors.primaryDark.withValues(alpha: 0.78),
+              foregroundColor: AppColors.white,
+              disabledForegroundColor: AppColors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              child: _isSubmitting
+                  ? Row(
+                      key: const ValueKey('statement-preparing'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 9),
+                        Text(
+                          context.l10nText('Preparing...'),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Text(
+                      key: const ValueKey('statement-generate'),
+                      context.l10nText('Generate'),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.cardColor(context),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final formBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
+    final accountNameHint = widget.accountHolderName.trim().isEmpty
+        ? context.l10nText('Account holder name')
+        : widget.accountHolderName.trim();
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(
+        bottom: keyboardInset + keyboardLiftBuffer,
       ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Align(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.slate400,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      context.l10nText('Generate bank statement'),
-                      style: TextStyle(
-                        color: AppColors.textPrimary(context),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: Icon(
-                      AppIcons.close,
-                      color: AppColors.textSecondary(context),
-                    ),
-                    splashRadius: 20,
-                  ),
-                ],
-              ),
-              Text(
-                context.l10nText(
-                  'Choose the starting and ending dates for your statement.',
-                ),
-                style: TextStyle(
-                  color: AppColors.textSecondary(context),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                context.l10nText('QUICK SELECT'),
-                style: TextStyle(
-                  color: AppColors.textSecondary(context),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              IgnorePointer(
-                ignoring: _isSubmitting,
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final preset in _BankStatementDatePreset.values)
-                      _FilterChip(
-                        label: _presetLabel(preset),
-                        selected: _selectedPreset == preset,
-                        onTap: () => _selectPreset(preset),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                context.l10nText('DATE RANGE'),
-                style: TextStyle(
-                  color: AppColors.textSecondary(context),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _DatePickerField(
-                      hint: 'Start date',
-                      value: _formatDateHeader(_startDate, context),
-                      onTap: () => _pickDate(isStart: true),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _DatePickerField(
-                      hint: 'End date',
-                      value: _formatDateHeader(_endDate, context),
-                      onTap: () => _pickDate(isStart: false),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _isSubmitting
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textSecondary(context),
-                        side: BorderSide(
-                          color: AppColors.borderColor(context),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: Text(
-                        context.l10nText('Cancel'),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: _isSubmitting ? null : _generate,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryDark,
-                        disabledBackgroundColor:
-                            AppColors.primaryDark.withValues(alpha: 0.78),
-                        foregroundColor: AppColors.white,
-                        disabledForegroundColor: AppColors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 150),
-                        child: _isSubmitting
-                            ? Row(
-                                key: const ValueKey('statement-preparing'),
-                                mainAxisSize: MainAxisSize.min,
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.cardColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxHeight = constraints.hasBoundedHeight
+                  ? constraints.maxHeight
+                  : mediaQuery.size.height;
+
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Flexible(
+                        child: SingleChildScrollView(
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: EdgeInsets.only(
+                            top: 10,
+                            bottom: formBottomPadding,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Align(
+                                child: Container(
+                                  width: 36,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.slate400,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
                                 children: [
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.white,
+                                  Expanded(
+                                    child: Text(
+                                      context
+                                          .l10nText('Generate bank statement'),
+                                      style: TextStyle(
+                                        color: AppColors.textPrimary(context),
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(width: 9),
-                                  Text(
-                                    context.l10nText('Preparing...'),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 14,
+                                  IconButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
+                                    icon: Icon(
+                                      AppIcons.close,
+                                      color: AppColors.textSecondary(context),
+                                    ),
+                                    splashRadius: 20,
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                context.l10nText(
+                                  'Choose the starting and ending dates for your statement.',
+                                ),
+                                style: TextStyle(
+                                  color: AppColors.textSecondary(context),
+                                  fontSize: 13,
+                                  height: 1.4,
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                context.l10nText('FULL NAME'),
+                                style: TextStyle(
+                                  color: AppColors.textSecondary(context),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _fullNameController,
+                                enabled: !_isSubmitting,
+                                keyboardType: TextInputType.name,
+                                textInputAction: TextInputAction.done,
+                                textCapitalization: TextCapitalization.words,
+                                autofillHints: const [AutofillHints.name],
+                                onSubmitted: (_) => _generate(),
+                                style: TextStyle(
+                                  color: AppColors.textPrimary(context),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: accountNameHint,
+                                  hintStyle: TextStyle(
+                                    color: AppColors.textTertiary(context),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  prefixIcon: Icon(
+                                    AppIcons.person_outline,
+                                    size: 19,
+                                    color: AppColors.textTertiary(context),
+                                  ),
+                                  filled: true,
+                                  fillColor: AppColors.surfaceColor(context),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 13,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide(
+                                      color: AppColors.borderColor(context),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide(
+                                      color: AppColors.borderColor(context),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(
+                                      color: AppColors.primaryLight,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                context.l10nText('QUICK SELECT'),
+                                style: TextStyle(
+                                  color: AppColors.textSecondary(context),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              IgnorePointer(
+                                ignoring: _isSubmitting,
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final preset
+                                        in _BankStatementDatePreset.values)
+                                      _FilterChip(
+                                        label: _presetLabel(preset),
+                                        selected: _selectedPreset == preset,
+                                        onTap: () => _selectPreset(preset),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                context.l10nText('DATE RANGE'),
+                                style: TextStyle(
+                                  color: AppColors.textSecondary(context),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _DatePickerField(
+                                      hint: 'Start date',
+                                      value: _formatDateHeader(
+                                          _startDate, context),
+                                      onTap: () => _pickDate(isStart: true),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _DatePickerField(
+                                      hint: 'End date',
+                                      value:
+                                          _formatDateHeader(_endDate, context),
+                                      onTap: () => _pickDate(isStart: false),
                                     ),
                                   ),
                                 ],
-                              )
-                            : Text(
-                                key: const ValueKey('statement-generate'),
-                                context.l10nText('Generate'),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
-                                ),
                               ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+                      SizedBox(height: actionTopGap),
+                      Padding(
+                        padding: EdgeInsets.only(
+                          bottom: bottomSafeArea + actionBottomGap,
+                        ),
+                        child: _buildActions(context),
+                      ),
+                      const SizedBox(height: 30),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              );
+            },
           ),
         ),
       ),
