@@ -99,6 +99,7 @@ class TelegramBotApi {
       fields: {
         'chat_id': chatId,
         'text': text,
+        'disable_notification': 'true',
       },
       timeout: const Duration(seconds: 10),
     );

@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:totals/repositories/runtime_lock_repository.dart';
 import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
@@ -50,10 +49,12 @@ class TelegramBackupService {
     TelegramBackupCrypto? crypto,
     DataExportImportService? exportImportService,
     TelegramBotApiFactory? apiFactory,
+    RuntimeLockRepository? runtimeLocks,
   })  : _settings = settings ?? TelegramBackupSettingsService.instance,
         _crypto = crypto ?? TelegramBackupCrypto(),
         _exportImportService = exportImportService ?? DataExportImportService(),
-        _apiFactory = apiFactory ?? ((token) => TelegramBotApi(token: token));
+        _apiFactory = apiFactory ?? ((token) => TelegramBotApi(token: token)),
+        _runtimeLocks = runtimeLocks ?? RuntimeLockRepository();
 
   static final TelegramBackupService instance = TelegramBackupService();
 
@@ -64,8 +65,12 @@ class TelegramBackupService {
   final TelegramBackupCrypto _crypto;
   final DataExportImportService _exportImportService;
   final TelegramBotApiFactory _apiFactory;
+  final RuntimeLockRepository _runtimeLocks;
   final Random _random = Random.secure();
   final Uuid _uuid = const Uuid();
+
+  static const String _runtimeLockName = 'telegram_backup';
+  static const Duration _runtimeLockTtl = Duration(minutes: 15);
 
   static const String _pairingConfirmationMessage = '✅ Telegram is ready\n\n'
       "You're all set here. Return to Totals to finish setting up your "
@@ -409,29 +414,32 @@ class TelegramBackupService {
     }
 
     return _serialized(
-      () => _withDeviceBackupLock(() async {
-        // Another isolate may have completed a manual backup while this worker
-        // waited for the lock. Re-read disk state before exporting.
-        await AdvancedSettingsService.instance.reload();
-        await _settings.reload();
-        final lockedConfig = _settings.config.value;
-        if (!AdvancedSettingsService.instance.telegramBackupEnabled.value ||
-            lockedConfig == null ||
-            lockedConfig.schedule == TelegramBackupSchedule.manual ||
-            !isTelegramBackupDue(
-              config: lockedConfig,
-              now: current,
-              summaryTime: scheduledTime,
-            )) {
-          return TelegramBackupAttemptResult.skipped;
-        }
-        try {
-          await _performBackup();
-          return TelegramBackupAttemptResult.succeeded;
-        } catch (_) {
-          return TelegramBackupAttemptResult.retry;
-        }
-      }),
+      () => _withDeviceBackupLock(
+        () async {
+          // The winning isolate re-reads persisted state after acquiring the
+          // SQLite lease so only one due boundary can be uploaded.
+          await AdvancedSettingsService.instance.reload();
+          await _settings.reload();
+          final lockedConfig = _settings.config.value;
+          if (!AdvancedSettingsService.instance.telegramBackupEnabled.value ||
+              lockedConfig == null ||
+              lockedConfig.schedule == TelegramBackupSchedule.manual ||
+              !isTelegramBackupDue(
+                config: lockedConfig,
+                now: current,
+                summaryTime: scheduledTime,
+              )) {
+            return TelegramBackupAttemptResult.skipped;
+          }
+          try {
+            await _performBackup();
+            return TelegramBackupAttemptResult.succeeded;
+          } catch (_) {
+            return TelegramBackupAttemptResult.retry;
+          }
+        },
+        onBusy: () => TelegramBackupAttemptResult.skipped,
+      ),
     );
   }
 
@@ -691,20 +699,26 @@ class TelegramBackupService {
     return completer.future;
   }
 
-  Future<T> _withDeviceBackupLock<T>(Future<T> Function() action) async {
-    final directory = await getApplicationSupportDirectory();
-    final lockFile = File('${directory.path}/telegram_backup.lock');
-    final handle = await lockFile.open(mode: FileMode.append);
+  Future<T> _withDeviceBackupLock<T>(
+    Future<T> Function() action, {
+    T Function()? onBusy,
+  }) async {
+    final lease = await _runtimeLocks.tryAcquire(
+      _runtimeLockName,
+      ttl: _runtimeLockTtl,
+    );
+    if (lease == null) {
+      if (onBusy != null) return onBusy();
+      throw const TelegramBackupException(
+        'Another Telegram backup operation is already running.',
+      );
+    }
     try {
-      // The UI and WorkManager use separate isolates. An OS-backed file lock
-      // prevents both from reading and replacing the catalog concurrently.
-      await handle.lock(FileLock.exclusive);
       return await action();
     } finally {
       try {
-        await handle.unlock();
+        await _runtimeLocks.release(lease);
       } catch (_) {}
-      await handle.close();
     }
   }
 
