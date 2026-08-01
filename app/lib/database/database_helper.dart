@@ -54,7 +54,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 27,
+      version: 30,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -131,7 +131,10 @@ class DatabaseHelper {
         profileId INTEGER,
         sourceType TEXT,
         sourceMessageId TEXT,
-        sourceFingerprint TEXT
+        sourceFingerprint TEXT,
+        ownerAccountNumber TEXT,
+        ownerAssignmentSource TEXT,
+        sourceSubscriptionId INTEGER
       )
     ''');
 
@@ -186,6 +189,10 @@ class DatabaseHelper {
         settledBalance REAL,
         pendingCredit REAL,
         profileId INTEGER,
+        smsSubscriptionId INTEGER,
+        includeInTotals INTEGER NOT NULL DEFAULT 1,
+        isDormant INTEGER NOT NULL DEFAULT 0,
+        isDefault INTEGER NOT NULL DEFAULT 0,
         UNIQUE(accountNumber, bank)
       )
     ''');
@@ -326,6 +333,26 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX idx_user_accounts_accountNumber ON user_accounts(accountNumber)',
     );
+
+    // Multi-account ownership indexes (see multi-account port, cluster 1).
+    await db.execute(
+      'CREATE INDEX idx_transactions_ownerAccount '
+      'ON transactions(profileId, bankId, ownerAccountNumber, time)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_transactions_sourceSubscriptionId '
+      'ON transactions(sourceType, sourceSubscriptionId)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_accounts_smsSubscriptionId '
+      'ON accounts(bank, smsSubscriptionId)',
+    );
+    // At most one default account per bank+profile.
+    await db.execute('''
+      CREATE UNIQUE INDEX idx_accounts_one_default_per_bank
+      ON accounts(bank, COALESCE(profileId, -1))
+      WHERE isDefault = 1
+    ''');
 
     await _ensureLoanDebtSchema(db);
 
@@ -854,6 +881,92 @@ class DatabaseHelper {
       await _ensureTransactionSourceSchema(db);
       await _ensureSyncSchema(db);
     }
+
+    // v28-v30: multiple bank account support (ported from multi-bank-accounts).
+    // Idempotent, so a single ensure covers every pre-v30 database.
+    if (oldVersion < 30) {
+      await _ensureMultiAccountSchema(db);
+    }
+  }
+
+  /// Adds the ownership/preference/control columns and indexes that back
+  /// multiple bank accounts per bank. Safe to run repeatedly.
+  ///
+  /// - v29 (his): transactions.ownerAccountNumber, sourceSubscriptionId;
+  ///   accounts.smsSubscriptionId + routing indexes.
+  /// - v30 (his): accounts.includeInTotals, isDormant.
+  /// - v31 (his): accounts.isDefault; transactions.ownerAssignmentSource;
+  ///   deterministic default election + one-default-per-bank unique index.
+  ///
+  /// smsSubscriptionId / sourceSubscriptionId are Android SIM-routing metadata
+  /// and stay NULL on iOS; ownership there is resolved from the pasted-message
+  /// ingest pipeline instead.
+  Future<void> _ensureMultiAccountSchema(Database db) async {
+    Future<Set<String>> columnNames(String table) async {
+      final cols = await db.rawQuery('PRAGMA table_info($table)');
+      return cols.map((c) => c['name'] as String).toSet();
+    }
+
+    Future<void> ensureColumns(
+      String table,
+      Map<String, String> additions,
+    ) async {
+      final existing = await columnNames(table);
+      for (final entry in additions.entries) {
+        if (existing.contains(entry.key)) continue;
+        await db.execute(entry.value);
+      }
+    }
+
+    await ensureColumns('transactions', {
+      'ownerAccountNumber':
+          'ALTER TABLE transactions ADD COLUMN ownerAccountNumber TEXT',
+      'sourceSubscriptionId':
+          'ALTER TABLE transactions ADD COLUMN sourceSubscriptionId INTEGER',
+      'ownerAssignmentSource':
+          'ALTER TABLE transactions ADD COLUMN ownerAssignmentSource TEXT',
+    });
+    await ensureColumns('accounts', {
+      'smsSubscriptionId':
+          'ALTER TABLE accounts ADD COLUMN smsSubscriptionId INTEGER',
+      'includeInTotals':
+          'ALTER TABLE accounts ADD COLUMN includeInTotals INTEGER NOT NULL DEFAULT 1',
+      'isDormant':
+          'ALTER TABLE accounts ADD COLUMN isDormant INTEGER NOT NULL DEFAULT 0',
+      'isDefault':
+          'ALTER TABLE accounts ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0',
+    });
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_transactions_ownerAccount '
+      'ON transactions(profileId, bankId, ownerAccountNumber, time)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_transactions_sourceSubscriptionId '
+      'ON transactions(sourceType, sourceSubscriptionId)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_accounts_smsSubscriptionId '
+      'ON accounts(bank, smsSubscriptionId)',
+    );
+
+    // Elect one deterministic default per bank+profile before enforcing the
+    // uniqueness constraint. The lowest id wins until the user changes it.
+    await db.execute('UPDATE accounts SET isDefault = 0');
+    await db.execute('''
+      UPDATE accounts
+      SET isDefault = 1
+      WHERE id IN (
+        SELECT MIN(id)
+        FROM accounts
+        GROUP BY bank, COALESCE(profileId, -1)
+      )
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_default_per_bank
+      ON accounts(bank, COALESCE(profileId, -1))
+      WHERE isDefault = 1
+    ''');
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {
