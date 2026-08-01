@@ -161,12 +161,15 @@ class TransactionRepository {
       'type': map['type'],
       'transactionLink': map['transactionLink'],
       'accountNumber': map['accountNumber'],
+      'ownerAccountNumber': map['ownerAccountNumber'],
+      'ownerAssignmentSource': map['ownerAssignmentSource'],
       'categoryId': map['categoryId'],
       'categoryIds': map['categoryIds'],
       'profileId': map['profileId'],
       'sourceType': map['sourceType'],
       'sourceMessageId': map['sourceMessageId'],
       'sourceFingerprint': map['sourceFingerprint'],
+      'sourceSubscriptionId': map['sourceSubscriptionId'],
     });
   }
 
@@ -232,6 +235,11 @@ class TransactionRepository {
       'type': transactionToSave.type,
       'transactionLink': transactionToSave.transactionLink,
       'accountNumber': transactionToSave.accountNumber,
+      // Preserve ownership across the REPLACE — otherwise note/category edits
+      // would silently drop a manual account assignment.
+      'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+      'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
+      'sourceSubscriptionId': transactionToSave.sourceSubscriptionId,
       'categoryId': transactionToSave.categoryId,
       'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
           ? null
@@ -378,13 +386,11 @@ class TransactionRepository {
     String? sourceMessageId,
   }) async {
     final db = await DatabaseHelper.instance.database;
-    final activeProfileId = await _getActiveProfileId();
+    // `reference` is globally UNIQUE, so match on it alone. Filtering by
+    // profileId would miss migrated rows that have a NULL profileId (common
+    // for data imported from the old app on iOS), silently updating 0 rows.
     final where = <String>['reference = ?'];
     final args = <Object?>[reference];
-    if (activeProfileId != null) {
-      where.add('profileId = ?');
-      args.add(activeProfileId);
-    }
 
     final existingRows = await db.query(
       'transactions',
