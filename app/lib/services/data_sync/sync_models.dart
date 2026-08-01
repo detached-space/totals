@@ -54,6 +54,8 @@ extension SyncEntityX on SyncEntity {
           'type',
           'transactionLink',
           'accountNumber',
+          'ownerAccountNumber',
+          'ownerAssignmentSource',
           'categoryId',
           'categoryIds',
           'categoryNames',
@@ -75,6 +77,9 @@ extension SyncEntityX on SyncEntity {
           'settledBalance',
           'pendingCredit',
           'profileId',
+          'includeInTotals',
+          'isDormant',
+          'isDefault',
         ];
       case SyncEntity.budgets:
         return const [

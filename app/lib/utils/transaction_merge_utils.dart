@@ -27,6 +27,17 @@ class TransactionMergeUtils {
       transactionLink: _pickText(
           existing.transactionLink, reparsed.transactionLink),
       accountNumber: _pickText(existing.accountNumber, reparsed.accountNumber),
+      // Ownership is user organization: the stored row wins. A manual (or any
+      // existing) account assignment must survive a re-parse; only fill from
+      // the parsed copy when the stored row has no owner yet.
+      ownerAccountNumber: _keepExistingOwner(existing)
+          ? existing.ownerAccountNumber
+          : reparsed.ownerAccountNumber,
+      ownerAssignmentSource: _keepExistingOwner(existing)
+          ? existing.ownerAssignmentSource
+          : reparsed.ownerAssignmentSource,
+      sourceSubscriptionId:
+          existing.sourceSubscriptionId ?? reparsed.sourceSubscriptionId,
       categoryId: existing.categoryId,
       categoryIds: existing.categoryIds,
       profileId: existing.profileId,
@@ -45,6 +56,9 @@ class TransactionMergeUtils {
     }
     return updated;
   }
+
+  static bool _keepExistingOwner(Transaction existing) =>
+      existing.ownerAccountNumber?.trim().isNotEmpty ?? false;
 
   static String? _pickText(String? existing, String? reparsed) {
     final trimmedExisting = existing?.trim();
@@ -73,6 +87,9 @@ class TransactionMergeUtils {
         a.type == b.type &&
         a.transactionLink == b.transactionLink &&
         a.accountNumber == b.accountNumber &&
+        a.ownerAccountNumber == b.ownerAccountNumber &&
+        a.ownerAssignmentSource == b.ownerAssignmentSource &&
+        a.sourceSubscriptionId == b.sourceSubscriptionId &&
         a.categoryId == b.categoryId &&
         listEquals(a.selectedCategoryIds, b.selectedCategoryIds) &&
         a.profileId == b.profileId &&
