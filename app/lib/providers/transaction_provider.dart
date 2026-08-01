@@ -22,7 +22,9 @@ import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/account_reconciliation.dart';
 import 'package:totals/utils/account_sort.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -811,22 +813,37 @@ class TransactionProvider with ChangeNotifier {
       double totalDebit = 0.0;
       double totalCredit = 0.0;
       double cashBalance = 0.0;
+      // Breakdown fields for the credit/debit sheet (F1.8), computed additively
+      // so the existing card totals are unchanged: of the credits/debits, how
+      // much is internal transfer between the user's own accounts, and how much
+      // of the debit total is fees/VAT.
+      double transferIn = 0.0;
+      double transferOut = 0.0;
+      double feesAndVat = 0.0;
       for (var t in accountTransactions) {
         double amount = t.amount;
         final skip = _categoryById[t.categoryId]?.uncategorized == true;
+        final isSelfTransfer = _isSelfTransfer(t);
         if (t.type == "DEBIT") {
           cashBalance -= amount;
+          feesAndVat += transactionFeeAmount(t);
+          if (isSelfTransfer) transferOut += amount.abs();
           if (!skip) {
             totalDebit += amount;
           }
         }
         if (t.type == "CREDIT") {
           cashBalance += amount;
+          if (isSelfTransfer) transferIn += amount.abs();
           if (!skip) {
             totalCredit += amount;
           }
         }
       }
+
+      final reconciliation = account.bank == CashConstants.bankId
+          ? null
+          : reconcileAccountTransactions(accountTransactions);
 
       final isCashAccount = account.bank == CashConstants.bankId;
       final bankAccountCount = groupedAccounts[account.bank]?.length ?? 0;
@@ -853,6 +870,20 @@ class TransactionProvider with ChangeNotifier {
         includeInTotals: account.includeInTotals,
         isDormant: account.isDormant,
         isDefault: account.isDefault,
+        transferIn: transferIn,
+        transferOut: transferOut,
+        feesAndVat: feesAndVat,
+        reconciliationOpeningBalance: reconciliation?.openingBalance,
+        reconciliationClosingBalance: reconciliation?.closingBalance,
+        reconciliationExpectedClosingBalance:
+            reconciliation?.expectedClosingBalance,
+        unreconciledAdjustment: reconciliation?.adjustment ?? 0.0,
+        reconciliationMismatchCount: reconciliation?.mismatchCount ?? 0,
+        reconciliationTransactionReferences:
+            reconciliation?.mismatchedTransactionReferences.toList() ??
+                const <String>[],
+        reconciliationMismatchPeriods:
+            reconciliation?.mismatchPeriods ?? const <ReconciliationMismatchPeriod>[],
       );
     }).toList();
     _transactionsByAccount = transactionsByAccount;

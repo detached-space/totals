@@ -28,6 +28,7 @@ import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
+import 'package:totals/_redesign/widgets/credit_debit_breakdown_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
@@ -3265,6 +3266,18 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   onManage: isCash
                       ? null
                       : () => _openAccountActionsSheet(provider, account),
+                  onShowBreakdown: () => showCreditDebitBreakdownSheet(
+                    context,
+                    totalCredit: account.totalCredit,
+                    totalDebit: account.totalDebit,
+                    transferIn: account.transferIn,
+                    transferOut: account.transferOut,
+                    feesAndVat: account.feesAndVat,
+                    unreconciledAdjustment: account.unreconciledAdjustment,
+                    reconciliationMismatchCount:
+                        account.reconciliationMismatchCount,
+                    showAmounts: _showAccountBalances,
+                  ),
                   onDelete:
                       isCash ? null : () => _showDeleteConfirmation(account),
                   onCashExpense: isCash ? _showCashExpenseSheet : null,
@@ -12923,6 +12936,7 @@ class _AccountCard extends StatelessWidget {
   final VoidCallback? onReparse;
   final VoidCallback? onDelete;
   final VoidCallback? onManage;
+  final VoidCallback? onShowBreakdown;
   final VoidCallback? onCashExpense;
   final VoidCallback? onCashIncome;
   final VoidCallback? onSetCashAmount;
@@ -12941,6 +12955,7 @@ class _AccountCard extends StatelessWidget {
     this.onReparse,
     this.onDelete,
     this.onManage,
+    this.onShowBreakdown,
     this.onCashExpense,
     this.onCashIncome,
     this.onSetCashAmount,
@@ -13149,9 +13164,19 @@ class _AccountCard extends StatelessWidget {
                     ],
                   ),
                   if (onReparse != null || onDelete != null ||
-                      onManage != null) ...[
+                      onManage != null || onShowBreakdown != null) ...[
                     const SizedBox(height: 14),
                     Container(height: 1, color: AppColors.borderColor(context)),
+                    if (onShowBreakdown != null) ...[
+                      const SizedBox(height: 12),
+                      _CashActionButton(
+                        label: 'Credit / debit breakdown',
+                        icon: Icons.pie_chart_outline_rounded,
+                        color: AppColors.primaryDark,
+                        outlined: true,
+                        onTap: isBusy ? null : onShowBreakdown,
+                      ),
+                    ],
                     if (onManage != null) ...[
                       const SizedBox(height: 12),
                       _CashActionButton(
