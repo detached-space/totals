@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,9 +20,37 @@ class DatabaseHelper {
     return _database!;
   }
 
+  /// Resolves where the database file lives.
+  ///
+  /// On iOS the DB is kept in Application Support instead of the sqflite
+  /// default (Documents): Documents is exposed to the Files app
+  /// (`UIFileSharingEnabled`) for the Shortcuts message inbox, and the
+  /// finance DB shouldn't sit one tap away from deletion or sharing. A legacy
+  /// Documents copy (plus its WAL/SHM/journal sidecars) is moved on first
+  /// run. Android and other platforms keep the sqflite default path.
+  Future<String> _databasePath(String fileName) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return join(await getDatabasesPath(), fileName);
+    }
+    final support = await getApplicationSupportDirectory();
+    await support.create(recursive: true);
+    final path = join(support.path, fileName);
+    final legacy = join(await getDatabasesPath(), fileName);
+    if (legacy != path &&
+        File(legacy).existsSync() &&
+        !File(path).existsSync()) {
+      for (final suffix in const ['', '-wal', '-shm', '-journal']) {
+        final sidecar = File('$legacy$suffix');
+        if (sidecar.existsSync()) {
+          sidecar.renameSync('$path$suffix');
+        }
+      }
+    }
+    return path;
+  }
+
   Future<Database> _initDB(String filePath) async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, filePath);
+    final path = await _databasePath(filePath);
 
     final db = await openDatabase(
       path,

@@ -4,6 +4,7 @@ import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/utils/platform_support.dart';
 
 class ToolsPage extends StatelessWidget {
   const ToolsPage({super.key});
@@ -68,18 +69,19 @@ class ToolsPage extends StatelessWidget {
                       );
                     },
                   ),
-                  _ToolCard(
-                    title: 'Verify Payments',
-                    icon: Icons.qr_code_scanner,
-                    iconColor: colorScheme.tertiary,
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const VerifyPaymentsPage(),
-                        ),
-                      );
-                    },
-                  ),
+                  if (PlatformSupport.canVerifyPayments)
+                    _ToolCard(
+                      title: 'Verify Payments',
+                      icon: Icons.qr_code_scanner,
+                      iconColor: colorScheme.tertiary,
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const VerifyPaymentsPage(),
+                          ),
+                        );
+                      },
+                    ),
                   _ToolCard(
                     title: 'Failed Parsings',
                     icon: Icons.sms_failed_rounded,

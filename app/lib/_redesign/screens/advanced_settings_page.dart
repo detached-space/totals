@@ -143,7 +143,7 @@ class _RedesignAdvancedSettingsPageState
                         ),
                       ),
                       Text(
-                        '${draft.length}/${ToolsFabItem.values.length}',
+                        '${draft.length}/${AdvancedSettingsService.supportedToolsFabItems.length}',
                         style: TextStyle(
                           color: AppColors.textSecondary(ctx),
                           fontSize: 12,
@@ -153,7 +153,8 @@ class _RedesignAdvancedSettingsPageState
                     ],
                   ),
                   const SizedBox(height: 12),
-                  for (final item in ToolsFabItem.values) ...[
+                  for (final item
+                      in AdvancedSettingsService.supportedToolsFabItems) ...[
                     _ToolsFabOptionTile(
                       icon: _toolsFabIcon(item),
                       color: AppColors.primaryLight,
@@ -162,7 +163,8 @@ class _RedesignAdvancedSettingsPageState
                       canToggle: draft.length > 1 || !draft.contains(item),
                       onTap: () => toggle(item),
                     ),
-                    if (item != ToolsFabItem.values.last)
+                    if (item !=
+                        AdvancedSettingsService.supportedToolsFabItems.last)
                       const SizedBox(height: 8),
                   ],
                   const SizedBox(height: 14),
@@ -195,7 +197,8 @@ class _RedesignAdvancedSettingsPageState
   }
 
   String _toolsFabSummary(BuildContext context) {
-    if (_visibleTools.length == ToolsFabItem.values.length) {
+    if (_visibleTools.length ==
+        AdvancedSettingsService.supportedToolsFabItems.length) {
       return context.l10nText('All tools');
     }
     return '${_visibleTools.length} ${context.l10nText('tools shown')}';

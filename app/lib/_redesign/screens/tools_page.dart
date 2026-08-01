@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
+import 'package:totals/_redesign/screens/paste_messages_page.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
 import 'package:totals/screens/web_page.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/utils/platform_support.dart';
 
 class RedesignToolsPage extends StatelessWidget {
   const RedesignToolsPage({super.key});
@@ -57,15 +59,29 @@ class RedesignToolsPage extends StatelessWidget {
                   MaterialPageRoute(builder: (_) => const AccountsPage()),
                 ),
               ),
+              if (PlatformSupport.canVerifyPayments)
+                _ToolTile(
+                  icon: AppIcons.qr_code_scanner_rounded,
+                  iconColor: AppColors.incomeSuccess,
+                  title: context.l10nText('Verify Payments'),
+                  subtitle:
+                      context.l10nText('Scan and verify transaction receipts'),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const VerifyPaymentsPage()),
+                  ),
+                ),
               _ToolTile(
-                icon: AppIcons.qr_code_scanner_rounded,
-                iconColor: AppColors.incomeSuccess,
-                title: context.l10nText('Verify Payments'),
+                icon: AppIcons.copy,
+                iconColor: AppColors.primaryLight,
+                title: context.l10nText('Paste Messages'),
                 subtitle:
-                    context.l10nText('Scan and verify transaction receipts'),
+                    context.l10nText('Manually parse pasted bank messages'),
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const VerifyPaymentsPage()),
+                  MaterialPageRoute(
+                      builder: (_) => const PasteMessagesPage()),
                 ),
               ),
               _ToolTile(

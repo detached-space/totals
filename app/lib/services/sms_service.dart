@@ -29,6 +29,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/sms_transaction_source.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
+import 'package:totals/utils/transaction_merge_utils.dart';
 
 enum ParseStatus {
   success,
@@ -36,6 +37,34 @@ enum ParseStatus {
   noPattern,
   duplicate,
   unregisteredBank,
+}
+
+/// Per-drain context for bulk ingestion, modeled on the Android reparse
+/// service's prepare-once pattern: banks, accounts and the existing
+/// transactions are loaded a single time and the per-message loop then works
+/// entirely against memory — no repository query per message.
+class _BulkIngestSession {
+  final List<Bank> banks;
+  final List<Account> accounts;
+  final List<Transaction> transactions;
+
+  _BulkIngestSession({
+    required this.banks,
+    required this.accounts,
+    required this.transactions,
+  });
+
+  void track(Transaction saved) => transactions.add(saved);
+
+  void replace(Transaction updated) {
+    final index =
+        transactions.indexWhere((t) => t.reference == updated.reference);
+    if (index >= 0) {
+      transactions[index] = updated;
+    } else {
+      transactions.add(updated);
+    }
+  }
 }
 
 class ParseResult {
@@ -123,6 +152,86 @@ class SmsService {
   final Telephony _telephony = Telephony.instance;
   static final BankConfigService _bankConfigService = BankConfigService();
   static List<Bank>? _cachedBanks;
+
+  static _BulkIngestSession? _bulkSession;
+
+  /// Starts a bulk ingest session: loads banks, accounts and the existing
+  /// transactions once so every message processed until [endBulkIngest] runs
+  /// its gate, duplicate checks and account matching against memory. Callers
+  /// must pair this with [endBulkIngest] (try/finally).
+  static Future<void> beginBulkIngest() async {
+    if (_bulkSession != null) return;
+    _bulkSession = _BulkIngestSession(
+      banks: await _bankConfigService.getBanks(allowRemoteFetch: false),
+      accounts: await AccountRepository().getAllAccounts(),
+      transactions: await TransactionRepository().getAllTransactions(),
+    );
+  }
+
+  /// Ends the bulk session and settles account balances: per account, the
+  /// newest-dated transaction with a balance-after wins — regardless of the
+  /// order messages happened to be processed in.
+  static Future<void> endBulkIngest() async {
+    final session = _bulkSession;
+    _bulkSession = null;
+    if (session == null) return;
+    try {
+      await _reconcileBulkBalances(session);
+    } catch (e) {
+      print("debug: Bulk balance reconciliation failed: $e");
+    }
+  }
+
+  static Future<void> _reconcileBulkBalances(_BulkIngestSession session) async {
+    final accRepo = AccountRepository();
+    for (final account in session.accounts) {
+      if (account.bank == CashConstants.bankId) continue;
+      final bank = _bankById(session.banks, account.bank);
+
+      Transaction? latest;
+      DateTime? latestTime;
+      for (final tx in session.transactions) {
+        if (tx.bankId != account.bank) continue;
+        final balance = tx.currentBalance?.trim();
+        if (balance == null || balance.isEmpty) continue;
+        if (tx.profileId != null &&
+            account.profileId != null &&
+            tx.profileId != account.profileId) {
+          continue;
+        }
+        if (!_transactionBelongsToAccount(tx, account, bank)) continue;
+        final time = DateTime.tryParse(tx.time ?? '');
+        if (time == null) continue;
+        if (latestTime == null || time.isAfter(latestTime)) {
+          latest = tx;
+          latestTime = time;
+        }
+      }
+      if (latest == null) continue;
+
+      final newBalance = sanitizeAmount(latest.currentBalance);
+      if ((newBalance - account.balance).abs() > 0.004) {
+        await _saveUpdatedAccountBalance(accRepo, account, newBalance);
+      }
+    }
+  }
+
+  /// Same account-attribution rules the transaction list uses: bank-only for
+  /// non-uniform-masking banks, masked-suffix compare for uniform ones.
+  static bool _transactionBelongsToAccount(
+      Transaction tx, Account account, Bank? bank) {
+    if (bank?.uniformMasking == false) return true;
+    final txAccount = tx.accountNumber?.trim() ?? '';
+    if (txAccount.isEmpty) return false;
+    if (bank?.uniformMasking == true) {
+      final mask = bank!.maskPattern;
+      final suffix = mask != null && mask > 0 && txAccount.length > mask
+          ? txAccount.substring(txAccount.length - mask)
+          : txAccount;
+      return account.accountNumber.endsWith(suffix);
+    }
+    return account.accountNumber.trim() == txAccount;
+  }
   static bool _cachedBanksLoadedWithRemoteFetch = false;
   static const String _atmCashCutoffPrefPrefix =
       'atm_cash_transfer_cutoff_iso_profile_';
@@ -366,8 +475,10 @@ class SmsService {
   static Future<Bank?> _detectBankFromBody(
     String messageBody, {
     bool allowRemoteFetch = true,
+    bool verbose = true,
   }) async {
-    final accounts = await AccountRepository().getAccounts();
+    final accounts =
+        _bulkSession?.accounts ?? await AccountRepository().getAllAccounts();
     final registeredBankIds = accounts.map((a) => a.bank).toSet();
     if (registeredBankIds.isEmpty) return null;
 
@@ -382,21 +493,28 @@ class SmsService {
     final patterns = await configService.getPatterns(allowRemoteFetch: false);
     final cleaned = configService.cleanSmsText(messageBody);
 
-    for (final bankId in registeredBankIds) {
-      final bankPatterns = patterns.where((p) => p.bankId == bankId).toList();
-      if (bankPatterns.isEmpty) continue;
-      final details = await PatternParser.extractTransactionDetails(
-        cleaned,
-        '',
-        null,
-        bankPatterns,
-        banks: _cachedBanks,
-      );
-      if (details != null) {
-        for (final b in _cachedBanks!) {
-          if (b.id == bankId) return b;
-        }
-      }
+    // One sweep over every registered bank's patterns in pattern-file order.
+    // The file lists all banks' specific patterns before any fallbacks, so a
+    // message that also happens to fit another bank's generic fallback still
+    // resolves to its own bank — iterating bank-by-bank instead would let the
+    // first bank's fallback shadow a later bank's exact pattern.
+    final relevantPatterns =
+        patterns.where((p) => registeredBankIds.contains(p.bankId)).toList();
+    if (relevantPatterns.isEmpty) return null;
+
+    final details = await PatternParser.extractTransactionDetails(
+      cleaned,
+      '',
+      null,
+      relevantPatterns,
+      banks: _cachedBanks,
+      verbose: verbose,
+    );
+    if (details == null) return null;
+
+    final matchedBankId = (details['bankId'] as num?)?.toInt();
+    for (final b in _cachedBanks!) {
+      if (b.id == matchedBankId) return b;
     }
     return null;
   }
@@ -704,6 +822,18 @@ class SmsService {
     return null;
   }
 
+  /// Orders accounts so the active profile's come first — when the same bank
+  /// (or masked suffix) exists in more than one profile, the first-match
+  /// helpers below then resolve the tie in favor of the active profile.
+  static List<Account> _activeProfileFirst(
+      List<Account> accounts, int? activeProfileId) {
+    if (activeProfileId == null) return accounts;
+    return [
+      ...accounts.where((a) => a.profileId == activeProfileId),
+      ...accounts.where((a) => a.profileId != activeProfileId),
+    ];
+  }
+
   static Account? _accountForBank(List<Account> accounts, int bankId) {
     for (final account in accounts) {
       if (account.bank == bankId) return account;
@@ -769,10 +899,12 @@ class SmsService {
         normalizedBody.contains('withdraw');
   }
 
-  static Future<void> _ensureCashAccount() async {
+  static Future<void> _ensureCashAccount(int? profileId) async {
     final accountRepo = AccountRepository();
-    final accounts = await accountRepo.getAccounts();
-    final hasCash = accounts.any((a) => a.bank == CashConstants.bankId);
+    final accounts = await accountRepo.getAllAccounts();
+    final hasCash = accounts.any((a) =>
+        a.bank == CashConstants.bankId &&
+        (profileId == null || a.profileId == profileId));
     if (hasCash) return;
 
     final cashAccount = Account(
@@ -780,13 +912,13 @@ class SmsService {
       bank: CashConstants.bankId,
       balance: 0.0,
       accountHolderName: CashConstants.defaultAccountHolderName,
+      profileId: profileId,
     );
     await accountRepo.saveAccount(cashAccount);
   }
 
   static Future<void> _createCashTransactionForAtmWithdrawal(
     Transaction withdrawal,
-    List<Transaction> existingTransactions,
   ) async {
     final bankId = withdrawal.bankId;
     if (bankId == null || bankId == CashConstants.bankId) return;
@@ -797,14 +929,21 @@ class SmsService {
       return;
     }
 
+    final txRepo = TransactionRepository();
     final cashReference = CashConstants.buildAtmReference(withdrawal.reference);
-    if (existingTransactions.any((t) => t.reference == cashReference)) {
+    if (await txRepo.getTransactionByReference(cashReference) != null) {
       return;
     }
 
-    await _ensureCashAccount();
-    final currentCashBalance =
-        await _currentCashWalletBalance(existingTransactions);
+    await _ensureCashAccount(withdrawal.profileId);
+    // Scope the cash wallet to the withdrawal's profile so the linked cash
+    // transaction lands (and its balance is computed) in the right profile.
+    final cashTransactions = await txRepo.getTransactionsForBank(
+      CashConstants.bankId,
+      profileId: withdrawal.profileId,
+    );
+    final currentCashBalance = await _currentCashWalletBalance(
+        cashTransactions, withdrawal.profileId);
 
     final cashTransaction = Transaction(
       amount: withdrawal.amount,
@@ -817,6 +956,7 @@ class SmsService {
           (currentCashBalance + withdrawal.amount).toStringAsFixed(2),
       transactionLink: withdrawal.reference,
       accountNumber: CashConstants.defaultAccountNumber,
+      profileId: withdrawal.profileId,
     );
 
     await TransactionRepository().saveTransaction(cashTransaction);
@@ -824,11 +964,14 @@ class SmsService {
 
   static Future<double> _currentCashWalletBalance(
     List<Transaction> existingTransactions,
+    int? profileId,
   ) async {
     final accountRepo = AccountRepository();
-    final accounts = await accountRepo.getAccounts();
+    final accounts = await accountRepo.getAllAccounts();
     final accountBase = accounts
-        .where((a) => a.bank == CashConstants.bankId)
+        .where((a) =>
+            a.bank == CashConstants.bankId &&
+            (profileId == null || a.profileId == profileId))
         .fold<double>(0.0, (sum, account) => sum + account.balance);
 
     final txDelta = existingTransactions
@@ -1014,6 +1157,11 @@ class SmsService {
   /// Same as [processMessage] but returns the full [ParseResult] so callers can
   /// see *why* nothing was stored (e.g. `noBank`). Used by the iOS file-ingest
   /// path to decide whether to delete or quarantine a dropped message.
+  ///
+  /// With [dryRun] the message goes through the full pipeline — bank detection,
+  /// pattern parsing, duplicate checks, account/profile matching — but nothing
+  /// is written: no transaction, no balance update, no failed-parse record. The
+  /// returned transaction is the preview of what a real run would save.
   static Future<ParseResult> processMessageResult(
     String messageBody,
     String senderAddress, {
@@ -1024,18 +1172,22 @@ class SmsService {
     bool allowRemoteBankFetch = true,
     bool allowRemotePatternFetch = false,
     int? sourceMessageId,
+    bool dryRun = false,
+    bool bulk = false,
   }) {
     return _processMessageInternal(
       messageBody,
       senderAddress,
       messageDate: messageDate,
       sourceMessageId: sourceMessageId,
-      notifyUser: notifyUser,
+      notifyUser: notifyUser && !dryRun,
       skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
       skipAutoCategorization: skipAutoCategorization,
       allowRemoteBankFetch: allowRemoteBankFetch,
       allowRemotePatternFetch: allowRemotePatternFetch,
-      recordFailure: true,
+      recordFailure: !dryRun,
+      dryRun: dryRun,
+      bulk: bulk,
     );
   }
 
@@ -1070,8 +1222,10 @@ class SmsService {
     bool allowRemotePatternFetch = false,
     bool recordFailure = true,
     int? sourceMessageId,
+    bool dryRun = false,
+    bool bulk = false,
   }) async {
-    print("debug: Processing message: $messageBody");
+    if (!bulk) print("debug: Processing message: $messageBody");
 
     Bank? resolvedBank = await getRelevantBank(
       senderAddress,
@@ -1085,6 +1239,7 @@ class SmsService {
       resolvedBank = await _detectBankFromBody(
         messageBody,
         allowRemoteFetch: allowRemoteBankFetch,
+        verbose: !bulk,
       );
     }
     if (resolvedBank == null) {
@@ -1097,8 +1252,12 @@ class SmsService {
     }
     final Bank bank = resolvedBank;
 
-    // Check if the user has a registered account for this bank
-    final registeredAccounts = await AccountRepository().getAccounts();
+    final session = _bulkSession;
+
+    // Check if the user has a registered account for this bank, in any
+    // profile — the message may belong to a profile that isn't active.
+    final registeredAccounts =
+        session?.accounts ?? await AccountRepository().getAllAccounts();
     final hasRegisteredAccount =
         registeredAccounts.any((a) => a.bank == bank.id);
     if (!hasRegisteredAccount) {
@@ -1127,6 +1286,7 @@ class SmsService {
       messageDate,
       relevantPatterns,
       banks: _cachedBanks,
+      verbose: !bulk,
     );
 
     if (details == null && FallbackSmsParser.isEnabled) {
@@ -1213,7 +1373,7 @@ class SmsService {
       );
     }
 
-    print("debug: Extracted details: $details");
+    if (!bulk) print("debug: Extracted details: $details");
 
     // Use message date if provided, otherwise use extracted time or current time
     if (messageDate != null && details['time'] == null) {
@@ -1233,9 +1393,28 @@ class SmsService {
     );
     details.addAll(smsSource.toJson());
 
-    // 3. Check duplicate transaction
+    // 3. Check duplicate transaction — across all profiles, so a message
+    // reprocessed while a different profile is active isn't ingested twice.
+    // In a bulk session the full history is already in memory; otherwise only
+    // collision candidates are fetched — loading the whole table per message
+    // made every ingest O(history) and froze the UI during pastes/drains.
     TransactionRepository txRepo = TransactionRepository();
-    List<Transaction> existingTx = await txRepo.getTransactions();
+    // Amount+balance dedup applies to Dashen (its expense messages repeat) and
+    // to any message whose reference was synthesized — a generated key can't
+    // match across imports, so the reference check alone would double-ingest.
+    final syntheticRef = details['syntheticReference'] == true;
+    final needsAmountDedup = parsedBankId == _dashenBankId || syntheticRef;
+    final parsedAmount = details['amount'];
+    List<Transaction> existingTx = session?.transactions ??
+        await txRepo.getDuplicateCandidates(
+          reference: details['reference']?.toString(),
+          sourceMessageId: details['sourceMessageId']?.toString(),
+          sourceFingerprint: details['sourceFingerprint']?.toString(),
+          bankId: needsAmountDedup && parsedAmount is num ? parsedBankId : null,
+          amount: needsAmountDedup && parsedAmount is num
+              ? parsedAmount.toDouble()
+              : null,
+        );
 
     if (_hasSmsSourceDuplicate(details, existingTx)) {
       print("debug: Duplicate SMS source skipped");
@@ -1248,13 +1427,27 @@ class SmsService {
     String? newRef = details['reference'];
     if (newRef != null && existingTx.any((t) => t.reference == newRef)) {
       print("debug: Duplicate transaction skipped");
-      if (_isAtmWithdrawal(details, messageBody)) {
+      if (!dryRun) {
+        // Learned from the Android reparse: a duplicate is a chance to enrich.
+        // Fill in fields the stored copy is missing (receiver, balance,
+        // receipt link, SMS source ids) while keeping its category, note and
+        // profile — this is how old-app-migrated rows gain SMS fidelity
+        // during a backfill without losing their categorization.
         try {
           final existing = existingTx
               .firstWhere((transaction) => transaction.reference == newRef);
-          await _createCashTransactionForAtmWithdrawal(existing, existingTx);
+          final merged = TransactionMergeUtils.mergeParsedFields(
+              existing, Transaction.fromJson(details));
+          if (merged != null) {
+            await txRepo.saveTransaction(merged, skipAutoCategorization: true);
+            session?.replace(merged);
+            print("debug: Enriched duplicate $newRef with parsed fields");
+          }
+          if (_isAtmWithdrawal(details, messageBody)) {
+            await _createCashTransactionForAtmWithdrawal(merged ?? existing);
+          }
         } catch (e) {
-          print("debug: Error reconciling cash transfer: $e");
+          print("debug: Error reconciling duplicate transaction: $e");
         }
       }
       if (recordFailure) {
@@ -1291,67 +1484,108 @@ class SmsService {
       );
     }
 
+    // Synthetic-reference messages: reference dedup can't recognize them
+    // across imports (e.g. an old-app migration row vs the same SMS
+    // re-ingested from a backfill), so fall back to amount+balance identity.
+    if (syntheticRef &&
+        parsedAmount is num &&
+        hasExactAmountAndBalanceDuplicate(
+          bankId: parsedBankId,
+          type: (details['type'] ?? '').toString().toUpperCase(),
+          amount: parsedAmount.toDouble(),
+          currentBalance: details['currentBalance']?.toString(),
+          accountNumber: details['accountNumber']?.toString(),
+          existingTransactions: existingTx,
+        )) {
+      print(
+          "debug: Duplicate synthetic-reference transaction skipped by amount and balance");
+      return const ParseResult(
+        status: ParseStatus.duplicate,
+        reason: "Duplicate transaction by amount and balance",
+      );
+    }
+
     // 4. Update Account Balance
     // We need to match the Bank ID from the pattern, not just assume 1 (CBE)
     int bankId = parsedBankId;
-    final banks = await _bankConfigService.getBanks(
-        allowRemoteFetch: allowRemoteBankFetch);
+    final banks = session?.banks ??
+        await _bankConfigService.getBanks(
+            allowRemoteFetch: allowRemoteBankFetch);
     final currentBank = _bankById(banks, bankId);
+    Account? matchedAccount;
     if (currentBank == null) {
       print("debug: No bank config found for bank $bankId");
-    } else if (currentBank.uniformMasking == false) {
+    } else {
+      // Match against every profile's accounts (active profile first), so a
+      // message for another profile's account is filed under that profile
+      // instead of whichever profile happens to be active.
       AccountRepository accRepo = AccountRepository();
-      List<Account> accounts = await accRepo.getAccounts();
-      final account = _accountForBank(accounts, bankId);
-      if (account == null) {
-        print("debug: No matching account found for bank $bankId");
-      } else {
-        final newBalance = details['currentBalance'] != null
-            ? sanitizeAmount(details['currentBalance'])
-            : account.balance;
-        await _saveUpdatedAccountBalance(accRepo, account, newBalance);
-      }
-    } else if (details['accountNumber'] != null) {
-      AccountRepository accRepo = AccountRepository();
-      List<Account> accounts = await accRepo.getAccounts();
+      final accounts = _activeProfileFirst(
+        session?.accounts ?? await accRepo.getAllAccounts(),
+        await ProfileRepository().getActiveProfileId(),
+      );
 
-      final extractedAccount = details['accountNumber'].toString();
-      final account = currentBank.uniformMasking == true
-          ? _maskedAccountMatch(
-              accounts,
-              bankId: bankId,
-              extractedAccount: extractedAccount,
-              maskPattern: currentBank.maskPattern,
-            )
-          : null;
-
-      if (account != null) {
-        final newBalance = details['currentBalance'] != null
-            ? sanitizeAmount(details['currentBalance'])
-            : account.balance;
-        await _saveUpdatedAccountBalance(accRepo, account, newBalance);
-      } else {
-        print(
-            "No matching account found for bank $bankId and account $extractedAccount");
+      if (currentBank.uniformMasking == false) {
+        matchedAccount = _accountForBank(accounts, bankId);
+        if (matchedAccount == null) {
+          print("debug: No matching account found for bank $bankId");
+        }
+      } else if (details['accountNumber'] != null) {
+        final extractedAccount = details['accountNumber'].toString();
+        matchedAccount = currentBank.uniformMasking == true
+            ? _maskedAccountMatch(
+                accounts,
+                bankId: bankId,
+                extractedAccount: extractedAccount,
+                maskPattern: currentBank.maskPattern,
+              )
+            : null;
+        if (matchedAccount == null) {
+          print(
+              "No matching account found for bank $bankId and account $extractedAccount");
+        }
       }
+
+      if (matchedAccount != null && !dryRun) {
+        if (session != null) {
+          // Bulk: don't let processing order decide the balance — an old
+          // backfilled message processed after a newer one would overwrite
+          // it. endBulkIngest reconciles each account once, from the
+          // newest-dated transaction (same idea as the iOS migration's
+          // balance reconstruction).
+        } else if (details['currentBalance'] != null) {
+          await _saveUpdatedAccountBalance(
+              accRepo, matchedAccount, sanitizeAmount(details['currentBalance']));
+        }
+      }
+    }
+
+    // File the transaction under the profile that owns the matched account —
+    // without this it falls back to the active profile at save time.
+    if (matchedAccount?.profileId != null) {
+      details['profileId'] = matchedAccount!.profileId;
     }
 
     // 5. Save Transaction
     // Need to ensure details has all fields or handle parsing
     // Transaction.fromJson expects Strings mostly?
     Transaction newTx = Transaction.fromJson(details);
+    if (dryRun) {
+      return ParseResult(status: ParseStatus.success, transaction: newTx);
+    }
     await txRepo.saveTransaction(
       newTx,
       skipAutoCategorization: skipAutoCategorization,
     );
     final savedTx =
         await txRepo.getTransactionByReference(newTx.reference) ?? newTx;
+    session?.track(savedTx);
 
-    print("debug: New transaction saved: ${savedTx.reference}");
+    if (!bulk) print("debug: New transaction saved: ${savedTx.reference}");
 
     if (_isAtmWithdrawal(details, messageBody)) {
       try {
-        await _createCashTransactionForAtmWithdrawal(savedTx, existingTx);
+        await _createCashTransactionForAtmWithdrawal(savedTx);
       } catch (e) {
         print("debug: Error creating cash transfer: $e");
       }
@@ -1364,18 +1598,23 @@ class SmsService {
       );
     }
 
-    if (savedTx.type == 'DEBIT') {
-      try {
-        await BudgetAlertService().checkAndNotifyBudgetAlerts();
-      } catch (e) {
-        print("debug: Error checking budget alerts after SMS transaction: $e");
+    // Bulk drains (a backfill of thousands of messages) run these once at the
+    // end instead of per message — a budget scan and widget refresh per entry
+    // turns a large queue drain into minutes.
+    if (!bulk) {
+      if (savedTx.type == 'DEBIT') {
+        try {
+          await BudgetAlertService().checkAndNotifyBudgetAlerts();
+        } catch (e) {
+          print("debug: Error checking budget alerts after SMS transaction: $e");
+        }
       }
-    }
 
-    try {
-      await WidgetService.refreshWidget();
-    } catch (e) {
-      print("debug: Error refreshing widget after SMS transaction: $e");
+      try {
+        await WidgetService.refreshWidget();
+      } catch (e) {
+        print("debug: Error refreshing widget after SMS transaction: $e");
+      }
     }
 
     return ParseResult(

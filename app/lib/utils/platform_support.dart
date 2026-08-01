@@ -22,4 +22,13 @@ class PlatformSupport {
   /// (see `MessageIngestService`) instead of direct SMS reads — i.e. iOS.
   static bool get usesFileInbox =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// True where the "Verify Payments" tool is offered — Android only for now.
+  ///
+  /// The verifier forwards transaction references / receipt images through a
+  /// third-party service, so it stays off on iOS v1 to keep the App Store
+  /// privacy label at "Data Not Collected". See
+  /// `app/docs/ios-port/APP_STORE_PREFLIGHT.md`.
+  static bool get canVerifyPayments =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 }

@@ -1,22 +1,70 @@
+import 'package:flutter/foundation.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/sms_pattern.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 
+/// Inputs for one sweep, bundled so [compute] can send them to the worker
+/// isolate in a single message. Everything here is plain data.
+class _ExtractRequest {
+  final String messageBody;
+  final DateTime? messageDate;
+  final List<SmsPattern> patterns;
+  final List<Bank> banks;
+  final bool verbose;
+
+  const _ExtractRequest({
+    required this.messageBody,
+    required this.messageDate,
+    required this.patterns,
+    required this.banks,
+    required this.verbose,
+  });
+}
+
 class PatternParser {
   /// Iterates through [patterns] that match the [senderAddress].
   /// Returns a map of extracted data if a match is found, or null otherwise.
+  ///
+  /// The regex sweep is CPU-bound (hundreds of patterns, some with heavy
+  /// backtracking), so it runs on a background isolate via [compute] — the
+  /// UI isolate only pays for resolving [banks] when none are passed. On web,
+  /// compute falls back to running inline.
   static Future<Map<String, dynamic>?> extractTransactionDetails(
       String messageBody,
       String senderAddress,
       DateTime? messageDate,
       List<SmsPattern> patterns,
-      {List<Bank>? banks}) async {
-    String cleanBody = messageBody.trim();
+      {List<Bank>? banks, bool verbose = true}) async {
+    if (patterns.isEmpty) return null;
 
-    for (var pattern in patterns) {
-      print("debug: Pattern Regex: ${[pattern.bankId]} ${pattern.regex}");
+    // Resolve banks up front — the sweep itself must stay free of plugin/DB
+    // calls so it can run off the main isolate.
+    final resolvedBanks = banks ?? await BankConfigService().getBanks();
 
+    return compute(
+      _extractSync,
+      _ExtractRequest(
+        messageBody: messageBody,
+        messageDate: messageDate,
+        patterns: patterns,
+        banks: resolvedBanks,
+        verbose: verbose,
+      ),
+      debugLabel: 'PatternParser.extract',
+    );
+  }
+
+  static Map<String, dynamic>? _extractSync(_ExtractRequest request) {
+    final String cleanBody = request.messageBody.trim();
+    final DateTime? messageDate = request.messageDate;
+    // Bulk drains silence the per-match logging: thousands of messages times
+    // a dozen lines each is minutes of console I/O under an attached debugger.
+    void log(String message) {
+      if (request.verbose) print(message);
+    }
+
+    for (var pattern in request.patterns) {
       // 2. Try to match regex
       try {
         RegExp regExp = RegExp(pattern.regex,
@@ -24,8 +72,8 @@ class PatternParser {
         RegExpMatch? match = regExp.firstMatch(cleanBody);
 
         if (match != null) {
-          print("debug: ✓ Pattern Matched: ${pattern.description}");
-          print("debug: Available named groups: ${match.groupNames.toList()}");
+          log("debug: ✓ Pattern Matched: ${pattern.description}");
+          log("debug: Available named groups: ${match.groupNames.toList()}");
 
           final Map<String, dynamic> extracted = {};
 
@@ -38,26 +86,24 @@ class PatternParser {
           extracted['patternDescription'] = pattern.description;
 
           if (match.groupNames.contains('amount')) {
-            print("debug: Extracted amount: ${match.namedGroup('amount')}");
+            log("debug: Extracted amount: ${match.namedGroup('amount')}");
             final cleanedAmount = _cleanNumber(match.namedGroup('amount'));
             extracted['amount'] = double.tryParse(cleanedAmount ?? "");
-            print("debug: Extracted amount: ${extracted['amount']}");
+            log("debug: Extracted amount: ${extracted['amount']}");
           }
           if (match.groupNames.contains('balance')) {
             extracted['currentBalance'] =
                 _cleanNumber(match.namedGroup('balance'));
-            print("debug: Extracted balance: ${extracted['currentBalance']}");
+            log("debug: Extracted balance: ${extracted['currentBalance']}");
           }
           if (match.groupNames.contains('account')) {
-            print("debug: ✓ after account - entering account extraction block");
+            log("debug: ✓ after account - entering account extraction block");
             String? raw = match.namedGroup('account');
-            print("debug: Raw account value: '$raw'");
+            log("debug: Raw account value: '$raw'");
 
             if (raw != null) {
-              final availableBanks =
-                  banks ?? await BankConfigService().getBanks();
               final bank =
-                  availableBanks.firstWhere((b) => b.id == pattern.bankId);
+                  request.banks.firstWhere((b) => b.id == pattern.bankId);
 
               // Use bank configuration for account extraction
               if (bank.uniformMasking == true && bank.maskPattern != null) {
@@ -65,29 +111,29 @@ class PatternParser {
                 if (raw.length >= bank.maskPattern!) {
                   extracted['accountNumber'] =
                       raw.substring(raw.length - bank.maskPattern!);
-                  print(
+                  log(
                       "Cleaned account (masked): ${extracted['accountNumber']}");
                 } else {
                   extracted['accountNumber'] = raw;
-                  print(
+                  log(
                       "Cleaned account (fallback): ${extracted['accountNumber']}");
                 }
               } else {
                 // No masking or uniformMasking is false - use full account number
                 extracted['accountNumber'] = raw;
-                print(
+                log(
                     "Cleaned account (direct): ${extracted['accountNumber']}");
               }
             } else {
-              print("debug: ✗ Raw account is null!");
+              log("debug: ✗ Raw account is null!");
             }
           } else {
-            print("debug: ✗ 'account' group NOT found in named groups");
+            log("debug: ✗ 'account' group NOT found in named groups");
           }
 
           if (match.groupNames.contains('reference')) {
             extracted['reference'] = match.namedGroup('reference');
-            print("debug: Extracted reference: ${extracted['reference']}");
+            log("debug: Extracted reference: ${extracted['reference']}");
           }
           if (match.groupNames.contains('type')) {
             final rawType = match.namedGroup('type');
@@ -154,16 +200,20 @@ class PatternParser {
             extracted['transactionLink'] = transactionLink;
           }
 
-          print("debug: account ${extracted["accountNumber"]}");
-          print("debug: amount ${extracted["amount"]}");
-          print("debug: balance ${extracted["currentBalance"]}");
-          print("debug: reference ${extracted["reference"]}");
-          print("debug: receiver ${extracted["receiver"]}");
+          log("debug: account ${extracted["accountNumber"]}");
+          log("debug: amount ${extracted["amount"]}");
+          log("debug: balance ${extracted["currentBalance"]}");
+          log("debug: reference ${extracted["reference"]}");
+          log("debug: receiver ${extracted["receiver"]}");
 
           if (pattern.refRequired == false && extracted["reference"] == null) {
             final fallbackDate = messageDate ?? DateTime.now();
             extracted["reference"] =
                 "${pattern.bankId}_${fallbackDate.toIso8601String()}";
+            // Reference-based dedup can't recognize this transaction across
+            // imports (each parse generates a fresh key), so ingestion falls
+            // back to amount+balance dedup for it.
+            extracted["syntheticReference"] = true;
           }
 
           final requiresReference = pattern.refRequired == true;
@@ -171,40 +221,38 @@ class PatternParser {
               match.groupNames.contains('account');
 
           if (extracted['amount'] == null) {
-            print(
+            log(
                 "✗ Pattern '${pattern.description}' matched but amount missing. Skipping.");
             continue;
           }
           if (match.groupNames.contains('balance') &&
               extracted['currentBalance'] == null) {
-            print(
+            log(
                 "✗ Pattern '${pattern.description}' matched but balance missing. Skipping.");
             continue;
           }
           if (requiresReference && extracted['reference'] == null) {
-            print(
+            log(
                 "✗ Pattern '${pattern.description}' matched but reference missing. Skipping.");
             continue;
           }
           if (requiresAccount && extracted['accountNumber'] == null) {
-            print(
+            log(
                 "✗ Pattern '${pattern.description}' matched but account missing. Skipping.");
             continue;
           }
 
-          print(
+          log(
               "dubg: ✓ All required fields present. Returning extracted data.");
           return extracted;
-        } else {
-          print("debug: ✗ No match for pattern: ${pattern.description}");
         }
       } catch (e) {
-        print("debug: ✗ Error checking pattern '${pattern.description}': $e");
+        log("debug: ✗ Error checking pattern '${pattern.description}': $e");
         // Continue to next pattern
       }
     }
 
-    print("debug: \n✗ No matching pattern found for message.");
+    log("debug: \n✗ No matching pattern found for message.");
     return null; // No match found
   }
 

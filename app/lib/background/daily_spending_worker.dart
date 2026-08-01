@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart' show TimeOfDay;
 import 'package:workmanager/workmanager.dart';
 import 'package:totals/services/notification_service.dart';
+import 'package:totals/services/spending_summary_ios_scheduler.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/shared_expense_background_notification_service.dart';
 import 'package:totals/services/data_sync/sync_service.dart';
@@ -93,13 +94,18 @@ void callbackDispatcher() {
       if (dailyEnabled) {
         final lastDailySent = await settings.getDailySummaryLastSentAt();
         if (lastDailySent == null || !_isSameDay(lastDailySent, now)) {
-          final totalSpent = await spendingProvider.getTodaySpending();
-          final shown =
-              await NotificationService.instance.showDailySpendingNotification(
-            amount: totalSpent,
-          );
-          if (shown) {
+          if (await SpendingSummaryIosScheduler.wasArmedForToday()) {
+            // iOS pre-armed an exact notification for today; just mark it.
             await settings.setDailySummaryLastSentAt(now);
+          } else {
+            final totalSpent = await spendingProvider.getTodaySpending();
+            final shown = await NotificationService.instance
+                .showDailySpendingNotification(
+              amount: totalSpent,
+            );
+            if (shown) {
+              await settings.setDailySummaryLastSentAt(now);
+            }
           }
         }
       }
@@ -111,15 +117,19 @@ void callbackDispatcher() {
         final alreadySentThisWeek = lastWeeklySent != null &&
             !lastWeeklySent.isBefore(currentWeekStart);
         if (!alreadySentThisWeek) {
-          final totalSpent = await spendingProvider.getCurrentWeekSpending(
-            now: now,
-          );
-          final shown =
-              await NotificationService.instance.showWeeklySpendingNotification(
-            amount: totalSpent,
-          );
-          if (shown) {
+          if (await SpendingSummaryIosScheduler.wasArmedForThisWeek()) {
             await settings.setWeeklySummaryLastSentAt(now);
+          } else {
+            final totalSpent = await spendingProvider.getCurrentWeekSpending(
+              now: now,
+            );
+            final shown = await NotificationService.instance
+                .showWeeklySpendingNotification(
+              amount: totalSpent,
+            );
+            if (shown) {
+              await settings.setWeeklySummaryLastSentAt(now);
+            }
           }
         }
       }
@@ -131,15 +141,19 @@ void callbackDispatcher() {
         final alreadySentThisMonth = lastMonthlySent != null &&
             !lastMonthlySent.isBefore(currentMonthStart);
         if (!alreadySentThisMonth) {
-          final totalSpent = await spendingProvider.getCurrentMonthSpending(
-            now: now,
-          );
-          final shown = await NotificationService.instance
-              .showMonthlySpendingNotification(
-            amount: totalSpent,
-          );
-          if (shown) {
+          if (await SpendingSummaryIosScheduler.wasArmedForThisMonth()) {
             await settings.setMonthlySummaryLastSentAt(now);
+          } else {
+            final totalSpent = await spendingProvider.getCurrentMonthSpending(
+              now: now,
+            );
+            final shown = await NotificationService.instance
+                .showMonthlySpendingNotification(
+              amount: totalSpent,
+            );
+            if (shown) {
+              await settings.setMonthlySummaryLastSentAt(now);
+            }
           }
         }
       }

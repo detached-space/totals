@@ -14,6 +14,7 @@ import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showClearDatabaseDialog(BuildContext context) async {
   bool clearFinancialData = false;
+  bool clearTransactionsOnly = false;
   bool clearBudgets = false;
   bool clearFailedParses = false;
   bool clearOrganization = false;
@@ -29,6 +30,7 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
       return StatefulBuilder(
         builder: (context, setState) {
           final hasSelection = clearFinancialData ||
+              clearTransactionsOnly ||
               clearBudgets ||
               clearFailedParses ||
               clearOrganization;
@@ -120,6 +122,20 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                   const SizedBox(height: 12),
                   _buildClearOption(
                     context: context,
+                    icon: Icons.history,
+                    title: 'Transactions only',
+                    subtitle:
+                        'Transaction history, keeping your bank accounts — for re-importing messages',
+                    value: clearTransactionsOnly,
+                    onChanged: (value) {
+                      setState(() {
+                        clearTransactionsOnly = value ?? false;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _buildClearOption(
+                    context: context,
                     icon: Icons.pie_chart_outline,
                     title: 'Budgets',
                     subtitle: 'All budget rules and limits',
@@ -203,6 +219,8 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                                     if (clearFinancialData) {
                                       await TransactionRepository().clearAll();
                                       await AccountRepository().clearAll();
+                                    } else if (clearTransactionsOnly) {
+                                      await TransactionRepository().clearAll();
                                     }
                                     if (clearBudgets) {
                                       await BudgetRepository().clearAll();
@@ -234,6 +252,7 @@ Future<void> showClearDatabaseDialog(BuildContext context) async {
                                         listen: false,
                                       ).loadData();
                                       if (clearFinancialData ||
+                                          clearTransactionsOnly ||
                                           clearBudgets ||
                                           clearOrganization) {
                                         try {

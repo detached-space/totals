@@ -78,6 +78,25 @@ class AccountRepository {
     }).toList();
   }
 
+  /// All accounts across every profile, unfiltered. Used by SMS ingestion to
+  /// match a message to its owning account regardless of the active profile.
+  Future<List<Account>> getAllAccounts() async {
+    final db = await DatabaseHelper.instance.database;
+    final List<Map<String, dynamic>> maps = await db.query('accounts');
+
+    return maps.map((map) {
+      return Account.fromJson({
+        'accountNumber': map['accountNumber'],
+        'bank': map['bank'],
+        'balance': map['balance'],
+        'accountHolderName': map['accountHolderName'],
+        'settledBalance': map['settledBalance'],
+        'pendingCredit': map['pendingCredit'],
+        'profileId': map['profileId'],
+      });
+    }).toList();
+  }
+
   Future<void> saveAccount(Account account) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();

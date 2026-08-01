@@ -162,7 +162,12 @@ class _SseEvent {
 }
 
 class TotalsEngineClient {
-  static const _defaultBaseUrl = 'https://engine-staging.totals.detached.space';
+  // Release builds must never silently fall back to staging: if the bundled
+  // .env fails to load, the compiled default is prod. Debug/profile builds
+  // keep the staging default. --dart-define / .env still override this.
+  static const _defaultBaseUrl = kReleaseMode
+      ? 'https://engine.totals.detached.space'
+      : 'https://engine-staging.totals.detached.space';
   static const _requestTimeout = Duration(seconds: 12);
   // SSE connect headroom — much longer than a regular request because some
   // proxies/engines flush response headers lazily. Once headers arrive, the
@@ -1045,7 +1050,7 @@ class TotalsEngineClient {
         return fromEnv;
       }
     }
-    _engineLog('baseUrl using default staging URL');
+    _engineLog('baseUrl using compiled default $_defaultBaseUrl');
     return _defaultBaseUrl;
   }
 }

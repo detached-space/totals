@@ -49,7 +49,18 @@ class SmsConfigService {
     }
   }
 
+  /// In-memory copy of the stored patterns. Ingestion calls getPatterns at
+  /// least twice per message (bank detection + parse); without this each call
+  /// re-reads and re-maps the whole table. Refreshed by [savePatterns], the
+  /// only writer.
+  static List<SmsPattern>? _dbPatternsCache;
+
   Future<List<SmsPattern>> getPatterns({bool allowRemoteFetch = true}) async {
+    final cached = _dbPatternsCache;
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+
     final db = await DatabaseHelper.instance.database;
 
     // First, try to load from database
@@ -70,6 +81,7 @@ class SmsConfigService {
           });
         }).toList();
         print("debug: Loaded ${patterns.length} patterns from database");
+        _dbPatternsCache = patterns;
         return patterns;
       } catch (e) {
         print("debug: Error parsing stored patterns: $e");
@@ -201,6 +213,7 @@ class SmsConfigService {
       });
     }
     await batch.commit(noResult: true);
+    _dbPatternsCache = List.unmodifiable(patterns);
     print("debug: Saved ${patterns.length} patterns to database");
   }
 

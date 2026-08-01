@@ -44,6 +44,7 @@ import 'package:totals/services/background_sync_signal_service.dart';
 import 'package:totals/services/connectivity_service.dart';
 import 'package:totals/services/data_sync/sync_service.dart';
 import 'package:totals/services/message_ingest_service.dart';
+import 'package:totals/services/spending_summary_ios_scheduler.dart';
 import 'package:totals/utils/platform_support.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
@@ -218,6 +219,7 @@ class RedesignShellState extends State<RedesignShell>
       if (PlatformSupport.usesFileInbox) {
         unawaited(MessageIngestService.instance.drainInbox());
       }
+      unawaited(SpendingSummaryIosScheduler.instance.sync());
       unawaited(BankDetectionStartupService.runOnAppOpen());
       if (mounted) _authenticateIfAvailable();
     });
@@ -265,6 +267,7 @@ class RedesignShellState extends State<RedesignShell>
     if (_isAuthenticated) {
       await Provider.of<TransactionProvider>(context, listen: false).loadData();
     }
+    unawaited(SpendingSummaryIosScheduler.instance.sync());
   }
 
   bool _shouldBypassSecurity(PlatformException error) {
@@ -1074,13 +1077,22 @@ class RedesignShellState extends State<RedesignShell>
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Text(
-                                  context.l10nText('Importing messages…'),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textPrimary(context),
-                                  ),
+                                ValueListenableBuilder<(int, int)?>(
+                                  valueListenable:
+                                      MessageIngestService.instance.progress,
+                                  builder: (context, progress, _) {
+                                    final label = progress == null
+                                        ? context.l10nText('Importing messages…')
+                                        : '${context.l10nText('Importing messages…')} ${progress.$1}/${progress.$2}';
+                                    return Text(
+                                      label,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textPrimary(context),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ],
                             ),

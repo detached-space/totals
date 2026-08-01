@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/utils/platform_support.dart';
 
 enum ProfileDoubleTapAction {
   lock,
@@ -31,10 +32,22 @@ class AdvancedSettingsService {
     ToolsFabItem.webDashboard,
   };
 
+  /// FAB items available on this platform, in canonical order. Verify
+  /// Payments is gated by [PlatformSupport.canVerifyPayments] (off on iOS —
+  /// it sends data through a third-party service; keeps the privacy label
+  /// clean).
+  static List<ToolsFabItem> get supportedToolsFabItems => [
+        for (final item in ToolsFabItem.values)
+          if (item != ToolsFabItem.verifyPayments ||
+              PlatformSupport.canVerifyPayments)
+            item,
+      ];
+
   final ValueNotifier<ProfileDoubleTapAction> profileDoubleTapAction =
       ValueNotifier<ProfileDoubleTapAction>(ProfileDoubleTapAction.lock);
   final ValueNotifier<Set<ToolsFabItem>> toolsFabItems =
-      ValueNotifier<Set<ToolsFabItem>>(defaultToolsFabItems);
+      ValueNotifier<Set<ToolsFabItem>>(
+          _normalizeToolsFabItems(defaultToolsFabItems));
 
   bool _loaded = false;
 
@@ -88,19 +101,25 @@ class AdvancedSettingsService {
   }
 
   static Set<ToolsFabItem> _toolsFabItemsFromStorage(List<String>? raw) {
-    if (raw == null || raw.isEmpty) return defaultToolsFabItems;
+    if (raw == null || raw.isEmpty) {
+      return _normalizeToolsFabItems(defaultToolsFabItems);
+    }
     return _normalizeToolsFabItems(
       raw.map(_toolsFabItemFromStorage).whereType<ToolsFabItem>().toSet(),
     );
   }
 
   static Set<ToolsFabItem> _normalizeToolsFabItems(Set<ToolsFabItem> items) {
-    if (items.isEmpty) return defaultToolsFabItems;
-    final ordered = <ToolsFabItem>{};
-    for (final item in ToolsFabItem.values) {
-      if (items.contains(item)) ordered.add(item);
+    final supported = supportedToolsFabItems;
+    final source = items.isEmpty ? defaultToolsFabItems : items;
+    final ordered = <ToolsFabItem>{
+      for (final item in supported)
+        if (source.contains(item)) item,
+    };
+    if (ordered.isEmpty) {
+      ordered.addAll(supported.where(defaultToolsFabItems.contains));
     }
-    return Set.unmodifiable(ordered.isEmpty ? defaultToolsFabItems : ordered);
+    return Set.unmodifiable(ordered);
   }
 
   static ToolsFabItem? _toolsFabItemFromStorage(String raw) {

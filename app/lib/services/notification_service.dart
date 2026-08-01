@@ -922,6 +922,52 @@ class NotificationService {
     );
   }
 
+  /// Pre-schedules a spending summary as an exact local notification. Used on
+  /// iOS, where BGTasks run opportunistically — waiting for the worker would
+  /// miss the user's chosen time. Same-id calls replace the pending request.
+  Future<void> scheduleSpendingSummaryAt({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime when,
+  }) async {
+    try {
+      await ensureInitialized();
+      final scheduled = tz.TZDateTime(
+          tz.local, when.year, when.month, when.day, when.hour, when.minute);
+      if (!scheduled.isAfter(tz.TZDateTime.now(tz.local))) return;
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        scheduled,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _spendingSummaryChannelId,
+            'Spending summaries',
+            channelDescription: 'Daily, weekly, and monthly spending summaries',
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to schedule spending summary: $e');
+      }
+    }
+  }
+
+  Future<void> cancelScheduledSpendingSummary(int id) async {
+    try {
+      await _plugin.cancel(id);
+    } catch (_) {/* best-effort */}
+  }
+
   /// Posts a single, self-replacing notification summarizing a Data Sync run.
   /// A failure raises importance; a clean success updates quietly.
   Future<void> showDataSyncResult({

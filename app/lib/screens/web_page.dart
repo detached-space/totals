@@ -295,6 +295,23 @@ class _WebPageState extends State<WebPage> {
                     ),
                   ),
                 ),
+                if (isRunning) ...[
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Text(
+                      context.l10nText(
+                        'Anyone on this Wi-Fi network can view your dashboard while the link is active.',
+                      ),
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: isDark
+                            ? const Color(0xFFFFB74D)
+                            : const Color(0xFFB26A00),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 32),
 
                 // Start/Stop Button

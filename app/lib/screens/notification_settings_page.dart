@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
@@ -8,6 +9,7 @@ import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/spending_summary_ios_scheduler.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
@@ -132,6 +134,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     await NotificationSettingsService.instance.setDailySummaryEnabled(value);
     await NotificationScheduler.syncSpendingSummarySchedule();
     await _load();
+    unawaited(SpendingSummaryIosScheduler.instance.sync());
   }
 
   Future<void> _setWeeklyEnabled(bool value) async {
@@ -139,6 +142,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     await NotificationSettingsService.instance.setWeeklySummaryEnabled(value);
     await NotificationScheduler.syncSpendingSummarySchedule();
     await _load();
+    unawaited(SpendingSummaryIosScheduler.instance.sync());
   }
 
   Future<void> _setMonthlyEnabled(bool value) async {
@@ -146,6 +150,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     await NotificationSettingsService.instance.setMonthlySummaryEnabled(value);
     await NotificationScheduler.syncSpendingSummarySchedule();
     await _load();
+    unawaited(SpendingSummaryIosScheduler.instance.sync());
   }
 
   Future<void> _pickDailyTime() async {
@@ -156,6 +161,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     if (picked == null) return;
     setState(() => _dailyTime = picked);
     await NotificationSettingsService.instance.setDailySummaryTime(picked);
+    unawaited(SpendingSummaryIosScheduler.instance.sync());
     await NotificationScheduler.syncSpendingSummarySchedule();
     await _load();
   }

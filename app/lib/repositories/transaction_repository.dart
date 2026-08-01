@@ -37,6 +37,81 @@ class TransactionRepository {
     return maps.map<Transaction>(_transactionFromMap).toList();
   }
 
+  /// All transactions across every profile, unfiltered. Loaded once per bulk
+  /// ingest session so duplicate checks run against memory instead of issuing
+  /// a query per message.
+  Future<List<Transaction>> getAllTransactions() async {
+    final db = await DatabaseHelper.instance.database;
+    final List<Map<String, dynamic>> maps =
+        await db.query('transactions', orderBy: 'time DESC, id DESC');
+
+    return maps.map<Transaction>(_transactionFromMap).toList();
+  }
+
+  /// Only the transactions (across every profile) that could collide with an
+  /// incoming message: same reference, same SMS source ids, or — for banks
+  /// deduped by amount+balance — the same bank and amount. Keeps per-message
+  /// duplicate checks to a few indexed rows instead of loading the whole table.
+  Future<List<Transaction>> getDuplicateCandidates({
+    String? reference,
+    String? sourceMessageId,
+    String? sourceFingerprint,
+    int? bankId,
+    double? amount,
+  }) async {
+    final clauses = <String>[];
+    final args = <dynamic>[];
+    if (reference != null && reference.isNotEmpty) {
+      clauses.add('reference = ?');
+      args.add(reference);
+    }
+    if (sourceFingerprint != null && sourceFingerprint.isNotEmpty) {
+      clauses.add('sourceFingerprint = ?');
+      args.add(sourceFingerprint);
+    }
+    if (sourceMessageId != null && sourceMessageId.isNotEmpty) {
+      clauses.add('sourceMessageId = ?');
+      args.add(sourceMessageId);
+    }
+    if (bankId != null && amount != null) {
+      // Amount tolerance mirrors hasExactAmountAndBalanceDuplicate's 0.0001.
+      clauses.add('(bankId = ? AND ABS(amount - ?) < 0.001)');
+      args.addAll([bankId, amount]);
+    }
+    if (clauses.isEmpty) return const [];
+
+    final db = await DatabaseHelper.instance.database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'transactions',
+      where: clauses.join(' OR '),
+      whereArgs: args,
+    );
+    return maps.map<Transaction>(_transactionFromMap).toList();
+  }
+
+  /// Transactions for one bank, optionally scoped to a profile. Used by the
+  /// ATM cash-wallet flow to compute the wallet balance without loading the
+  /// whole table.
+  Future<List<Transaction>> getTransactionsForBank(
+    int bankId, {
+    int? profileId,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final whereParts = <String>['bankId = ?'];
+    final whereArgs = <dynamic>[bankId];
+    if (profileId != null) {
+      whereParts.add('profileId = ?');
+      whereArgs.add(profileId);
+    }
+    final List<Map<String, dynamic>> maps = await db.query(
+      'transactions',
+      where: whereParts.join(' AND '),
+      whereArgs: whereArgs,
+      orderBy: 'time DESC, id DESC',
+    );
+    return maps.map<Transaction>(_transactionFromMap).toList();
+  }
+
   Future<Transaction?> getTransactionByReference(String reference) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();

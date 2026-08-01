@@ -116,7 +116,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
       // iOS has no SMS to sync; refresh instead ingests any bank messages the
       // Shortcuts automation dropped into the Totals folder.
       if (PlatformSupport.usesFileInbox) {
-        final added = await MessageIngestService.instance.drainInbox();
+        final added = await MessageIngestService.instance
+            .drainInbox(retryQuarantined: true);
         if (!mounted) return;
         if (added > 0) await provider.loadData();
         final message = added > 0
