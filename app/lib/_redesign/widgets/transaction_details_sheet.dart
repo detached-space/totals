@@ -1397,6 +1397,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         _DetailRow(
                           label: 'Account',
                           value: _currentOwnerLabel(),
+                          marquee: true,
                           onTap: () {
                             unawaited(_openAccountAssignmentSheet());
                           },
@@ -2135,7 +2136,7 @@ class _DetailRow extends StatelessWidget {
       fontWeight: FontWeight.w600,
     );
 
-    return Container(
+    final Widget row = Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
         border: Border(
@@ -2171,6 +2172,13 @@ class _DetailRow extends StatelessWidget {
             ),
         ],
       ),
+    );
+
+    if (onTap == null) return row;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: row,
     );
   }
 }
