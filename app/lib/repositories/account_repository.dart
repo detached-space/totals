@@ -74,6 +74,10 @@ class AccountRepository {
         'settledBalance': map['settledBalance'],
         'pendingCredit': map['pendingCredit'],
         'profileId': map['profileId'],
+        'smsSubscriptionId': map['smsSubscriptionId'],
+        'includeInTotals': map['includeInTotals'],
+        'isDormant': map['isDormant'],
+        'isDefault': map['isDefault'],
       });
     }).toList();
   }
@@ -93,6 +97,10 @@ class AccountRepository {
         'settledBalance': map['settledBalance'],
         'pendingCredit': map['pendingCredit'],
         'profileId': map['profileId'],
+        'smsSubscriptionId': map['smsSubscriptionId'],
+        'includeInTotals': map['includeInTotals'],
+        'isDormant': map['isDormant'],
+        'isDefault': map['isDefault'],
       });
     }).toList();
   }
@@ -114,6 +122,10 @@ class AccountRepository {
         'settledBalance': account.settledBalance,
         'pendingCredit': account.pendingCredit,
         'profileId': profileId,
+        'smsSubscriptionId': account.smsSubscriptionId,
+        'includeInTotals': account.includeInTotals ? 1 : 0,
+        'isDormant': account.isDormant ? 1 : 0,
+        'isDefault': account.isDefault ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );

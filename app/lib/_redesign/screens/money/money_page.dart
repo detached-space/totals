@@ -3600,38 +3600,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     TransactionProvider provider,
     AccountSummary account,
   ) {
-    final bank = _resolveBankInfo(account.bankId);
-    return provider.allTransactions.where((transaction) {
-      if (transaction.bankId != account.bankId) return false;
-
-      if (account.bankId == CashConstants.bankId) {
-        return transaction.accountNumber == account.accountNumber;
-      }
-
-      if (bank?.uniformMasking == true && bank?.maskPattern != null) {
-        final maskPattern = bank!.maskPattern!;
-        final transactionAccount = transaction.accountNumber?.trim();
-        if (transactionAccount == null || transactionAccount.isEmpty) {
-          return false;
-        }
-        if (account.accountNumber.length < maskPattern ||
-            transactionAccount.length < maskPattern) {
-          return false;
-        }
-        return account.accountNumber.substring(
-              account.accountNumber.length - maskPattern,
-            ) ==
-            transactionAccount.substring(
-              transactionAccount.length - maskPattern,
-            );
-      }
-
-      if (bank?.uniformMasking == false) {
-        return true;
-      }
-
-      return transaction.accountNumber == account.accountNumber;
-    }).toList(growable: false);
+    // Single source of truth: the provider's ownership-partitioned map, so the
+    // account detail list always agrees with the account card's summary.
+    return provider.transactionsForAccount(
+      account.bankId,
+      account.accountNumber,
+    );
   }
 
   Future<void> _openAccountReparseSheet(

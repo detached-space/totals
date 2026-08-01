@@ -195,9 +195,15 @@ class TransactionProvider with ChangeNotifier {
   List<BankSummary> _bankSummaries = [];
   List<AccountSummary> _accountSummaries = [];
   // Transactions whose owning account could not be resolved, grouped by bank.
-  // On multi-account banks these need manual assignment; on single-account
-  // banks they still show under that account (see _calculateSummaries).
+  // These are routed to the bank's default account for display (see
+  // _calculateSummaries) and can be reassigned once the management UI lands.
   Map<int, List<Transaction>> _unmatchedTransactionsByBank = {};
+  // Ownership-partitioned transactions keyed by "bankId:accountNumber" — the
+  // single source of truth shared by summaries and the account detail list.
+  Map<String, List<Transaction>> _transactionsByAccount = {};
+
+  static String _accountPartitionKey(int bankId, String accountNumber) =>
+      '$bankId:${accountNumber.trim()}';
 
   bool _isLoading = false;
   String _searchKey = "";
@@ -244,6 +250,15 @@ class TransactionProvider with ChangeNotifier {
   List<AccountSummary> get accountSummaries => _accountSummaries;
   Map<int, List<Transaction>> get unmatchedTransactionsByBank =>
       _unmatchedTransactionsByBank;
+
+  /// Transactions owned by a specific account (ownership-partitioned). Shared
+  /// by the money page summary and the account detail list.
+  List<Transaction> transactionsForAccount(int bankId, String accountNumber) =>
+      _transactionsByAccount[_accountPartitionKey(bankId, accountNumber)] ??
+      const <Transaction>[];
+
+  List<Transaction> unmatchedTransactionsForBank(int bankId) =>
+      _unmatchedTransactionsByBank[bankId] ?? const <Transaction>[];
   DateTime get selectedDate => _selectedDate;
 
   bool isSharedExpenseTransaction(Transaction transaction) {
@@ -746,16 +761,31 @@ class TransactionProvider with ChangeNotifier {
         entry.key: List<Transaction>.unmodifiable(entry.value),
     };
 
+    final transactionsByAccount = <String, List<Transaction>>{};
+
     // Calculate Account Summaries
     _accountSummaries = _accounts.map((account) {
       final bank = banksById[account.bank];
       final bankAccounts = groupedAccounts[account.bank] ?? const <Account>[];
-      // A bank with a single registered account keeps the pre-multi-account
-      // behavior: unmatched transactions still show under that sole account.
-      // iOS can't batch-reparse the SMS inbox to stamp ownership the way the
-      // Android app does, so this fallback avoids hiding legacy transactions.
-      final isSingleAccountBank =
-          account.bank != CashConstants.bankId && bankAccounts.length == 1;
+      // Unmatched transactions (no resolvable owner) are displayed under the
+      // bank's default account so nothing looks lost. iOS can't batch-reparse
+      // the SMS inbox to stamp ownership the way Android does, so this keeps
+      // legacy transactions visible until the user reassigns them. If a bank
+      // somehow has no default flagged, fall back to its first account so the
+      // transactions are never orphaned.
+      Account? catchAllAccount;
+      for (final a in bankAccounts) {
+        if (a.isDefault) {
+          catchAllAccount = a;
+          break;
+        }
+      }
+      catchAllAccount ??=
+          bankAccounts.isNotEmpty ? bankAccounts.first : null;
+      final isCatchAllAccount = account.bank != CashConstants.bankId &&
+          catchAllAccount != null &&
+          catchAllAccount.accountNumber == account.accountNumber &&
+          catchAllAccount.bank == account.bank;
       var accountTransactions = validTransactions.where((t) {
         if (t.bankId != account.bank) return false;
         if (account.bank == CashConstants.bankId) return true;
@@ -768,8 +798,12 @@ class TransactionProvider with ChangeNotifier {
             account.accountNumber,
           );
         }
-        return isSingleAccountBank;
+        return isCatchAllAccount;
       }).toList();
+      transactionsByAccount[_accountPartitionKey(
+        account.bank,
+        account.accountNumber,
+      )] = List<Transaction>.unmodifiable(accountTransactions);
 
       debugPrint(
         "debug: Account Transactions: ${accountTransactions.length}",
@@ -822,6 +856,7 @@ class TransactionProvider with ChangeNotifier {
         isDefault: account.isDefault,
       );
     }).toList();
+    _transactionsByAccount = transactionsByAccount;
     _accountSummaries.sort(_compareAccountSummaries);
 
     // Calculate Bank Summaries
