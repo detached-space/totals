@@ -3257,7 +3257,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   syncStatus: syncStatus,
                   syncProgress: syncProgress,
                   onOpenTransactions: () =>
-                      _openBankTransactionsPage(account.bankId),
+                      _openAccountTransactionsPage(account),
                   isReparsing: isReparsing,
                   onReparse: isCash
                       ? null
@@ -3577,10 +3577,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
-  void _openBankTransactionsPage(int bankId) {
+  void _openAccountTransactionsPage(AccountSummary account) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _BankTransactionsPage(bankId: bankId),
+        builder: (_) => _BankTransactionsPage(
+          bankId: account.bankId,
+          account: account,
+        ),
       ),
     );
   }
@@ -11275,8 +11278,14 @@ class _LedgerFlatItem {
 class _BankTransactionsPage extends StatefulWidget {
   final int bankId;
 
+  /// When set, the page is scoped to a single account and lists only that
+  /// account's owned transactions (ownership-partitioned by the provider),
+  /// instead of every transaction for the bank.
+  final AccountSummary? account;
+
   const _BankTransactionsPage({
     required this.bankId,
+    this.account,
   });
 
   @override
@@ -11325,6 +11334,15 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   }
 
   List<Transaction> _bankTransactions(TransactionProvider provider) {
+    final account = widget.account;
+    if (account != null) {
+      // Account-scoped: use the same ownership partition the account card's
+      // summary count is derived from, so the list and the count agree.
+      return provider.transactionsForAccount(
+        account.bankId,
+        account.accountNumber,
+      );
+    }
     return provider.allTransactions
         .where((transaction) => transaction.bankId == widget.bankId)
         .toList(growable: false);
