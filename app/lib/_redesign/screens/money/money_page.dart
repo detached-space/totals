@@ -3721,13 +3721,6 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     return '${account.bankId}:${account.accountNumber}';
   }
 
-  bank_model.Bank? _resolveBankInfo(int bankId) {
-    for (final bank in _assetBanks) {
-      if (bank.id == bankId) return bank;
-    }
-    return null;
-  }
-
   List<Transaction> _transactionsForAccount(
     TransactionProvider provider,
     AccountSummary account,
