@@ -22,6 +22,7 @@ import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -355,22 +356,20 @@ class TransactionProvider with ChangeNotifier {
   }
 
   int _compareAccountSummaries(AccountSummary a, AccountSummary b) {
+    // Cash wallet stays pinned first; everything else uses the shared
+    // bank -> holder -> number ordering so all account lists agree (F1.6).
     final cashComparison = _compareCashFirst(a.bankId, b.bankId);
     if (cashComparison != 0) return cashComparison;
 
-    final holderComparison = _normalizedSortText(
-      a.accountHolderName,
-    ).compareTo(_normalizedSortText(b.accountHolderName));
-    if (holderComparison != 0) return holderComparison;
-
-    final bankComparison = _normalizedSortText(
-      getBankName(a.bankId),
-    ).compareTo(_normalizedSortText(getBankName(b.bankId)));
-    if (bankComparison != 0) return bankComparison;
-
-    return _normalizedSortText(
-      a.accountNumber,
-    ).compareTo(_normalizedSortText(b.accountNumber));
+    return compareAccountDisplayFields(
+      leftBankId: a.bankId,
+      rightBankId: b.bankId,
+      leftHolderName: a.accountHolderName,
+      rightHolderName: b.accountHolderName,
+      leftAccountNumber: a.accountNumber,
+      rightAccountNumber: b.accountNumber,
+      bankNameForId: getBankShortName,
+    );
   }
 
   Category? getCategoryById(int? id) {
