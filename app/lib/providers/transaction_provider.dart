@@ -893,14 +893,20 @@ class TransactionProvider with ChangeNotifier {
       double pendingCredit =
           accounts.fold(0.0, (sum, a) => sum + (a.pendingCredit ?? 0.0));
       final isCashBank = bankId == CashConstants.bankId;
-      final hasSingleNonCashAccount = !isCashBank && accounts.length == 1;
+      // Only accounts the user counts (not dormant, not excluded) contribute
+      // to the bank's balance total.
+      final includedAccounts = accounts
+          .where((a) => a.includeInTotals && !a.isDormant)
+          .toList();
+      final hasSingleIncludedAccount =
+          !isCashBank && includedAccounts.length == 1;
       final totalBalance = isCashBank
           ? accounts.fold(0.0, (sum, a) => sum + a.balance) + cashBalance
-          : hasSingleNonCashAccount
+          : hasSingleIncludedAccount
               ? resolvedAccountBalances[
-                      accountBalanceResolverKey(accounts.first)] ??
-                  accounts.first.balance
-              : accounts.fold(0.0, (sum, a) => sum + a.balance);
+                      accountBalanceResolverKey(includedAccounts.first)] ??
+                  includedAccounts.first.balance
+              : includedAccounts.fold(0.0, (sum, a) => sum + a.balance);
 
       return BankSummary(
         bankId: bankId,
@@ -925,8 +931,12 @@ class TransactionProvider with ChangeNotifier {
         0.0,
         (sum, b) =>
             b.bankId == CashConstants.bankId ? sum : sum + b.totalDebit);
-    double grandTotalBalance =
-        _bankSummaries.fold(0.0, (sum, b) => sum + b.totalBalance);
+    // Cash wallet is excluded from the headline total balance (it mirrors bank
+    // money the user tracks manually); only bank accounts contribute.
+    double grandTotalBalance = _bankSummaries.fold(
+        0.0,
+        (sum, b) =>
+            b.bankId == CashConstants.bankId ? sum : sum + b.totalBalance);
 
     _summary = AllSummary(
       totalCredit: grandTotalCredit,
@@ -1723,6 +1733,42 @@ class TransactionProvider with ChangeNotifier {
       ownerAccountNumber: normalizedOwner,
       ownerAssignmentSource: Transaction.manualOwnerAssignment,
       sourceMessageId: transaction.sourceMessageId,
+    );
+    if (changed) {
+      await loadData();
+    }
+    return changed;
+  }
+
+  /// Toggles an account's include-in-totals / dormant preferences and reloads
+  /// so summaries and headline totals update.
+  Future<bool> updateAccountPreferences({
+    required String accountNumber,
+    required int bank,
+    bool? includeInTotals,
+    bool? isDormant,
+  }) async {
+    final changed = await _accountRepo.updateAccountPreferences(
+      accountNumber: accountNumber,
+      bank: bank,
+      includeInTotals: includeInTotals,
+      isDormant: isDormant,
+    );
+    if (changed) {
+      await loadData();
+    }
+    return changed;
+  }
+
+  /// Makes an account the default (catch-all) for its bank and reloads so
+  /// unmatched transactions re-route to it.
+  Future<bool> setDefaultAccount({
+    required String accountNumber,
+    required int bank,
+  }) async {
+    final changed = await _accountRepo.setDefaultAccount(
+      accountNumber: accountNumber,
+      bank: bank,
     );
     if (changed) {
       await loadData();

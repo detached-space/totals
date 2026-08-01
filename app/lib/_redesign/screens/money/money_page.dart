@@ -3262,6 +3262,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   onReparse: isCash
                       ? null
                       : () => _openAccountReparseSheet(provider, account),
+                  onManage: isCash
+                      ? null
+                      : () => _openAccountActionsSheet(provider, account),
                   onDelete:
                       isCash ? null : () => _showDeleteConfirmation(account),
                   onCashExpense: isCash ? _showCashExpenseSheet : null,
@@ -3585,6 +3588,119 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           account: account,
         ),
       ),
+    );
+  }
+
+  /// Bottom sheet with the per-account controls: include-in-totals, dormant,
+  /// and set-as-default. Reads current state from the account summary and
+  /// writes through the provider (which reloads).
+  Future<void> _openAccountActionsSheet(
+    TransactionProvider provider,
+    AccountSummary account,
+  ) async {
+    // How many accounts this bank has — "set default" only matters with 2+.
+    final bankAccountCount = provider.accountSummaries
+        .where((a) => a.bankId == account.bankId)
+        .length;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        var includeInTotals = account.includeInTotals;
+        var isDormant = account.isDormant;
+        var isDefault = account.isDefault;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            account.accountHolderName.trim().isNotEmpty
+                                ? account.accountHolderName
+                                : account.accountNumber,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SwitchListTile(
+                    title: const Text('Include in total balance'),
+                    subtitle: const Text(
+                      'Count this account in the headline totals.',
+                    ),
+                    value: includeInTotals,
+                    onChanged: isDormant
+                        ? null
+                        : (value) async {
+                            setSheetState(() => includeInTotals = value);
+                            await provider.updateAccountPreferences(
+                              accountNumber: account.accountNumber,
+                              bank: account.bankId,
+                              includeInTotals: value,
+                            );
+                          },
+                  ),
+                  SwitchListTile(
+                    title: const Text('Mark as dormant'),
+                    subtitle: const Text(
+                      'Keeps history but hides the balance and excludes it '
+                      'from totals.',
+                    ),
+                    value: isDormant,
+                    onChanged: (value) async {
+                      setSheetState(() {
+                        isDormant = value;
+                        if (value) includeInTotals = false;
+                      });
+                      await provider.updateAccountPreferences(
+                        accountNumber: account.accountNumber,
+                        bank: account.bankId,
+                        isDormant: value,
+                      );
+                    },
+                  ),
+                  if (bankAccountCount >= 2)
+                    ListTile(
+                      leading: const Icon(Icons.star_outline),
+                      title: const Text('Set as default account'),
+                      subtitle: const Text(
+                        'Unmatched transactions for this bank land here.',
+                      ),
+                      trailing: isDefault
+                          ? const Icon(Icons.check, color: Colors.green)
+                          : null,
+                      enabled: !isDefault,
+                      onTap: isDefault
+                          ? null
+                          : () async {
+                              setSheetState(() => isDefault = true);
+                              await provider.setDefaultAccount(
+                                accountNumber: account.accountNumber,
+                                bank: account.bankId,
+                              );
+                              if (sheetContext.mounted) {
+                                Navigator.of(sheetContext).pop();
+                              }
+                            },
+                    ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -12806,6 +12922,7 @@ class _AccountCard extends StatelessWidget {
   final VoidCallback onOpenTransactions;
   final VoidCallback? onReparse;
   final VoidCallback? onDelete;
+  final VoidCallback? onManage;
   final VoidCallback? onCashExpense;
   final VoidCallback? onCashIncome;
   final VoidCallback? onSetCashAmount;
@@ -12823,6 +12940,7 @@ class _AccountCard extends StatelessWidget {
     required this.onOpenTransactions,
     this.onReparse,
     this.onDelete,
+    this.onManage,
     this.onCashExpense,
     this.onCashIncome,
     this.onSetCashAmount,
@@ -13030,9 +13148,20 @@ class _AccountCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (onReparse != null || onDelete != null) ...[
+                  if (onReparse != null || onDelete != null ||
+                      onManage != null) ...[
                     const SizedBox(height: 14),
                     Container(height: 1, color: AppColors.borderColor(context)),
+                    if (onManage != null) ...[
+                      const SizedBox(height: 12),
+                      _CashActionButton(
+                        label: 'Manage account',
+                        icon: Icons.tune_rounded,
+                        color: AppColors.primaryDark,
+                        outlined: true,
+                        onTap: isBusy ? null : onManage,
+                      ),
+                    ],
                     if (onReparse != null) ...[
                       const SizedBox(height: 12),
                       _CashActionButton(

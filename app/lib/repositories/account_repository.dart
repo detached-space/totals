@@ -181,6 +181,142 @@ class AccountRepository {
     );
   }
 
+  /// Updates the include-in-totals / dormant preferences for one account.
+  /// Marking an account dormant also removes it from totals. Accounts are
+  /// UNIQUE by (accountNumber, bank), so match on that pair — filtering by
+  /// profileId would miss migrated rows with a NULL profileId.
+  Future<bool> updateAccountPreferences({
+    required String accountNumber,
+    required int bank,
+    bool? includeInTotals,
+    bool? isDormant,
+  }) async {
+    if (includeInTotals == null && isDormant == null) return false;
+
+    final db = await DatabaseHelper.instance.database;
+    final values = <String, Object?>{
+      if (includeInTotals != null) 'includeInTotals': includeInTotals ? 1 : 0,
+      if (isDormant != null) 'isDormant': isDormant ? 1 : 0,
+    };
+    if (isDormant == true) values['includeInTotals'] = 0;
+
+    final changed = await db.update(
+      'accounts',
+      values,
+      where: 'accountNumber = ? AND bank = ?',
+      whereArgs: [accountNumber, bank],
+    );
+    if (changed == 0) return false;
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.accounts,
+      entityRef: '$accountNumber|$bank',
+      op: SyncOp.upsert,
+      row: {
+        'accountNumber': accountNumber,
+        'bank': bank,
+        ...values,
+      },
+    );
+    return true;
+  }
+
+  /// Makes [accountNumber] the default (catch-all) account for its bank.
+  /// Clears the default from the other accounts in the same bank+profile group
+  /// so the one-default-per-bank invariant holds.
+  Future<bool> setDefaultAccount({
+    required String accountNumber,
+    required int bank,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final target = await db.query(
+      'accounts',
+      columns: const <String>['profileId'],
+      where: 'accountNumber = ? AND bank = ?',
+      whereArgs: [accountNumber, bank],
+      limit: 1,
+    );
+    if (target.isEmpty) return false;
+    final profileId = target.single['profileId'] as int?;
+    final profileClause =
+        profileId == null ? 'profileId IS NULL' : 'profileId = ?';
+    final profileArgs = profileId == null ? <Object?>[] : <Object?>[profileId];
+
+    final groupRows = await db.query(
+      'accounts',
+      columns: const <String>['accountNumber'],
+      where: 'bank = ? AND $profileClause',
+      whereArgs: [bank, ...profileArgs],
+    );
+
+    await db.transaction((txn) async {
+      await txn.update(
+        'accounts',
+        const <String, Object?>{'isDefault': 0},
+        where: 'bank = ? AND $profileClause',
+        whereArgs: [bank, ...profileArgs],
+      );
+      await txn.update(
+        'accounts',
+        const <String, Object?>{'isDefault': 1},
+        where: 'accountNumber = ? AND bank = ?',
+        whereArgs: [accountNumber, bank],
+      );
+    });
+
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.accounts,
+      records: groupRows.map((row) {
+        final number = row['accountNumber'].toString();
+        return MapEntry('$number|$bank', <String, dynamic>{
+          'accountNumber': number,
+          'bank': bank,
+          'isDefault': number == accountNumber ? 1 : 0,
+        });
+      }).toList(growable: false),
+    );
+    return true;
+  }
+
+  /// If a bank+profile group has accounts but no default, promotes the
+  /// lowest-id account so unmatched transactions always have a catch-all.
+  Future<void> _ensureDefaultAccountForBank(
+    Database db,
+    int bank,
+    int? profileId,
+  ) async {
+    final profileClause =
+        profileId == null ? 'profileId IS NULL' : 'profileId = ?';
+    final profileArgs = profileId == null ? <Object?>[] : <Object?>[profileId];
+    final rows = await db.query(
+      'accounts',
+      columns: const <String>['id', 'accountNumber', 'isDefault'],
+      where: 'bank = ? AND $profileClause',
+      whereArgs: [bank, ...profileArgs],
+      orderBy: 'id ASC',
+    );
+    if (rows.isEmpty || rows.any((row) => row['isDefault'] == 1)) return;
+    await db.update(
+      'accounts',
+      const <String, Object?>{'isDefault': 1},
+      where: 'id = ?',
+      whereArgs: <Object?>[rows.first['id']],
+    );
+    final promotedNumber = rows.first['accountNumber']?.toString();
+    if (promotedNumber != null && promotedNumber.isNotEmpty) {
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.accounts,
+        entityRef: '$promotedNumber|$bank',
+        op: SyncOp.upsert,
+        row: <String, dynamic>{
+          'accountNumber': promotedNumber,
+          'bank': bank,
+          'isDefault': 1,
+        },
+      );
+    }
+  }
+
   Future<bool> accountExists(String accountNumber, int bank) async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
@@ -265,11 +401,29 @@ class AccountRepository {
       }
     }
 
+    // Capture the account's profile before deleting so we can re-elect a
+    // default within the same bank+profile group.
+    final deletedRows = await db.query(
+      'accounts',
+      columns: const <String>['profileId'],
+      where: 'accountNumber = ? AND bank = ?',
+      whereArgs: [accountNumber, bank],
+      limit: 1,
+    );
+    final deletedProfileId =
+        deletedRows.isEmpty ? null : deletedRows.single['profileId'] as int?;
+
     // Finally, delete the account itself
     await db.delete(
       'accounts',
       where: 'accountNumber = ? AND bank = ?',
       whereArgs: [accountNumber, bank],
     );
+
+    // If the deleted account was the bank's default, promote another so
+    // unmatched transactions keep a catch-all.
+    if (bank != CashConstants.bankId) {
+      await _ensureDefaultAccountForBank(db, bank, deletedProfileId);
+    }
   }
 }
