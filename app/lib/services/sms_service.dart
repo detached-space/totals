@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/utils/platform_support.dart';
 import 'package:totals/repositories/transaction_repository.dart';
@@ -1392,6 +1393,28 @@ class SmsService {
       dateMillis: messageDate?.millisecondsSinceEpoch,
     );
     details.addAll(smsSource.toJson());
+
+    // Stamp the owning account at ingest so multi-account banks route to the
+    // right account immediately. iOS has no SIM subscription id, so ownership
+    // is resolved purely from the message body (greeting + "your account"
+    // number) and the parsed account number — see account_identity. If nothing
+    // resolves, the transaction falls back to the bank's default account at
+    // read time and can be reassigned manually.
+    final ownershipAccounts = registeredAccounts
+        .where((account) => account.bank == bank.id)
+        .toList(growable: false);
+    if (ownershipAccounts.isNotEmpty) {
+      final resolvedOwner = resolveSmsOwnership(
+        bank: bank,
+        accounts: ownershipAccounts,
+        messageBody: messageBody,
+        parsedAccountNumber: details['accountNumber']?.toString(),
+      );
+      if (resolvedOwner != null) {
+        details['ownerAccountNumber'] = resolvedOwner.accountNumber;
+        details['ownerAssignmentSource'] = Transaction.automaticOwnerAssignment;
+      }
+    }
 
     // 3. Check duplicate transaction — across all profiles, so a message
     // reprocessed while a different profile is active isn't ingested twice.
