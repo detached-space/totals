@@ -1709,6 +1709,27 @@ class TransactionProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Manually pins a transaction to a specific account. Recorded as a manual
+  /// assignment so automatic reconciliation won't override it. Reloads so the
+  /// ownership partition and account summaries reflect the move.
+  Future<bool> assignTransactionToAccount(
+    Transaction transaction,
+    String ownerAccountNumber,
+  ) async {
+    final normalizedOwner = ownerAccountNumber.trim();
+    if (normalizedOwner.isEmpty) return false;
+    final changed = await _transactionRepo.updateTransactionOwnership(
+      reference: transaction.reference,
+      ownerAccountNumber: normalizedOwner,
+      ownerAssignmentSource: Transaction.manualOwnerAssignment,
+      sourceMessageId: transaction.sourceMessageId,
+    );
+    if (changed) {
+      await loadData();
+    }
+    return changed;
+  }
+
   Future<void> updateCounterpartyForTransaction(
     Transaction transaction,
     String? counterparty,

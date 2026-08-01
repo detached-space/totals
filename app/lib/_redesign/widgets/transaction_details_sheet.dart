@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
@@ -1104,6 +1105,89 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
   }
 
+  /// The registered accounts for this transaction's bank.
+  List<AccountSummary> _bankAccountsForTransaction() {
+    final bankId = _tx.bankId;
+    if (bankId == null) return const <AccountSummary>[];
+    return _provider.accountSummaries
+        .where((a) => a.bankId == bankId)
+        .toList(growable: false);
+  }
+
+  /// Display label for the account this transaction currently belongs to.
+  String _currentOwnerLabel() {
+    final accounts = _bankAccountsForTransaction();
+    final owner = _tx.ownerAccountNumber?.trim();
+    if (owner != null && owner.isNotEmpty) {
+      for (final a in accounts) {
+        if (a.accountNumber == owner) {
+          return a.accountHolderName.trim().isNotEmpty
+              ? a.accountHolderName
+              : a.accountNumber;
+        }
+      }
+      return owner;
+    }
+    return 'Auto';
+  }
+
+  /// Presents the bank's accounts so the user can pin this transaction to one.
+  /// Only meaningful when the bank has more than one account.
+  Future<void> _openAccountAssignmentSheet() async {
+    final accounts = _bankAccountsForTransaction();
+    if (accounts.length < 2) return;
+    final currentOwner = _tx.ownerAccountNumber?.trim();
+
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Assign to account',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              for (final account in accounts)
+                ListTile(
+                  title: Text(
+                    account.accountHolderName.trim().isNotEmpty
+                        ? account.accountHolderName
+                        : account.accountNumber,
+                  ),
+                  subtitle: Text(account.accountNumber),
+                  trailing: account.accountNumber == currentOwner
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () =>
+                      Navigator.of(sheetContext).pop(account.accountNumber),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (chosen == null || chosen == currentOwner) return;
+    final ok = await _provider.assignTransactionToAccount(_tx, chosen);
+    if (!mounted) return;
+    if (ok) {
+      setState(() => _transaction = _tx.copyWith(
+            ownerAccountNumber: chosen,
+            ownerAssignmentSource: Transaction.manualOwnerAssignment,
+          ));
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Transaction reassigned')),
+      );
+    }
+  }
+
   Future<void> _openLoanDebtPersonPrompt(Transaction transaction) async {
     final hostContext = widget.hostContext;
     _dismissComposerState(clearDraft: true);
@@ -1309,9 +1393,14 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         },
                       ),
                       _DetailRow(label: 'Bank', value: _bankShortName),
-                      // if (_tx.accountNumber != null &&
-                      //     _tx.accountNumber!.isNotEmpty)
-                      //   _DetailRow(label: 'Account', value: _tx.accountNumber!),
+                      if (_bankAccountsForTransaction().length >= 2)
+                        _DetailRow(
+                          label: 'Account',
+                          value: _currentOwnerLabel(),
+                          onTap: () {
+                            unawaited(_openAccountAssignmentSheet());
+                          },
+                        ),
                       if (_formattedDate != null)
                         _DetailRow(
                             label: 'Date & Time', value: _formattedDate!),

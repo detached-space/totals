@@ -365,6 +365,81 @@ class TransactionRepository {
     );
   }
 
+  /// Assigns a transaction to a specific account (its durable owner).
+  ///
+  /// A prior manual assignment is authoritative and is never overwritten by a
+  /// non-manual update, so automatic reconciliation can't undo the user's
+  /// choice. Returns true when a row was updated.
+  Future<bool> updateTransactionOwnership({
+    required String reference,
+    required String ownerAccountNumber,
+    required String ownerAssignmentSource,
+    int? sourceSubscriptionId,
+    String? sourceMessageId,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final where = <String>['reference = ?'];
+    final args = <Object?>[reference];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      args.add(activeProfileId);
+    }
+
+    final existingRows = await db.query(
+      'transactions',
+      columns: const <String>['ownerAssignmentSource'],
+      where: where.join(' AND '),
+      whereArgs: args,
+      limit: 1,
+    );
+    if (existingRows.isNotEmpty &&
+        existingRows.single['ownerAssignmentSource'] ==
+            Transaction.manualOwnerAssignment &&
+        ownerAssignmentSource != Transaction.manualOwnerAssignment) {
+      return false;
+    }
+
+    final values = <String, Object?>{
+      'ownerAccountNumber': ownerAccountNumber,
+      'ownerAssignmentSource': ownerAssignmentSource,
+      if (sourceSubscriptionId != null && sourceSubscriptionId >= 0)
+        'sourceSubscriptionId': sourceSubscriptionId,
+      if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty)
+        'sourceMessageId': sourceMessageId.trim(),
+    };
+    final changed = await db.update(
+      'transactions',
+      values,
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
+    if (changed == 0) return false;
+
+    final currentRows = await db.query(
+      'transactions',
+      where: where.join(' AND '),
+      whereArgs: args,
+      limit: 1,
+    );
+    final syncRow = currentRows.isEmpty
+        ? <String, dynamic>{
+            'reference': reference,
+            'ownerAccountNumber': ownerAccountNumber,
+            'ownerAssignmentSource': ownerAssignmentSource,
+          }
+        : (Map<String, dynamic>.from(currentRows.single)
+          ..remove('sourceSubscriptionId'));
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.transactions,
+      entityRef: reference,
+      op: SyncOp.upsert,
+      row: syncRow,
+    );
+    return true;
+  }
+
   Future<void> clearAll() async {
     final db = await DatabaseHelper.instance.database;
     await db.delete('transactions');
