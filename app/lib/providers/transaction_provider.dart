@@ -21,6 +21,7 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
+import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -193,6 +194,10 @@ class TransactionProvider with ChangeNotifier {
   AllSummary? _summary;
   List<BankSummary> _bankSummaries = [];
   List<AccountSummary> _accountSummaries = [];
+  // Transactions whose owning account could not be resolved, grouped by bank.
+  // On multi-account banks these need manual assignment; on single-account
+  // banks they still show under that account (see _calculateSummaries).
+  Map<int, List<Transaction>> _unmatchedTransactionsByBank = {};
 
   bool _isLoading = false;
   String _searchKey = "";
@@ -237,6 +242,8 @@ class TransactionProvider with ChangeNotifier {
   AllSummary? get summary => _summary;
   List<BankSummary> get bankSummaries => _bankSummaries;
   List<AccountSummary> get accountSummaries => _accountSummaries;
+  Map<int, List<Transaction>> get unmatchedTransactionsByBank =>
+      _unmatchedTransactionsByBank;
   DateTime get selectedDate => _selectedDate;
 
   bool isSharedExpenseTransaction(Transaction transaction) {
@@ -712,61 +719,61 @@ class TransactionProvider with ChangeNotifier {
 
     final resolvedAccountBalances = <String, double>{};
 
+    // Resolve the owning account for every valid transaction once, up front.
+    // resolveTransactionOwnership uses the durable ownerAccountNumber when set,
+    // otherwise falls back to account-number matching (see account_identity).
+    final resolvedOwners = <Transaction, Account?>{};
+    final unmatchedByBank = <int, List<Transaction>>{};
+    for (final t in validTransactions) {
+      final bankId = t.bankId;
+      if (bankId == null || bankId == CashConstants.bankId) continue;
+      final bank = banksById[bankId];
+      final bankAccounts = groupedAccounts[bankId] ?? const <Account>[];
+      final owner = bank == null
+          ? null
+          : resolveTransactionOwnership(
+              transaction: t,
+              bank: bank,
+              accounts: bankAccounts,
+            );
+      resolvedOwners[t] = owner;
+      if (owner == null) {
+        unmatchedByBank.putIfAbsent(bankId, () => <Transaction>[]).add(t);
+      }
+    }
+    _unmatchedTransactionsByBank = {
+      for (final entry in unmatchedByBank.entries)
+        entry.key: List<Transaction>.unmodifiable(entry.value),
+    };
+
     // Calculate Account Summaries
     _accountSummaries = _accounts.map((account) {
-      // Logic for specific account transactions
-      // Note: original logic had a specific condition for bankId == 1 handling substrings
-      // Use validTransactions to ensure we only include transactions with matching accounts
+      final bank = banksById[account.bank];
+      final bankAccounts = groupedAccounts[account.bank] ?? const <Account>[];
+      // A bank with a single registered account keeps the pre-multi-account
+      // behavior: unmatched transactions still show under that sole account.
+      // iOS can't batch-reparse the SMS inbox to stamp ownership the way the
+      // Android app does, so this fallback avoids hiding legacy transactions.
+      final isSingleAccountBank =
+          account.bank != CashConstants.bankId && bankAccounts.length == 1;
       var accountTransactions = validTransactions.where((t) {
-        bool bankMatch = t.bankId == account.bank;
-        if (!bankMatch) return false;
-
-        if (account.bank == CashConstants.bankId) {
-          return true;
-        }
-
-        final bank = banksById[t.bankId];
+        if (t.bankId != account.bank) return false;
+        if (account.bank == CashConstants.bankId) return true;
         if (bank == null) return false;
-
-        if (bank.uniformMasking == true) {
-          // CBE check: last 4 digits
-
-          return t.accountNumber
-                  ?.substring(t.accountNumber!.length - bank.maskPattern!) ==
-              account.accountNumber
-                  .substring(account.accountNumber.length - bank.maskPattern!);
-        } else {
-          return t.bankId == account.bank;
+        final owner = resolvedOwners[t];
+        if (owner != null) {
+          return registeredAccountNumbersMatch(
+            bank,
+            owner.accountNumber,
+            account.accountNumber,
+          );
         }
+        return isSingleAccountBank;
       }).toList();
 
       debugPrint(
         "debug: Account Transactions: ${accountTransactions.length}",
       );
-
-      // Fallback: If this is the ONLY account for this bank, also include transactions with NULL account number
-      // This handles legacy data or parsing failures where account wasn't captured.
-      // NOTE: Skip this for banks that match by bankId only (uniformMasking == false)
-      // because they already get all transactions via the else clause above
-      if (account.bank != CashConstants.bankId) {
-        try {
-          final accountBank = banksById[account.bank];
-          if (accountBank != null && accountBank.uniformMasking != false) {
-            var bankAccounts =
-                _accounts.where((a) => a.bank == account.bank).toList();
-            if (bankAccounts.length == 1 && bankAccounts.first == account) {
-              var orphanedTransactions = validTransactions
-                  .where((t) =>
-                      t.bankId == account.bank &&
-                      (t.accountNumber == null || t.accountNumber!.isEmpty))
-                  .toList();
-              accountTransactions.addAll(orphanedTransactions);
-            }
-          }
-        } catch (e) {
-          // Bank not found in database, skip orphaned transactions fallback
-        }
-      }
 
       double totalDebit = 0.0;
       double totalCredit = 0.0;
@@ -810,6 +817,9 @@ class TransactionProvider with ChangeNotifier {
         settledBalance: account.settledBalance ?? 0.0,
         balance: accountBalance,
         pendingCredit: account.pendingCredit ?? 0.0,
+        includeInTotals: account.includeInTotals,
+        isDormant: account.isDormant,
+        isDefault: account.isDefault,
       );
     }).toList();
     _accountSummaries.sort(_compareAccountSummaries);
