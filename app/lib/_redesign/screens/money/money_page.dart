@@ -3605,9 +3605,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   ) {
     // Single source of truth: the provider's ownership-partitioned map, so the
     // account detail list always agrees with the account card's summary.
-    return provider.transactionsForAccount(
-      account.bankId,
-      account.accountNumber,
+    // Copy to a mutable list — the partition is unmodifiable and callers sort.
+    return List<Transaction>.of(
+      provider.transactionsForAccount(
+        account.bankId,
+        account.accountNumber,
+      ),
     );
   }
 
@@ -11338,9 +11341,13 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     if (account != null) {
       // Account-scoped: use the same ownership partition the account card's
       // summary count is derived from, so the list and the count agree.
-      return provider.transactionsForAccount(
-        account.bankId,
-        account.accountNumber,
+      // Copy to a mutable list — the provider's partition is unmodifiable and
+      // the display pipeline sorts in place.
+      return List<Transaction>.of(
+        provider.transactionsForAccount(
+          account.bankId,
+          account.accountNumber,
+        ),
       );
     }
     return provider.allTransactions
