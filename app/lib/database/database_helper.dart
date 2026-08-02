@@ -54,7 +54,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 30,
+      version: 33,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -355,6 +355,8 @@ class DatabaseHelper {
     ''');
 
     await _ensureLoanDebtSchema(db);
+    await _ensureReimbursementSchema(db);
+    await _ensureTransactionSourceSmsSchema(db);
 
     await _seedBuiltInCategories(db);
   }
@@ -887,6 +889,74 @@ class DatabaseHelper {
     if (oldVersion < 30) {
       await _ensureMultiAccountSchema(db);
     }
+
+    // v31-v33: reimbursement allocations, captured SMS source rows, and the
+    // runtime-lock table (backup/dedup). All idempotent (CREATE IF NOT EXISTS).
+    if (oldVersion < 33) {
+      await _ensureReimbursementSchema(db);
+      await _ensureTransactionSourceSmsSchema(db);
+      await _ensureSyncSchema(db);
+    }
+  }
+
+  /// Stores the original bank SMS body per transaction so it can be shown or
+  /// re-parsed later. Rows are cleaned up when their transaction is deleted.
+  Future<void> _ensureTransactionSourceSmsSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS transaction_source_sms (
+        transactionReference TEXT PRIMARY KEY NOT NULL,
+        body TEXT NOT NULL,
+        senderAddress TEXT,
+        receivedAt TEXT,
+        messageId TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_transaction_source_sms_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM transaction_source_sms
+        WHERE transactionReference = OLD.reference;
+      END
+    ''');
+  }
+
+  /// Links reimbursement (credit) transactions to the expenses they repay.
+  Future<void> _ensureReimbursementSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS reimbursement_allocations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reimbursementTransactionReference TEXT NOT NULL,
+        expenseTransactionReference TEXT NOT NULL,
+        appliedAmount REAL NOT NULL CHECK(appliedAmount > 0),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reimbursement_allocations_reimbursement
+      ON reimbursement_allocations(reimbursementTransactionReference)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reimbursement_allocations_expense
+      ON reimbursement_allocations(expenseTransactionReference)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursement_allocations_pair
+      ON reimbursement_allocations(
+        reimbursementTransactionReference,
+        expenseTransactionReference
+      )
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_reimbursement_allocations_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM reimbursement_allocations
+        WHERE reimbursementTransactionReference = OLD.reference
+           OR expenseTransactionReference = OLD.reference;
+      END
+    ''');
   }
 
   /// Adds the ownership/preference/control columns and indexes that back
