@@ -270,7 +270,11 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
     if (_restoringId != null) return;
     setState(() => _restoringId = entry.id);
     try {
+      debugPrint('debug: TelegramRestore: downloading ${entry.id} '
+          '(${entry.fileSize} bytes)…');
       final jsonData = await _service.downloadBackup(entry);
+      debugPrint('debug: TelegramRestore: downloaded+decrypted '
+          '${jsonData.length} chars; awaiting confirmation…');
       if (!mounted) return;
       // iOS restore is a full import (the per-item import options sheet is
       // deferred). Confirm before overwriting local data.
@@ -295,7 +299,9 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
         ),
       );
       if (confirmed != true || !mounted) return;
+      debugPrint('debug: TelegramRestore: importing…');
       await _exportImportService.importAllData(jsonData);
+      debugPrint('debug: TelegramRestore: import OK, reloading…');
       if (!mounted) return;
       try {
         await Provider.of<TransactionProvider>(
@@ -306,11 +312,10 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
       if (mounted) {
         _showSnack(context.l10nTextRead('Data imported successfully'));
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('debug: TelegramRestore FAILED: $error\n$stackTrace');
       if (mounted) {
-        _showError(
-          '${context.l10nTextRead('Import failed')}: ${_message(error)}',
-        );
+        _showError('Restore failed: $error');
       }
     } finally {
       if (mounted) setState(() => _restoringId = null);
