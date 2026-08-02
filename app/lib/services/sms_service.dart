@@ -9,7 +9,9 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/utils/platform_support.dart';
+import 'package:totals/models/transaction_source_sms.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/repositories/transaction_source_sms_repository.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/account.dart';
@@ -546,6 +548,32 @@ class SmsService {
 
     // Safe parse
     return double.tryParse(cleaned) ?? 0.0;
+  }
+
+  /// Stores the original bank message for a saved transaction so it can be
+  /// shown in detail or re-parsed later. Best-effort; failures are swallowed.
+  static Future<void> _captureTransactionSourceSms({
+    required String transactionReference,
+    required String body,
+    required String senderAddress,
+    required DateTime? receivedAt,
+    required String? messageId,
+  }) async {
+    final reference = transactionReference.trim();
+    if (reference.isEmpty || body.trim().isEmpty) return;
+    try {
+      await TransactionSourceSmsRepository().upsert(
+        TransactionSourceSms(
+          transactionReference: reference,
+          body: body,
+          senderAddress: senderAddress.trim(),
+          receivedAt: receivedAt,
+          messageId: messageId,
+        ),
+      );
+    } catch (error) {
+      debugPrint('debug: Could not retain source SMS for $reference: $error');
+    }
   }
 
   static Future<void> _recordFailedParse({
@@ -1603,6 +1631,15 @@ class SmsService {
     final savedTx =
         await txRepo.getTransactionByReference(newTx.reference) ?? newTx;
     session?.track(savedTx);
+
+    // Retain the original bank message so it can be shown or re-parsed later.
+    await _captureTransactionSourceSms(
+      transactionReference: savedTx.reference,
+      body: messageBody,
+      senderAddress: senderAddress,
+      receivedAt: messageDate,
+      messageId: null,
+    );
 
     if (!bulk) print("debug: New transaction saved: ${savedTx.reference}");
 
