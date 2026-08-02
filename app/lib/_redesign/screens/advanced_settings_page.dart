@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_home_page.dart';
+import 'package:totals/_redesign/screens/telegram_backup_consent_page.dart';
+import 'package:totals/_redesign/screens/telegram_backup_page.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_widgets.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/services/advanced_settings_service.dart';
@@ -238,6 +240,22 @@ class _RedesignAdvancedSettingsPageState
     }
   }
 
+  /// Opens the Telegram Backup flow: consent first if not yet accepted, then
+  /// the management page (pair a bot, back up, restore).
+  Future<void> _openTelegramBackupFlow() async {
+    await AdvancedSettingsService.instance.ensureLoaded();
+    if (!AdvancedSettingsService.instance.hasTelegramBackupConsent) {
+      final accepted = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => const TelegramBackupConsentPage()),
+      );
+      if (!mounted || accepted != true) return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const TelegramBackupPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -261,6 +279,16 @@ class _RedesignAdvancedSettingsPageState
                       builder: (_) => const DataSyncHomePage(),
                     ),
                   ),
+                ),
+                const SizedBox(height: 12),
+                DataSyncTile(
+                  icon: AppIcons.cloud_download,
+                  title: context.l10nText('Telegram Backup'),
+                  subtitle: context.l10nText(
+                    'Encrypted automatic backup to your Telegram bot',
+                  ),
+                  showChevron: true,
+                  onTap: _openTelegramBackupFlow,
                 ),
                 const SizedBox(height: 12),
                 Container(
