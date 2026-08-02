@@ -446,6 +446,21 @@ class TransactionRepository {
     return true;
   }
 
+  /// Removes one reimbursement link. Returns null; the provider reloads
+  /// reimbursement state afterwards. (The Android app also strips the built-in
+  /// reimbursement category from a credit once its last link is gone — skipped
+  /// on iOS to avoid a deep helper cascade; remove the category manually.)
+  Future<Transaction?> unlinkReimbursementAllocation(int allocationId) async {
+    if (allocationId <= 0) return null;
+    final db = await DatabaseHelper.instance.database;
+    await db.delete(
+      'reimbursement_allocations',
+      where: 'id = ?',
+      whereArgs: [allocationId],
+    );
+    return null;
+  }
+
   Future<void> clearAll() async {
     final db = await DatabaseHelper.instance.database;
     await db.delete('transactions');

@@ -1,6 +1,12 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:totals/services/bank_statement_description_service.dart';
+import 'package:totals/services/bank_statement_pdf_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -3604,6 +3610,63 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
+  /// Generates a PDF bank statement (all-time) for one account and hands it to
+  /// the system share sheet (on iOS that includes "Save to Files").
+  Future<void> _generateBankStatement(
+    TransactionProvider provider,
+    AccountSummary account,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final transactions =
+          provider.transactionsForAccount(account.bankId, account.accountNumber);
+      if (transactions.isEmpty) {
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('No transactions to include.')),
+        );
+        return;
+      }
+      final times = transactions
+          .map((t) => DateTime.tryParse(t.time ?? ''))
+          .whereType<DateTime>()
+          .toList()
+        ..sort();
+      final now = DateTime.now();
+      final start = times.isEmpty ? DateTime(2000) : times.first;
+      final end = times.isEmpty ? now : times.last;
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Generating statement…')),
+      );
+      final descriptions =
+          await BankStatementDescriptionService().resolveDescriptions(transactions);
+      final statement = BankStatementData.fromTransactions(
+        bankName: provider.getBankName(account.bankId),
+        bankShortName: provider.getBankShortName(account.bankId),
+        bankIconAssetPath: provider.getBankImage(account.bankId),
+        accountNumber: account.accountNumber,
+        accountHolderName: account.accountHolderName,
+        startDate: start,
+        endDate: end,
+        generatedAt: now,
+        currentAccountBalance: account.balance,
+        transactions: transactions,
+        descriptionsByReference: descriptions,
+      );
+      final bytes = await BankStatementPdfService().generate(statement);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/${statement.fileName}');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/pdf')],
+        subject: statement.fileName,
+      );
+    } catch (e) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Statement failed: $e')),
+      );
+    }
+  }
+
   /// Bottom sheet with the per-account controls: include-in-totals, dormant,
   /// and set-as-default. Reads current state from the account summary and
   /// writes through the provider (which reloads).
@@ -3681,6 +3744,17 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                         bank: account.bankId,
                         isDormant: value,
                       );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.picture_as_pdf_outlined),
+                    title: const Text('Generate statement (PDF)'),
+                    subtitle: const Text(
+                      'Export this account\'s history and share or save it.',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_generateBankStatement(provider, account));
                     },
                   ),
                   if (bankAccountCount >= 2)

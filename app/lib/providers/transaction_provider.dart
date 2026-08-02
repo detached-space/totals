@@ -21,6 +21,9 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
+import 'package:totals/models/reimbursement_allocation.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/account_reconciliation.dart';
 import 'package:totals/utils/account_sort.dart';
@@ -321,6 +324,99 @@ class TransactionProvider with ChangeNotifier {
   TransactionTrendSeries get monthTrendSeries => _monthTrendSeries;
   FinancialHealthSnapshot get financialHealth => _financialHealth;
   int get dataVersion => _dataVersion;
+  Map<int, String> _bankImagesById = {};
+  String getBankImage(int? bankId) {
+    if (bankId == null) return '';
+    if (bankId == CashConstants.bankId) return CashConstants.bankImage;
+    return _bankImagesById[bankId] ?? '';
+  }
+
+  final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
+  List<ReimbursementAllocation> _reimbursementAllocations = const [];
+  Map<String, List<ReimbursementAllocation>>
+      _reimbursementsByCreditReference = const {};
+  Map<String, List<ReimbursementAllocation>>
+      _reimbursementsByExpenseReference = const {};
+
+  List<ReimbursementAllocation> get reimbursementAllocations =>
+      _reimbursementAllocations;
+
+  bool isReimbursementTransaction(Transaction transaction) {
+    final reference = transaction.reference.trim();
+    if (reference.isNotEmpty &&
+        (_reimbursementsByCreditReference[reference]?.isNotEmpty ?? false)) {
+      return true;
+    }
+    return transaction.selectedCategoryIds.any((categoryId) {
+      final category = _categoryById[categoryId];
+      return category != null && isReimbursementCategory(category);
+    });
+  }
+
+  List<ReimbursementAllocation> reimbursementsForCredit(String reference) =>
+      _reimbursementsByCreditReference[reference.trim()] ??
+      const <ReimbursementAllocation>[];
+
+  List<ReimbursementAllocation> reimbursementsForExpense(String reference) =>
+      _reimbursementsByExpenseReference[reference.trim()] ??
+      const <ReimbursementAllocation>[];
+
+  double allocatedReimbursementAmount(Transaction transaction) =>
+      reimbursementsForCredit(transaction.reference)
+          .fold<double>(0.0, (sum, a) => sum + a.appliedAmount);
+
+  double reimbursedExpenseAmount(Transaction transaction) =>
+      reimbursementsForExpense(transaction.reference)
+          .fold<double>(0.0, (sum, a) => sum + a.appliedAmount);
+
+  Future<void> refreshReimbursements() async {
+    await _reloadReimbursementState();
+    _dataVersion += 1;
+    notifyListeners();
+  }
+
+  Future<Transaction?> unlinkReimbursementAllocation(int allocationId) async {
+    final updated =
+        await _transactionRepo.unlinkReimbursementAllocation(allocationId);
+    if (updated != null) {
+      _replaceTransactionLocally(updated);
+    }
+    await _reloadReimbursementState();
+    _dataVersion += 1;
+    notifyListeners();
+    return updated;
+  }
+
+  Future<void> _reloadReimbursementState() async {
+    try {
+      final allocations = await _reimbursementRepo.getAllocations();
+      final byCredit = <String, List<ReimbursementAllocation>>{};
+      final byExpense = <String, List<ReimbursementAllocation>>{};
+      for (final allocation in allocations) {
+        final credit = allocation.reimbursementTransactionReference.trim();
+        final expense = allocation.expenseTransactionReference.trim();
+        byCredit
+            .putIfAbsent(credit, () => <ReimbursementAllocation>[])
+            .add(allocation);
+        byExpense
+            .putIfAbsent(expense, () => <ReimbursementAllocation>[])
+            .add(allocation);
+      }
+      _reimbursementAllocations =
+          List<ReimbursementAllocation>.unmodifiable(allocations);
+      _reimbursementsByCreditReference = {
+        for (final e in byCredit.entries)
+          e.key: List<ReimbursementAllocation>.unmodifiable(e.value),
+      };
+      _reimbursementsByExpenseReference = {
+        for (final e in byExpense.entries)
+          e.key: List<ReimbursementAllocation>.unmodifiable(e.value),
+      };
+    } catch (e) {
+      debugPrint("debug: Error loading reimbursements: $e");
+    }
+  }
+
   Map<int, String> get bankNamesById => _bankNamesById;
   Map<int, String> get bankShortNamesById => _bankShortNamesById;
 
@@ -605,6 +701,11 @@ class TransactionProvider with ChangeNotifier {
         CashConstants.bankId: CashConstants.bankShortName,
         for (final bank in banks) bank.id: bank.shortName,
       };
+      _bankImagesById = {
+        CashConstants.bankId: CashConstants.bankImage,
+        for (final bank in banks) bank.id: bank.image,
+      };
+      await _reloadReimbursementState();
       final labels = _buildSelfTransferLabels(
         _telebirrMatchService.findMatches(_allTransactions, banks),
       );

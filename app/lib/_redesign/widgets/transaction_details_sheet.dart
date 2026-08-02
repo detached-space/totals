@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
@@ -1188,6 +1189,26 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
   }
 
+  /// Short label for the reimbursement row: how much of this credit is linked
+  /// to expenses, or "Link" when nothing is linked yet.
+  String _reimbursementLabel() {
+    final linked = _provider.allocatedReimbursementAmount(_tx);
+    if (linked <= 0) return 'Link';
+    return 'ETB ${linked.toStringAsFixed(2)} linked';
+  }
+
+  /// Opens the sheet to link this reimbursement (credit) to the expenses it
+  /// repays, then refreshes so the label and budgets reflect the change.
+  Future<void> _openReimbursementSheet() async {
+    await showReimbursementLinkSheet(
+      context: context,
+      transaction: _tx,
+      provider: _provider,
+    );
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Future<void> _openLoanDebtPersonPrompt(Transaction transaction) async {
     final hostContext = widget.hostContext;
     _dismissComposerState(clearDraft: true);
@@ -1400,6 +1421,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                           marquee: true,
                           onTap: () {
                             unawaited(_openAccountAssignmentSheet());
+                          },
+                        ),
+                      if (_tx.type == 'CREDIT')
+                        _DetailRow(
+                          label: 'Reimbursement',
+                          value: _reimbursementLabel(),
+                          marquee: true,
+                          onTap: () {
+                            unawaited(_openReimbursementSheet());
                           },
                         ),
                       if (_formattedDate != null)

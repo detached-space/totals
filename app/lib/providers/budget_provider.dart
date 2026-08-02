@@ -192,7 +192,7 @@ class BudgetProvider with ChangeNotifier {
     return await _budgetService.getBudgetStatus(budget);
   }
 
-  Future<void> refreshBudgetStatuses() async {
+  Future<void> refreshBudgetStatuses({bool waitForWidget = true}) async {
     await _refreshBudgetStatuses();
     await _refreshBudgetWidgetSafe();
     notifyListeners();
