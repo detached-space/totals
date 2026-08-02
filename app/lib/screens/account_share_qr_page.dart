@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
@@ -194,6 +195,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
       await Share.shareXFiles(
         [XFile(file.path)],
         text: shareText,
+        sharePositionOrigin: sharePositionOriginFor(context),
       );
     } catch (e) {
       if (!mounted) return;

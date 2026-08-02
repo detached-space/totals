@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:totals/providers/theme_provider.dart';
@@ -279,6 +280,7 @@ class _SettingsPageState extends State<SettingsPage>
                 [XFile(tempFile.path)],
                 text: 'Totals Data Export',
                 subject: 'Totals Backup',
+                sharePositionOrigin: sharePositionOriginFor(context),
               );
 
               ScaffoldMessenger.of(context).showSnackBar(
@@ -472,6 +474,7 @@ class _SettingsPageState extends State<SettingsPage>
           [XFile(file.path)],
           text: 'Totals Data Export',
           subject: 'Totals Backup',
+          sharePositionOrigin: sharePositionOriginFor(context),
         );
 
         if (mounted) {

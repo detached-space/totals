@@ -10,6 +10,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/_redesign/screens/shared_expense_vault_sheets.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';

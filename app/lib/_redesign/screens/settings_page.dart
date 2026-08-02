@@ -21,6 +21,7 @@ import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/ios_migration_service.dart';
 import 'package:totals/utils/platform_support.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
@@ -928,6 +929,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                 [XFile(tempFile.path)],
                 text: context.l10nTextRead('Totals Data Export'),
                 subject: context.l10nTextRead('Totals Backup'),
+                sharePositionOrigin: sharePositionOriginFor(context),
               );
               if (mounted) {
                 _showSnack(context.l10nTextRead('Use Share to save the file'));
@@ -1013,6 +1015,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
           [XFile(file.path)],
           text: context.l10nTextRead('Totals Data Export'),
           subject: context.l10nTextRead('Totals Backup'),
+          sharePositionOrigin: sharePositionOriginFor(context),
         );
         if (mounted)
           _showSnack(context.l10nTextRead('Data exported successfully'));

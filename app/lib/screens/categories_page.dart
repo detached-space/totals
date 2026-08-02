@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/auto_categorization.dart';
 import 'package:totals/models/category.dart';
@@ -652,6 +653,7 @@ class _AutoCategorizationShareSheetState
       await Share.shareXFiles(
         [XFile(file.path)],
         text: shareText,
+        sharePositionOrigin: sharePositionOriginFor(context),
       );
     } catch (e) {
       if (!mounted) return;

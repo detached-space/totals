@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:totals/services/bank_statement_description_service.dart';
 import 'package:totals/services/bank_statement_pdf_service.dart';
 import 'package:flutter/material.dart';
@@ -3659,6 +3660,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       await Share.shareXFiles(
         [XFile(file.path, mimeType: 'application/pdf')],
         subject: statement.fileName,
+        // iPad / iOS require a non-zero anchor within the window.
+        sharePositionOrigin: sharePositionOriginFor(context),
       );
     } catch (e) {
       messenger?.showSnackBar(

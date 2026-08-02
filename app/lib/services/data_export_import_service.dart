@@ -50,12 +50,16 @@ class DataExportImportService {
   /// Export all data to JSON
   Future<String> exportAllData() async {
     try {
-      final accounts = await _accountRepo.getAccounts();
+      // A backup must contain EVERYTHING regardless of the active profile —
+      // profile-filtered reads (getAccounts/getTransactions) drop rows whose
+      // profileId doesn't match the active profile (e.g. migrated data with a
+      // NULL profileId), producing an empty backup that wipes data on restore.
+      final accounts = await _accountRepo.getAllAccounts();
       final banks = await _getBanksFromDb();
       final budgets = await _budgetRepo.getAllBudgets();
       final categories = await _categoryRepo.getCategories();
       final userAccounts = await _userAccountRepo.getUserAccounts();
-      final transactions = await _transactionRepo.getTransactions();
+      final transactions = await _transactionRepo.getAllTransactions();
       final failedParses = await _failedParseRepo.getAll();
       final autoCategoryRules = await _autoCategorizationService.getRules();
       final autoCategoryPromptDismissals =

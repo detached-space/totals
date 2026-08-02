@@ -1523,7 +1523,6 @@ class _GroupInviteSheet extends StatelessWidget {
             final messenger = ScaffoldMessenger.maybeOf(context);
             final unavailableText = context
                 .l10nTextRead('Sharing is unavailable on this device.');
-            final box = context.findRenderObject() as RenderBox?;
             final shareText = _shareText(context);
             debugPrint(
               'debug: invite-share text="${shareText.replaceAll('\n', ' / ')}"',
@@ -1534,9 +1533,7 @@ class _GroupInviteSheet extends StatelessWidget {
               final result = await Share.share(
                 shareText,
                 subject: shellTitle,
-                sharePositionOrigin: box == null
-                    ? null
-                    : box.localToGlobal(Offset.zero) & box.size,
+                sharePositionOrigin: sharePositionOriginFor(context),
               );
               debugPrint(
                 'debug: invite-share result=${result.status} raw=${result.raw}',

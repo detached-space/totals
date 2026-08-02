@@ -54,7 +54,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 33,
+      version: 34,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -347,10 +347,10 @@ class DatabaseHelper {
       'CREATE INDEX idx_accounts_smsSubscriptionId '
       'ON accounts(bank, smsSubscriptionId)',
     );
-    // At most one default account per bank+profile.
+    // At most one default account per bank, global across all profiles.
     await db.execute('''
       CREATE UNIQUE INDEX idx_accounts_one_default_per_bank
-      ON accounts(bank, COALESCE(profileId, -1))
+      ON accounts(bank)
       WHERE isDefault = 1
     ''');
 
@@ -897,6 +897,80 @@ class DatabaseHelper {
       await _ensureTransactionSourceSmsSchema(db);
       await _ensureSyncSchema(db);
     }
+
+    // v34: collapse per-(bank,profile) defaults into ONE global default per
+    // bank, then rebuild the uniqueness index on bank alone. Runs after the
+    // <30 multi-account ensure above, so it drops+recreates whatever index
+    // that path created.
+    if (oldVersion < 34) {
+      await _migrateToGlobalDefaultPerBank(db);
+    }
+  }
+
+  /// v34: collapse any per-(bank,profile) defaults into ONE global default per
+  /// bank. Keeper election is deterministic — the active profile's default
+  /// wins, else the lowest account id among that bank's defaults. Every other
+  /// isDefault flag for the bank is cleared, then the uniqueness index is
+  /// rebuilt on (bank) alone. Only ever clears extras, so a bank with >=1
+  /// default keeps exactly one.
+  Future<void> _migrateToGlobalDefaultPerBank(Database db) async {
+    final prefs = await SharedPreferences.getInstance();
+    final activeProfileId = prefs.getInt('active_profile_id');
+
+    await db.transaction((txn) async {
+      // Drop the old per-(bank,profile) constraint first so duplicates can be
+      // collapsed and the new (bank)-only index can be created afterward.
+      await txn.execute(
+        'DROP INDEX IF EXISTS idx_accounts_one_default_per_bank',
+      );
+
+      final bankRows = await txn.rawQuery(
+        'SELECT DISTINCT bank FROM accounts WHERE isDefault = 1',
+      );
+      for (final row in bankRows) {
+        final bank = row['bank'] as int;
+
+        // Prefer the active profile's default for this bank, else lowest id.
+        List<Map<String, Object?>> keeperRows =
+            const <Map<String, Object?>>[];
+        if (activeProfileId != null) {
+          keeperRows = await txn.query(
+            'accounts',
+            columns: const <String>['id'],
+            where: 'bank = ? AND isDefault = 1 AND profileId = ?',
+            whereArgs: <Object?>[bank, activeProfileId],
+            orderBy: 'id ASC',
+            limit: 1,
+          );
+        }
+        if (keeperRows.isEmpty) {
+          keeperRows = await txn.query(
+            'accounts',
+            columns: const <String>['id'],
+            where: 'bank = ? AND isDefault = 1',
+            whereArgs: <Object?>[bank],
+            orderBy: 'id ASC',
+            limit: 1,
+          );
+        }
+        if (keeperRows.isEmpty) continue;
+        final keeperId = keeperRows.single['id'];
+
+        // Clear every other default for this bank, across all profiles.
+        await txn.update(
+          'accounts',
+          const <String, Object?>{'isDefault': 0},
+          where: 'bank = ? AND isDefault = 1 AND id != ?',
+          whereArgs: <Object?>[bank, keeperId],
+        );
+      }
+
+      await txn.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_default_per_bank
+        ON accounts(bank)
+        WHERE isDefault = 1
+      ''');
+    });
   }
 
   /// Stores the original bank SMS body per transaction so it can be shown or
@@ -1020,8 +1094,10 @@ class DatabaseHelper {
       'ON accounts(bank, smsSubscriptionId)',
     );
 
-    // Elect one deterministic default per bank+profile before enforcing the
-    // uniqueness constraint. The lowest id wins until the user changes it.
+    // Elect one deterministic default per bank (global across profiles) before
+    // enforcing the uniqueness constraint. The lowest id wins until the user
+    // changes it. A later <34 migration re-collapses/rebuilds this anyway, but
+    // keeping both paths on (bank) alone avoids a transient shape mismatch.
     await db.execute('UPDATE accounts SET isDefault = 0');
     await db.execute('''
       UPDATE accounts
@@ -1029,12 +1105,12 @@ class DatabaseHelper {
       WHERE id IN (
         SELECT MIN(id)
         FROM accounts
-        GROUP BY bank, COALESCE(profileId, -1)
+        GROUP BY bank
       )
     ''');
     await db.execute('''
       CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_default_per_bank
-      ON accounts(bank, COALESCE(profileId, -1))
+      ON accounts(bank)
       WHERE isDefault = 1
     ''');
   }

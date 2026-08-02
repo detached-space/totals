@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:totals/utils/share_position.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
@@ -104,6 +105,7 @@ class _StatsRecapContentState extends State<StatsRecapContent> {
       await Share.shareXFiles(
         [XFile(imagePath)],
         text: 'My ${widget.data.year} Totals Recap!',
+        sharePositionOrigin: sharePositionOriginFor(context),
       );
     } catch (e) {
       if (mounted) {

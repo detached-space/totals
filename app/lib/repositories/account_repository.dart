@@ -221,9 +221,10 @@ class AccountRepository {
     return true;
   }
 
-  /// Makes [accountNumber] the default (catch-all) account for its bank.
-  /// Clears the default from the other accounts in the same bank+profile group
-  /// so the one-default-per-bank invariant holds.
+  /// Makes [accountNumber] the default (catch-all) account for its bank. The
+  /// default is global across all profiles, so this clears the flag from every
+  /// other account of the same bank in any profile — exactly one account
+  /// bank-wide stays default, which is what the ingest fallback relies on.
   Future<bool> setDefaultAccount({
     required String accountNumber,
     required int bank,
@@ -231,30 +232,29 @@ class AccountRepository {
     final db = await DatabaseHelper.instance.database;
     final target = await db.query(
       'accounts',
-      columns: const <String>['profileId'],
+      columns: const <String>['accountNumber'],
       where: 'accountNumber = ? AND bank = ?',
       whereArgs: [accountNumber, bank],
       limit: 1,
     );
     if (target.isEmpty) return false;
-    final profileId = target.single['profileId'] as int?;
-    final profileClause =
-        profileId == null ? 'profileId IS NULL' : 'profileId = ?';
-    final profileArgs = profileId == null ? <Object?>[] : <Object?>[profileId];
 
+    // Every account of this bank, across all profiles — for the sync payload.
     final groupRows = await db.query(
       'accounts',
       columns: const <String>['accountNumber'],
-      where: 'bank = ? AND $profileClause',
-      whereArgs: [bank, ...profileArgs],
+      where: 'bank = ?',
+      whereArgs: [bank],
     );
 
     await db.transaction((txn) async {
+      // Clear-then-set in one transaction keeps the unique index
+      // (bank WHERE isDefault=1) satisfied at every statement boundary.
       await txn.update(
         'accounts',
         const <String, Object?>{'isDefault': 0},
-        where: 'bank = ? AND $profileClause',
-        whereArgs: [bank, ...profileArgs],
+        where: 'bank = ?',
+        whereArgs: [bank],
       );
       await txn.update(
         'accounts',
@@ -278,21 +278,18 @@ class AccountRepository {
     return true;
   }
 
-  /// If a bank+profile group has accounts but no default, promotes the
-  /// lowest-id account so unmatched transactions always have a catch-all.
+  /// If a bank has accounts but no default anywhere, promotes the lowest-id
+  /// account (across all profiles) so unmatched transactions always have a
+  /// single global catch-all.
   Future<void> _ensureDefaultAccountForBank(
     Database db,
     int bank,
-    int? profileId,
   ) async {
-    final profileClause =
-        profileId == null ? 'profileId IS NULL' : 'profileId = ?';
-    final profileArgs = profileId == null ? <Object?>[] : <Object?>[profileId];
     final rows = await db.query(
       'accounts',
       columns: const <String>['id', 'accountNumber', 'isDefault'],
-      where: 'bank = ? AND $profileClause',
-      whereArgs: [bank, ...profileArgs],
+      where: 'bank = ?',
+      whereArgs: [bank],
       orderBy: 'id ASC',
     );
     if (rows.isEmpty || rows.any((row) => row['isDefault'] == 1)) return;
@@ -401,18 +398,6 @@ class AccountRepository {
       }
     }
 
-    // Capture the account's profile before deleting so we can re-elect a
-    // default within the same bank+profile group.
-    final deletedRows = await db.query(
-      'accounts',
-      columns: const <String>['profileId'],
-      where: 'accountNumber = ? AND bank = ?',
-      whereArgs: [accountNumber, bank],
-      limit: 1,
-    );
-    final deletedProfileId =
-        deletedRows.isEmpty ? null : deletedRows.single['profileId'] as int?;
-
     // Finally, delete the account itself
     await db.delete(
       'accounts',
@@ -421,9 +406,9 @@ class AccountRepository {
     );
 
     // If the deleted account was the bank's default, promote another so
-    // unmatched transactions keep a catch-all.
+    // unmatched transactions keep a single global catch-all.
     if (bank != CashConstants.bankId) {
-      await _ensureDefaultAccountForBank(db, bank, deletedProfileId);
+      await _ensureDefaultAccountForBank(db, bank);
     }
   }
 }
