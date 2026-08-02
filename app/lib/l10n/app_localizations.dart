@@ -1794,7 +1794,7 @@ class AppLocalizations {
     "This week": "በዚህ ሳምንት",
     "This month": "በዚህ ወር",
     "Last 7 days": "ያለፉት 7 ቀናት",
-    "Last 90 days cash flow used in this score":
+    "Last 90 days money flow used in this score":
         "በዚህ ውጤት ውስጥ ጥቅም ላይ የዋለ ያለፉት 90 ቀናት የጥሬ ገንዘብ ፍሰት",
     "Daily": "በየቀኑ",
     "Weekly": "በየሳምንቱ",
@@ -1853,13 +1853,12 @@ class AppLocalizations {
     "Accounts": "አካውንቶች",
     "Analytics": "ትንታኔ",
     "Ledger": "መዝገብ",
-    "Cash Flow": "የገንዘብ ፍሰት",
-    "Cash Flow (90 Days)": "የገንዘብ ፍሰት (90 ቀናት)",
+    "Money Flow (90 Days)": "የገንዘብ ፍሰት (90 ቀናት)",
     "Runway": "የቆይታ ጊዜ",
     "Stability": "መረጋጋት",
     "Fixed Costs": "ቋሚ ወጪዎች",
     "Tap to see how this score works": "ይህ ውጤት እንዴት እንደሚሰራ ለማየት ይንኩ",
-    "This score blends your last 90 days of cash flow with balance runway, recent consistency, and essential-cost pressure.":
+    "This score blends your last 90 days of money flow with balance runway, recent consistency, and essential-cost pressure.":
         "ይህ ውጤት ያለፉትን 90 ቀናት የገንዘብ ፍሰት ከቀሪ ሂሳብ ቆይታ፣ ከቅርብ ጊዜ መረጋጋት እና ከአስፈላጊ ወጪዎች ጫና ጋር ያቀላቅላል።",
     "balance": "ቀሪ ሂሳብ",
     "avg monthly expense": "አማካይ ወርሃዊ ወጪ",

@@ -21,6 +21,7 @@ import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/telebirr_bank_transfer_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/account_balance_resolver.dart';
+import 'package:totals/services/notification_service.dart';
 import 'package:totals/models/reimbursement_allocation.dart';
 import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
@@ -1799,6 +1800,10 @@ class TransactionProvider with ChangeNotifier {
         updated,
         skipAutoCategorization: true,
       );
+      // Editing/categorizing a transaction clears its pending notification.
+      unawaited(
+        NotificationService.instance.dismissTransactionNotification(updated),
+      );
     } catch (e) {
       if (previous != null) {
         _replaceTransactionLocally(previous);
@@ -1835,6 +1840,10 @@ class TransactionProvider with ChangeNotifier {
       await _transactionRepo.saveTransaction(
         updated,
         skipAutoCategorization: true,
+      );
+      // Editing/categorizing a transaction clears its pending notification.
+      unawaited(
+        NotificationService.instance.dismissTransactionNotification(updated),
       );
     } catch (e) {
       if (previous != null) {
@@ -1951,6 +1960,10 @@ class TransactionProvider with ChangeNotifier {
       await _transactionRepo.saveTransaction(
         updated,
         skipAutoCategorization: true,
+      );
+      // Editing/categorizing a transaction clears its pending notification.
+      unawaited(
+        NotificationService.instance.dismissTransactionNotification(updated),
       );
     } catch (e) {
       if (previous != null) {

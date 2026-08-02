@@ -1542,6 +1542,19 @@ class NotificationService {
     return null;
   }
 
+  /// Cancels the notification for a transaction — used when the user
+  /// categorizes it, so a handled transaction stops nagging.
+  Future<void> dismissTransactionNotification(Transaction transaction) async {
+    try {
+      await ensureInitialized();
+      await _plugin.cancel(_notificationId(transaction));
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to dismiss transaction notification: $e');
+      }
+    }
+  }
+
   static int _notificationId(Transaction transaction) {
     // Stable ID so "same reference" updates instead of spamming.
     final raw = transaction.reference.isEmpty

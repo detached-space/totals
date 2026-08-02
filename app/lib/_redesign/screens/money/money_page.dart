@@ -4761,7 +4761,7 @@ class _FinancialHealthCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      context.l10nText('Cash Flow (90 Days)').toUpperCase(),
+                      context.l10nText('Money Flow (90 Days)').toUpperCase(),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: AppColors.textSecondary(context),
                         letterSpacing: 0.8,
@@ -4945,7 +4945,7 @@ class _FinancialHealthSheet extends StatelessWidget {
               ),
               Text(
                 context.l10nText(
-                  'This score blends your last 90 days of cash flow with balance runway, recent consistency, and essential-cost pressure.',
+                  'This score blends your last 90 days of money flow with balance runway, recent consistency, and essential-cost pressure.',
                 ),
                 style: TextStyle(
                   color: AppColors.textSecondary(context),
@@ -4993,7 +4993,7 @@ class _FinancialHealthSheet extends StatelessWidget {
                         children: [
                           Text(
                             context.l10nText(
-                              'Last 90 days cash flow used in this score',
+                              'Last 90 days money flow used in this score',
                             ),
                             style: TextStyle(
                               color: AppColors.textSecondary(context),
@@ -5030,7 +5030,7 @@ class _FinancialHealthSheet extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               _FinancialHealthMetricTile(
-                title: 'Cash Flow',
+                title: 'Money Flow',
                 weight: '40%',
                 score: financialHealth.cashFlowScore,
                 detail:
