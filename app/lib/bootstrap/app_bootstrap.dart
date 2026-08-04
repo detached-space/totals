@@ -77,6 +77,11 @@ typedef BootstrapInitializer = Future<void> Function({
 
 typedef BootstrapThemeModeLoader = Future<ThemeMode> Function();
 
+typedef BootstrapAppBuilder = Widget Function(
+  BuildContext context,
+  ThemeMode initialThemeMode,
+);
+
 class BootstrapFailure implements Exception {
   BootstrapFailure({
     required this.phase,
@@ -387,7 +392,7 @@ class AppBootstrapGate extends StatefulWidget {
     this.themeModeLoader,
   });
 
-  final WidgetBuilder appBuilder;
+  final BootstrapAppBuilder appBuilder;
   final BootstrapInitializer? bootstrapInitializer;
   final BootstrapThemeModeLoader? themeModeLoader;
 
@@ -399,13 +404,14 @@ class _AppBootstrapGateState extends State<AppBootstrapGate> {
   BootstrapPhase _phase = BootstrapPhase.preparing;
   BootstrapFailure? _failure;
   ThemeMode _themeMode = ThemeMode.system;
+  late final Future<void> _themeModeLoad;
   bool _isRunning = false;
   bool _isReady = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadThemeMode());
+    _themeModeLoad = _loadThemeMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initialize();
     });
@@ -444,6 +450,9 @@ class _AppBootstrapGateState extends State<AppBootstrapGate> {
           setState(() => _phase = phase);
         },
       );
+      // Keep startup work and preference loading concurrent, but do not replace
+      // the bootstrap tree until its resolved theme can be handed to the app.
+      await _themeModeLoad;
       if (!mounted) return;
       setState(() {
         _isRunning = false;
@@ -473,7 +482,7 @@ class _AppBootstrapGateState extends State<AppBootstrapGate> {
   @override
   Widget build(BuildContext context) {
     if (_isReady) {
-      return widget.appBuilder(context);
+      return widget.appBuilder(context, _themeMode);
     }
 
     return _BootstrapMaterialApp(

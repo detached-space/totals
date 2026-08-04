@@ -107,9 +107,10 @@ void main() {
 
   runApp(
     AppBootstrapGate(
-      appBuilder: (_) => const MyApp(
+      appBuilder: (_, initialThemeMode) => MyApp(
         useRedesign: true,
         showOnboarding: false,
+        initialThemeMode: initialThemeMode,
       ),
     ),
   );
@@ -118,18 +119,22 @@ void main() {
 class MyApp extends StatelessWidget {
   final bool useRedesign;
   final bool showOnboarding;
+  final ThemeMode? initialThemeMode;
 
   const MyApp({
     super.key,
     required this.useRedesign,
     this.showOnboarding = false,
+    this.initialThemeMode,
   });
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(
+          create: (_) => ThemeProvider(initialThemeMode: initialThemeMode),
+        ),
         ChangeNotifierProvider(create: (_) => TransactionProvider()),
         ChangeNotifierProvider(create: (_) => BudgetProvider()),
 
