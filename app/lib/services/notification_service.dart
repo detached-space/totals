@@ -539,6 +539,7 @@ class NotificationService {
           channel: _transactionChannelId,
           title: title,
           body: body,
+          transactionReference: transaction.reference,
         );
       }
     } catch (e) {
@@ -548,7 +549,10 @@ class NotificationService {
     }
   }
 
-  Future<void> dismissTransactionNotification(Transaction transaction) async {
+  Future<void> dismissTransactionNotification(
+    Transaction transaction, {
+    bool removeFromHistory = false,
+  }) async {
     try {
       await ensureInitialized();
       await _plugin.cancel(_notificationId(transaction));
@@ -556,6 +560,9 @@ class NotificationService {
       if (kDebugMode) {
         print('debug: Failed to dismiss transaction notification: $e');
       }
+    }
+    if (removeFromHistory) {
+      await _removeTransactionNotificationFromHistory(transaction.reference);
     }
   }
 
@@ -1679,6 +1686,7 @@ class NotificationService {
     required String channel,
     required String title,
     required String body,
+    String? transactionReference,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1688,6 +1696,7 @@ class NotificationService {
         title: title,
         body: body,
         sentAt: DateTime.now(),
+        transactionReference: transactionReference,
       );
       rawEntries.insert(0, jsonEncode(entry.toJson()));
       if (rawEntries.length > _maxHistoryEntries) {
@@ -1698,6 +1707,31 @@ class NotificationService {
       // Ignore persistence failures for notification history.
     }
   }
+
+  Future<void> _removeTransactionNotificationFromHistory(
+    String transactionReference,
+  ) async {
+    final reference = transactionReference.trim();
+    if (reference.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawEntries = prefs.getStringList(_historyPrefsKey) ?? <String>[];
+      rawEntries.removeWhere((raw) {
+        try {
+          final jsonMap = jsonDecode(raw) as Map<String, dynamic>;
+          return NotificationHistoryEntry.fromJson(jsonMap)
+                  .transactionReference ==
+              reference;
+        } catch (_) {
+          return false;
+        }
+      });
+      await prefs.setStringList(_historyPrefsKey, rawEntries);
+    } catch (_) {
+      // Notification dismissal should not fail on history cleanup.
+    }
+  }
 }
 
 class NotificationHistoryEntry {
@@ -1705,12 +1739,14 @@ class NotificationHistoryEntry {
   final String title;
   final String body;
   final DateTime sentAt;
+  final String? transactionReference;
 
   const NotificationHistoryEntry({
     required this.channel,
     required this.title,
     required this.body,
     required this.sentAt,
+    this.transactionReference,
   });
 
   factory NotificationHistoryEntry.fromJson(Map<String, dynamic> json) {
@@ -1718,11 +1754,17 @@ class NotificationHistoryEntry {
     final title = (json['title'] as String?)?.trim();
     final body = (json['body'] as String?)?.trim();
     final sentAtRaw = json['sentAt'] as String?;
+    final transactionReference =
+        (json['transactionReference'] as String?)?.trim();
     return NotificationHistoryEntry(
       channel: (channel == null || channel.isEmpty) ? 'unknown' : channel,
       title: (title == null || title.isEmpty) ? 'Notification' : title,
       body: body ?? '',
       sentAt: DateTime.tryParse(sentAtRaw ?? '') ?? DateTime.now(),
+      transactionReference:
+          transactionReference == null || transactionReference.isEmpty
+              ? null
+              : transactionReference,
     );
   }
 
@@ -1732,6 +1774,8 @@ class NotificationHistoryEntry {
       'title': title,
       'body': body,
       'sentAt': sentAt.toIso8601String(),
+      if (transactionReference != null)
+        'transactionReference': transactionReference,
     };
   }
 }

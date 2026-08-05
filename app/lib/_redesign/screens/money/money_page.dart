@@ -14940,6 +14940,7 @@ class _BankGridState extends State<_BankGrid> with WidgetsBindingObserver {
           isCash: isCash,
           accountCount: bank.accountCount,
           balance: bank.totalBalance,
+          isIncludedInTotalBalance: bank.hasAccountsIncludedInTotalBalance,
           showBalance: widget.showBalance,
           syncProgress: isCash
               ? null
@@ -14985,6 +14986,7 @@ class _BankGridCard extends StatelessWidget {
   final bool isCash;
   final int accountCount;
   final double balance;
+  final bool isIncludedInTotalBalance;
   final bool showBalance;
   final double? syncProgress;
   final VoidCallback onTap;
@@ -14994,6 +14996,7 @@ class _BankGridCard extends StatelessWidget {
     required this.isCash,
     required this.accountCount,
     required this.balance,
+    required this.isIncludedInTotalBalance,
     required this.showBalance,
     this.syncProgress,
     required this.onTap,
@@ -15006,8 +15009,11 @@ class _BankGridCard extends StatelessWidget {
         : _localizedBankLabel(context, bankId);
     final bankImage = _getBankImage(bankId);
     final currencyLabel = context.l10nText('ETB');
-    final balanceLabel =
-        showBalance ? '$currencyLabel ${_formatEtbFull(balance)}' : '*****';
+    final balanceLabel = !isIncludedInTotalBalance
+        ? context.l10nText('Not in total balance')
+        : showBalance
+            ? '$currencyLabel ${_formatEtbFull(balance)}'
+            : '*****';
     final subtitleLabel = isCash
         ? context.l10nText('On-hand cash')
         : _formatLocalizedCount(context, accountCount, 'Account', 'Accounts');
@@ -15066,14 +15072,18 @@ class _BankGridCard extends StatelessWidget {
                     style: TextStyle(
                       color: isSyncing
                           ? AppColors.primaryLight
-                          : showBalance
+                          : showBalance && isIncludedInTotalBalance
                               ? (AppColors.isDark(context)
                                   ? AppColors.slate400
                                   : AppColors.slate700)
                               : AppColors.textSecondary(context),
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: (isSyncing || showBalance) ? 0 : 2,
+                      letterSpacing: (isSyncing ||
+                              showBalance ||
+                              !isIncludedInTotalBalance)
+                          ? 0
+                          : 2,
                     ),
                   ),
                 ],

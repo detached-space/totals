@@ -8,6 +8,7 @@ class BankSummary {
   final double pendingCredit;
   final double totalBalance;
   final int accountCount;
+  final bool hasAccountsIncludedInTotalBalance;
   final double transferIn;
   final double transferOut;
   final double feesAndVat;
@@ -24,6 +25,7 @@ class BankSummary {
       required this.settledBalance,
       required this.totalBalance,
       required this.pendingCredit,
+      required this.hasAccountsIncludedInTotalBalance,
       this.transferIn = 0.0,
       this.transferOut = 0.0,
       this.feesAndVat = 0.0,

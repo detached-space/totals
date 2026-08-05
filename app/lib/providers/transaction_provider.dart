@@ -1073,6 +1073,7 @@ class TransactionProvider with ChangeNotifier {
         pendingCredit: pendingCredit,
         totalBalance: totalBalance,
         accountCount: accounts.length,
+        hasAccountsIncludedInTotalBalance: includedAccounts.isNotEmpty,
         transferIn: transferIn,
         transferOut: transferOut,
         feesAndVat: feesAndVat,

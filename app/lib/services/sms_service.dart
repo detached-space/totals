@@ -14,12 +14,14 @@ import 'package:totals/models/account.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/models/transaction_source_sms.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_source_sms_repository.dart';
 import 'package:flutter/widgets.dart';
 import 'package:totals/services/failed_parse_review_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/self_transfer_notification_resolver.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -128,6 +130,9 @@ onBackgroundMessage(SmsMessage message) async {
 class SmsService {
   final Telephony _telephony = Telephony.instance;
   static final BankConfigService _bankConfigService = BankConfigService();
+  static final SelfTransferNotificationResolver
+      _selfTransferNotificationResolver = SelfTransferNotificationResolver();
+  static Future<void> _transactionNotificationTurn = Future<void>.value();
   static List<Bank>? _cachedBanks;
   static bool _cachedBanksLoadedWithRemoteFetch = false;
   static const String _atmCashCutoffPrefPrefix =
@@ -964,6 +969,65 @@ class SmsService {
     }
   }
 
+  static Future<void> _showTransactionNotificationUnlessSelfTransfer(
+    Transaction transaction,
+  ) async {
+    final previousTurn = _transactionNotificationTurn;
+    final currentTurn = Completer<void>();
+    _transactionNotificationTurn = currentTurn.future;
+    try {
+      await previousTurn;
+      await _showTransactionNotificationUnlessSelfTransferNow(transaction);
+    } finally {
+      currentTurn.complete();
+    }
+  }
+
+  static Future<void> _showTransactionNotificationUnlessSelfTransferNow(
+    Transaction transaction,
+  ) async {
+    try {
+      final transactions = await TransactionRepository().getTransactions();
+      final banks = await _bankConfigService.getBanks(allowRemoteFetch: false);
+      final accounts = await AccountRepository().getAccounts();
+      final categories = await CategoryRepository().getCategories();
+      final suppressedTransactions =
+          _selfTransferNotificationResolver.transactionsToSuppress(
+        transaction: transaction,
+        transactions: transactions,
+        banks: banks,
+        accounts: accounts,
+        categories: categories,
+      );
+
+      if (suppressedTransactions.isNotEmpty) {
+        final dismissedReferences = <String>{};
+        for (final suppressedTransaction in suppressedTransactions) {
+          if (!dismissedReferences.add(suppressedTransaction.reference)) {
+            continue;
+          }
+          await NotificationService.instance.dismissTransactionNotification(
+            suppressedTransaction,
+            removeFromHistory: true,
+          );
+        }
+        debugPrint(
+          'debug: Transaction notification skipped — self transfer detected',
+        );
+        return;
+      }
+    } catch (error) {
+      debugPrint(
+        'debug: Could not check self-transfer notification: $error',
+      );
+    }
+
+    await NotificationService.instance.showTransactionNotification(
+      transaction: transaction,
+      bankId: transaction.bankId,
+    );
+  }
+
   // Static processing logic so it can be used by background handler too.
   static Future<Transaction?> processMessage(
     String messageBody,
@@ -1164,9 +1228,8 @@ class SmsService {
           if (canonicalResult != null) {
             if (canonicalResult.status == ParseStatus.success &&
                 canonicalResult.transaction != null) {
-              await NotificationService.instance.showTransactionNotification(
-                transaction: canonicalResult.transaction!,
-                bankId: canonicalResult.transaction!.bankId,
+              await _showTransactionNotificationUnlessSelfTransfer(
+                canonicalResult.transaction!,
               );
             }
             return canonicalResult;
@@ -1381,7 +1444,6 @@ class SmsService {
       );
     }
 
-    int bankId = parsedBankId;
     if (resolvedOwner != null && details['currentBalance'] != null) {
       final newBalance = sanitizeAmount(details['currentBalance']);
       await _saveUpdatedAccountBalance(
@@ -1420,10 +1482,7 @@ class SmsService {
     }
 
     if (notifyUser) {
-      await NotificationService.instance.showTransactionNotification(
-        transaction: savedTx,
-        bankId: bankId,
-      );
+      await _showTransactionNotificationUnlessSelfTransfer(savedTx);
     }
 
     if (savedTx.type == 'DEBIT') {
