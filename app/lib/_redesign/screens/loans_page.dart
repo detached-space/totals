@@ -515,6 +515,7 @@ class _LoansPageState extends State<LoansPage> {
     await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
+      enableDrag: true,
       backgroundColor: Colors.transparent,
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _LoanDebtDetailsSheet(
@@ -4447,8 +4448,6 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     final title = _isBorrowed
         ? context.l10nText('Debt details')
         : context.l10nText('Loan details');
-    final status =
-        _isBorrowed ? context.l10nText('Borrowed') : context.l10nText('Lent');
     final statusColor = _loanDebtStatusColor(_item.status, _directionColor);
     final subtitle =
         _needsPerson ? context.l10nText('Needs a person') : _item.personName;
@@ -4488,18 +4487,15 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      _TinyStatusPill(label: status, color: _directionColor),
-                      if (!_item.isActive) ...[
-                        const SizedBox(height: 5),
-                        _TinyStatusPill(
-                          label: _loanDebtStatusLabel(context, _item.status),
-                          color: statusColor,
-                        ),
-                      ],
-                    ],
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: context.l10nText('Close'),
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary(context),
+                      backgroundColor: AppColors.surfaceColor(context),
+                    ),
+                    icon: const Icon(AppIcons.close_rounded, size: 20),
                   ),
                 ],
               ),
@@ -5045,58 +5041,68 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     final keyboardLiftBuffer = bottomInset > 0 ? 28.0 : 0.0;
     final sheetBottomPadding = bottomSafeArea + (bottomInset > 0 ? 12.0 : 20.0);
 
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: bottomInset + keyboardLiftBuffer),
-      child: Container(
-        constraints: BoxConstraints(maxHeight: mediaQuery.size.height * 0.9),
-        decoration: BoxDecoration(
-          color: AppColors.cardColor(context),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border.all(color: AppColors.borderColor(context)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: EdgeInsets.fromLTRB(20, 10, 20, sheetBottomPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.borderColor(context),
-                      borderRadius: BorderRadius.circular(999),
+    return DraggableScrollableSheet(
+      initialChildSize: 0.82,
+      minChildSize: 0.45,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(bottom: bottomInset + keyboardLiftBuffer),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.cardColor(context),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border.all(color: AppColors.borderColor(context)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                controller: scrollController,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(20, 10, 20, sheetBottomPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 44,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.borderColor(context),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 18),
+                    _buildHeader(context),
+                    const SizedBox(height: 18),
+                    if (_needsPerson)
+                      _buildPersonAssignmentSection(context)
+                    else
+                      _buildLinkedPersonPanel(context),
+                    if (!_needsPerson) ...[
+                      const SizedBox(height: 14),
+                      _buildReturnDateSection(context),
+                    ],
+                    const SizedBox(height: 14),
+                    _buildDetailRows(context, provider),
+                    if (!_needsPerson) ...[
+                      const SizedBox(height: 14),
+                      _buildActionsSection(context),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 18),
-                _buildHeader(context),
-                const SizedBox(height: 18),
-                if (_needsPerson)
-                  _buildPersonAssignmentSection(context)
-                else
-                  _buildLinkedPersonPanel(context),
-                if (!_needsPerson) ...[
-                  const SizedBox(height: 14),
-                  _buildReturnDateSection(context),
-                ],
-                const SizedBox(height: 14),
-                _buildDetailRows(context, provider),
-                if (!_needsPerson) ...[
-                  const SizedBox(height: 14),
-                  _buildActionsSection(context),
-                ],
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -5454,6 +5460,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
     await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
+      enableDrag: true,
       backgroundColor: Colors.transparent,
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _LoanDebtDetailsSheet(
