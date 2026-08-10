@@ -95,11 +95,65 @@ void main() {
       expect(await _count(db, table), 1, reason: table);
     }
   });
+
+  test('clears transactions and accounts for only the selected banks',
+      () async {
+    await db.insert('accounts', {
+      'accountNumber': 'second-owned-account',
+      'bank': 2,
+      'balance': 20,
+      'accountHolderName': 'Owner',
+    });
+    await db.insert('transactions', {
+      'amount': 11,
+      'reference': 'bank-one-transaction',
+      'bankId': 1,
+    });
+    await db.insert('transactions', {
+      'amount': 22,
+      'reference': 'bank-two-transaction',
+      'bankId': 2,
+    });
+
+    await DataClearService().clear(
+      const ClearDataSelection(
+        financialData: true,
+        bankIds: {1},
+      ),
+    );
+
+    expect(await _countWhere(db, 'accounts', 'bank = ?', [1]), 0);
+    expect(await _countWhere(db, 'accounts', 'bank = ?', [2]), 1);
+    expect(await _countWhere(db, 'transactions', 'bankId = ?', [1]), 0);
+    expect(await _countWhere(db, 'transactions', 'bankId = ?', [2]), 1);
+    expect(
+      await _countWhere(db, 'transactions', 'bankId IS NULL', const []),
+      1,
+    );
+    expect(await _count(db, 'sms_patterns'), 1);
+  });
 }
 
 Future<int> _count(Database db, String table) async {
   return Sqflite.firstIntValue(
         await db.rawQuery('SELECT COUNT(*) FROM $table'),
+      ) ??
+      0;
+}
+
+Future<int> _countWhere(
+  Database db,
+  String table,
+  String where,
+  List<Object?> whereArgs,
+) async {
+  return Sqflite.firstIntValue(
+        await db.query(
+          table,
+          columns: const ['COUNT(*)'],
+          where: where,
+          whereArgs: whereArgs,
+        ),
       ) ??
       0;
 }
