@@ -90,11 +90,11 @@ class TelegramBotApi {
     return _postMap('getChat', fields: {'chat_id': chatId});
   }
 
-  Future<void> sendMessage({
+  Future<int> sendMessage({
     required String chatId,
     required String text,
   }) async {
-    await _post(
+    final result = await _postMap(
       'sendMessage',
       fields: {
         'chat_id': chatId,
@@ -103,6 +103,13 @@ class TelegramBotApi {
       },
       timeout: const Duration(seconds: 10),
     );
+    final messageId = (result['message_id'] as num?)?.toInt() ?? 0;
+    if (messageId <= 0) {
+      throw const TelegramBotApiException(
+        'Telegram did not return the message identifier.',
+      );
+    }
+    return messageId;
   }
 
   Future<TelegramRemoteDocument> sendDocument({
@@ -225,8 +232,9 @@ class TelegramBotApi {
   Future<Map<String, dynamic>> _postMap(
     String method, {
     Map<String, String> fields = const {},
+    Duration timeout = const Duration(seconds: 30),
   }) async {
-    final result = await _post(method, fields: fields);
+    final result = await _post(method, fields: fields, timeout: timeout);
     if (result is! Map) {
       throw const TelegramBotApiException(
         'Telegram returned an invalid response.',

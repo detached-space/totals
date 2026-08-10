@@ -38,7 +38,7 @@ class _TelegramBackupConsentPageState extends State<TelegramBackupConsentPage> {
     (
       AppIcons.schedule_rounded,
       'Backups can be automatic',
-      'After you connect a new private bot, backups start on a daily schedule '
+      'After you connect a new private bot, backups start on a weekly schedule '
           'using Wi-Fi or mobile data. You can change the schedule or use '
           'manual backups.',
     ),

@@ -75,6 +75,8 @@ class TelegramBackupService {
   static const String _pairingConfirmationMessage = '✅ Telegram is ready\n\n'
       "You're all set here. Return to Totals to finish setting up your "
       'encrypted backups.';
+  static const String _pendingBackupMessage =
+      'Preparing encrypted Totals backup…';
 
   Future<void> _operationQueue = Future<void>.value();
 
@@ -278,7 +280,7 @@ class TelegramBackupService {
         // producing this catalog. The user can deliberately move the schedule
         // here after disabling it on the old device.
         schedule: createdNewCatalog
-            ? TelegramBackupSchedule.daily
+            ? TelegramBackupSchedule.recommended
             : TelegramBackupSchedule.manual,
         scheduleAnchorAt: DateTime.now().toUtc(),
       );
@@ -466,6 +468,17 @@ class TelegramBackupService {
         config: connection.config,
         recoveryKey: connection.recoveryKey,
       );
+      final pendingBackup = connection.config.pendingBackup;
+      if (pendingBackup != null) {
+        return await _commitBackupEntry(
+          api: api,
+          config: connection.config,
+          loaded: loaded,
+          entry: pendingBackup,
+          recoveryKey: connection.recoveryKey,
+        );
+      }
+
       final exported = await _exportImportService.exportAllData();
       final encrypted = await _crypto.encrypt(
         utf8.encode(exported),
@@ -481,8 +494,20 @@ class TelegramBackupService {
 
       final now = DateTime.now().toUtc();
       final fileName = _backupFileName(now);
-      final uploaded = await api.sendDocument(
+      var uploadMessageId = connection.config.pendingUploadMessageId;
+      if (uploadMessageId == null) {
+        uploadMessageId = await api.sendMessage(
+          chatId: connection.config.chatId,
+          text: _pendingBackupMessage,
+        );
+        await _settings.recordPendingUploadMessageId(uploadMessageId);
+      }
+      // Upload by editing one durable placeholder message. If Telegram accepts
+      // the document but its response is lost, a retry replaces that same
+      // message instead of creating a second visible backup document.
+      final uploaded = await api.replaceDocument(
         chatId: connection.config.chatId,
+        messageId: uploadMessageId,
         bytes: encrypted,
         fileName: fileName,
         caption: 'Encrypted Totals backup • ${now.toIso8601String()}',
@@ -497,19 +522,17 @@ class TelegramBackupService {
         fileId: uploaded.fileId,
         messageId: uploaded.messageId,
       );
-      final updatedCatalog = loaded.catalog.add(entry);
-      final catalogDocument = await _replaceCatalog(
+      // Persist Telegram's document identifiers before touching the catalog.
+      // If catalog replacement or the final settings write fails, the retry
+      // can commit this exact upload instead of sending the backup again.
+      await _settings.recordPendingBackup(entry);
+      return await _commitBackupEntry(
         api: api,
         config: connection.config,
-        currentDocument: loaded.document,
-        catalog: updatedCatalog,
+        loaded: loaded,
+        entry: entry,
         recoveryKey: connection.recoveryKey,
       );
-      await _settings.recordBackupSuccess(
-        completedAt: now,
-        catalogMessageId: catalogDocument.messageId,
-      );
-      return entry;
     } on TelegramBackupException catch (error) {
       await _settings.recordBackupFailure(error.message);
       rethrow;
@@ -527,6 +550,36 @@ class TelegramBackupService {
     } finally {
       api.close();
     }
+  }
+
+  Future<TelegramBackupEntry> _commitBackupEntry({
+    required TelegramBotApi api,
+    required TelegramBackupConfig config,
+    required _LoadedCatalog loaded,
+    required TelegramBackupEntry entry,
+    required String recoveryKey,
+  }) async {
+    final alreadyCataloged = loaded.catalog.entries.any(
+      (existing) =>
+          existing.id == entry.id ||
+          existing.messageId == entry.messageId ||
+          existing.fileId == entry.fileId,
+    );
+    var catalogDocument = loaded.document;
+    if (!alreadyCataloged) {
+      catalogDocument = await _replaceCatalog(
+        api: api,
+        config: config,
+        currentDocument: loaded.document,
+        catalog: loaded.catalog.add(entry),
+        recoveryKey: recoveryKey,
+      );
+    }
+    await _settings.recordBackupSuccess(
+      completedAt: entry.createdAt,
+      catalogMessageId: catalogDocument.messageId,
+    );
+    return entry;
   }
 
   Future<_TelegramConnection> _connection() async {

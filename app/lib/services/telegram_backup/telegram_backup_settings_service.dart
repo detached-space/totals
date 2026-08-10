@@ -100,8 +100,24 @@ class TelegramBackupSettingsService {
         catalogMessageId: catalogMessageId,
         lastBackupAt: completedAt.toUtc(),
         clearLastBackupError: true,
+        clearPendingUploadMessageId: true,
+        clearPendingBackup: true,
       ),
     );
+  }
+
+  Future<void> recordPendingUploadMessageId(int messageId) async {
+    await reload();
+    final current = config.value;
+    if (current == null) return;
+    await _writeConfig(current.copyWith(pendingUploadMessageId: messageId));
+  }
+
+  Future<void> recordPendingBackup(TelegramBackupEntry entry) async {
+    await reload();
+    final current = config.value;
+    if (current == null) return;
+    await _writeConfig(current.copyWith(pendingBackup: entry));
   }
 
   Future<void> recordBackupFailure(String message) async {

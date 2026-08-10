@@ -3,6 +3,8 @@ enum TelegramBackupSchedule {
   daily,
   weekly;
 
+  static const recommended = TelegramBackupSchedule.weekly;
+
   String get storageValue {
     switch (this) {
       case TelegramBackupSchedule.manual:
@@ -39,6 +41,8 @@ class TelegramBackupConfig {
   final DateTime? scheduleAnchorAt;
   final DateTime? lastBackupAt;
   final String? lastBackupError;
+  final int? pendingUploadMessageId;
+  final TelegramBackupEntry? pendingBackup;
 
   const TelegramBackupConfig({
     required this.botId,
@@ -48,10 +52,12 @@ class TelegramBackupConfig {
     required this.chatDisplayName,
     required this.catalogMessageId,
     this.chatUsername,
-    this.schedule = TelegramBackupSchedule.daily,
+    this.schedule = TelegramBackupSchedule.recommended,
     this.scheduleAnchorAt,
     this.lastBackupAt,
     this.lastBackupError,
+    this.pendingUploadMessageId,
+    this.pendingBackup,
   });
 
   bool get isConfigured =>
@@ -67,6 +73,10 @@ class TelegramBackupConfig {
     DateTime? lastBackupAt,
     String? lastBackupError,
     bool clearLastBackupError = false,
+    int? pendingUploadMessageId,
+    bool clearPendingUploadMessageId = false,
+    TelegramBackupEntry? pendingBackup,
+    bool clearPendingBackup = false,
   }) {
     return TelegramBackupConfig(
       botId: botId,
@@ -81,6 +91,11 @@ class TelegramBackupConfig {
       lastBackupAt: lastBackupAt ?? this.lastBackupAt,
       lastBackupError:
           clearLastBackupError ? null : lastBackupError ?? this.lastBackupError,
+      pendingUploadMessageId: clearPendingUploadMessageId
+          ? null
+          : pendingUploadMessageId ?? this.pendingUploadMessageId,
+      pendingBackup:
+          clearPendingBackup ? null : pendingBackup ?? this.pendingBackup,
     );
   }
 
@@ -103,6 +118,9 @@ class TelegramBackupConfig {
       if (lastBackupAt != null)
         'lastBackupAt': lastBackupAt!.toUtc().toIso8601String(),
       if (lastBackupError != null) 'lastBackupError': lastBackupError,
+      if (pendingUploadMessageId != null)
+        'pendingUploadMessageId': pendingUploadMessageId,
+      if (pendingBackup != null) 'pendingBackup': pendingBackup!.toJson(),
     };
   }
 
@@ -125,7 +143,30 @@ class TelegramBackupConfig {
         (json['lastBackupAt'] as String?) ?? '',
       )?.toUtc(),
       lastBackupError: json['lastBackupError'] as String?,
+      pendingUploadMessageId: _positiveInt(json['pendingUploadMessageId']),
+      pendingBackup: _pendingBackupFromJson(json['pendingBackup']),
     );
+  }
+}
+
+int? _positiveInt(Object? raw) {
+  final value = (raw as num?)?.toInt();
+  return value != null && value > 0 ? value : null;
+}
+
+TelegramBackupEntry? _pendingBackupFromJson(Object? raw) {
+  if (raw is! Map) return null;
+  try {
+    final entry = TelegramBackupEntry.fromJson(
+      Map<String, dynamic>.from(raw),
+    );
+    return entry.id.isNotEmpty && entry.fileId.isNotEmpty && entry.messageId > 0
+        ? entry
+        : null;
+  } catch (_) {
+    // A damaged optional retry marker must not disconnect an otherwise valid
+    // Telegram backup configuration.
+    return null;
   }
 }
 

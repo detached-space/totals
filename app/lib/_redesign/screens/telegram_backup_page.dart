@@ -669,9 +669,9 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
         const SizedBox(height: 14),
         Text(
           context.l10nText(
-            'A new backup space starts with daily backups over Wi-Fi or mobile '
-            'data. When reconnecting an existing space, scheduling stays off '
-            'until you turn it on.',
+            'A new backup space starts with weekly backups over Wi-Fi or '
+            'mobile data. When reconnecting an existing space, scheduling '
+            'stays off until you turn it on.',
           ),
           textAlign: TextAlign.center,
           style: TextStyle(
@@ -949,7 +949,8 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
       case TelegramBackupSchedule.daily:
         return context.l10nText('Daily');
       case TelegramBackupSchedule.weekly:
-        return context.l10nText('Weekly');
+        return '${context.l10nText('Weekly')} '
+            '(${context.l10nText('recommended')})';
     }
   }
 
