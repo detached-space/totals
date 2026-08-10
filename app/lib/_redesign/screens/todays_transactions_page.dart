@@ -368,6 +368,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       isDebit: !isCredit,
                       isSelfTransfer: isSelfTransfer,
                       isMisc: isMisc,
+                      isReimbursed: provider.isReimbursedExpense(tx),
                       isSharing: provider.isSharingSharedExpenseTransaction(tx),
                       isShared: provider.isSharedExpenseTransaction(tx),
                       amount: _amountLabel(

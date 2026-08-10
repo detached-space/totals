@@ -216,12 +216,25 @@ class WidgetDataProvider {
   ) async {
     final categories = await _categoryRepository.getCategories();
     final categoryMap = {for (final c in categories) c.id: c};
+    final reimbursedByReference =
+        await _reimbursementRepository.getAppliedTotalsForExpenses(
+      transactions
+          .where((transaction) => transaction.type == 'DEBIT')
+          .map((transaction) => transaction.reference),
+    );
 
     final Map<int, double> categoryTotals = {};
     for (final tx in transactions) {
       final catId = tx.categoryId ?? 0;
-      final amount =
-          tx.type == 'DEBIT' ? transactionDebitOutflow(tx) : tx.amount;
+      final amount = tx.type == 'DEBIT'
+          ? transactionNetExpenseAmount(
+              tx,
+              isSelfTransfer: false,
+              reimbursedAmount:
+                  reimbursedByReference[tx.reference.trim()] ?? 0.0,
+            )
+          : tx.amount;
+      if (amount <= 0) continue;
       categoryTotals[catId] = (categoryTotals[catId] ?? 0) + amount;
     }
 
@@ -268,9 +281,19 @@ class WidgetDataProvider {
       start,
       end,
     );
+    final reimbursedByReference =
+        await _reimbursementRepository.getAppliedTotalsForExpenses(
+      transactions.map((transaction) => transaction.reference),
+    );
     return transactions.fold<double>(
       0.0,
-      (sum, tx) => sum + transactionDebitOutflow(tx),
+      (sum, tx) =>
+          sum +
+          transactionNetExpenseAmount(
+            tx,
+            isSelfTransfer: false,
+            reimbursedAmount: reimbursedByReference[tx.reference.trim()] ?? 0.0,
+          ),
     );
   }
 

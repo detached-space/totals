@@ -16,6 +16,7 @@ class InsightsService {
   // function that maps categoryId to Category? (nullable Category)
   final Category? Function(int? categoryId)? _getCategoryById;
   final bool Function(Transaction transaction)? _isExcludedFromIncome;
+  final double Function(Transaction transaction)? _expenseAmountForTransaction;
 
   // small memoization cache, will be cleared
   // when transactions change
@@ -25,8 +26,10 @@ class InsightsService {
     this._getTransactions, {
     Category? Function(int? categoryId)? getCategoryById,
     bool Function(Transaction transaction)? isExcludedFromIncome,
+    double Function(Transaction transaction)? expenseAmountForTransaction,
   })  : _getCategoryById = getCategoryById,
-        _isExcludedFromIncome = isExcludedFromIncome;
+        _isExcludedFromIncome = isExcludedFromIncome,
+        _expenseAmountForTransaction = expenseAmountForTransaction;
 
   void invalidate() => _cache = null;
 
@@ -40,9 +43,11 @@ class InsightsService {
     final income = transactions.where(_isEarnedIncome).toList();
     final totalIncome = MathUtils.findTransactionSum(income);
 
-    final expenses = transactions.where(_isExpense).toList();
-    final expensesAbs =
-        transactions.where(_isExpense).map((t) => t.amount.abs()).toList();
+    final expenses = transactions
+        .where((transaction) =>
+            _isExpense(transaction) && _expenseAmount(transaction) > 0)
+        .toList();
+    final expensesAbs = expenses.map(_expenseAmount).toList();
 
     final categoryBreakdown = _computeCategorySpend(transactions);
     final totalExpense = MathUtils.findSum(expensesAbs);
@@ -117,20 +122,22 @@ class InsightsService {
     return _cache!;
   }
 
-  List<Transaction> _anomalies(List<Transaction> expenses) {
+  List<Transaction> _anomalies(List<Transaction> transactions) {
     // we use simple z-score. i.e.
     // expense with 2 standard deviations to the right of the mean
     // i.e. expense > mean + 2 * sd
     // such an expense will be flagged as an anomaly.
 
-    if (expenses.length < 5) return [];
-    final amounts = expenses.map((t) => t.amount).toList();
+    if (transactions.length < 5) return [];
+    final amounts = transactions.map(_insightAmount).toList();
     final mean = MathUtils.findMean(amounts);
     final variance = MathUtils.findVariance(amounts);
 
     final sd = sqrt(variance); // standard deviation
     final limitValue = mean + 2 * sd;
-    return expenses.where((exp) => exp.amount > limitValue).toList();
+    return transactions
+        .where((transaction) => _insightAmount(transaction) > limitValue)
+        .toList();
   }
 
   double _avgMonthly(List<Transaction> txns) {
@@ -145,7 +152,7 @@ class InsightsService {
           DateTime.now().subtract(const Duration(days: 30));
       final key = '${txnDate.year}-${txnDate.month}';
 
-      byMonth[key] = (byMonth[key] ?? 0) + t.amount;
+      byMonth[key] = (byMonth[key] ?? 0) + _insightAmount(t);
     }
 
     return byMonth.values.isEmpty
@@ -216,7 +223,7 @@ class InsightsService {
     for (final t in txns) {
       if (_isIncome(t)) continue; // we only care about expenses here
 
-      final amount = t.amount.abs(); // we take the absolute value
+      final amount = _expenseAmount(t);
       final category = _getCategoryById?.call(t.categoryId);
 
       if (category == null) {
@@ -405,7 +412,7 @@ class InsightsService {
         // Calculate average using absolute values since these are expenses
         final total = exp.value.fold<double>(
           0.0,
-          (sum, tx) => sum + tx.amount.abs(),
+          (sum, tx) => sum + _expenseAmount(tx),
         );
         final avg = total / exp.value.length;
         return {
@@ -499,17 +506,25 @@ class InsightsService {
 
   Map<String, dynamic> _spendingPatterns(List<Transaction> txns) {
     final Map<String, double> byCategory = {};
+    final includedTransactions = txns.where((transaction) {
+      if (_isIncome(transaction)) {
+        return !(_isExcludedFromIncome?.call(transaction) ?? false);
+      }
+      return !_isExpense(transaction) || _expenseAmount(transaction) > 0;
+    }).toList(growable: false);
 
-    for (final txn in txns) {
+    for (final txn in includedTransactions) {
       final cat = _categoryFor(txn);
-      byCategory[cat] = (byCategory[cat] ?? 0) + (txn.amount);
+      byCategory[cat] = (byCategory[cat] ?? 0) + _insightAmount(txn);
     }
 
     // variance shows how volatile our spending is.
     // we scale the amounts down so that we work in thousands
     // this is because the variance can get very high,
     // even in the millions.
-    final amounts = txns.map((txn) => txn.amount / 1000.0).toList();
+    final amounts = includedTransactions
+        .map((txn) => _insightAmount(txn) / 1000.0)
+        .toList();
     final variance = MathUtils.findVariance(amounts);
 
     // then we convert the varaince into a stability index between
@@ -542,7 +557,7 @@ class InsightsService {
 
       final key = '${txnDate.year}-${txnDate.month}';
 
-      byMonth[key] = (byMonth[key] ?? 0) + t.amount;
+      byMonth[key] = (byMonth[key] ?? 0) + _insightAmount(t);
     }
 
     final sorted = byMonth.entries.toList()
@@ -554,6 +569,19 @@ class InsightsService {
     final beforeLast = sorted[sorted.length - 2].value;
 
     return last - beforeLast;
+  }
+
+  double _expenseAmount(Transaction transaction) {
+    final amount = _expenseAmountForTransaction?.call(transaction) ??
+        transaction.amount.abs();
+    if (!amount.isFinite || amount <= 0) return 0.0;
+    return amount;
+  }
+
+  double _insightAmount(Transaction transaction) {
+    return _isExpense(transaction)
+        ? _expenseAmount(transaction)
+        : transaction.amount;
   }
 }
 

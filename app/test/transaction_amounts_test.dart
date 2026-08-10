@@ -44,4 +44,32 @@ void main() {
       0,
     );
   });
+
+  test('reimbursements reduce summary expense without changing the debit', () {
+    final transaction = Transaction(
+      amount: 3000,
+      reference: 'reimbursed-expense',
+      type: 'DEBIT',
+    );
+
+    expect(
+      transactionNetExpenseAmount(
+        transaction,
+        isSelfTransfer: false,
+        reimbursedAmount: 2000,
+      ),
+      1000,
+    );
+    expect(transactionDebitOutflow(transaction), 3000);
+  });
+
+  test('net expense never becomes negative', () {
+    expect(
+      expenseAmountAfterReimbursement(
+        grossExpense: 1000,
+        reimbursedAmount: 1500,
+      ),
+      0,
+    );
+  });
 }

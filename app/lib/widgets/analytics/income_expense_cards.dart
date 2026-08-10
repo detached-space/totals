@@ -8,7 +8,6 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:intl/intl.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
-import 'package:totals/utils/transaction_amounts.dart';
 
 class IncomeExpenseCards extends StatelessWidget {
   final String? selectedCard;
@@ -186,12 +185,7 @@ class IncomeExpenseCards extends StatelessWidget {
                     t.categoryId, selectedExpenseCategoryIds))
             .fold(
               0.0,
-              (sum, t) =>
-                  sum +
-                  transactionExpenseAmount(
-                    t,
-                    isSelfTransfer: provider.isSelfTransfer(t),
-                  ),
+              (sum, t) => sum + provider.netExpenseAmountForTransaction(t),
             );
 
         return Row(

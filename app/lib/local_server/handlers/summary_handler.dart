@@ -12,6 +12,7 @@ import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 /// Handler for summary-related API endpoints
 class SummaryHandler {
@@ -92,6 +93,10 @@ class SummaryHandler {
       final transactions = await _filterOrphanedTransactions(allTransactions);
       final reimbursementReferences =
           await _reimbursementReferences(transactions);
+      final reimbursedExpenses =
+          await _reimbursementRepo.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
 
       // Calculate totals
       double totalBalance = 0;
@@ -117,7 +122,10 @@ class SummaryHandler {
             !reimbursementReferences.contains(t.reference.trim())) {
           totalCredit += t.amount.abs();
         } else if (t.type == 'DEBIT') {
-          totalDebit += t.amount.abs();
+          totalDebit += expenseAmountAfterReimbursement(
+            grossExpense: t.amount.abs(),
+            reimbursedAmount: reimbursedExpenses[t.reference.trim()] ?? 0.0,
+          );
         }
       }
 
@@ -151,6 +159,10 @@ class SummaryHandler {
       final transactions = await _filterOrphanedTransactions(allTransactions);
       final reimbursementReferences =
           await _reimbursementReferences(transactions);
+      final reimbursedExpenses =
+          await _reimbursementRepo.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
 
       // Group accounts by bank
       final Map<int, List<Account>> accountsByBank = {};
@@ -198,7 +210,10 @@ class SummaryHandler {
                 !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
             } else if (t.type == 'DEBIT') {
-              totalDebit += t.amount.abs();
+              totalDebit += expenseAmountAfterReimbursement(
+                grossExpense: t.amount.abs(),
+                reimbursedAmount: reimbursedExpenses[t.reference.trim()] ?? 0.0,
+              );
             }
           }
 
@@ -236,6 +251,10 @@ class SummaryHandler {
       final transactions = await _filterOrphanedTransactions(allTransactions);
       final reimbursementReferences =
           await _reimbursementReferences(transactions);
+      final reimbursedExpenses =
+          await _reimbursementRepo.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
 
       final accountSummaries = await Future.wait(
         accounts.map((account) async {
@@ -265,7 +284,10 @@ class SummaryHandler {
                 !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
             } else if (t.type == 'DEBIT') {
-              totalDebit += t.amount.abs();
+              totalDebit += expenseAmountAfterReimbursement(
+                grossExpense: t.amount.abs(),
+                reimbursedAmount: reimbursedExpenses[t.reference.trim()] ?? 0.0,
+              );
             }
           }
 

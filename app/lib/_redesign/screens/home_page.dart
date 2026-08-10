@@ -451,6 +451,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                     isDebit: !isCredit,
                                     isSelfTransfer: isSelfTransfer,
                                     isMisc: isMisc,
+                                    isReimbursed: provider
+                                        .isReimbursedExpense(transaction),
                                     isSharing: provider
                                         .isSharingSharedExpenseTransaction(
                                             transaction),

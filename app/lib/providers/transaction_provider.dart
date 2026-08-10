@@ -581,6 +581,11 @@ class TransactionProvider with ChangeNotifier {
     );
   }
 
+  bool isReimbursedExpense(Transaction transaction) {
+    return transaction.type == 'DEBIT' &&
+        reimbursedExpenseAmount(transaction) > 0;
+  }
+
   double incomeAmountForTransaction(Transaction transaction) {
     if (transaction.type != 'CREDIT') return 0.0;
     return transactionIncomeAmount(
@@ -590,11 +595,20 @@ class TransactionProvider with ChangeNotifier {
     );
   }
 
+  double netExpenseAmountForTransaction(Transaction transaction) {
+    return transactionNetExpenseAmount(
+      transaction,
+      isSelfTransfer: _isSelfTransfer(transaction),
+      reimbursedAmount: reimbursedExpenseAmount(transaction),
+    );
+  }
+
   double budgetExpenseAmountForTransaction(Transaction transaction) {
-    final gross = transactionDebitOutflow(transaction);
-    final reimbursed = reimbursedExpenseAmount(transaction);
-    final net = gross - reimbursed;
-    return net <= 0 ? 0.0 : net;
+    return transactionNetExpenseAmount(
+      transaction,
+      isSelfTransfer: false,
+      reimbursedAmount: reimbursedExpenseAmount(transaction),
+    );
   }
 
   Future<void> refreshReimbursements() async {
@@ -926,10 +940,7 @@ class TransactionProvider with ChangeNotifier {
           feesAndVat += feeAmount;
         }
         totalCredit += incomeAmountForTransaction(t);
-        totalDebit += transactionExpenseAmount(
-          t,
-          isSelfTransfer: isSelfTransfer,
-        );
+        totalDebit += netExpenseAmountForTransaction(t);
         if (isSelfTransfer && t.type == 'CREDIT') {
           transferIn += t.amount.abs();
         } else if (isSelfTransfer && t.type == 'DEBIT') {
@@ -1358,10 +1369,7 @@ class TransactionProvider with ChangeNotifier {
       if (!isCredit && !isDebit) continue;
 
       final incomeAmount = incomeAmountForTransaction(transaction);
-      final expenseAmount = transactionExpenseAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      final expenseAmount = netExpenseAmountForTransaction(transaction);
       final category = _categoryById[transaction.categoryId];
 
       if (isToday) {

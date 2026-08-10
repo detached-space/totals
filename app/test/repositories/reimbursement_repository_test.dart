@@ -17,9 +17,11 @@ import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/screens/stats_recap_page.dart';
 import 'package:totals/services/budget_service.dart';
 import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/financial_insights.dart';
+import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/utils/map_keys.dart';
 
 void main() {
@@ -149,12 +151,26 @@ void main() {
       provider.incomeAmountForTransaction(byReference['friend-two']!),
       0,
     );
+    expect(provider.isReimbursedExpense(byReference['lunch-one']!), isTrue);
+    expect(provider.isReimbursedExpense(byReference['lunch-two']!), isTrue);
+    expect(provider.isReimbursedExpense(byReference['friend-one']!), isFalse);
     final insights = InsightsService(
       () => provider.allTransactions,
       getCategoryById: provider.getCategoryById,
       isExcludedFromIncome: provider.isReimbursementTransaction,
+      expenseAmountForTransaction: provider.netExpenseAmountForTransaction,
     ).summarize();
     expect(insights[MapKeys.totalIncome], 0);
+    expect(insights[MapKeys.totalExpense], 400);
+    final recap = StatsRecapData.from(
+      transactions: provider.allTransactions,
+      banks: const [],
+      year: 2026,
+      expenseAmountForTransaction: provider.netExpenseAmountForTransaction,
+      incomeAmountForTransaction: provider.incomeAmountForTransaction,
+    );
+    expect(recap.topSentTo.single.amount, 400);
+    expect(recap.topReceivedFrom, isEmpty);
     expect(
       provider.budgetExpenseAmountForTransaction(byReference['lunch-one']!),
       400,
@@ -170,6 +186,13 @@ void main() {
         startDate: DateTime(2026, 7, 1),
         endDate: DateTime(2026, 7, 31, 23, 59, 59, 999),
         categoryId: lunchCategoryId,
+      ),
+      400,
+    );
+    expect(
+      await WidgetDataProvider().getSpendingForRange(
+        DateTime(2026, 7, 1),
+        DateTime(2026, 7, 31, 23, 59, 59, 999),
       ),
       400,
     );

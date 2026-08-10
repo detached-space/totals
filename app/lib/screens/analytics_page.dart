@@ -428,16 +428,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     DateTime baseDate,
     TransactionProvider provider,
   ) {
-    final chartTransactions = _selectedCard == 'Income'
-        ? transactions
-            .map(
-              (transaction) => transaction.copyWith(
-                amount: provider.incomeAmountForTransaction(transaction),
-              ),
-            )
-            .where((transaction) => transaction.amount > 0)
-            .toList(growable: false)
-        : transactions;
+    final chartTransactions = transactions
+        .map((transaction) {
+          final amount = transaction.type == 'CREDIT'
+              ? provider.incomeAmountForTransaction(transaction)
+              : transaction.type == 'DEBIT'
+                  ? provider.netExpenseAmountForTransaction(transaction)
+                  : transaction.amount.abs();
+          return transaction.copyWith(amount: amount);
+        })
+        .where((transaction) => transaction.amount > 0)
+        .toList(growable: false);
     return ChartDataUtils.getChartData(
       chartTransactions,
       _selectedPeriod,

@@ -15,6 +15,7 @@ import 'package:totals/services/data_sync/outbound_http_client.dart';
 import 'package:totals/services/data_sync/sync_auth.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/services/notification_service.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('debug: SyncService: $message');
@@ -924,6 +925,17 @@ class SyncService {
       where: 'type = ?',
       whereArgs: ['DEBIT'],
     );
+    final reimbursementRows = await db.rawQuery('''
+      SELECT expenseTransactionReference, SUM(appliedAmount) AS total
+      FROM reimbursement_allocations
+      GROUP BY expenseTransactionReference
+    ''');
+    final reimbursedByReference = <String, double>{
+      for (final row in reimbursementRows)
+        if (row['expenseTransactionReference'] is String)
+          row['expenseTransactionReference'] as String:
+              (row['total'] as num?)?.toDouble() ?? 0.0,
+    };
     final categoryIds = budget.selectedCategoryIds.toSet();
     var usedAmount = 0.0;
 
@@ -939,7 +951,12 @@ class SyncService {
           !transaction.selectedCategoryIds.any(categoryIds.contains)) {
         continue;
       }
-      usedAmount += transaction.amount.abs();
+      usedAmount += transactionNetExpenseAmount(
+        transaction,
+        isSelfTransfer: false,
+        reimbursedAmount:
+            reimbursedByReference[transaction.reference.trim()] ?? 0.0,
+      );
     }
 
     final availableAmount = budget.amount - usedAmount;

@@ -432,6 +432,7 @@ class AppLocalizations {
     "Money": "ገንዘብ",
     "Budget": "በጀት",
     "Shared": "የጋራ",
+    "Reimbursed": "ካሳ የተከፈለ",
     "Tools": "መሳሪያዎች",
     "You": "የእርስዎ",
     "Settings": "ቅንብሮች",

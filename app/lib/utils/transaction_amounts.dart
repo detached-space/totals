@@ -34,6 +34,34 @@ double transactionExpenseAmount(
   return principal + transactionFeeAmount(transaction);
 }
 
+double transactionNetExpenseAmount(
+  Transaction transaction, {
+  required bool isSelfTransfer,
+  double reimbursedAmount = 0.0,
+}) {
+  final gross = transactionExpenseAmount(
+    transaction,
+    isSelfTransfer: isSelfTransfer,
+  );
+  return expenseAmountAfterReimbursement(
+    grossExpense: gross,
+    reimbursedAmount: reimbursedAmount,
+  );
+}
+
+double expenseAmountAfterReimbursement({
+  required double grossExpense,
+  required double reimbursedAmount,
+}) {
+  if (!grossExpense.isFinite || grossExpense <= 0) return 0.0;
+  if (!reimbursedAmount.isFinite || reimbursedAmount <= 0) {
+    return grossExpense;
+  }
+
+  final net = grossExpense - reimbursedAmount;
+  return net <= 0 ? 0.0 : net;
+}
+
 double transactionBalanceDelta(Transaction transaction) {
   if (transaction.type == 'CREDIT') {
     return _principalAmount(transaction);

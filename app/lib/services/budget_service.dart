@@ -168,9 +168,13 @@ class BudgetService {
       0.0,
       (sum, transaction) {
         final gross = transactionDebitOutflow(transaction);
-        final reimbursed = reimbursedByReference[transaction.reference] ?? 0.0;
-        final net = gross - reimbursed;
-        return sum + (net <= 0 ? 0.0 : net);
+        final reimbursed =
+            reimbursedByReference[transaction.reference.trim()] ?? 0.0;
+        return sum +
+            expenseAmountAfterReimbursement(
+              grossExpense: gross,
+              reimbursedAmount: reimbursed,
+            );
       },
     );
   }

@@ -2346,6 +2346,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       isDebit: !isCredit,
       isSelfTransfer: isSelfTransfer,
       isMisc: isMisc,
+      isReimbursed: provider.isReimbursedExpense(transaction),
       isSharing: provider.isSharingSharedExpenseTransaction(transaction),
       isShared: provider.isSharedExpenseTransaction(transaction),
       amount: _amountLabel(
@@ -2797,10 +2798,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
       final incomeAmount = provider.incomeAmountForTransaction(transaction);
-      final expenseAmount = transactionExpenseAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      final expenseAmount =
+          provider.netExpenseAmountForTransaction(transaction);
       final category = transaction.categoryId == null
           ? null
           : provider.getCategoryById(transaction.categoryId!);
@@ -2944,13 +2943,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
 
-      final isSelfTransfer = provider.isSelfTransfer(transaction);
       final amount = showIncome
           ? provider.incomeAmountForTransaction(transaction)
-          : transactionExpenseAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            );
+          : provider.netExpenseAmountForTransaction(transaction);
       if (amount <= 0) continue;
 
       final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
@@ -3004,10 +2999,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
       final amount = showIncome
           ? provider.incomeAmountForTransaction(transaction)
-          : transactionExpenseAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            );
+          : provider.netExpenseAmountForTransaction(transaction);
       if (amount <= 0) continue;
 
       recipientExpenseCount += 1;
@@ -3056,12 +3048,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       totalTransactions += 1;
-      final isSelfTransfer = provider.isSelfTransfer(transaction);
       final incomeAmount = provider.incomeAmountForTransaction(transaction);
-      final expenseAmount = transactionExpenseAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      final expenseAmount =
+          provider.netExpenseAmountForTransaction(transaction);
       totalIncome += incomeAmount;
       totalExpense += expenseAmount;
       largestDeposit = math.max(largestDeposit, incomeAmount);
@@ -3417,12 +3406,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      final isSelfTransfer = provider.isSelfTransfer(transaction);
       totalIncome += provider.incomeAmountForTransaction(transaction);
-      totalExpense += transactionExpenseAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      totalExpense += provider.netExpenseAmountForTransaction(transaction);
     }
 
     return _ActivityTransactionsSummary(
@@ -3516,10 +3501,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       if (transaction.type == 'CREDIT') {
         unmatchedCredit += provider.incomeAmountForTransaction(transaction);
       } else if (transaction.type == 'DEBIT') {
-        unmatchedDebit += transactionExpenseAmount(
-          transaction,
-          isSelfTransfer: provider.isSelfTransfer(transaction),
-        );
+        unmatchedDebit += provider.netExpenseAmountForTransaction(transaction);
       }
     }
     final bankTxnCount = isOverview
@@ -8195,16 +8177,9 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
   }
 
   double _heatmapDelta(Transaction transaction) {
-    final isSelfTransfer =
-        context.read<TransactionProvider>().isSelfTransfer(transaction);
-    final incomeAmount =
-        context.read<TransactionProvider>().incomeAmountForTransaction(
-              transaction,
-            );
-    final expenseAmount = transactionExpenseAmount(
-      transaction,
-      isSelfTransfer: isSelfTransfer,
-    );
+    final provider = context.read<TransactionProvider>();
+    final incomeAmount = provider.incomeAmountForTransaction(transaction);
+    final expenseAmount = provider.netExpenseAmountForTransaction(transaction);
     switch (widget.mode) {
       case _AnalyticsHeatmapMode.all:
         return incomeAmount - expenseAmount;
@@ -9686,13 +9661,9 @@ class _AnalyticsLineChartCard extends StatelessWidget {
     for (final transaction in transactions) {
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
-      final isSelfTransfer = provider.isSelfTransfer(transaction);
       final amount = transaction.type == 'CREDIT'
           ? provider.incomeAmountForTransaction(transaction)
-          : transactionExpenseAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            );
+          : provider.netExpenseAmountForTransaction(transaction);
       if (amount <= 0.001) continue;
 
       int? bucketIndex;
@@ -10378,10 +10349,7 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       final isSelfTransfer = provider.isSelfTransfer(transaction);
       final amount = isIncome
           ? provider.incomeAmountForTransaction(transaction)
-          : transactionExpenseAmount(
-              transaction,
-              isSelfTransfer: isSelfTransfer,
-            );
+          : provider.netExpenseAmountForTransaction(transaction);
       if (amount <= 0.001) continue;
 
       final dt = _parseTransactionTime(transaction.time);
@@ -12828,12 +12796,8 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      final isSelfTransfer = provider.isSelfTransfer(transaction);
       totalIncome += provider.incomeAmountForTransaction(transaction);
-      totalExpense += transactionExpenseAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      totalExpense += provider.netExpenseAmountForTransaction(transaction);
     }
 
     return _ActivityTransactionsSummary(
@@ -13019,6 +12983,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       isDebit: !isCredit,
       isSelfTransfer: isSelfTransfer,
       isMisc: isMisc,
+      isReimbursed: provider.isReimbursedExpense(transaction),
       isSharing: provider.isSharingSharedExpenseTransaction(transaction),
       isShared: provider.isSharedExpenseTransaction(transaction),
       amount: _amountLabel(
@@ -14353,12 +14318,8 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     var incomeTotal = 0.0;
     var expenseTotal = 0.0;
     for (final transaction in transactions) {
-      final isSelfTransfer = provider.isSelfTransfer(transaction);
       incomeTotal += provider.incomeAmountForTransaction(transaction);
-      expenseTotal += transactionExpenseAmount(
-        transaction,
-        isSelfTransfer: isSelfTransfer,
-      );
+      expenseTotal += provider.netExpenseAmountForTransaction(transaction);
     }
     final netTotal = incomeTotal - expenseTotal;
     final transactionLabel = _formatLocalizedCount(
