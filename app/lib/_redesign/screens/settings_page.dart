@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:totals/_redesign/screens/feature_discovery_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/screens/tools_page.dart';
 import 'package:totals/_redesign/screens/advanced_settings_page.dart';
@@ -1583,6 +1584,25 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
 
               _SettingTile(
+                leading: Image.asset(
+                  'assets/icon/totals_icon.png',
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
+                ),
+                iconColor: AppColors.primaryLight,
+                title: context.l10nText('Discover Totals'),
+                subtitle: context.l10nText(
+                  'Preview new features and tutorials',
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const FeatureDiscoveryPage(),
+                  ),
+                ),
+              ),
+
+              _SettingTile(
                 icon: AppIcons.info_outline_rounded,
                 iconColor: AppColors.primaryLight,
                 title: context.l10n('settings.about', 'About'),
@@ -1752,23 +1772,25 @@ class _ProfileCard extends StatelessWidget {
 }
 
 class _SettingTile extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final Color iconColor;
   final String title;
   final String subtitle;
+  final Widget? leading;
   final Widget? trailing;
   final VoidCallback? onTap;
   final bool showChevron;
 
   const _SettingTile({
-    required this.icon,
+    this.icon,
     required this.iconColor,
     required this.title,
     required this.subtitle,
+    this.leading,
     this.trailing,
     this.onTap,
     this.showChevron = true,
-  });
+  }) : assert(icon != null || leading != null);
 
   @override
   Widget build(BuildContext context) {
@@ -1793,11 +1815,12 @@ class _SettingTile extends StatelessWidget {
                 Container(
                   width: 40,
                   height: 40,
+                  clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     color: iconColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(icon, color: iconColor, size: 20),
+                  child: leading ?? Icon(icon, color: iconColor, size: 20),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
