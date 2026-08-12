@@ -23,9 +23,14 @@ void main() {
   });
 
   test('default previews use versioned R2 videos and cache keys', () {
-    expect(totalsFeaturePreviews, hasLength(2));
+    expect(totalsFeaturePreviews, hasLength(3));
     final autoCategorizationPreview = totalsFeaturePreviews.first;
-    final quickAccessAccountPreview = totalsFeaturePreviews.last;
+    final quickAccessAccountPreview = totalsFeaturePreviews.firstWhere(
+      (preview) => preview.title == 'Quick Account Access',
+    );
+    final reimbursementPreview = totalsFeaturePreviews.firstWhere(
+      (preview) => preview.title == 'Link Reimbursements',
+    );
 
     expect(autoCategorizationPreview.videoUrl, autoCategorizationPreviewUrl);
     expect(
@@ -59,6 +64,21 @@ void main() {
     expect(
       quickAccessAccountPreview.videoPlaceholderAsset,
       quickAccessAccountPreviewPlaceholderAsset,
+    );
+
+    expect(reimbursementPreview.videoUrl, reimbursementPreviewUrl);
+    expect(
+      reimbursementPreview.videoUrl,
+      'https://tutorials.example.invalid/'
+      'tutorials/v1/reimbursement.mp4',
+    );
+    expect(
+      reimbursementPreview.videoCacheKey,
+      reimbursementPreviewCacheKey,
+    );
+    expect(
+      reimbursementPreview.videoPlaceholderAsset,
+      reimbursementPreviewPlaceholderAsset,
     );
   });
 

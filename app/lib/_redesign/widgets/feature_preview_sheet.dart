@@ -21,6 +21,11 @@ const String quickAccessAccountPreviewCacheKey =
     'tutorials/v1/quick-access-account.mp4';
 const String quickAccessAccountPreviewDescription =
     'Long-press Shared in the bottom navigation to open Account Hub. Search your saved accounts or switch to Mine, then tap an account to copy its number.';
+const String reimbursementPreviewPlaceholderAsset =
+    'assets/images/tutorials/reimbursement_blurred.webp';
+const String reimbursementPreviewCacheKey = 'tutorials/v1/reimbursement.mp4';
+const String reimbursementPreviewDescription =
+    'Open an incoming transaction and link it to the original expense as a reimbursement. Totals adjusts your spending and budgets by the amount you received.';
 const int _featurePreviewCacheSize = 100 * 1024 * 1024;
 const int _featurePreviewCacheFileSize = 20 * 1024 * 1024;
 
@@ -29,6 +34,9 @@ String get autoCategorizationPreviewUrl =>
 
 String get quickAccessAccountPreviewUrl =>
     _tutorialVideoUrl(quickAccessAccountPreviewCacheKey);
+
+String get reimbursementPreviewUrl =>
+    _tutorialVideoUrl(reimbursementPreviewCacheKey);
 
 String _tutorialVideoUrl(String objectKey) {
   if (!dotenv.isInitialized) {
@@ -124,6 +132,16 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           videoCacheKey: quickAccessAccountPreviewCacheKey,
           videoPlaceholderAsset: quickAccessAccountPreviewPlaceholderAsset,
           icon: Icons.account_balance_wallet_rounded,
+          accentColor: AppColors.blue,
+        ),
+        FeaturePreviewItem(
+          title: 'Link Reimbursements',
+          summary: 'Track returned money against past spending',
+          description: reimbursementPreviewDescription,
+          videoUrl: reimbursementPreviewUrl,
+          videoCacheKey: reimbursementPreviewCacheKey,
+          videoPlaceholderAsset: reimbursementPreviewPlaceholderAsset,
+          icon: Icons.currency_exchange_rounded,
           accentColor: AppColors.blue,
         ),
       ],

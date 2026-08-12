@@ -2,6 +2,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
 
 void main() {
+  test('new config defaults to the recommended weekly schedule', () {
+    const config = TelegramBackupConfig(
+      botId: '123',
+      botUsername: 'totals_backup_bot',
+      botDisplayName: 'Totals Backup',
+      chatId: '456',
+      chatDisplayName: 'Owner',
+      catalogMessageId: 7,
+    );
+
+    expect(TelegramBackupSchedule.recommended, TelegramBackupSchedule.weekly);
+    expect(config.schedule, TelegramBackupSchedule.weekly);
+  });
+
   test('catalog JSON round trip keeps newest backups first', () {
     final older = TelegramBackupEntry(
       id: 'older',
@@ -66,5 +80,40 @@ void main() {
     expect(successful.lastBackupError, isNull);
     expect(legacy.scheduleAnchorAt, isNull);
     expect(legacy.toJson()['wifiOnly'], isFalse);
+  });
+
+  test('pending uploaded backup survives persistence and can be cleared', () {
+    final pending = TelegramBackupEntry(
+      id: 'pending-id',
+      createdAt: DateTime.utc(2026, 8, 10, 12),
+      fileName: 'totals_backup_20260810_120000.totals',
+      fileSize: 321,
+      sha256: 'abc123',
+      exportSchemaVersion: 11,
+      fileId: 'pending-file-id',
+      messageId: 42,
+    );
+    final config = TelegramBackupConfig(
+      botId: '123',
+      botUsername: 'totals_backup_bot',
+      botDisplayName: 'Totals Backup',
+      chatId: '456',
+      chatDisplayName: 'Owner',
+      catalogMessageId: 7,
+      pendingUploadMessageId: 41,
+      pendingBackup: pending,
+    );
+
+    final decoded = TelegramBackupConfig.fromJson(config.toJson());
+    final completed = decoded.copyWith(
+      clearPendingUploadMessageId: true,
+      clearPendingBackup: true,
+    );
+
+    expect(decoded.pendingBackup?.id, 'pending-id');
+    expect(decoded.pendingBackup?.messageId, 42);
+    expect(decoded.pendingUploadMessageId, 41);
+    expect(completed.pendingUploadMessageId, isNull);
+    expect(completed.pendingBackup, isNull);
   });
 }

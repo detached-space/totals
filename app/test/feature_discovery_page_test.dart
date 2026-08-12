@@ -38,6 +38,11 @@ void main() {
       find.text('Long-press Shared to find and copy accounts'),
       findsOneWidget,
     );
+    expect(find.text('Link Reimbursements'), findsOneWidget);
+    expect(
+      find.text('Track returned money against past spending'),
+      findsOneWidget,
+    );
     expect(find.textContaining('Subscribe'), findsNothing);
 
     final cards = <Material>[
@@ -52,6 +57,13 @@ void main() {
         find.byKey(
           const ValueKey<String>(
             'feature-discovery-card-tutorials/v1/quick-access-account.mp4',
+          ),
+        ),
+      ),
+      tester.widget<Material>(
+        find.byKey(
+          const ValueKey<String>(
+            'feature-discovery-card-tutorials/v1/reimbursement.mp4',
           ),
         ),
       ),
