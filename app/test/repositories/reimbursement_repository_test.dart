@@ -198,6 +198,53 @@ void main() {
     );
   });
 
+  test('home cash flow keeps reimbursement inflow and gross expense', () async {
+    final now = DateTime.now().toIso8601String();
+    await transactionRepository.saveTransaction(
+      _transaction(
+        reference: 'today-expense',
+        amount: 300,
+        type: 'DEBIT',
+        time: now,
+        categoryId: lunchCategoryId,
+      ),
+      skipAutoCategorization: true,
+    );
+    await transactionRepository.saveTransaction(
+      _transaction(
+        reference: 'today-reimbursement',
+        amount: 150,
+        type: 'CREDIT',
+        time: now,
+        categoryId: reimbursementCategoryId,
+      ),
+      skipAutoCategorization: true,
+    );
+    await reimbursementRepository.replaceForReimbursement(
+      reimbursementTransactionReference: 'today-reimbursement',
+      allocations: const [
+        ReimbursementAllocationDraft(
+          expenseTransactionReference: 'today-expense',
+          appliedAmount: 150,
+        ),
+      ],
+    );
+
+    final provider = TransactionProvider();
+    addTearDown(provider.dispose);
+    await provider.loadData();
+
+    expect(provider.todayCashFlowTotals.income, 150);
+    expect(provider.todayCashFlowTotals.expense, 300);
+    expect(provider.weekCashFlowTotals.income, 150);
+    expect(provider.weekCashFlowTotals.expense, 300);
+
+    // Spending surfaces still use net expense and exclude reimbursements from
+    // earned income.
+    expect(provider.todayTotals.income, 0);
+    expect(provider.todayTotals.expense, 150);
+  });
+
   testWidgets('custom amount remains editable while temporarily empty',
       (tester) async {
     final provider = _ReimbursementPickerTestProvider(
@@ -265,8 +312,7 @@ void main() {
     addTearDown(tester.view.resetViewInsets);
     await tester.pumpAndSettle();
 
-    final saveButton =
-        find.byKey(const ValueKey('save-reimbursement-links'));
+    final saveButton = find.byKey(const ValueKey('save-reimbursement-links'));
     final saveButtonContext = tester.element(saveButton);
     final mediaQuery = MediaQuery.of(saveButtonContext);
     final viewportBottom =

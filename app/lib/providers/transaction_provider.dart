@@ -224,6 +224,8 @@ class TransactionProvider with ChangeNotifier {
   // Redesign home cached metrics
   List<Transaction> _todayTransactions = [];
   List<Transaction> _monthTransactions = [];
+  TransactionTotals _todayCashFlowTotals = const TransactionTotals.zero();
+  TransactionTotals _weekCashFlowTotals = const TransactionTotals.zero();
   TransactionTotals _todayTotals = const TransactionTotals.zero();
   TransactionTotals _weekTotals = const TransactionTotals.zero();
   TransactionTotals _monthTotals = const TransactionTotals.zero();
@@ -326,6 +328,8 @@ class TransactionProvider with ChangeNotifier {
 
   List<Transaction> get todayTransactions => _todayTransactions;
   List<Transaction> get monthTransactions => _monthTransactions;
+  TransactionTotals get todayCashFlowTotals => _todayCashFlowTotals;
+  TransactionTotals get weekCashFlowTotals => _weekCashFlowTotals;
   TransactionTotals get todayTotals => _todayTotals;
   TransactionTotals get weekTotals => _weekTotals;
   TransactionTotals get monthTotals => _monthTotals;
@@ -1310,6 +1314,10 @@ class TransactionProvider with ChangeNotifier {
     var todayExpense = 0.0;
     var weekIncome = 0.0;
     var weekExpense = 0.0;
+    var todayCashIn = 0.0;
+    var todayCashOut = 0.0;
+    var weekCashIn = 0.0;
+    var weekCashOut = 0.0;
     var monthIncome = 0.0;
     var monthExpense = 0.0;
     var thirtyDayIncome = 0.0;
@@ -1370,16 +1378,31 @@ class TransactionProvider with ChangeNotifier {
 
       final incomeAmount = incomeAmountForTransaction(transaction);
       final expenseAmount = netExpenseAmountForTransaction(transaction);
+      // The balance card is a cash-flow surface: reimbursements remain money
+      // in and reimbursed debits remain money out. Spending analytics below
+      // continue to exclude reimbursement income and use net expenses.
+      final cashInAmount = transactionIncomeAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
+      final cashOutAmount = transactionExpenseAmount(
+        transaction,
+        isSelfTransfer: isSelfTransfer,
+      );
       final category = _categoryById[transaction.categoryId];
 
       if (isToday) {
         todayIncome += incomeAmount;
         todayExpense += expenseAmount;
+        todayCashIn += cashInAmount;
+        todayCashOut += cashOutAmount;
       }
 
       if (isWeek) {
         weekIncome += incomeAmount;
         weekExpense += expenseAmount;
+        weekCashIn += cashInAmount;
+        weekCashOut += cashOutAmount;
 
         final weekIndex = dateOnly.difference(weekStart).inDays;
         if (weekIndex >= 0 && weekIndex < 7) {
@@ -1427,6 +1450,10 @@ class TransactionProvider with ChangeNotifier {
     _todayTransactions =
         todayEntries.map((entry) => entry.key).toList(growable: false);
     _monthTransactions = monthTransactions.toList(growable: false);
+    _todayCashFlowTotals =
+        TransactionTotals(income: todayCashIn, expense: todayCashOut);
+    _weekCashFlowTotals =
+        TransactionTotals(income: weekCashIn, expense: weekCashOut);
     _todayTotals =
         TransactionTotals(income: todayIncome, expense: todayExpense);
     _weekTotals = TransactionTotals(income: weekIncome, expense: weekExpense);

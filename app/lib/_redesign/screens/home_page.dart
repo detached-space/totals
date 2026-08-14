@@ -293,8 +293,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
         final todayCount = todaySorted.length;
         final monthTransactionsCount = provider.monthTransactions.length;
         final todayList = todaySorted.take(3).toList(growable: false);
-        final todayTotals = provider.todayTotals;
-        final weekTotals = provider.weekTotals;
+        final todayCashFlowTotals = provider.todayCashFlowTotals;
+        final weekCashFlowTotals = provider.weekCashFlowTotals;
         final monthTotals = provider.monthTotals;
         final thirtyDayTotals = provider.thirtyDayTotals;
         final selfTransferCount = provider.selfTransferCount;
@@ -323,10 +323,10 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                             children: [
                               _TotalBalanceCard(
                                 totalBalance: totalBalance,
-                                todayIncome: todayTotals.income,
-                                todayExpense: todayTotals.expense,
-                                weekIncome: weekTotals.income,
-                                weekExpense: weekTotals.expense,
+                                todayIncome: todayCashFlowTotals.income,
+                                todayExpense: todayCashFlowTotals.expense,
+                                weekIncome: weekCashFlowTotals.income,
+                                weekExpense: weekCashFlowTotals.expense,
                                 showBalance: _showBalance,
                                 onToggleBalance: () {
                                   setState(() {
