@@ -19462,6 +19462,8 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                                   child: CategoryFilterChip(
                                     label: category.name,
                                     flow: category.flow,
+                                    subtleFlowTint:
+                                        isSelfCategoryFilter(category),
                                     selected: _selectedCategoryIds.contains(
                                       category.id,
                                     ),
@@ -20401,6 +20403,8 @@ class _AnalyticsChartFilterSheetState
                                     child: CategoryFilterChip(
                                       label: category.name,
                                       flow: category.flow,
+                                      subtleFlowTint:
+                                          isSelfCategoryFilter(category),
                                       selected: _selectedCategoryIds.contains(
                                         category.id,
                                       ),

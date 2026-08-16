@@ -13,7 +13,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('category chips show clear flow and selection states', (
+  testWidgets('only Self category chips use subtle flow colors', (
     tester,
   ) async {
     final themeProvider = ThemeProvider(initialThemeMode: ThemeMode.light);
@@ -25,7 +25,7 @@ void main() {
         child: MaterialApp(
           theme: ThemeData(brightness: Brightness.light),
           home: Scaffold(
-            body: Row(
+            body: Wrap(
               children: [
                 CategoryFilterChip(
                   key: const ValueKey<String>('income-category-filter'),
@@ -59,6 +59,22 @@ void main() {
                   selected: true,
                   onTap: () {},
                 ),
+                CategoryFilterChip(
+                  key: const ValueKey<String>('self-income-category-filter'),
+                  label: 'Self',
+                  flow: 'income',
+                  subtleFlowTint: true,
+                  selected: false,
+                  onTap: () {},
+                ),
+                CategoryFilterChip(
+                  key: const ValueKey<String>('self-expense-category-filter'),
+                  label: 'Self',
+                  flow: 'expense',
+                  subtleFlowTint: true,
+                  selected: true,
+                  onTap: () {},
+                ),
               ],
             ),
           ),
@@ -78,19 +94,35 @@ void main() {
 
     expect(
       decorationFor('income-category-filter').color,
-      AppColors.incomeSuccess.withValues(alpha: 0.08),
+      AppColors.surfaceColor(
+        tester.element(find.byKey(
+          const ValueKey<String>('income-category-filter'),
+        )),
+      ),
     );
     expect(
       decorationFor('expense-category-filter').color,
-      AppColors.red.withValues(alpha: 0.08),
+      AppColors.surfaceColor(
+        tester.element(find.byKey(
+          const ValueKey<String>('expense-category-filter'),
+        )),
+      ),
     );
     expect(
       decorationFor('selected-income-category-filter').color,
-      const Color(0xFF047857),
+      AppColors.primaryDark,
     );
     expect(
       decorationFor('selected-expense-category-filter').color,
-      const Color(0xFFB91C1C),
+      AppColors.primaryDark,
+    );
+    expect(
+      decorationFor('self-income-category-filter').color,
+      AppColors.incomeSuccess.withValues(alpha: 0.08),
+    );
+    expect(
+      decorationFor('self-expense-category-filter').color,
+      AppColors.red.withValues(alpha: 0.16),
     );
 
     Text textFor(String key) {
@@ -109,6 +141,14 @@ void main() {
     expect(
       textFor('selected-expense-category-filter').style?.color,
       AppColors.white,
+    );
+    expect(
+      textFor('self-income-category-filter').style?.color,
+      const Color(0xFF047857),
+    );
+    expect(
+      textFor('self-expense-category-filter').style?.color,
+      const Color(0xFFB91C1C),
     );
   });
 }

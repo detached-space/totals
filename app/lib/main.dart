@@ -152,7 +152,7 @@ class MyApp extends StatelessWidget {
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
           return MaterialApp(
-            debugShowCheckedModeBanner: false,
+            debugShowCheckedModeBanner: true,
             title: 'Totals',
             theme: useRedesign
                 ? RedesignTheme.light(fontOption: themeProvider.appFont)
