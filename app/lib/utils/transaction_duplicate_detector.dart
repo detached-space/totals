@@ -444,6 +444,11 @@ Transaction _mergeTransactions(
           ),
       categoryId: merged.categoryId ?? transaction.categoryId,
       categoryIds: mergedCategoryIds,
+      categorySplits: merged.hasCategorySplit
+          ? merged.categorySplits
+          : transaction.hasCategorySplit
+              ? transaction.categorySplits
+              : null,
       profileId: merged.profileId ?? transaction.profileId,
       serviceCharge:
           _pickBetterNumber(merged.serviceCharge, transaction.serviceCharge),

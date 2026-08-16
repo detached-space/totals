@@ -9,46 +9,49 @@ class CategoryFilterChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.flow,
+    this.subtleFlowTint = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final String? flow;
+  final bool subtleFlowTint;
 
   @override
   Widget build(BuildContext context) {
     final normalizedFlow = flow?.trim().toLowerCase();
-    final accent = switch (normalizedFlow) {
-      'income' => AppColors.incomeSuccess,
-      'expense' => AppColors.red,
-      _ => null,
-    };
-    final selectedFlowColor = switch (normalizedFlow) {
-      'income' => const Color(0xFF047857),
-      'expense' => const Color(0xFFB91C1C),
-      _ => null,
-    };
+    final accent = subtleFlowTint
+        ? switch (normalizedFlow) {
+            'income' => AppColors.incomeSuccess,
+            'expense' => AppColors.red,
+            _ => null,
+          }
+        : null;
     final isDark = AppColors.isDark(context);
     final backgroundColor = accent == null
         ? selected
             ? AppColors.primaryDark
             : AppColors.surfaceColor(context)
-        : selected
-            ? selectedFlowColor!
-            : accent.withValues(alpha: isDark ? 0.14 : 0.08);
+        : accent.withValues(
+            alpha: selected
+                ? isDark
+                    ? 0.24
+                    : 0.16
+                : isDark
+                    ? 0.14
+                    : 0.08,
+          );
     final borderColor = accent == null
         ? selected
             ? AppColors.primaryDark
             : AppColors.borderColor(context)
-        : selected
-            ? selectedFlowColor!
-            : accent.withValues(alpha: 0.35);
-    final foregroundColor = selected
-        ? AppColors.white
-        : accent == null
-            ? AppColors.textSecondary(context)
-            : _flowForegroundColor(normalizedFlow!, isDark: isDark);
+        : accent.withValues(alpha: selected ? 0.7 : 0.35);
+    final foregroundColor = accent == null
+        ? selected
+            ? AppColors.white
+            : AppColors.textSecondary(context)
+        : _flowForegroundColor(normalizedFlow!, isDark: isDark);
     final localizedLabel = context.l10nText(label);
     final flowLabel = switch (normalizedFlow) {
       'income' => context.l10nText('Income'),

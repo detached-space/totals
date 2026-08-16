@@ -1311,6 +1311,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       provider,
       sourceTransactions: transactions,
       categoryMode: filter.mode,
+      categoryIds: filter.categoryIds,
       constrainSeriesToAnchorMonth: true,
       anchorDate: targetMonth,
     );
@@ -2455,6 +2456,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   List<Widget> _buildAnalyticsSlivers(TransactionProvider provider) {
+    final activeFilter =
+        _analyticsFilterForSection(_analyticsSelectedChartSection);
     final heatmapTransactions = provider.allTransactions
         .where(
           (transaction) =>
@@ -2466,6 +2469,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       sourceTransactions: heatmapTransactions,
       anchorTransactions: provider.allTransactions,
       categoryMode: _analyticsHeatmapFilter.mode,
+      categoryIds: _analyticsHeatmapFilter.categoryIds,
     );
     final heatmapFocusMonth =
         _resolveAnalyticsHeatmapFocusMonth(heatmapSnapshot.monthDate);
@@ -2474,32 +2478,37 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       heatmapTransactions: heatmapTransactions,
       heatmapFocusMonth: heatmapFocusMonth,
     );
+    final supportPeriodKey =
+        '${activeSupportContext.periodKey}-categories-${_categoryFilterCacheKey(activeFilter.categoryIds)}';
     final spendingByDaySnapshot = _buildAnalyticsSpendingByDaySnapshot(
       provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
-      periodKey: activeSupportContext.periodKey,
+      periodKey: supportPeriodKey,
       showIncome: activeSupportContext.showIncome,
+      categoryIds: activeFilter.categoryIds,
     );
     final topRecipientsSnapshot = _buildAnalyticsTopRecipientsSnapshot(
       provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
-      periodKey: activeSupportContext.periodKey,
+      periodKey: supportPeriodKey,
       showIncome: activeSupportContext.showIncome,
+      categoryIds: activeFilter.categoryIds,
     );
     final moneyFlowSnapshot = _buildAnalyticsMoneyFlowSnapshot(
       provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
-      periodKey: activeSupportContext.periodKey,
+      periodKey: supportPeriodKey,
+      categoryIds: activeFilter.categoryIds,
     );
     final overviewSnapshot = _buildAnalyticsSnapshot(
       provider,
       sourceTransactions: activeSupportContext.transactions,
       anchorTransactions: activeSupportContext.transactions,
-      categoryMode:
-          _analyticsFilterForSection(_analyticsSelectedChartSection).mode,
+      categoryMode: activeFilter.mode,
+      categoryIds: activeFilter.categoryIds,
       constrainSeriesToAnchorMonth: false,
     );
     return [
@@ -2540,6 +2549,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           focusMonth: heatmapFocusMonth,
           view: _analyticsHeatmapView,
           mode: _analyticsHeatmapFilter.mode,
+          categoryIds: _analyticsHeatmapFilter.categoryIds,
           activeFilterCount: _AnalyticsChartSection.heatmap.activeFilterCount(
             _analyticsHeatmapFilter,
           ),
@@ -2569,6 +2579,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   sourceTransactions: filteredTransactions,
                   anchorTransactions: filteredTransactions,
                   categoryMode: filter.mode,
+                  categoryIds: filter.categoryIds,
                   constrainSeriesToAnchorMonth: false,
                 ),
                 periodLabel: _formatAnalyticsChartPeriodLabel(
@@ -2642,6 +2653,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         return _AnalyticsLineChartCard(
           provider: provider,
           transactions: filteredTransactions,
+          categoryIds: filter.categoryIds,
           period: _analyticsLineChartPeriod,
           periodOffset: _analyticsLineChartOffset,
           onPeriodChanged: _setAnalyticsLineChartPeriod,
@@ -2693,6 +2705,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   sourceTransactions: filteredTransactions,
                   anchorTransactions: filteredTransactions,
                   categoryMode: filter.mode,
+                  categoryIds: filter.categoryIds,
                   constrainSeriesToAnchorMonth: false,
                 ),
                 periodLabel: _formatAnalyticsChartPeriodLabel(
@@ -2763,6 +2776,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     List<Transaction>? sourceTransactions,
     Iterable<Transaction>? anchorTransactions,
     _AnalyticsHeatmapMode categoryMode = _AnalyticsHeatmapMode.expense,
+    Iterable<int?> categoryIds = const <int?>{},
     bool constrainSeriesToAnchorMonth = true,
     DateTime? anchorDate,
   }) {
@@ -2811,12 +2825,25 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       }
 
       totalTransactions += 1;
-      totalFees += transactionFeeAmount(transaction);
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final incomeAmount = provider.incomeAmountForTransaction(transaction);
-      final expenseAmount =
-          provider.netExpenseAmountForTransaction(transaction);
+      final selectedAmount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
+      final incomeAmount = transaction.type == 'CREDIT' ? selectedAmount : 0.0;
+      final expenseAmount = transaction.type == 'DEBIT' ? selectedAmount : 0.0;
+      final fullAmount = transaction.type == 'CREDIT'
+          ? provider.incomeAmountForTransaction(transaction)
+          : transaction.type == 'DEBIT'
+              ? provider.netExpenseAmountForTransaction(transaction)
+              : 0.0;
+      final selectedShare = categoryIds.isEmpty
+          ? 1.0
+          : fullAmount > 0
+              ? (selectedAmount / fullAmount).clamp(0.0, 1.0).toDouble()
+              : 0.0;
+      totalFees += transactionFeeAmount(transaction) * selectedShare;
       final category = transaction.categoryId == null
           ? null
           : provider.getCategoryById(transaction.categoryId!);
@@ -2860,16 +2887,30 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           : isDebit && expenseAmount > 0;
 
       if (includeBubbleCategory) {
-        final categoryName = isSelfTransfer
-            ? 'Fees & VAT'
-            : !isMisc && (category?.name.trim().isNotEmpty ?? false)
-                ? category!.name.trim()
-                : 'Other';
         final categoryAmount = categoryMode == _AnalyticsHeatmapMode.income
             ? incomeAmount
             : expenseAmount;
-        categoryTotals[categoryName] =
-            (categoryTotals[categoryName] ?? 0.0) + categoryAmount;
+        if (isSelfTransfer) {
+          categoryTotals['Fees & VAT'] =
+              (categoryTotals['Fees & VAT'] ?? 0.0) + categoryAmount;
+        } else {
+          final categorizedAmounts = provider.categoryAmountsForSelection(
+            transaction,
+            categoryIds,
+          );
+          for (final allocation in categorizedAmounts.entries) {
+            if (allocation.value <= 0) continue;
+            final allocatedCategory = provider.getCategoryById(allocation.key);
+            final allocatedName = allocatedCategory?.name.trim() ?? '';
+            final categoryName = allocatedCategory != null &&
+                    !allocatedCategory.uncategorized &&
+                    allocatedName.isNotEmpty
+                ? allocatedName
+                : 'Other';
+            categoryTotals[categoryName] =
+                (categoryTotals[categoryName] ?? 0.0) + allocation.value;
+          }
+        }
       }
 
       if (isDebit && expenseAmount > 0) {
@@ -2948,6 +2989,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required String periodLabel,
     required String periodKey,
     required bool showIncome,
+    Iterable<int?> categoryIds = const <int?>{},
   }) {
     final weekdayExpenseTotals = List<double>.filled(7, 0.0);
 
@@ -2960,9 +3002,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
 
-      final amount = showIncome
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
       if (amount <= 0) continue;
 
       final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
@@ -2996,6 +3039,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required String periodLabel,
     required String periodKey,
     required bool showIncome,
+    Iterable<int?> categoryIds = const <int?>{},
   }) {
     final recipientTotals = <String, _AnalyticsRecipientAccumulator>{};
     var recipientExpenseCount = 0;
@@ -3014,9 +3058,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         if (isSelfTransfer) continue;
       }
 
-      final amount = showIncome
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
       if (amount <= 0) continue;
 
       recipientExpenseCount += 1;
@@ -3056,6 +3101,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required List<Transaction> transactions,
     required String periodLabel,
     required String periodKey,
+    Iterable<int?> categoryIds = const <int?>{},
   }) {
     var totalTransactions = 0;
     var totalIncome = 0.0;
@@ -3065,9 +3111,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       totalTransactions += 1;
-      final incomeAmount = provider.incomeAmountForTransaction(transaction);
-      final expenseAmount =
-          provider.netExpenseAmountForTransaction(transaction);
+      final selectedAmount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
+      final incomeAmount = transaction.type == 'CREDIT' ? selectedAmount : 0.0;
+      final expenseAmount = transaction.type == 'DEBIT' ? selectedAmount : 0.0;
       totalIncome += incomeAmount;
       totalExpense += expenseAmount;
       largestDeposit = math.max(largestDeposit, incomeAmount);
@@ -3423,8 +3472,15 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      totalIncome += provider.incomeAmountForTransaction(transaction);
-      totalExpense += provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        _filter.categoryIds,
+      );
+      if (transaction.type == 'CREDIT') {
+        totalIncome += amount;
+      } else if (transaction.type == 'DEBIT') {
+        totalExpense += amount;
+      }
     }
 
     return _ActivityTransactionsSummary(
@@ -6791,6 +6847,7 @@ class _AnalyticsHeatmapCard extends StatefulWidget {
   final DateTime focusMonth;
   final _AnalyticsHeatmapView view;
   final _AnalyticsHeatmapMode mode;
+  final Set<int> categoryIds;
   final int activeFilterCount;
   final VoidCallback onOpenModeSheet;
   final VoidCallback onOpenChartSheet;
@@ -6806,6 +6863,7 @@ class _AnalyticsHeatmapCard extends StatefulWidget {
     required this.focusMonth,
     required this.view,
     required this.mode,
+    this.categoryIds = const <int>{},
     this.activeFilterCount = 0,
     required this.onOpenModeSheet,
     required this.onOpenChartSheet,
@@ -8207,15 +8265,19 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
 
   double _heatmapDelta(Transaction transaction) {
     final provider = context.read<TransactionProvider>();
-    final incomeAmount = provider.incomeAmountForTransaction(transaction);
-    final expenseAmount = provider.netExpenseAmountForTransaction(transaction);
+    final amount = provider.amountForCategorySelection(
+      transaction,
+      widget.categoryIds,
+    );
     switch (widget.mode) {
       case _AnalyticsHeatmapMode.all:
-        return incomeAmount - expenseAmount;
+        if (transaction.type == 'CREDIT') return amount;
+        if (transaction.type == 'DEBIT') return -amount;
+        return 0.0;
       case _AnalyticsHeatmapMode.expense:
-        return -expenseAmount;
+        return transaction.type == 'DEBIT' ? -amount : 0.0;
       case _AnalyticsHeatmapMode.income:
-        return incomeAmount;
+        return transaction.type == 'CREDIT' ? amount : 0.0;
     }
   }
 }
@@ -9490,6 +9552,7 @@ DateTime _shiftAnalyticsBarAnchorDate(
 class _AnalyticsLineChartCard extends StatelessWidget {
   final TransactionProvider provider;
   final List<Transaction> transactions;
+  final Set<int> categoryIds;
   final _AnalyticsLineChartPeriod period;
   final int periodOffset;
   final ValueChanged<_AnalyticsLineChartPeriod>? onPeriodChanged;
@@ -9502,6 +9565,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
   const _AnalyticsLineChartCard({
     required this.provider,
     required this.transactions,
+    this.categoryIds = const <int>{},
     required this.period,
     this.periodOffset = 0,
     this.onPeriodChanged,
@@ -9690,9 +9754,10 @@ class _AnalyticsLineChartCard extends StatelessWidget {
     for (final transaction in transactions) {
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
-      final amount = transaction.type == 'CREDIT'
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
       if (amount <= 0.001) continue;
 
       int? bucketIndex;
@@ -10376,9 +10441,10 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       if (mode == _AnalyticsHeatmapMode.income && !isIncome) continue;
       if (mode == _AnalyticsHeatmapMode.expense && !isExpense) continue;
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final amount = isIncome
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        filter.categoryIds,
+      );
       if (amount <= 0.001) continue;
 
       final dt = _parseTransactionTime(transaction.time);
@@ -10387,34 +10453,41 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       final bucketIndex = bucketIndexFor(dt);
       if (bucketIndex == null) continue;
 
-      final category = transaction.categoryId == null
-          ? null
-          : provider.getCategoryById(transaction.categoryId!);
-      final categoryName = category?.name.trim() ?? '';
-      final isOther =
-          category == null || category.uncategorized || categoryName.isEmpty;
       final isTransferFee = isSelfTransfer && isExpense;
-      final label = isTransferFee
-          ? 'Fees & VAT'
-          : isOther
-              ? 'Other'
-              : categoryName;
-      final key = isTransferFee
-          ? 'fees-and-vat'
-          : isOther
-              ? 'other'
-              : 'category:${category.id}';
-      final accumulator = statsByKey.putIfAbsent(
-        key,
-        () => _AnalyticsBarCategoryAccumulator(
-          label: label,
-          bucketValues: List<double>.filled(bucketCount, 0.0),
-          orderSeed: statsByKey.length,
-        ),
-      );
+      final categorizedAmounts = isTransferFee
+          ? <int?, double>{null: amount}
+          : provider.categoryAmountsForSelection(
+              transaction,
+              filter.categoryIds,
+            );
+      for (final allocation in categorizedAmounts.entries) {
+        if (allocation.value <= 0) continue;
+        final category = provider.getCategoryById(allocation.key);
+        final categoryName = category?.name.trim() ?? '';
+        final isOther =
+            category == null || category.uncategorized || categoryName.isEmpty;
+        final label = isTransferFee
+            ? 'Fees & VAT'
+            : isOther
+                ? 'Other'
+                : categoryName;
+        final key = isTransferFee
+            ? 'fees-and-vat'
+            : isOther
+                ? 'other'
+                : 'category:${category.id}';
+        final accumulator = statsByKey.putIfAbsent(
+          key,
+          () => _AnalyticsBarCategoryAccumulator(
+            label: label,
+            bucketValues: List<double>.filled(bucketCount, 0.0),
+            orderSeed: statsByKey.length,
+          ),
+        );
 
-      accumulator.bucketValues[bucketIndex] += amount;
-      accumulator.total += amount;
+        accumulator.bucketValues[bucketIndex] += allocation.value;
+        accumulator.total += allocation.value;
+      }
     }
 
     final sorted = statsByKey.values.toList()
@@ -12828,8 +12901,15 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      totalIncome += provider.incomeAmountForTransaction(transaction);
-      totalExpense += provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        _filter.categoryIds,
+      );
+      if (transaction.type == 'CREDIT') {
+        totalIncome += amount;
+      } else if (transaction.type == 'DEBIT') {
+        totalExpense += amount;
+      }
     }
 
     return _ActivityTransactionsSummary(
@@ -14351,8 +14431,15 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     var incomeTotal = 0.0;
     var expenseTotal = 0.0;
     for (final transaction in transactions) {
-      incomeTotal += provider.incomeAmountForTransaction(transaction);
-      expenseTotal += provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        filter.categoryIds,
+      );
+      if (transaction.type == 'CREDIT') {
+        incomeTotal += amount;
+      } else if (transaction.type == 'DEBIT') {
+        expenseTotal += amount;
+      }
     }
     final netTotal = incomeTotal - expenseTotal;
     final transactionLabel = _formatLocalizedCount(
@@ -14481,6 +14568,12 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
                                   ),
                                   child: _LedgerTransactionEntry(
                                     transaction: transaction,
+                                    displayAmount: filter.categoryIds.isEmpty
+                                        ? null
+                                        : provider.amountForCategorySelection(
+                                            transaction,
+                                            filter.categoryIds,
+                                          ),
                                     derivedBalance: derivedBalancesByReference[
                                         transaction.reference],
                                     isSelfTransfer:
@@ -14545,11 +14638,13 @@ class _HeatmapDayInlineStat extends StatelessWidget {
 
 class _LedgerTransactionEntry extends StatelessWidget {
   final Transaction transaction;
+  final double? displayAmount;
   final double? derivedBalance;
   final bool isSelfTransfer;
 
   const _LedgerTransactionEntry({
     required this.transaction,
+    this.displayAmount,
     this.derivedBalance,
     this.isSelfTransfer = false,
   });
@@ -14562,7 +14657,7 @@ class _LedgerTransactionEntry extends StatelessWidget {
     final sign = isCredit ? '+' : '-';
     final currencyLabel = context.l10nText('ETB');
 
-    final amount = transaction.amount;
+    final amount = displayAmount ?? transaction.amount;
     final amountStr = formatNumberAbbreviated(amount).replaceAll('k', 'K');
 
     final name = isSelfTransfer
@@ -19462,6 +19557,8 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                                   child: CategoryFilterChip(
                                     label: category.name,
                                     flow: category.flow,
+                                    subtleFlowTint:
+                                        isSelfCategoryFilter(category),
                                     selected: _selectedCategoryIds.contains(
                                       category.id,
                                     ),
@@ -20401,6 +20498,8 @@ class _AnalyticsChartFilterSheetState
                                     child: CategoryFilterChip(
                                       label: category.name,
                                       flow: category.flow,
+                                      subtleFlowTint:
+                                          isSelfCategoryFilter(category),
                                       selected: _selectedCategoryIds.contains(
                                         category.id,
                                       ),

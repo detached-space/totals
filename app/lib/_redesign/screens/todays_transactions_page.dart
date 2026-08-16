@@ -828,6 +828,7 @@ class _TodayTransactionsFilterSheetState
                           CategoryFilterChip(
                             label: category.name,
                             flow: category.flow,
+                            subtleFlowTint: isSelfCategoryFilter(category),
                             selected: _selectedCategoryIds.contains(
                               category.id,
                             ),

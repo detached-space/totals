@@ -225,7 +225,6 @@ class WidgetDataProvider {
 
     final Map<int, double> categoryTotals = {};
     for (final tx in transactions) {
-      final catId = tx.categoryId ?? 0;
       final amount = tx.type == 'DEBIT'
           ? transactionNetExpenseAmount(
               tx,
@@ -235,7 +234,13 @@ class WidgetDataProvider {
             )
           : tx.amount;
       if (amount <= 0) continue;
-      categoryTotals[catId] = (categoryTotals[catId] ?? 0) + amount;
+      for (final allocation
+          in tx.categoryAmounts(totalAmount: amount).entries) {
+        if (allocation.value <= 0) continue;
+        final categoryId = allocation.key ?? 0;
+        categoryTotals[categoryId] =
+            (categoryTotals[categoryId] ?? 0) + allocation.value;
+      }
     }
 
     final sortedEntries = categoryTotals.entries.toList()

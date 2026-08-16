@@ -58,6 +58,7 @@ extension SyncEntityX on SyncEntity {
           'ownerAssignmentSource',
           'categoryId',
           'categoryIds',
+          'categorySplits',
           'categoryNames',
           'profileId',
           'includeInTotals',

@@ -164,11 +164,15 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
           (value) => value + amount,
           ifAbsent: () => amount,
         );
-        categorySpend.update(
-          transaction.categoryId,
-          (value) => value + amount,
-          ifAbsent: () => amount,
-        );
+        for (final allocation
+            in transaction.categoryAmounts(totalAmount: amount).entries) {
+          if (allocation.value <= 0) continue;
+          categorySpend.update(
+            allocation.key,
+            (value) => value + allocation.value,
+            ifAbsent: () => allocation.value,
+          );
+        }
 
         final recipient = _cleanCounterparty(transaction.receiver) ??
             _cleanCounterparty(transaction.creditor);

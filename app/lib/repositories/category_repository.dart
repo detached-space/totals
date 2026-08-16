@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/category.dart' as models;
+import 'package:totals/models/transaction_category_split.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 
@@ -223,8 +224,9 @@ class CategoryRepository {
     await db.transaction((txn) async {
       final affectedTransactions = await txn.query(
         'transactions',
-        columns: ['id', 'categoryId', 'categoryIds'],
-        where: 'categoryId = ? OR categoryIds IS NOT NULL',
+        columns: ['id', 'categoryId', 'categoryIds', 'categorySplits'],
+        where:
+            'categoryId = ? OR categoryIds IS NOT NULL OR categorySplits IS NOT NULL',
         whereArgs: [category.id],
       );
 
@@ -248,6 +250,33 @@ class CategoryRepository {
         }
       }
 
+      List<TransactionCategorySplit> decodeCategorySplits(dynamic raw) {
+        if (raw == null || (raw is String && raw.trim().isEmpty)) {
+          return const <TransactionCategorySplit>[];
+        }
+        try {
+          final decoded = raw is String ? jsonDecode(raw) : raw;
+          if (decoded is! Iterable) {
+            return const <TransactionCategorySplit>[];
+          }
+          return decoded
+              .whereType<Map<Object?, Object?>>()
+              .map(
+                (value) => TransactionCategorySplit.fromJson(
+                  Map<String, dynamic>.from(
+                    value.map(
+                      (key, entry) => MapEntry(key.toString(), entry),
+                    ),
+                  ),
+                ),
+              )
+              .where((split) => split.categoryId > 0 && split.amountMinor > 0)
+              .toList(growable: false);
+        } catch (_) {
+          return const <TransactionCategorySplit>[];
+        }
+      }
+
       final batch = txn.batch();
       for (final row in affectedTransactions) {
         final transactionId = row['id'] as int?;
@@ -262,14 +291,43 @@ class CategoryRepository {
           selectedCategoryIds.insert(0, primaryCategoryId);
         }
 
-        if (!selectedCategoryIds.contains(category.id)) {
+        final categorySplits = decodeCategorySplits(row['categorySplits']);
+        if (!selectedCategoryIds.contains(category.id) &&
+            !categorySplits.any((split) => split.categoryId == category.id)) {
           continue;
         }
 
-        final remainingIds = selectedCategoryIds
+        var remainingIds = selectedCategoryIds
             .where((id) => id != category.id)
             .toSet()
             .toList(growable: false);
+        String? encodedCategorySplits = row['categorySplits']?.toString();
+        final removedSplitAmount = categorySplits
+            .where((split) => split.categoryId == category.id)
+            .fold<int>(0, (sum, split) => sum + split.amountMinor);
+        if (removedSplitAmount > 0) {
+          final remainingSplits = categorySplits
+              .where((split) => split.categoryId != category.id)
+              .toList(growable: true);
+          if (remainingSplits.length >= 2) {
+            final first = remainingSplits.first;
+            remainingSplits[0] = TransactionCategorySplit(
+              categoryId: first.categoryId,
+              amountMinor: first.amountMinor + removedSplitAmount,
+            );
+            remainingIds = remainingSplits
+                .map((split) => split.categoryId)
+                .toList(growable: false);
+            encodedCategorySplits = jsonEncode(
+              remainingSplits.map((split) => split.toJson()).toList(),
+            );
+          } else {
+            if (remainingSplits.length == 1) {
+              remainingIds = <int>[remainingSplits.single.categoryId];
+            }
+            encodedCategorySplits = null;
+          }
+        }
 
         batch.update(
           'transactions',
@@ -277,6 +335,7 @@ class CategoryRepository {
             'categoryId': remainingIds.isEmpty ? null : remainingIds.first,
             'categoryIds':
                 remainingIds.isEmpty ? null : jsonEncode(remainingIds),
+            'categorySplits': encodedCategorySplits,
           },
           where: 'id = ?',
           whereArgs: [transactionId],

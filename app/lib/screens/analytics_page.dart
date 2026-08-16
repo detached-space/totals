@@ -429,10 +429,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   ) {
     final chartTransactions = transactions
         .map((transaction) {
-          final amount = transaction.type == 'CREDIT'
-              ? provider.incomeAmountForTransaction(transaction)
+          final selectedCategoryIds = transaction.type == 'CREDIT'
+              ? _selectedIncomeCategoryIds
               : transaction.type == 'DEBIT'
-                  ? provider.netExpenseAmountForTransaction(transaction)
+                  ? _selectedExpenseCategoryIds
+                  : const <int?>{};
+          final amount =
+              transaction.type == 'CREDIT' || transaction.type == 'DEBIT'
+                  ? provider.amountForCategorySelection(
+                      transaction,
+                      selectedCategoryIds,
+                    )
                   : transaction.amount.abs();
           return transaction.copyWith(amount: amount);
         })
@@ -752,6 +759,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                               builder: (context) => InsightsPage(
                                 transactions: filteredTransactions,
                                 periodLabel: 'Based on $_selectedPeriod view',
+                                selectedIncomeCategoryIds:
+                                    _selectedIncomeCategoryIds,
+                                selectedExpenseCategoryIds:
+                                    _selectedExpenseCategoryIds,
                               ),
                             ),
                           );
