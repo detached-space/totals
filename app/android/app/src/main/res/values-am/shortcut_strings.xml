@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_add_expense">ወጪ አክል</string>
+    <string name="shortcut_add_income">ገቢ አክል</string>
+    <string name="shortcut_quick_accounts">ፈጣን አካውንቶች</string>
+    <string name="shortcut_verify_payments">ክፍያዎችን ያረጋግጡ</string>
+</resources>

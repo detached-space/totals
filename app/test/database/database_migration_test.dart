@@ -7,7 +7,7 @@ import 'package:totals/database/database_helper.dart';
 
 import 'database_fixture.dart';
 
-const _schemaVersion = 28;
+const _schemaVersion = 33;
 
 void main() {
   late Directory tempDirectory;
@@ -31,13 +31,13 @@ void main() {
     }
   });
 
-  test('fresh database creates a healthy v28 schema and reopens cleanly',
+  test('fresh database creates a healthy v33 schema and reopens cleanly',
       () async {
     int? categoryCount;
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV28(db);
+        await _expectHealthyV33(db);
         final count = (await db.rawQuery(
           'SELECT COUNT(*) AS count FROM categories',
         ))
@@ -48,13 +48,13 @@ void main() {
     }
   });
 
-  test('exact v4 schema upgrades to v28 without losing sentinel data',
+  test('exact v4 schema upgrades to v33 without losing sentinel data',
       () async {
     await DatabaseFixture.createV4(databaseFactoryFfi, databasePath);
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV28(db);
+        await _expectHealthyV33(db);
 
         final transaction = (await db.query(
           'transactions',
@@ -111,7 +111,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV28(db);
+        await _expectHealthyV33(db);
 
         final renamed = (await db.query(
           'categories',
@@ -153,7 +153,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV28(db);
+        await _expectHealthyV33(db);
 
         final renamed = (await db.query(
           'categories',
@@ -185,7 +185,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV28(db);
+        await _expectHealthyV33(db);
 
         final legacyRule = (await db.query(
           'auto_category_rules',
@@ -215,7 +215,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV28(db);
+        await _expectHealthyV33(db);
 
         final entry = (await db.query(
           'loan_debt_entries',
@@ -269,7 +269,7 @@ void main() {
 
       for (var pass = 0; pass < 2; pass++) {
         await _withDatabase(databasePath, (db) async {
-          await _expectHealthyV28(db);
+          await _expectHealthyV33(db);
 
           final transaction = (await db.query(
             'transactions',
@@ -303,6 +303,128 @@ void main() {
       }
     });
   }
+
+  test('exact v28 schema upgrades through v33 idempotently', () async {
+    await _withDatabase(databasePath, (db) async {
+      await DatabaseFixture.replaceV29OwnershipShapeWithV28(db);
+    });
+
+    for (var pass = 0; pass < 2; pass++) {
+      await _withDatabase(databasePath, (db) async {
+        await _expectHealthyV33(db);
+
+        final transaction = (await db.query(
+          'transactions',
+          where: 'id = ?',
+          whereArgs: [DatabaseFixture.v28OwnershipTransactionId],
+        ))
+            .single;
+        expect(transaction['reference'], 'v28-ownership-sentinel');
+        expect(transaction['amount'], 29.28);
+        expect(transaction['accountNumber'], '251911223344');
+        expect(transaction['ownerAccountNumber'], isNull);
+        expect(transaction['sourceSubscriptionId'], isNull);
+        expect(transaction['ownerAssignmentSource'], isNull);
+
+        final account = (await db.query(
+          'accounts',
+          where: 'id = ?',
+          whereArgs: [DatabaseFixture.v28OwnershipAccountId],
+        ))
+            .single;
+        expect(account['accountNumber'], '0911223344');
+        expect(account['accountHolderName'], 'V28 owner');
+        expect(account['smsSubscriptionId'], isNull);
+        expect(account['includeInTotals'], 1);
+        expect(account['isDormant'], 0);
+        expect(account['isDefault'], 1);
+      });
+    }
+  });
+
+  test(
+      'v31 custom Reimbursement survives while the stable built-in is restored',
+      () async {
+    await _withDatabase(databasePath, (db) async {
+      await db.delete(
+        'categories',
+        where: 'builtInKey = ?',
+        whereArgs: ['income_reimbursement'],
+      );
+      await db.insert('categories', {
+        'name': 'Reimbursement',
+        'essential': 0,
+        'uncategorized': 0,
+        'iconKey': 'wallet',
+        'description': 'A user-created category',
+        'flow': 'income',
+        'recurring': 0,
+        'builtIn': 0,
+        'builtInKey': null,
+      });
+      await db.execute(
+        'DROP TRIGGER IF EXISTS trg_reimbursement_allocations_tx_delete',
+      );
+      await db.execute('DROP TABLE reimbursement_allocations');
+      await db.setVersion(31);
+    });
+
+    for (var pass = 0; pass < 2; pass++) {
+      await _withDatabase(databasePath, (db) async {
+        await _expectHealthyV33(db);
+
+        final custom = (await db.query(
+          'categories',
+          where: 'name = ? AND flow = ?',
+          whereArgs: ['Reimbursement', 'income'],
+        ))
+            .single;
+        expect(custom['builtIn'], 0);
+        expect(custom['builtInKey'], isNull);
+
+        final builtIn = (await db.query(
+          'categories',
+          where: 'builtInKey = ?',
+          whereArgs: ['income_reimbursement'],
+        ))
+            .single;
+        expect(builtIn['name'], 'Reimbursement (Totals)');
+        expect(builtIn['flow'], 'income');
+        expect(builtIn['builtIn'], 1);
+      });
+    }
+  });
+
+  test('v32 database adds durable transaction source SMS storage', () async {
+    await _withDatabase(databasePath, (db) async {
+      await db.execute(
+        'DROP TRIGGER IF EXISTS trg_transaction_source_sms_tx_delete',
+      );
+      await db.execute('DROP TABLE transaction_source_sms');
+      await db.setVersion(32);
+    });
+
+    await _withDatabase(databasePath, (db) async {
+      await _expectHealthyV33(db);
+      await db.insert('transactions', {
+        'amount': 25,
+        'reference': 'source-sms-migration',
+      });
+      await db.insert('transaction_source_sms', {
+        'transactionReference': 'source-sms-migration',
+        'body': 'Original bank message',
+        'senderAddress': 'BANK',
+      });
+
+      await db.delete(
+        'transactions',
+        where: 'reference = ?',
+        whereArgs: ['source-sms-migration'],
+      );
+
+      expect(await db.query('transaction_source_sms'), isEmpty);
+    });
+  });
 }
 
 Future<T> _withDatabase<T>(
@@ -323,7 +445,7 @@ Future<T> _withDatabase<T>(
   }
 }
 
-Future<void> _expectHealthyV28(Database db) async {
+Future<void> _expectHealthyV33(Database db) async {
   expect(await db.getVersion(), _schemaVersion);
 
   final integrity = await db.rawQuery('PRAGMA integrity_check');
@@ -351,6 +473,8 @@ Future<void> _expectHealthyV28(Database db) async {
       'user_accounts',
       'loan_debt_entries',
       'loan_debt_repayments',
+      'reimbursement_allocations',
+      'transaction_source_sms',
       'sync_destinations',
       'sync_rules',
       'sync_outbox',
@@ -369,6 +493,18 @@ Future<void> _expectHealthyV28(Database db) async {
       'sourceType',
       'sourceMessageId',
       'sourceFingerprint',
+      'ownerAccountNumber',
+      'sourceSubscriptionId',
+      'ownerAssignmentSource',
+    }),
+  );
+  expect(
+    await _columnNames(db, 'accounts'),
+    containsAll(<String>{
+      'smsSubscriptionId',
+      'includeInTotals',
+      'isDormant',
+      'isDefault',
     }),
   );
   expect(
@@ -390,6 +526,86 @@ Future<void> _expectHealthyV28(Database db) async {
       'lastScheduledAt',
     }),
   );
+
+  expect(
+    await _indexNames(db, 'transactions'),
+    containsAll(<String>{
+      'idx_transactions_ownerAccount',
+      'idx_transactions_sourceSubscriptionId',
+    }),
+  );
+  expect(
+    await _indexNames(db, 'accounts'),
+    containsAll(<String>{
+      'idx_accounts_smsSubscriptionId',
+      'idx_accounts_one_default_per_bank',
+    }),
+  );
+  expect(
+    await _columnNames(db, 'reimbursement_allocations'),
+    containsAll(<String>{
+      'id',
+      'reimbursementTransactionReference',
+      'expenseTransactionReference',
+      'appliedAmount',
+      'createdAt',
+      'updatedAt',
+    }),
+  );
+  expect(
+    await _indexNames(db, 'reimbursement_allocations'),
+    containsAll(<String>{
+      'idx_reimbursement_allocations_reimbursement',
+      'idx_reimbursement_allocations_expense',
+      'idx_reimbursement_allocations_pair',
+    }),
+  );
+  expect(
+    await _columnNames(db, 'transaction_source_sms'),
+    containsAll(<String>{
+      'transactionReference',
+      'body',
+      'senderAddress',
+      'receivedAt',
+      'messageId',
+    }),
+  );
+
+  final reimbursementCategories = await db.query(
+    'categories',
+    where: 'builtInKey = ?',
+    whereArgs: ['income_reimbursement'],
+  );
+  expect(reimbursementCategories, hasLength(1));
+  expect(reimbursementCategories.single['flow'], 'income');
+  expect(reimbursementCategories.single['builtIn'], 1);
+
+  final refundCategories = await db.query(
+    'categories',
+    where: 'builtInKey = ?',
+    whereArgs: ['income_refund'],
+  );
+  expect(refundCategories, hasLength(1));
+  expect(
+    refundCategories.single['description'],
+    'Money returned by a merchant for a purchase',
+  );
+
+  final reimbursementTriggers = await db.rawQuery('''
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'trigger'
+      AND name = 'trg_reimbursement_allocations_tx_delete'
+  ''');
+  expect(reimbursementTriggers, hasLength(1));
+
+  final sourceSmsTriggers = await db.rawQuery('''
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'trigger'
+      AND name = 'trg_transaction_source_sms_tx_delete'
+  ''');
+  expect(sourceSmsTriggers, hasLength(1));
 
   final duplicateBuiltInKeys = await db.rawQuery('''
     SELECT builtInKey
@@ -420,4 +636,9 @@ Future<void> _expectHealthyV28(Database db) async {
 Future<Set<String>> _columnNames(Database db, String table) async {
   final columns = await db.rawQuery('PRAGMA table_info($table)');
   return columns.map((column) => column['name'] as String).toSet();
+}
+
+Future<Set<String>> _indexNames(Database db, String table) async {
+  final indexes = await db.rawQuery('PRAGMA index_list($table)');
+  return indexes.map((index) => index['name'] as String).toSet();
 }

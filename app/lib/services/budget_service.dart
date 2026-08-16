@@ -1,10 +1,15 @@
 import 'package:totals/models/budget.dart';
+import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/budget_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 class BudgetService {
   final BudgetRepository _budgetRepository = BudgetRepository();
   final TransactionRepository _transactionRepository = TransactionRepository();
+  final ReimbursementRepository _reimbursementRepository =
+      ReimbursementRepository();
 
   // Calculate spending for a given period and category
   Future<double> calculateSpending({
@@ -28,44 +33,25 @@ class BudgetService {
       ids.add(categoryId);
     }
 
-    if (ids.isNotEmpty) {
-      final filtered = transactions
-          .where((t) => t.selectedCategoryIds.any(ids.contains))
-          .toList();
-      return filtered.fold<double>(0.0, (sum, t) => sum + t.amount.abs());
-    }
-
-    return transactions.fold<double>(0.0, (sum, t) => sum + t.amount.abs());
+    final filtered = ids.isEmpty
+        ? transactions
+        : transactions
+            .where((transaction) =>
+                transaction.selectedCategoryIds.any(ids.contains))
+            .toList(growable: false);
+    final reimbursedByReference =
+        await _reimbursementRepository.getAppliedTotalsForExpenses(
+      filtered.map((transaction) => transaction.reference),
+    );
+    return _sumNetSpending(
+      filtered,
+      reimbursedByReference,
+    );
   }
 
   // Calculate budget usage/spent amounts for a budget
   Future<BudgetStatus> getBudgetStatus(Budget budget) async {
-    final periodStart = budget.getCurrentPeriodStart();
-    final periodEnd = budget.getCurrentPeriodEnd();
-
-    final spent = await calculateSpending(
-      startDate: periodStart,
-      endDate: periodEnd,
-      categoryId: budget.categoryId,
-      categoryIds: budget.categoryIds,
-    );
-
-    final remaining = budget.amount - spent;
-    final percentageUsed =
-        budget.amount > 0 ? (spent / budget.amount) * 100 : 0.0;
-    final isExceeded = spent > budget.amount;
-    final isApproachingLimit = percentageUsed >= budget.alertThreshold;
-
-    return BudgetStatus(
-      budget: budget,
-      spent: spent,
-      remaining: remaining,
-      percentageUsed: percentageUsed,
-      isExceeded: isExceeded,
-      isApproachingLimit: isApproachingLimit,
-      periodStart: periodStart,
-      periodEnd: periodEnd,
-    );
+    return (await _getStatusesForBudgets(<Budget>[budget])).single;
   }
 
   // Get all active budgets with their status
@@ -73,14 +59,7 @@ class BudgetService {
     final budgets = await _budgetRepository.getActiveBudgets(
       calendar: calendar,
     );
-    final statuses = <BudgetStatus>[];
-
-    for (final budget in budgets) {
-      final status = await getBudgetStatus(budget);
-      statuses.add(status);
-    }
-
-    return statuses;
+    return _getStatusesForCurrentBudgets(budgets);
   }
 
   // Get budgets by type with status
@@ -92,14 +71,7 @@ class BudgetService {
       type,
       calendar: calendar,
     );
-    final statuses = <BudgetStatus>[];
-
-    for (final budget in budgets) {
-      final status = await getBudgetStatus(budget);
-      statuses.add(status);
-    }
-
-    return statuses;
+    return _getStatusesForCurrentBudgets(budgets);
   }
 
   // Get category budgets with status
@@ -109,14 +81,122 @@ class BudgetService {
     final budgets = await _budgetRepository.getCategoryBudgets(
       calendar: calendar,
     );
-    final statuses = <BudgetStatus>[];
+    return _getStatusesForCurrentBudgets(budgets);
+  }
 
-    for (final budget in budgets) {
-      final status = await getBudgetStatus(budget);
-      statuses.add(status);
+  Future<List<BudgetStatus>> _getStatusesForCurrentBudgets(
+    List<Budget> budgets,
+  ) {
+    final now = DateTime.now();
+    return _getStatusesForBudgets(
+      budgets
+          .where((budget) => budget.isEffectiveOn(now))
+          .toList(growable: false),
+    );
+  }
+
+  Future<List<BudgetStatus>> _getStatusesForBudgets(
+    List<Budget> budgets,
+  ) async {
+    if (budgets.isEmpty) return const <BudgetStatus>[];
+
+    final requestsByPeriod = <String, List<_BudgetStatusRequest>>{};
+    for (var index = 0; index < budgets.length; index++) {
+      final budget = budgets[index];
+      final periodStart = budget.getCurrentPeriodStart();
+      final periodEnd = budget.getCurrentPeriodEnd();
+      final periodKey = '${periodStart.microsecondsSinceEpoch}:'
+          '${periodEnd.microsecondsSinceEpoch}';
+      requestsByPeriod
+          .putIfAbsent(periodKey, () => <_BudgetStatusRequest>[])
+          .add(
+            _BudgetStatusRequest(
+              index: index,
+              budget: budget,
+              periodStart: periodStart,
+              periodEnd: periodEnd,
+            ),
+          );
     }
 
-    return statuses;
+    final statuses = List<BudgetStatus?>.filled(budgets.length, null);
+    for (final requests in requestsByPeriod.values) {
+      final periodStart = requests.first.periodStart;
+      final periodEnd = requests.first.periodEnd;
+      final transactions =
+          await _transactionRepository.getTransactionsByDateRange(
+        periodStart,
+        periodEnd,
+        type: 'DEBIT',
+      );
+      final reimbursedByReference =
+          await _reimbursementRepository.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
+
+      for (final request in requests) {
+        final categoryIds = request.budget.selectedCategoryIds.toSet();
+        final applicableTransactions = categoryIds.isEmpty
+            ? transactions
+            : transactions.where(
+                (transaction) =>
+                    transaction.selectedCategoryIds.any(categoryIds.contains),
+              );
+        final spent = _sumNetSpending(
+          applicableTransactions,
+          reimbursedByReference,
+        );
+        statuses[request.index] = _buildStatus(
+          request: request,
+          spent: spent,
+        );
+      }
+    }
+
+    return List<BudgetStatus>.generate(
+      statuses.length,
+      (index) => statuses[index]!,
+      growable: false,
+    );
+  }
+
+  double _sumNetSpending(
+    Iterable<Transaction> transactions,
+    Map<String, double> reimbursedByReference,
+  ) {
+    return transactions.fold<double>(
+      0.0,
+      (sum, transaction) {
+        final gross = transactionDebitOutflow(transaction);
+        final reimbursed =
+            reimbursedByReference[transaction.reference.trim()] ?? 0.0;
+        return sum +
+            expenseAmountAfterReimbursement(
+              grossExpense: gross,
+              reimbursedAmount: reimbursed,
+            );
+      },
+    );
+  }
+
+  BudgetStatus _buildStatus({
+    required _BudgetStatusRequest request,
+    required double spent,
+  }) {
+    final budget = request.budget;
+    final remaining = budget.amount - spent;
+    final percentageUsed =
+        budget.amount > 0 ? (spent / budget.amount) * 100 : 0.0;
+    return BudgetStatus(
+      budget: budget,
+      spent: spent,
+      remaining: remaining,
+      percentageUsed: percentageUsed,
+      isExceeded: spent > budget.amount,
+      isApproachingLimit: percentageUsed >= budget.alertThreshold,
+      periodStart: request.periodStart,
+      periodEnd: request.periodEnd,
+    );
   }
 
   // Get budgets by category ID
@@ -124,10 +204,19 @@ class BudgetService {
     int categoryId, {
     String? calendar,
   }) async {
-    return await _budgetRepository.getBudgetsByCategory(
+    final budgets = await _budgetRepository.getBudgetsByCategory(
       categoryId,
       calendar: calendar,
     );
+    final now = DateTime.now();
+    return budgets
+        .where((budget) => budget.isEffectiveOn(now))
+        .toList(growable: false);
+  }
+
+  Future<BudgetStatus?> getCurrentBudgetStatus(Budget budget) async {
+    if (!budget.isEffectiveOn(DateTime.now())) return null;
+    return getBudgetStatus(budget);
   }
 
   // Check if budget is exceeded or approaching limit
@@ -167,6 +256,20 @@ class BudgetService {
       }
     }
   }
+}
+
+class _BudgetStatusRequest {
+  final int index;
+  final Budget budget;
+  final DateTime periodStart;
+  final DateTime periodEnd;
+
+  const _BudgetStatusRequest({
+    required this.index,
+    required this.budget,
+    required this.periodStart,
+    required this.periodEnd,
+  });
 }
 
 class BudgetStatus {

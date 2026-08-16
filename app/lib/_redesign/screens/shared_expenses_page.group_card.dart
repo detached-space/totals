@@ -418,6 +418,15 @@ class _GroupCardBalanceBlock extends StatelessWidget {
         .replaceFirst('{amount}', amount);
     final balanceColor = isOwed ? AppColors.incomeSuccess : AppColors.red;
     final plan = originalDebtPlanFor(group);
+    final debtorCount = isOwed
+        ? plan.debts
+            .where(
+              (debt) => debt.to == myPublicKey && debt.from.trim().isNotEmpty,
+            )
+            .map((debt) => debt.from)
+            .toSet()
+            .length
+        : 0;
     SettlementDebt? topDebt;
     for (final d in plan.debts) {
       if (d.from != myPublicKey && d.to != myPublicKey) continue;
@@ -443,15 +452,25 @@ class _GroupCardBalanceBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          balanceText,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: balanceColor,
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                balanceText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: balanceColor,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (debtorCount > 1) ...[
+              const SizedBox(width: 7),
+              _MultipleDebtorsIndicator(count: debtorCount),
+            ],
+          ],
         ),
         if (counterpartyName != null) ...[
           const SizedBox(height: 2),
@@ -489,6 +508,59 @@ class _GroupCardBalanceBlock extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _MultipleDebtorsIndicator extends StatelessWidget {
+  final int count;
+
+  const _MultipleDebtorsIndicator({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = context
+        .l10n(
+          'shared.peopleOweYouCount',
+          '{count} people owe you',
+        )
+        .replaceFirst('{count}', '$count');
+    const color = AppColors.incomeSuccess;
+
+    return Semantics(
+      label: label,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: label,
+        excludeFromSemantics: true,
+        child: Container(
+          height: 21,
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                AppIcons.group_outlined,
+                size: 12,
+                color: color,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: const TextStyle(
+                  color: color,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

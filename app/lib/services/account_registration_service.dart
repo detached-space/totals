@@ -2,7 +2,6 @@ import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
-import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/account_sync_status_service.dart';
@@ -13,7 +12,10 @@ import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/pattern_parser.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/utils/sms_transaction_source.dart';
+import 'package:totals/utils/sms_message_classifier.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
+import 'package:totals/services/account_ownership_service.dart';
+import 'package:totals/utils/account_identity.dart';
 
 const int _dashenBankId = 4;
 
@@ -141,6 +143,7 @@ class AccountRegistrationService {
             SmsColumn.ADDRESS,
             SmsColumn.BODY,
             SmsColumn.DATE,
+            SmsColumn.SUBSCRIPTION_ID,
           ],
           sortOrder: [
             OrderBy(SmsColumn.DATE, sort: Sort.DESC),
@@ -221,6 +224,7 @@ class AccountRegistrationService {
     final totalMessages = messages.length;
     const int batchSize = 10; // Process 10 messages concurrently
     final existingTransactions = await _transactionRepo.getTransactions();
+    final registeredAccounts = await _accountRepo.getAccounts();
     final importedReferences = existingTransactions
         .map((transaction) => transaction.reference)
         .toSet();
@@ -236,10 +240,6 @@ class AccountRegistrationService {
         .toSet();
     final transactionsToImport = <Transaction>[];
 
-    // Track the latest message with balance for account update
-    Map<String, dynamic>? latestBalanceDetails;
-    String? latestAccountNumber;
-
     // Process messages in batches
     for (int batchStart = 0;
         batchStart < messages.length;
@@ -254,6 +254,15 @@ class AccountRegistrationService {
       final results = await Future.wait(
         batch.map((message) async {
           if (message.body == null || message.address == null) {
+            return const _ParsedSmsImportResult();
+          }
+          if (bank.id == 6 &&
+              (SmsMessageClassifier.isTelebirrAtmAuthorization(
+                    message.body!,
+                  ) ||
+                  SmsMessageClassifier.isTelebirrAirtimeReceipt(
+                    message.body!,
+                  ))) {
             return const _ParsedSmsImportResult();
           }
 
@@ -287,6 +296,25 @@ class AccountRegistrationService {
                 bankId: parsedBankId,
               );
               details.addAll(source.toJson());
+              details['reference'] = source.scopeReference(
+                bankId: parsedBankId,
+                reference: details['reference']?.toString(),
+                transactionType: details['type']?.toString(),
+              );
+              if (message.subscriptionId != null &&
+                  message.subscriptionId! >= 0) {
+                details['sourceSubscriptionId'] = message.subscriptionId;
+              }
+              final owner = resolveSmsOwnership(
+                bank: bank,
+                accounts: registeredAccounts,
+                messageBody: cleanedBody,
+                parsedAccountNumber: details['accountNumber']?.toString(),
+                sourceSubscriptionId: message.subscriptionId,
+              );
+              if (owner != null) {
+                details['ownerAccountNumber'] = owner.accountNumber;
+              }
               _applyMessageDate(details, messageDate);
               return _ParsedSmsImportResult(details: details);
             }
@@ -301,13 +329,6 @@ class AccountRegistrationService {
       // Count results and track latest balance
       for (var result in results) {
         final details = result.details;
-        if (details != null &&
-            details['currentBalance'] != null &&
-            latestBalanceDetails == null) {
-          latestBalanceDetails = details;
-          latestAccountNumber = details['accountNumber'];
-        }
-
         if (!result.isParsed) {
           skippedCount++;
           continue;
@@ -349,15 +370,8 @@ class AccountRegistrationService {
       );
     }
 
-    // Update account balance from the latest message
-    if (latestBalanceDetails != null) {
-      await reportProgress("Updating account balance...", progress: 1.0);
-      await _updateAccountBalanceFromLatestMessage(
-        bankId,
-        latestBalanceDetails,
-        latestAccountNumber,
-      );
-    }
+    await reportProgress("Assigning transactions to account...", progress: 1.0);
+    await AccountOwnershipService.instance.reconcile(bankId: bankId);
 
     duplicatesRemovedCount = await _removeImportedDuplicates(
       bank: bank,
@@ -497,74 +511,5 @@ class AccountRegistrationService {
       return trimmedAccount.substring(trimmedAccount.length - maskPattern);
     }
     return trimmedAccount;
-  }
-
-  /// Updates account balance from the latest message
-  Future<void> _updateAccountBalanceFromLatestMessage(
-    int bankId,
-    Map<String, dynamic> details,
-    String? extractedAccountNumber,
-  ) async {
-    try {
-      final accounts = await _accountRepo.getAccounts();
-      int bankIdFromDetails = details['bankId'] ?? bankId;
-      final banks = await _bankConfigService.getBanks();
-      final bank = banks.firstWhere((b) => b.id == bankIdFromDetails);
-
-      int index = -1;
-
-      // Use uniformMasking logic to match accounts
-      if (bank.uniformMasking == false) {
-        // Match by bankId only (e.g., Awash/Telebirr)
-        index = accounts.indexWhere((a) => a.bank == bankIdFromDetails);
-      } else if (extractedAccountNumber != null &&
-          extractedAccountNumber.isNotEmpty) {
-        if (bank.uniformMasking == true && bank.maskPattern != null) {
-          // Match last N digits based on mask pattern
-          final extractedSuffix = extractedAccountNumber.length >=
-                  bank.maskPattern!
-              ? extractedAccountNumber
-                  .substring(extractedAccountNumber.length - bank.maskPattern!)
-              : extractedAccountNumber;
-
-          index = accounts.indexWhere((a) {
-            if (a.bank != bankIdFromDetails) return false;
-            if (a.accountNumber.length < bank.maskPattern!) return false;
-            final accountSuffix = a.accountNumber
-                .substring(a.accountNumber.length - bank.maskPattern!);
-            return accountSuffix == extractedSuffix;
-          });
-        } else {
-          // Exact match (uniformMasking is null)
-          index = accounts.indexWhere((a) =>
-              a.bank == bankIdFromDetails &&
-              a.accountNumber == extractedAccountNumber);
-        }
-      } else {
-        // No account number extracted, match by bankId only
-        index = accounts.indexWhere((a) => a.bank == bankIdFromDetails);
-      }
-
-      if (index != -1) {
-        final account = accounts[index];
-        final newBalance = details['currentBalance'] != null
-            ? SmsService.sanitizeAmount(details['currentBalance'])
-            : account.balance;
-
-        final updated = Account(
-          accountNumber: account.accountNumber,
-          bank: account.bank,
-          balance: newBalance,
-          accountHolderName: account.accountHolderName,
-          settledBalance: account.settledBalance,
-          pendingCredit: account.pendingCredit,
-        );
-        await _accountRepo.saveAccount(updated);
-        print(
-            "debug: Account balance updated from latest message for ${account.accountHolderName}: $newBalance");
-      }
-    } catch (e) {
-      print("debug: Error updating account balance from latest message: $e");
-    }
   }
 }

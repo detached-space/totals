@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_home_page.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_widgets.dart';
+import 'package:totals/_redesign/screens/telegram_backup_consent_page.dart';
+import 'package:totals/_redesign/screens/telegram_backup_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
-import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/services/advanced_settings_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
 
 class RedesignAdvancedSettingsPage extends StatefulWidget {
   const RedesignAdvancedSettingsPage({super.key});
@@ -19,6 +22,7 @@ class _RedesignAdvancedSettingsPageState
   ProfileDoubleTapAction _selected = ProfileDoubleTapAction.lock;
   Set<ToolsFabItem> _visibleTools =
       AdvancedSettingsService.defaultToolsFabItems;
+  bool _telegramBackupEnabled = false;
   bool _loading = true;
 
   @override
@@ -33,8 +37,51 @@ class _RedesignAdvancedSettingsPageState
     setState(() {
       _selected = AdvancedSettingsService.instance.profileDoubleTapAction.value;
       _visibleTools = AdvancedSettingsService.instance.toolsFabItems.value;
+      _telegramBackupEnabled =
+          AdvancedSettingsService.instance.telegramBackupEnabled.value;
       _loading = false;
     });
+  }
+
+  Future<void> _setTelegramBackupEnabled(bool enabled) async {
+    if (enabled) {
+      final accepted = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => const TelegramBackupConsentPage(),
+        ),
+      );
+      if (!mounted || accepted != true) return;
+    }
+
+    setState(() => _telegramBackupEnabled = enabled);
+    try {
+      await AdvancedSettingsService.instance.setTelegramBackupEnabled(enabled);
+      await TelegramBackupScheduler.sync();
+      if (enabled && mounted) _openTelegramBackup();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _telegramBackupEnabled =
+            AdvancedSettingsService.instance.telegramBackupEnabled.value;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead(
+              'Could not update the Telegram Backup setting.',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _openTelegramBackup() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const TelegramBackupPage(),
+      ),
+    );
   }
 
   Future<void> _openActionPicker() async {
@@ -258,6 +305,22 @@ class _RedesignAdvancedSettingsPageState
                       builder: (_) => const DataSyncHomePage(),
                     ),
                   ),
+                ),
+                const SizedBox(height: 12),
+                DataSyncTile(
+                  icon: AppIcons.upload_rounded,
+                  title: context.l10nText('Telegram Backup'),
+                  subtitle: context.l10nText(
+                    'Show encrypted Telegram backups in Settings',
+                  ),
+                  trailing: Switch(
+                    value: _telegramBackupEnabled,
+                    activeThumbColor: AppColors.primaryLight,
+                    onChanged: _setTelegramBackupEnabled,
+                  ),
+                  onTap: _telegramBackupEnabled
+                      ? _openTelegramBackup
+                      : () => _setTelegramBackupEnabled(true),
                 ),
                 const SizedBox(height: 12),
                 Container(

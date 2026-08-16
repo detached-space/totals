@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/loan_debt_entry.dart';
@@ -419,6 +420,36 @@ class LoanDebtRepository {
       whereArgs: [normalizedReference],
     );
     await _cancelReturnReminder(normalizedReference);
+  }
+
+  Future<void> clearAll() async {
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query(
+      'loan_debt_entries',
+      columns: ['transactionReference'],
+    );
+    final references = rows
+        .map((row) => (row['transactionReference'] as String?)?.trim())
+        .whereType<String>()
+        .where((reference) => reference.isNotEmpty)
+        .toSet();
+
+    await db.transaction((txn) async {
+      await txn.delete('loan_debt_repayments');
+      await txn.delete('loan_debt_entries');
+    });
+
+    for (final reference in references) {
+      try {
+        await _cancelReturnReminder(reference);
+      } catch (error) {
+        // The stored data is already gone; notification cleanup is best-effort.
+        debugPrint(
+          'debug: Failed to cancel loan/debt reminder while clearing data: '
+          '$error',
+        );
+      }
+    }
   }
 
   Future<void> syncReturnReminders() async {

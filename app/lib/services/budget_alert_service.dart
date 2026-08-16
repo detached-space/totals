@@ -111,8 +111,9 @@ class BudgetAlertService {
   // Check and send notification for a specific budget
   Future<void> checkAndNotifyBudgetAlert(Budget budget) async {
     try {
-      final status = await _budgetService.getBudgetStatus(budget);
-      
+      final status = await _budgetService.getCurrentBudgetStatus(budget);
+      if (status == null) return;
+
       if (status.isExceeded) {
         final alert = BudgetAlert(
           budget: budget,

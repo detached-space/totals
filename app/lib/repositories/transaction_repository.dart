@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
@@ -10,6 +11,25 @@ import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/data_sync/sync_enqueuer.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/models/account.dart';
+import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
+
+class TransactionOwnershipUpdate {
+  final String reference;
+  final String? ownerAccountNumber;
+  final String? ownerAssignmentSource;
+  final int? sourceSubscriptionId;
+  final String? sourceMessageId;
+
+  const TransactionOwnershipUpdate({
+    required this.reference,
+    required this.ownerAccountNumber,
+    this.ownerAssignmentSource,
+    this.sourceSubscriptionId,
+    this.sourceMessageId,
+  });
+}
 
 class TransactionRepository {
   final BankConfigService _bankConfigService = BankConfigService();
@@ -86,12 +106,15 @@ class TransactionRepository {
       'type': map['type'],
       'transactionLink': map['transactionLink'],
       'accountNumber': map['accountNumber'],
+      'ownerAccountNumber': map['ownerAccountNumber'],
+      'ownerAssignmentSource': map['ownerAssignmentSource'],
       'categoryId': map['categoryId'],
       'categoryIds': map['categoryIds'],
       'profileId': map['profileId'],
       'sourceType': map['sourceType'],
       'sourceMessageId': map['sourceMessageId'],
       'sourceFingerprint': map['sourceFingerprint'],
+      'sourceSubscriptionId': map['sourceSubscriptionId'],
     });
   }
 
@@ -157,6 +180,8 @@ class TransactionRepository {
       'type': transactionToSave.type,
       'transactionLink': transactionToSave.transactionLink,
       'accountNumber': transactionToSave.accountNumber,
+      'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+      'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
       'categoryId': transactionToSave.categoryId,
       'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
           ? null
@@ -164,6 +189,7 @@ class TransactionRepository {
       'sourceType': transactionToSave.sourceType,
       'sourceMessageId': transactionToSave.sourceMessageId,
       'sourceFingerprint': transactionToSave.sourceFingerprint,
+      'sourceSubscriptionId': transactionToSave.sourceSubscriptionId,
       'year': year,
       'month': month,
       'day': day,
@@ -189,7 +215,8 @@ class TransactionRepository {
       entity: SyncEntity.transactions,
       entityRef: transactionToSave.reference,
       op: SyncOp.upsert,
-      row: Map<String, dynamic>.from(dataToSave),
+      row: Map<String, dynamic>.from(dataToSave)
+        ..remove('sourceSubscriptionId'),
     );
   }
 
@@ -253,6 +280,8 @@ class TransactionRepository {
           'type': transactionToSave.type,
           'transactionLink': transactionToSave.transactionLink,
           'accountNumber': transactionToSave.accountNumber,
+          'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+          'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
           'categoryId': transactionToSave.categoryId,
           'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
               ? null
@@ -261,6 +290,7 @@ class TransactionRepository {
           'sourceType': transactionToSave.sourceType,
           'sourceMessageId': transactionToSave.sourceMessageId,
           'sourceFingerprint': transactionToSave.sourceFingerprint,
+          'sourceSubscriptionId': transactionToSave.sourceSubscriptionId,
           'year': year,
           'month': month,
           'day': day,
@@ -279,6 +309,8 @@ class TransactionRepository {
         'sourceType': transactionToSave.sourceType,
         'sourceMessageId': transactionToSave.sourceMessageId,
         'sourceFingerprint': transactionToSave.sourceFingerprint,
+        'ownerAccountNumber': transactionToSave.ownerAccountNumber,
+        'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
       }));
     }
 
@@ -290,9 +322,301 @@ class TransactionRepository {
     );
   }
 
+  /// Updates category fields for existing transactions in one database batch.
+  /// All other transaction fields, including SMS source and account ownership,
+  /// are left untouched.
+  Future<int> updateTransactionCategories(
+    Iterable<Transaction> transactions,
+  ) async {
+    final deduped = <String, Transaction>{
+      for (final transaction in transactions)
+        if (transaction.reference.trim().isNotEmpty)
+          transaction.reference: transaction,
+    };
+    if (deduped.isEmpty) return 0;
+
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final previousRowsByReference = <String, Map<String, dynamic>>{};
+    final references = deduped.keys.toList(growable: false);
+    const maxSqlVars = 900;
+    for (var start = 0; start < references.length; start += maxSqlVars) {
+      final end = math.min(start + maxSqlVars, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final where = StringBuffer('reference IN ($placeholders)');
+      final args = <Object?>[...chunk];
+      if (activeProfileId != null) {
+        where.write(' AND profileId = ?');
+        args.add(activeProfileId);
+      }
+      final rows = await db.query(
+        'transactions',
+        where: where.toString(),
+        whereArgs: args,
+      );
+      for (final row in rows) {
+        final reference = row['reference']?.toString();
+        if (reference == null || reference.isEmpty) continue;
+        previousRowsByReference[reference] = Map<String, dynamic>.from(row);
+      }
+    }
+
+    final updates = deduped.values
+        .where(
+          (transaction) =>
+              previousRowsByReference.containsKey(transaction.reference),
+        )
+        .toList(growable: false);
+    if (updates.isEmpty) return 0;
+
+    final batch = db.batch();
+    for (final transaction in updates) {
+      final where = <String>['reference = ?'];
+      final args = <Object?>[transaction.reference];
+      if (activeProfileId != null) {
+        where.add('profileId = ?');
+        args.add(activeProfileId);
+      }
+      batch.update(
+        'transactions',
+        <String, Object?>{
+          'categoryId': transaction.categoryId,
+          'categoryIds': transaction.selectedCategoryIds.isEmpty
+              ? null
+              : jsonEncode(transaction.selectedCategoryIds),
+        },
+        where: where.join(' AND '),
+        whereArgs: args,
+      );
+    }
+    await batch.commit(noResult: true);
+
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    for (final transaction in updates) {
+      final row = Map<String, dynamic>.from(
+        previousRowsByReference[transaction.reference]!,
+      );
+      row['categoryId'] = transaction.categoryId;
+      row['categoryIds'] = transaction.selectedCategoryIds.isEmpty
+          ? null
+          : jsonEncode(transaction.selectedCategoryIds);
+      row.remove('sourceSubscriptionId');
+      syncRecords.add(MapEntry(transaction.reference, row));
+    }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: syncRecords,
+    );
+    return updates.length;
+  }
+
+  Future<bool> updateTransactionOwnership({
+    required String reference,
+    required String ownerAccountNumber,
+    required String ownerAssignmentSource,
+    int? sourceSubscriptionId,
+    String? sourceMessageId,
+  }) async {
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final where = <String>['reference = ?'];
+    final args = <Object?>[reference];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      args.add(activeProfileId);
+    }
+
+    final existingRows = await db.query(
+      'transactions',
+      columns: const <String>['ownerAssignmentSource'],
+      where: where.join(' AND '),
+      whereArgs: args,
+      limit: 1,
+    );
+    if (existingRows.isNotEmpty &&
+        existingRows.single['ownerAssignmentSource'] ==
+            Transaction.manualOwnerAssignment &&
+        ownerAssignmentSource != Transaction.manualOwnerAssignment) {
+      return false;
+    }
+
+    final values = <String, Object?>{
+      'ownerAccountNumber': ownerAccountNumber,
+      'ownerAssignmentSource': ownerAssignmentSource,
+      if (sourceSubscriptionId != null && sourceSubscriptionId >= 0)
+        'sourceSubscriptionId': sourceSubscriptionId,
+      if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty)
+        'sourceMessageId': sourceMessageId.trim(),
+    };
+    final changed = await db.update(
+      'transactions',
+      values,
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
+    if (changed == 0) return false;
+
+    final currentRows = await db.query(
+      'transactions',
+      where: where.join(' AND '),
+      whereArgs: args,
+      limit: 1,
+    );
+    final syncRow = currentRows.isEmpty
+        ? <String, dynamic>{
+            'reference': reference,
+            'ownerAccountNumber': ownerAccountNumber,
+            'ownerAssignmentSource': ownerAssignmentSource,
+          }
+        : Map<String, dynamic>.from(currentRows.single)
+      ..remove('sourceSubscriptionId');
+
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.transactions,
+      entityRef: reference,
+      op: SyncOp.upsert,
+      row: syncRow,
+    );
+    return true;
+  }
+
+  Future<int> updateTransactionOwnerships(
+    Iterable<TransactionOwnershipUpdate> updates,
+  ) async {
+    final deduped = <String, TransactionOwnershipUpdate>{
+      for (final update in updates) update.reference: update,
+    };
+    if (deduped.isEmpty) return 0;
+
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final previousRowsByReference = <String, Map<String, dynamic>>{};
+    final references = deduped.keys.toList(growable: false);
+    const maxSqlVars = 900;
+    for (var start = 0; start < references.length; start += maxSqlVars) {
+      final candidateEnd = start + maxSqlVars;
+      final end =
+          candidateEnd < references.length ? candidateEnd : references.length;
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final where = StringBuffer('reference IN ($placeholders)');
+      final args = <Object?>[...chunk];
+      if (activeProfileId != null) {
+        where.write(' AND profileId = ?');
+        args.add(activeProfileId);
+      }
+      final rows = await db.query(
+        'transactions',
+        where: where.toString(),
+        whereArgs: args,
+      );
+      for (final row in rows) {
+        final reference = row['reference']?.toString();
+        if (reference == null || reference.isEmpty) continue;
+        previousRowsByReference[reference] = Map<String, dynamic>.from(row);
+      }
+    }
+    final updatesToApply = deduped.values.where((update) {
+      final previous = previousRowsByReference[update.reference];
+      final previousSource = previous?['ownerAssignmentSource']?.toString();
+      return previousSource != Transaction.manualOwnerAssignment ||
+          update.ownerAssignmentSource == Transaction.manualOwnerAssignment;
+    }).toList(growable: false);
+    if (updatesToApply.isEmpty) return 0;
+    final batch = db.batch();
+    for (final update in updatesToApply) {
+      final where = <String>['reference = ?'];
+      final args = <Object?>[update.reference];
+      if (activeProfileId != null) {
+        where.add('profileId = ?');
+        args.add(activeProfileId);
+      }
+      batch.update(
+        'transactions',
+        <String, Object?>{
+          'ownerAccountNumber': update.ownerAccountNumber,
+          if (update.ownerAssignmentSource != null)
+            'ownerAssignmentSource': update.ownerAssignmentSource,
+          // Clearing a disproven owner must also clear its SIM shortcut;
+          // otherwise read-time ownership would immediately assign it again.
+          if (update.ownerAccountNumber == null)
+            'sourceSubscriptionId': null
+          else if (update.sourceSubscriptionId != null &&
+              update.sourceSubscriptionId! >= 0)
+            'sourceSubscriptionId': update.sourceSubscriptionId,
+          if (update.sourceMessageId?.trim().isNotEmpty == true)
+            'sourceMessageId': update.sourceMessageId!.trim(),
+        },
+        where: where.join(' AND '),
+        whereArgs: args,
+      );
+    }
+    await batch.commit(noResult: true);
+
+    // A clear must remove a previously account-scoped remote copy. Queue the
+    // delete against the old snapshot first; the current-row upsert below will
+    // then recreate it only for broader rules that still match (for example,
+    // the whole bank).
+    for (final update in updatesToApply) {
+      if (update.ownerAccountNumber != null) continue;
+      final previous = previousRowsByReference[update.reference];
+      if (previous == null) continue;
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.transactions,
+        entityRef: update.reference,
+        op: SyncOp.delete,
+        deleteSnapshot: Map<String, dynamic>.from(previous)
+          ..remove('sourceSubscriptionId'),
+      );
+    }
+
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    for (final update in updatesToApply) {
+      final row = Map<String, dynamic>.from(
+        previousRowsByReference[update.reference] ??
+            <String, dynamic>{'reference': update.reference},
+      );
+      row['ownerAccountNumber'] = update.ownerAccountNumber;
+      if (update.ownerAssignmentSource != null) {
+        row['ownerAssignmentSource'] = update.ownerAssignmentSource;
+      }
+      if (update.ownerAccountNumber == null) {
+        row['sourceSubscriptionId'] = null;
+      } else if (update.sourceSubscriptionId != null &&
+          update.sourceSubscriptionId! >= 0) {
+        row['sourceSubscriptionId'] = update.sourceSubscriptionId;
+      }
+      if (update.sourceMessageId?.trim().isNotEmpty == true) {
+        row['sourceMessageId'] = update.sourceMessageId!.trim();
+      }
+      row.remove('sourceSubscriptionId');
+      syncRecords.add(MapEntry(update.reference, row));
+    }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: syncRecords,
+    );
+    return updatesToApply.length;
+  }
+
   Future<void> clearAll() async {
     final db = await DatabaseHelper.instance.database;
     await db.delete('transactions');
+  }
+
+  Future<void> clearBanks(Set<int> bankIds) async {
+    if (bankIds.isEmpty) return;
+
+    final db = await DatabaseHelper.instance.database;
+    final ids = bankIds.toList(growable: false);
+    final placeholders = List.filled(ids.length, '?').join(', ');
+    await _deleteTransactionsMatching(
+      db,
+      where: 'bankId IN ($placeholders)',
+      whereArgs: ids,
+      enqueueSyncChanges: false,
+    );
   }
 
   /// Get transactions by date range with optional filters
@@ -444,129 +768,389 @@ class TransactionRepository {
       return;
     }
 
-    final banks = await _bankConfigService.getBanks();
+    final banks = await _bankConfigService.getBanks(allowRemoteFetch: false);
     final currentBank = banks.firstWhere((b) => b.id == bank);
-
-    // Build where clause with profile filtering
-    final whereParts = <String>[];
-    final whereArgs = <dynamic>[];
-
+    final accountWhere = <String>['bank = ?'];
+    final accountArgs = <Object?>[bank];
     if (activeProfileId != null) {
-      whereParts.add('profileId = ?');
-      whereArgs.add(activeProfileId);
+      accountWhere.add('profileId = ?');
+      accountArgs.add(activeProfileId);
     }
+    final accountRows = await db.query(
+      'accounts',
+      where: accountWhere.join(' AND '),
+      whereArgs: accountArgs,
+    );
+    final bankAccounts = accountRows
+        .map((row) => Account.fromJson(Map<String, dynamic>.from(row)))
+        .toList(growable: false);
+    final targetMatches = bankAccounts
+        .where((account) => registeredAccountNumbersMatch(
+              currentBank,
+              account.accountNumber,
+              accountNumber,
+            ))
+        .toList(growable: false);
+    if (targetMatches.length != 1) return;
+    final target = targetMatches.single;
 
-    // For banks that match by bankId only (Awash=2, Telebirr=6), delete all transactions for that bank
-    if (currentBank.uniformMasking == false) {
-      whereParts.add('bankId = ?');
-      whereArgs.add(bank);
-
-      await _deleteTransactionsAndEnqueue(
-        db,
-        where: whereParts.join(' AND '),
-        whereArgs: whereArgs,
-      );
-      return;
+    final transactionWhere = <String>['bankId = ?'];
+    final transactionArgs = <Object?>[bank];
+    if (activeProfileId != null) {
+      transactionWhere.add('profileId = ?');
+      transactionArgs.add(activeProfileId);
     }
+    final rows = await db.query(
+      'transactions',
+      where: transactionWhere.join(' AND '),
+      whereArgs: transactionArgs,
+    );
+    final references = rows
+        .map(_transactionFromMap)
+        .where((transaction) => transactionBelongsToAccount(
+              transaction: transaction,
+              account: target,
+              bank: currentBank,
+              accounts: bankAccounts,
+            ))
+        .map((transaction) => transaction.reference);
+    await deleteTransactionsByReferences(references);
+  }
 
-    // For other banks, match by accountNumber substring logic
-    String? accountSuffix;
-
-    if (currentBank.uniformMasking == true) {
-      accountSuffix = accountNumber
-          .substring(accountNumber.length - currentBank.maskPattern!);
+  /// Deletes every transaction for [bank] in the active profile.
+  ///
+  /// This is used when the bank's final registered account is removed: once
+  /// no account remains, retaining an orphaned Other-transactions bucket is
+  /// surprising and leaves totals behind for a bank the user deleted.
+  Future<void> deleteTransactionsByBank(int bank) async {
+    final db = await DatabaseHelper.instance.database;
+    final activeProfileId = await _getActiveProfileId();
+    final where = <String>['bankId = ?'];
+    final args = <dynamic>[bank];
+    if (activeProfileId != null) {
+      where.add('profileId = ?');
+      args.add(activeProfileId);
     }
-
-    if (accountSuffix != null) {
-      whereParts.add('bankId = ?');
-      whereArgs.add(bank);
-      whereParts.add('accountNumber IS NOT NULL');
-      whereParts.add('accountNumber LIKE ?');
-      whereArgs.add('%$accountSuffix');
-
-      // Delete transactions where bankId matches and accountNumber ends with the suffix
-      // Using SQL LIKE pattern matching to match the suffix at the end
-      await _deleteTransactionsAndEnqueue(
-        db,
-        where: whereParts.join(' AND '),
-        whereArgs: whereArgs,
-      );
-    } else {
-      // Fallback: delete all transactions for this bank (except NULL accountNumber ones)
-      whereParts.add('bankId = ?');
-      whereArgs.add(bank);
-      whereParts.add('accountNumber IS NOT NULL');
-
-      await _deleteTransactionsAndEnqueue(
-        db,
-        where: whereParts.join(' AND '),
-        whereArgs: whereArgs,
-      );
-    }
+    await _deleteTransactionsAndEnqueue(
+      db,
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
   }
 
   Future<void> deleteTransactionsByReferences(
       Iterable<String> references) async {
-    final refs = references.toSet();
+    final refs = references
+        .map((reference) => reference.trim())
+        .where((reference) => reference.isNotEmpty)
+        .toSet();
     if (refs.isEmpty) return;
 
-    const maxSqlVars = 900;
-    final refList = refs.toList();
+    final refList = refs.toList(growable: false);
     final db = await DatabaseHelper.instance.database;
+    final categorySyncRecords =
+        await _deleteReferencesWithReimbursementCleanup(db, refList);
+    await _enqueueTransactionDeletionChanges(
+      deletedReferences: refList,
+      categorySyncRecords: categorySyncRecords,
+    );
+  }
 
-    for (var i = 0; i < refList.length; i += maxSqlVars) {
-      final chunkEnd =
-          (i + maxSqlVars) > refList.length ? refList.length : i + maxSqlVars;
-      final chunk = refList.sublist(i, chunkEnd);
-      final placeholders = List.filled(chunk.length, '?').join(', ');
-      await db.delete(
-        'transactions',
-        where: 'reference IN ($placeholders)',
-        whereArgs: chunk,
-      );
-    }
+  /// Removes one reimbursement link and, when it was the credit's final link,
+  /// removes the built-in reimbursement category in the same transaction.
+  Future<Transaction?> unlinkReimbursementAllocation(int allocationId) async {
+    if (allocationId <= 0) return null;
 
-    for (final ref in refList) {
-      await SyncEnqueuer.instance.onEntityWritten(
-        entity: SyncEntity.transactions,
-        entityRef: ref,
-        op: SyncOp.delete,
-        deleteSnapshot: {'reference': ref},
+    final db = await DatabaseHelper.instance.database;
+    List<MapEntry<String, Map<String, dynamic>>> categorySyncRecords = const [];
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'reimbursement_allocations',
+        columns: const ['reimbursementTransactionReference'],
+        where: 'id = ?',
+        whereArgs: [allocationId],
+        limit: 1,
       );
-    }
+      if (rows.isEmpty) return;
+
+      final reimbursementReference =
+          rows.single['reimbursementTransactionReference']?.toString().trim();
+      await txn.delete(
+        'reimbursement_allocations',
+        where: 'id = ?',
+        whereArgs: [allocationId],
+      );
+      if (reimbursementReference == null || reimbursementReference.isEmpty) {
+        return;
+      }
+      categorySyncRecords = await _removeCategoryFromOrphanedReimbursements(
+        txn,
+        <String>{reimbursementReference},
+      );
+    });
+
+    await _enqueueTransactionDeletionChanges(
+      deletedReferences: const <String>[],
+      categorySyncRecords: categorySyncRecords,
+    );
+    if (categorySyncRecords.isEmpty) return null;
+    return _transactionFromMap(categorySyncRecords.single.value);
   }
 
   /// Deletes transactions matching [where]/[whereArgs] and, when Data Sync is
-  /// enabled, enqueues a delete for each removed reference. The reference
-  /// lookup is skipped entirely when sync is off so the delete path stays cheap.
+  /// enabled, enqueues a delete for each removed reference.
   Future<void> _deleteTransactionsAndEnqueue(
     Database db, {
     required String where,
     required List<dynamic> whereArgs,
   }) async {
+    await _deleteTransactionsMatching(
+      db,
+      where: where,
+      whereArgs: whereArgs,
+      enqueueSyncChanges: true,
+    );
+  }
+
+  Future<void> _deleteTransactionsMatching(
+    Database db, {
+    required String where,
+    required List<dynamic> whereArgs,
+    required bool enqueueSyncChanges,
+  }) async {
     List<String> refs = const [];
+    List<MapEntry<String, Map<String, dynamic>>> categorySyncRecords = const [];
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'transactions',
+        columns: ['reference'],
+        where: where,
+        whereArgs: whereArgs,
+      );
+      refs = rows
+          .map((row) => row['reference'] as String?)
+          .whereType<String>()
+          .toList(growable: false);
+      // Capture the credits before deleting their allocations so only
+      // reimbursements orphaned by this specific deletion are repaired.
+      final affectedReimbursements =
+          await _findReimbursementsLinkedToExpenses(txn, refs);
+      await txn.delete(
+        'transactions',
+        where: where,
+        whereArgs: whereArgs,
+      );
+      await _deleteAllocationsForTransactionReferences(txn, refs);
+      categorySyncRecords = await _removeCategoryFromOrphanedReimbursements(
+        txn,
+        affectedReimbursements,
+      );
+    });
+
+    if (!enqueueSyncChanges) return;
+    await _enqueueTransactionDeletionChanges(
+      deletedReferences: refs,
+      categorySyncRecords: categorySyncRecords,
+    );
+  }
+
+  Future<List<MapEntry<String, Map<String, dynamic>>>>
+      _deleteReferencesWithReimbursementCleanup(
+    Database db,
+    List<String> references,
+  ) {
+    return db.transaction((txn) async {
+      final affectedReimbursements =
+          await _findReimbursementsLinkedToExpenses(txn, references);
+      for (var start = 0;
+          start < references.length;
+          start += _maxSqlVariables) {
+        final end = math.min(start + _maxSqlVariables, references.length);
+        final chunk = references.sublist(start, end);
+        final placeholders = List.filled(chunk.length, '?').join(', ');
+        await txn.delete(
+          'transactions',
+          where: 'reference IN ($placeholders)',
+          whereArgs: chunk,
+        );
+      }
+      await _deleteAllocationsForTransactionReferences(txn, references);
+      return _removeCategoryFromOrphanedReimbursements(
+        txn,
+        affectedReimbursements,
+      );
+    });
+  }
+
+  static const int _maxSqlVariables = 900;
+
+  Future<void> _deleteAllocationsForTransactionReferences(
+    DatabaseExecutor executor,
+    Iterable<String> transactionReferences,
+  ) async {
+    final references = transactionReferences
+        .map((reference) => reference.trim())
+        .where((reference) => reference.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    for (var start = 0; start < references.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      await executor.delete(
+        'reimbursement_allocations',
+        where: 'reimbursementTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      await executor.delete(
+        'reimbursement_allocations',
+        where: 'expenseTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+    }
+  }
+
+  Future<Set<String>> _findReimbursementsLinkedToExpenses(
+    DatabaseExecutor executor,
+    Iterable<String> expenseReferences,
+  ) async {
+    final references = expenseReferences
+        .map((reference) => reference.trim())
+        .where((reference) => reference.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (references.isEmpty) return <String>{};
+
+    final reimbursements = <String>{};
+    for (var start = 0; start < references.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'reimbursement_allocations',
+        columns: ['reimbursementTransactionReference'],
+        where: 'expenseTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+        distinct: true,
+      );
+      for (final row in rows) {
+        final reference =
+            row['reimbursementTransactionReference']?.toString().trim();
+        if (reference != null && reference.isNotEmpty) {
+          reimbursements.add(reference);
+        }
+      }
+    }
+    return reimbursements;
+  }
+
+  Future<List<MapEntry<String, Map<String, dynamic>>>>
+      _removeCategoryFromOrphanedReimbursements(
+    DatabaseExecutor executor,
+    Set<String> reimbursementReferences,
+  ) async {
+    if (reimbursementReferences.isEmpty) return const [];
+
+    final stillLinked = <String>{};
+    final references = reimbursementReferences.toList(growable: false);
+    for (var start = 0; start < references.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, references.length);
+      final chunk = references.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'reimbursement_allocations',
+        columns: ['reimbursementTransactionReference'],
+        where: 'reimbursementTransactionReference IN ($placeholders)',
+        whereArgs: chunk,
+        distinct: true,
+      );
+      for (final row in rows) {
+        final reference =
+            row['reimbursementTransactionReference']?.toString().trim();
+        if (reference != null && reference.isNotEmpty) {
+          stillLinked.add(reference);
+        }
+      }
+    }
+
+    final orphanedReferences = reimbursementReferences.difference(stillLinked);
+    if (orphanedReferences.isEmpty) return const [];
+
+    final categoryRows = await executor.query(
+      'categories',
+      columns: ['id'],
+      where: 'builtInKey = ?',
+      whereArgs: const [reimbursementBuiltInKey],
+    );
+    final reimbursementCategoryIds =
+        categoryRows.map((row) => row['id']).whereType<int>().toSet();
+    if (reimbursementCategoryIds.isEmpty) return const [];
+
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    final orphaned = orphanedReferences.toList(growable: false);
+    for (var start = 0; start < orphaned.length; start += _maxSqlVariables) {
+      final end = math.min(start + _maxSqlVariables, orphaned.length);
+      final chunk = orphaned.sublist(start, end);
+      final placeholders = List.filled(chunk.length, '?').join(', ');
+      final rows = await executor.query(
+        'transactions',
+        where: 'reference IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      for (final row in rows) {
+        final transaction = _transactionFromMap(row);
+        if (transaction.type?.trim().toUpperCase() != 'CREDIT') continue;
+        // A reimbursement can also carry another income category. Remove only
+        // the stable built-in category and promote a surviving category.
+        final remainingCategoryIds = transaction.selectedCategoryIds
+            .where((id) => !reimbursementCategoryIds.contains(id))
+            .toList(growable: false);
+        if (remainingCategoryIds.length ==
+            transaction.selectedCategoryIds.length) {
+          continue;
+        }
+
+        final currentPrimary = transaction.categoryId;
+        final nextPrimary = currentPrimary != null &&
+                remainingCategoryIds.contains(currentPrimary)
+            ? currentPrimary
+            : (remainingCategoryIds.isEmpty
+                ? null
+                : remainingCategoryIds.first);
+        final encodedCategoryIds = remainingCategoryIds.isEmpty
+            ? null
+            : jsonEncode(remainingCategoryIds);
+        await executor.update(
+          'transactions',
+          {
+            'categoryId': nextPrimary,
+            'categoryIds': encodedCategoryIds,
+          },
+          where: 'reference = ?',
+          whereArgs: [transaction.reference],
+        );
+
+        final syncRow = Map<String, dynamic>.from(row)
+          ..['categoryId'] = nextPrimary
+          ..['categoryIds'] = encodedCategoryIds
+          ..remove('sourceSubscriptionId');
+        syncRecords.add(MapEntry(transaction.reference, syncRow));
+      }
+    }
+    return syncRecords;
+  }
+
+  Future<void> _enqueueTransactionDeletionChanges({
+    required Iterable<String> deletedReferences,
+    required List<MapEntry<String, Map<String, dynamic>>> categorySyncRecords,
+  }) async {
     bool syncOn = false;
     try {
       syncOn = await DataSyncSettingsService.readEnabledFromPrefs();
     } catch (_) {}
-    if (syncOn) {
-      try {
-        final rows = await db.query(
-          'transactions',
-          columns: ['reference'],
-          where: where,
-          whereArgs: whereArgs,
-        );
-        refs = rows
-            .map((r) => r['reference'] as String?)
-            .whereType<String>()
-            .toList(growable: false);
-      } catch (_) {}
-    }
+    if (!syncOn) return;
 
-    await db.delete('transactions', where: where, whereArgs: whereArgs);
-
-    for (final ref in refs) {
+    for (final ref in deletedReferences) {
       await SyncEnqueuer.instance.onEntityWritten(
         entity: SyncEntity.transactions,
         entityRef: ref,
@@ -574,5 +1158,9 @@ class TransactionRepository {
         deleteSnapshot: {'reference': ref},
       );
     }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: categorySyncRecords,
+    );
   }
 }

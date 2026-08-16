@@ -5,6 +5,7 @@ import 'package:totals/models/category.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/receiver_category_service.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 class AutoCategorizationService {
   AutoCategorizationService._();
@@ -317,6 +318,16 @@ class AutoCategorizationService {
     );
   }
 
+  Future<void> clearAll() async {
+    final db = await DatabaseHelper.instance.database;
+    await db.transaction((txn) async {
+      await txn.delete('auto_category_rules');
+      await txn.delete('auto_category_prompt_dismissals');
+      // Keep the legacy fallback in sync with the current rule store.
+      await txn.delete('receiver_category_mappings');
+    });
+  }
+
   Future<void> deleteRulesForCategory(int categoryId) async {
     final db = await DatabaseHelper.instance.database;
     await db.delete(
@@ -397,7 +408,9 @@ class AutoCategorizationService {
     return rows
         .map(Category.fromDb)
         .where((category) =>
-            isLoanDebtCategory(category) || isRepaymentCategory(category))
+            isLoanDebtCategory(category) ||
+            isRepaymentCategory(category) ||
+            isReimbursementCategory(category))
         .map((category) => category.id)
         .whereType<int>()
         .toSet();

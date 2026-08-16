@@ -1,350 +1,349 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/providers/budget_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
-import 'package:totals/repositories/account_repository.dart';
-import 'package:totals/repositories/budget_repository.dart';
-import 'package:totals/repositories/failed_parse_repository.dart';
-import 'package:totals/repositories/transaction_repository.dart';
-import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/services/data_clear_service.dart';
+import 'package:totals/services/data_export_import_service.dart';
 
-Future<void> showClearDatabaseDialog(BuildContext context) async {
-  bool clearFinancialData = false;
-  bool clearBudgets = false;
-  bool clearFailedParses = false;
-  final parentContext = context;
-
-  await showModalBottomSheet<void>(
+Future<ClearDataSelection?> showClearDataOptionsSheet({
+  required BuildContext context,
+  required List<ExportBankSummary> banks,
+}) {
+  return showModalBottomSheet<ClearDataSelection>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      final theme = Theme.of(sheetContext);
-
-      return StatefulBuilder(
-        builder: (context, setState) {
-          final hasSelection =
-              clearFinancialData || clearBudgets || clearFailedParses;
-
-          return Container(
-            padding: EdgeInsets.fromLTRB(
-              20,
-              0,
-              20,
-              20 + MediaQuery.of(sheetContext).viewInsets.bottom,
-            ),
-            decoration: BoxDecoration(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
-              color: theme.colorScheme.surface,
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      margin: const EdgeInsets.only(top: 12, bottom: 16),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.onSurface.withOpacity(0.25),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.error.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.warning_amber_rounded,
-                          color: theme.colorScheme.error,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text(
-                          context.l10nText('Clear Data'),
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(sheetContext),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    context.l10nText(
-                      'Select what you want to clear. This action cannot be undone.',
-                    ),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurface.withOpacity(0.7),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildClearOption(
-                    context: context,
-                    icon: Icons.receipt_long,
-                    title: 'Transactions & Accounts',
-                    subtitle: 'All transaction history and bank accounts',
-                    value: clearFinancialData,
-                    onChanged: (value) {
-                      setState(() {
-                        clearFinancialData = value ?? false;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _buildClearOption(
-                    context: context,
-                    icon: Icons.pie_chart_outline,
-                    title: 'Budgets',
-                    subtitle: 'All budget rules and limits',
-                    value: clearBudgets,
-                    onChanged: (value) {
-                      setState(() {
-                        clearBudgets = value ?? false;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _buildClearOption(
-                    context: context,
-                    icon: Icons.error_outline,
-                    title: 'Failed Parses',
-                    subtitle: 'Failed SMS parsing records',
-                    value: clearFailedParses,
-                    onChanged: (value) {
-                      setState(() {
-                        clearFailedParses = value ?? false;
-                      });
-                    },
-                  ),
-                  if (!hasSelection)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.info_outline,
-                            size: 16,
-                            color: theme.colorScheme.error,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            context
-                                .l10nText('Please select at least one option'),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.error,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(sheetContext),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: theme.colorScheme.onSurfaceVariant,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: Text(context.l10nText('Cancel')),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: hasSelection
-                              ? () async {
-                                  try {
-                                    if (clearFinancialData) {
-                                      await TransactionRepository().clearAll();
-                                      await AccountRepository().clearAll();
-                                    }
-                                    if (clearBudgets) {
-                                      await BudgetRepository().clearAll();
-                                    }
-                                    if (clearFailedParses) {
-                                      await FailedParseRepository().clear();
-                                    }
-
-                                    if (parentContext.mounted) {
-                                      await Provider.of<TransactionProvider>(
-                                        parentContext,
-                                        listen: false,
-                                      ).loadData();
-                                      if (clearFinancialData || clearBudgets) {
-                                        try {
-                                          await Provider.of<BudgetProvider>(
-                                            parentContext,
-                                            listen: false,
-                                          ).loadBudgets();
-                                        } catch (_) {}
-                                      }
-                                      Navigator.pop(sheetContext);
-                                      ScaffoldMessenger.of(parentContext)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            parentContext.l10nTextRead(
-                                              'Data cleared successfully',
-                                            ),
-                                          ),
-                                          behavior: SnackBarBehavior.floating,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  } catch (e) {
-                                    if (parentContext.mounted) {
-                                      Navigator.pop(sheetContext);
-                                      ScaffoldMessenger.of(parentContext)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            '${parentContext.l10nTextRead('Error clearing data')}: $e',
-                                          ),
-                                          behavior: SnackBarBehavior.floating,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                }
-                              : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: theme.colorScheme.error,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: Text(context.l10nText('Clear')),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    },
+    useSafeArea: true,
+    builder: (_) => ClearDataOptionsSheet(banks: banks),
   );
 }
 
-Widget _buildClearOption({
-  required BuildContext context,
-  required IconData icon,
-  required String title,
-  required String subtitle,
-  required bool value,
-  required ValueChanged<bool?> onChanged,
-}) {
-  final theme = Theme.of(context);
+Future<void> showClearDatabaseDialog(BuildContext context) async {
+  final parentContext = context;
 
-  return Material(
-    color: Colors.transparent,
-    child: InkWell(
-      onTap: () => onChanged(!value),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: value
-              ? theme.colorScheme.error.withOpacity(0.1)
-              : theme.colorScheme.surfaceVariant.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: value
-                ? theme.colorScheme.error.withOpacity(0.3)
-                : theme.colorScheme.outline.withOpacity(0.1),
-          ),
+  late final List<ExportBankSummary> banks;
+  try {
+    banks = await DataExportImportService().getExportBankSummaries(
+      includeQuickAccessAccounts: false,
+    );
+  } catch (error) {
+    if (!parentContext.mounted) return;
+    ScaffoldMessenger.of(parentContext).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${parentContext.l10nTextRead('Error clearing data')}: $error',
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: value
-                    ? theme.colorScheme.error.withOpacity(0.2)
-                    : theme.colorScheme.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                icon,
-                color:
-                    value ? theme.colorScheme.error : theme.colorScheme.primary,
-                size: 20,
-              ),
+      ),
+    );
+    return;
+  }
+
+  if (!parentContext.mounted) return;
+  final selection = await showClearDataOptionsSheet(
+    context: parentContext,
+    banks: banks,
+  );
+  if (selection == null || !parentContext.mounted) return;
+
+  try {
+    final transactionProvider = Provider.of<TransactionProvider>(
+      parentContext,
+      listen: false,
+    );
+    BudgetProvider? budgetProvider;
+    if (selection.financialData || selection.budgets) {
+      try {
+        budgetProvider = Provider.of<BudgetProvider>(
+          parentContext,
+          listen: false,
+        );
+      } catch (_) {}
+    }
+
+    await DataClearService().clear(selection);
+    await transactionProvider.loadData();
+    await budgetProvider?.loadBudgets();
+    if (!parentContext.mounted) return;
+
+    ScaffoldMessenger.of(parentContext).showSnackBar(
+      SnackBar(
+        content: Text(
+          parentContext.l10nTextRead('Data cleared successfully'),
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  } catch (error) {
+    if (!parentContext.mounted) return;
+    ScaffoldMessenger.of(parentContext).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${parentContext.l10nTextRead('Error clearing data')}: $error',
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+}
+
+class ClearDataOptionsSheet extends StatefulWidget {
+  final List<ExportBankSummary> banks;
+
+  const ClearDataOptionsSheet({
+    super.key,
+    required this.banks,
+  });
+
+  @override
+  State<ClearDataOptionsSheet> createState() => _ClearDataOptionsSheetState();
+}
+
+class _ClearDataOptionsSheetState extends State<ClearDataOptionsSheet> {
+  final Set<int> _selectedBankIds = <int>{};
+  bool _clearQuickAccessAccounts = false;
+  bool _clearBudgets = false;
+  bool _clearAutoCategorization = false;
+  bool _clearLoansAndDebts = false;
+  bool _clearFailedParses = false;
+
+  bool get _allBanksSelected =>
+      widget.banks.isNotEmpty &&
+      _selectedBankIds.length == widget.banks.length;
+
+  ClearDataSelection get _selection {
+    return ClearDataSelection(
+      financialData: _selectedBankIds.isNotEmpty,
+      bankIds: _allBanksSelected
+          ? null
+          : Set<int>.unmodifiable(_selectedBankIds),
+      quickAccessAccounts: _clearQuickAccessAccounts,
+      budgets: _clearBudgets,
+      autoCategorization: _clearAutoCategorization,
+      loansAndDebts: _clearLoansAndDebts,
+      failedParses: _clearFailedParses,
+    );
+  }
+
+  void _submit() {
+    final selection = _selection;
+    if (!selection.hasSelection) return;
+    Navigator.of(context).pop(selection);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selection = _selection;
+
+    return FractionallySizedBox(
+      heightFactor: 0.92,
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 38,
+            height: 4,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(999),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    context.l10nText(title),
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    context.l10nText('Clear Data'),
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    context.l10nText(subtitle),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withOpacity(0.6),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  tooltip: context.l10nText('Close'),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+              children: [
+                Text(
+                  context.l10nText(
+                    'Select what you want to clear. This action cannot be undone.',
+                  ),
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  context.l10nText('Banks and wallets'),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  context.l10nText(
+                    'Transactions and accounts from selected institutions will be permanently deleted.',
+                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (widget.banks.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Text(
+                      context.l10nText(
+                        'No bank or wallet data was found.',
+                      ),
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else ...[
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        setState(() {
+                          if (_allBanksSelected) {
+                            _selectedBankIds.clear();
+                          } else {
+                            _selectedBankIds
+                              ..clear()
+                              ..addAll(widget.banks.map((bank) => bank.id));
+                          }
+                        });
+                      },
+                      child: Text(
+                        context.l10nText(
+                          _allBanksSelected ? 'Clear all' : 'Select all',
+                        ),
+                      ),
+                    ),
+                  ),
+                  ...widget.banks.map(
+                    (bank) => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: _selectedBankIds.contains(bank.id),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: Text(bank.name),
+                      subtitle: Text(
+                        '${bank.accountCount} ${context.l10nText('accounts')}'
+                        ' · ${bank.transactionCount} '
+                        '${context.l10nText('transactions')}',
+                      ),
+                      onChanged: (selected) {
+                        setState(() {
+                          if (selected == true) {
+                            _selectedBankIds.add(bank.id);
+                          } else {
+                            _selectedBankIds.remove(bank.id);
+                          }
+                        });
+                      },
                     ),
                   ),
                 ],
-              ),
+                const SizedBox(height: 20),
+                Text(
+                  context.l10nText('Additional data'),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(context.l10nText('Quick Access accounts')),
+                  subtitle: Text(
+                    context.l10nText(
+                      'Saved accounts belonging to other people',
+                    ),
+                  ),
+                  value: _clearQuickAccessAccounts,
+                  onChanged: (value) =>
+                      setState(() => _clearQuickAccessAccounts = value),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(context.l10nText('Budgets')),
+                  value: _clearBudgets,
+                  onChanged: (value) =>
+                      setState(() => _clearBudgets = value),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    context.l10nText('Auto-categorization rules'),
+                  ),
+                  subtitle: Text(
+                    context.l10nText(
+                      'Learned rules and dismissed suggestions',
+                    ),
+                  ),
+                  value: _clearAutoCategorization,
+                  onChanged: (value) =>
+                      setState(() => _clearAutoCategorization = value),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(context.l10nText('Loans and debts')),
+                  subtitle: Text(
+                    context.l10nText(
+                      'Loan, debt, and repayment tracking',
+                    ),
+                  ),
+                  value: _clearLoansAndDebts,
+                  onChanged: (value) =>
+                      setState(() => _clearLoansAndDebts = value),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    context.l10nText('Failed message diagnostics'),
+                  ),
+                  subtitle: Text(
+                    context.l10nText('Failed SMS parsing records'),
+                  ),
+                  value: _clearFailedParses,
+                  onChanged: (value) =>
+                      setState(() => _clearFailedParses = value),
+                ),
+              ],
             ),
-            Transform.scale(
-              scale: 1.1,
-              child: Checkbox(
-                value: value,
-                onChanged: onChanged,
-                activeColor: theme.colorScheme.error,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(4),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: selection.hasSelection ? _submit : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.error,
+                    foregroundColor: theme.colorScheme.onError,
+                  ),
+                  child: Text(context.l10nText('Clear selected')),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }

@@ -60,24 +60,22 @@ class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
     return refreshed;
   }
 
-  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
-    if (selection.isEmpty) return true;
-    if (categoryId == null) return selection.contains(null);
-    return selection.contains(categoryId);
-  }
-
   bool _matchesCategoryFilter(Transaction transaction) {
     if (_selectedIncomeCategoryIds.isEmpty &&
         _selectedExpenseCategoryIds.isEmpty) {
       return true;
     }
     if (transaction.type == 'CREDIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedIncomeCategoryIds);
+      return widget.provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedIncomeCategoryIds,
+      );
     }
     if (transaction.type == 'DEBIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedExpenseCategoryIds);
+      return widget.provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedExpenseCategoryIds,
+      );
     }
     return true;
   }
@@ -207,8 +205,7 @@ class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
       animation: widget.provider,
       builder: (context, _) {
         final refreshedTransactions = _refreshTransactions(widget.provider);
-        final filteredTransactions =
-            _filterByCategory(refreshedTransactions);
+        final filteredTransactions = _filterByCategory(refreshedTransactions);
         final filteredReferences =
             filteredTransactions.map((transaction) => transaction.reference);
         _pruneSelection(filteredReferences.toSet());
@@ -258,8 +255,7 @@ class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
                     IconButton(
                       tooltip: 'Delete selected',
                       icon: const Icon(Icons.delete_outline),
-                      onPressed: () =>
-                          _confirmDeleteSelected(widget.provider),
+                      onPressed: () => _confirmDeleteSelected(widget.provider),
                     ),
                   ]
                 : null,
@@ -280,8 +276,7 @@ class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
                             icon: Icons.toc_rounded,
                             iconColor: Colors.green,
                             flipIconHorizontally: true,
-                            selectedCount:
-                                _selectedIncomeCategoryIds.length,
+                            selectedCount: _selectedIncomeCategoryIds.length,
                             tooltip: 'Income categories',
                             onTap: () =>
                                 _openCategoryFilterSheet(flow: 'income'),
@@ -291,8 +286,7 @@ class _TransactionsForPeriodPageState extends State<TransactionsForPeriodPage> {
                             icon: Icons.toc_rounded,
                             iconColor: Theme.of(context).colorScheme.error,
                             flipIconHorizontally: true,
-                            selectedCount:
-                                _selectedExpenseCategoryIds.length,
+                            selectedCount: _selectedExpenseCategoryIds.length,
                             tooltip: 'Expense categories',
                             onTap: () =>
                                 _openCategoryFilterSheet(flow: 'expense'),

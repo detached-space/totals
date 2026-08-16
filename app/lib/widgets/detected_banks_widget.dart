@@ -5,6 +5,7 @@ import 'package:totals/models/bank.dart';
 import 'package:totals/services/account_sync_status_service.dart';
 import 'package:totals/services/bank_detection_service.dart';
 import 'package:totals/widgets/add_account_form.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 /// Widget that displays banks detected from user's SMS
 /// and allows quick account registration
@@ -97,16 +98,15 @@ class _DetectedBanksWidgetState extends State<DetectedBanksWidget>
   }
 
   Future<void> _requestSmsPermission() async {
-    final status = await Permission.sms.request();
+    final granted = await SmsPermissionPrompt.ensureGranted(
+      context,
+      userInitiated: true,
+    );
     if (!mounted) return;
 
-    if (status.isGranted) {
+    if (granted) {
       await _loadDetectedBanks();
       return;
-    }
-
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
     }
 
     setState(() {

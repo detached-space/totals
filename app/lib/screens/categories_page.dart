@@ -15,6 +15,7 @@ import 'package:totals/screens/auto_categorization_rules_scan_page.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
 import 'package:totals/utils/category_icons.dart';
 import 'package:totals/utils/category_style.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -87,7 +88,7 @@ class _CategoriesPageState extends State<CategoriesPage>
             iconKey: result.iconKey,
             colorKey: result.colorKey,
             description: result.description,
-            flow: result.flow,
+            flow: isReimbursementCategory(existing) ? 'income' : result.flow,
             recurring: result.recurring,
           ),
         );
@@ -1454,6 +1455,8 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
     final theme = Theme.of(context);
     final isEdit = widget.existing != null;
     final canDelete = isEdit && (widget.existing?.builtIn != true);
+    final locksFlow =
+        widget.existing != null && isReimbursementCategory(widget.existing!);
     final isIncome = _flow == 'income';
     final selectedColorKey = _colorKey ??
         suggestedCategoryColorKey(
@@ -1529,14 +1532,18 @@ class _CategoryEditorSheetState extends State<_CategoryEditorSheet> {
                     child: _FlowTab(
                       label: 'Expense',
                       selected: !isIncome,
-                      onTap: () => setState(() => _flow = 'expense'),
+                      onTap: locksFlow
+                          ? () {}
+                          : () => setState(() => _flow = 'expense'),
                     ),
                   ),
                   Expanded(
                     child: _FlowTab(
                       label: 'Income',
                       selected: isIncome,
-                      onTap: () => setState(() => _flow = 'income'),
+                      onTap: locksFlow
+                          ? () {}
+                          : () => setState(() => _flow = 'income'),
                     ),
                   ),
                 ],

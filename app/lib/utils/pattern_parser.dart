@@ -152,6 +152,14 @@ class PatternParser {
           );
           if (transactionLink != null) {
             extracted['transactionLink'] = transactionLink;
+            final linkedReference =
+                TransactionLinkUtils.extractReferenceFromLink(
+              transactionLink,
+            );
+            if ((extracted['reference']?.toString().trim().isEmpty ?? true) &&
+                linkedReference != null) {
+              extracted['reference'] = linkedReference;
+            }
           }
 
           print("debug: account ${extracted["accountNumber"]}");

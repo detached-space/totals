@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/providers/transaction_provider.dart';
 import 'package:intl/intl.dart';
 import '../chart_data_point.dart';
 
@@ -28,6 +30,7 @@ class PnLCalendarChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = baseDate;
+    final provider = context.read<TransactionProvider>();
     Widget wrapCell(DateTime date, Widget child) {
       if (onDateSelected == null) return child;
       return GestureDetector(
@@ -90,14 +93,14 @@ class PnLCalendarChart extends StatelessWidget {
 
       double delta = 0.0;
       if (selectedCard == 'Income') {
-        delta = transaction.amount;
+        delta = provider.incomeAmountForTransaction(transaction);
       } else if (selectedCard == 'Expense') {
-        delta = -transaction.amount;
+        delta = -provider.netExpenseAmountForTransaction(transaction);
       } else {
         if (transaction.type == 'CREDIT') {
-          delta = transaction.amount;
+          delta = provider.incomeAmountForTransaction(transaction);
         } else if (transaction.type == 'DEBIT') {
-          delta = -transaction.amount;
+          delta = -provider.netExpenseAmountForTransaction(transaction);
         } else {
           return;
         }

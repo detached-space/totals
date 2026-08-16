@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/utils/category_filter_utils.dart';
 import 'package:totals/utils/category_icons.dart';
 
 class _CategoryFilterOption {
@@ -8,12 +10,14 @@ class _CategoryFilterOption {
   final String name;
   final IconData icon;
   final String? subtitle;
+  final String? flow;
 
   const _CategoryFilterOption({
     required this.id,
     required this.name,
     required this.icon,
     this.subtitle,
+    this.flow,
   });
 }
 
@@ -31,7 +35,9 @@ Future<Set<int?>?> showCategoryFilterSheet({
       : provider.categories
           .where((c) => c.flow.toLowerCase() == flow.toLowerCase())
           .toList(growable: false);
-  final categories = filtered.isEmpty ? provider.categories : filtered;
+  final categories = orderedCategoriesForFilter(
+    filtered.isEmpty ? provider.categories : filtered,
+  );
 
   final options = <_CategoryFilterOption>[];
   if (includeUncategorized) {
@@ -53,6 +59,7 @@ Future<Set<int?>?> showCategoryFilterSheet({
         name: category.name,
         icon: iconForCategoryKey(category.iconKey),
         subtitle: category.typeLabel(),
+        flow: category.flow,
       ),
     );
   }
@@ -127,11 +134,12 @@ Future<Set<int?>?> showCategoryFilterSheet({
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: themed.colorScheme.surfaceVariant.withOpacity(0.3),
+                      color: themed.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color:
-                            themed.colorScheme.onSurfaceVariant.withOpacity(0.15),
+                        color: themed.colorScheme.onSurfaceVariant
+                            .withValues(alpha: 0.15),
                       ),
                     ),
                     child: Row(
@@ -164,7 +172,17 @@ Future<Set<int?>?> showCategoryFilterSheet({
                       itemBuilder: (context, index) {
                         final option = options[index];
                         final selected = workingSelection.contains(option.id);
+                        final tint = switch (option.flow?.toLowerCase()) {
+                          'income' => AppColors.incomeSuccess,
+                          'expense' => AppColors.red,
+                          _ => null,
+                        };
                         return ListTile(
+                          tileColor: tint?.withValues(
+                            alpha: themed.brightness == Brightness.dark
+                                ? 0.14
+                                : 0.08,
+                          ),
                           leading: Icon(option.icon),
                           title: Text(option.name),
                           subtitle: option.subtitle == null
@@ -185,7 +203,8 @@ Future<Set<int?>?> showCategoryFilterSheet({
                     child: SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () => Navigator.pop(context, workingSelection),
+                        onPressed: () =>
+                            Navigator.pop(context, workingSelection),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: themed.colorScheme.primary,
                           foregroundColor: themed.colorScheme.onPrimary,

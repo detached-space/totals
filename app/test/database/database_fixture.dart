@@ -11,6 +11,9 @@ class DatabaseFixture {
   static const syncRuleId = 2603;
   static const syncOutboxId = 2604;
 
+  static const v28OwnershipTransactionId = 2901;
+  static const v28OwnershipAccountId = 2902;
+
   static const legacyAutoRuleId = 2001;
   static const legacyReceiverMappingId = 2002;
 
@@ -359,6 +362,9 @@ class DatabaseFixture {
     await db.execute(
       'DROP INDEX IF EXISTS idx_transactions_sourceFingerprint',
     );
+    await db.execute(
+      'DROP INDEX IF EXISTS idx_transactions_sourceSubscriptionId',
+    );
     await db.execute('ALTER TABLE transactions DROP COLUMN sourceMessageId');
     await db.execute('ALTER TABLE transactions DROP COLUMN sourceFingerprint');
     await db.execute('ALTER TABLE transactions DROP COLUMN sourceType');
@@ -371,5 +377,38 @@ class DatabaseFixture {
     await db.execute('ALTER TABLE sync_rules DROP COLUMN scheduleMode');
     await db.execute('DROP TABLE IF EXISTS sync_runtime_locks');
     await db.setVersion(version);
+  }
+
+  static Future<void> replaceV29OwnershipShapeWithV28(Database db) async {
+    await db.insert('accounts', {
+      'id': v28OwnershipAccountId,
+      'accountNumber': '0911223344',
+      'bank': 6,
+      'balance': 128.0,
+      'accountHolderName': 'V28 owner',
+    });
+    await db.insert('transactions', {
+      'id': v28OwnershipTransactionId,
+      'amount': 29.28,
+      'reference': 'v28-ownership-sentinel',
+      'time': '2026-06-28T12:00:00.000',
+      'bankId': 6,
+      'type': 'DEBIT',
+      'accountNumber': '251911223344',
+    });
+
+    await db.execute('DROP INDEX IF EXISTS idx_transactions_ownerAccount');
+    await db.execute(
+      'DROP INDEX IF EXISTS idx_transactions_sourceSubscriptionId',
+    );
+    await db.execute('DROP INDEX IF EXISTS idx_accounts_smsSubscriptionId');
+    await db.execute(
+      'ALTER TABLE transactions DROP COLUMN ownerAccountNumber',
+    );
+    await db.execute(
+      'ALTER TABLE transactions DROP COLUMN sourceSubscriptionId',
+    );
+    await db.execute('ALTER TABLE accounts DROP COLUMN smsSubscriptionId');
+    await db.setVersion(28);
   }
 }

@@ -4,10 +4,15 @@ import 'package:sqflite/sqflite.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/category.dart' as models;
 import 'package:totals/services/auto_categorization_service.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 class CategoryRepository {
   Future<void> ensureSeeded() async {
     final db = await DatabaseHelper.instance.database;
+    final reimbursementDefinition = models.BuiltInCategories.all.firstWhere(
+      (category) => category.builtInKey == reimbursementBuiltInKey,
+    );
+    await _ensureReimbursementSeeded(db, reimbursementDefinition);
     final batch = db.batch();
     for (final category in models.BuiltInCategories.all) {
       batch.insert(
@@ -42,6 +47,24 @@ class CategoryRepository {
         where: "builtInKey = ? AND (description IS NULL OR description = '')",
         whereArgs: [category.builtInKey],
       );
+      if (category.builtInKey == 'income_refund') {
+        batch.update(
+          'categories',
+          {'description': category.description},
+          where: '''
+            builtInKey = ?
+            AND (
+              description IS NULL
+              OR TRIM(description) = ''
+              OR description = ?
+            )
+          ''',
+          whereArgs: const [
+            'income_refund',
+            'Refunds and reimbursements',
+          ],
+        );
+      }
       batch.update(
         'categories',
         {
@@ -58,8 +81,66 @@ class CategoryRepository {
         where: "builtInKey = ?",
         whereArgs: [category.builtInKey],
       );
+      if (category.builtInKey == reimbursementBuiltInKey) {
+        batch.update(
+          'categories',
+          {
+            'flow': 'income',
+            'builtIn': 1,
+          },
+          where: 'builtInKey = ?',
+          whereArgs: [category.builtInKey],
+        );
+      }
     }
     await batch.commit(noResult: true);
+  }
+
+  Future<void> _ensureReimbursementSeeded(
+    Database db,
+    models.Category definition,
+  ) async {
+    final existing = await db.query(
+      'categories',
+      columns: const ['id'],
+      where: 'builtInKey = ?',
+      whereArgs: const [reimbursementBuiltInKey],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return;
+
+    var name = definition.name;
+    var suffix = 1;
+    while ((await db.query(
+      'categories',
+      columns: const ['id'],
+      where: 'name = ? COLLATE NOCASE AND flow = ?',
+      whereArgs: [name, definition.flow],
+      limit: 1,
+    ))
+        .isNotEmpty) {
+      name = suffix == 1
+          ? '${definition.name} (Totals)'
+          : '${definition.name} (Totals $suffix)';
+      suffix++;
+    }
+
+    await db.insert(
+      'categories',
+      {
+        'name': name,
+        'essential': definition.essential ? 1 : 0,
+        'uncategorized': definition.uncategorized ? 1 : 0,
+        'iconKey': definition.iconKey,
+        'colorKey': definition.colorKey,
+        'description': definition.description,
+        'flow': 'income',
+        'recurring': definition.recurring ? 1 : 0,
+        'builtIn': 1,
+        'builtInKey': reimbursementBuiltInKey,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
   }
 
   Future<List<models.Category>> getCategories() async {

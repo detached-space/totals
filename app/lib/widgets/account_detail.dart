@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/bank.dart';
+import 'package:totals/models/account.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:intl/intl.dart';
 
@@ -15,6 +16,8 @@ import 'package:totals/widgets/category_filter_button.dart';
 import 'package:totals/widgets/category_filter_sheet.dart';
 import 'package:totals/widgets/categorize_transaction_sheet.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 class AccountDetailPage extends StatefulWidget {
   final String accountNumber;
@@ -161,24 +164,25 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
-    if (selection.isEmpty) return true;
-    if (categoryId == null) return selection.contains(null);
-    return selection.contains(categoryId);
-  }
-
-  bool _matchesCategoryFilter(Transaction transaction) {
+  bool _matchesCategoryFilter(
+    Transaction transaction,
+    TransactionProvider provider,
+  ) {
     if (_selectedIncomeCategoryIds.isEmpty &&
         _selectedExpenseCategoryIds.isEmpty) {
       return true;
     }
     if (transaction.type == 'CREDIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedIncomeCategoryIds);
+      return provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedIncomeCategoryIds,
+      );
     }
     if (transaction.type == 'DEBIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedExpenseCategoryIds);
+      return provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedExpenseCategoryIds,
+      );
     }
     return true;
   }
@@ -308,6 +312,22 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
     setState(() => _isReparsing = true);
 
     try {
+      final hasSmsPermission = await SmsPermissionPrompt.ensureGranted(
+        context,
+        userInitiated: true,
+      );
+      if (!mounted) return;
+      if (!hasSmsPermission) {
+        messenger?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'SMS permission is required to reparse transactions.',
+            ),
+          ),
+        );
+        return;
+      }
+
       final result = await _reparseService.reparseAccountTransactions(
         bankId: widget.bankId,
         accountNumber: widget.accountNumber,
@@ -370,7 +390,9 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
     return Consumer<TransactionProvider>(builder: (context, provider, child) {
       // 1. Find the AccountSummary
       final accountSummary = provider.accountSummaries.firstWhere(
-        (a) => a.accountNumber == widget.accountNumber,
+        (a) =>
+            a.accountNumber == widget.accountNumber &&
+            a.bankId == widget.bankId,
         orElse: () => AccountSummary(
           bankId: widget.bankId,
           accountNumber: widget.accountNumber,
@@ -384,43 +406,48 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
         ),
       );
 
-      // 2. Filter Transactions for this account
-      // Use helper logic similar to provider to match account
-      List<Transaction> transactions = provider.allTransactions.where((t) {
-        if (t.bankId != widget.bankId) return false;
-
-        if (widget.bankId == CashConstants.bankId) {
-          return t.accountNumber == widget.accountNumber;
+      // 2. Filter transactions with the same durable ownership predicate used
+      // by summaries, account navigation, deletion, and reparse.
+      Bank? bank;
+      for (final candidate in _banks) {
+        if (candidate.id == widget.bankId) {
+          bank = candidate;
+          break;
         }
-
-        // Get bank info with error handling
-        try {
-          final bank = _banks.firstWhere((b) => b.id == widget.bankId);
-
-          if (bank.uniformMasking == true && bank.maskPattern != null) {
-            // Match last N digits based on mask pattern
-            if (t.accountNumber == null || t.accountNumber!.isEmpty) {
-              return false;
-            }
-            if (widget.accountNumber.length < bank.maskPattern! ||
-                t.accountNumber!.length < bank.maskPattern!) {
-              return false;
-            }
-            return widget.accountNumber.substring(
-                    widget.accountNumber.length - bank.maskPattern!) ==
-                t.accountNumber!
-                    .substring(t.accountNumber!.length - bank.maskPattern!);
-          } else if (bank.uniformMasking == false) {
-            // Match by bankId only
-            return true;
-          } else {
-            // Exact match (uniformMasking is null)
-            return t.accountNumber == widget.accountNumber;
+      }
+      Account? target;
+      if (bank != null) {
+        for (final candidate in provider.accounts) {
+          if (candidate.bank == widget.bankId &&
+              registeredAccountNumbersMatch(
+                bank,
+                candidate.accountNumber,
+                widget.accountNumber,
+              )) {
+            target = candidate;
+            break;
           }
-        } catch (e) {
-          // Bank not found in database, fallback to exact match
-          return t.accountNumber == widget.accountNumber;
         }
+      }
+      target ??= Account(
+        accountNumber: accountSummary.accountNumber,
+        bank: accountSummary.bankId,
+        balance: accountSummary.balance,
+        accountHolderName: accountSummary.accountHolderName,
+      );
+
+      List<Transaction> transactions = provider.allTransactions.where((t) {
+        if (widget.bankId == CashConstants.bankId) {
+          return t.bankId == widget.bankId &&
+              t.accountNumber == widget.accountNumber;
+        }
+        if (bank == null) return false;
+        return transactionBelongsToAccount(
+          transaction: t,
+          account: target!,
+          bank: bank,
+          accounts: provider.accounts,
+        );
       }).toList();
 
       // 3. Filter by Date Range
@@ -490,8 +517,11 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
       }
 
       // Apply Category Filters
-      visibleTransaction =
-          visibleTransaction.where(_matchesCategoryFilter).toList();
+      visibleTransaction = visibleTransaction
+          .where(
+            (transaction) => _matchesCategoryFilter(transaction, provider),
+          )
+          .toList();
 
       // Sort by date desc
       visibleTransaction.sort((a, b) =>

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:totals/_redesign/theme/theme.dart';
 import 'package:totals/_redesign/widgets/finance_lock_surface.dart';
@@ -13,9 +12,12 @@ import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/data_sync/data_sync_scheduler.dart';
 import 'package:totals/services/data_sync/data_sync_settings_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
+import 'package:totals/services/totals_engine_client.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/widget_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_settings_service.dart';
 import 'package:totals/theme/app_theme_mode_preference.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -74,6 +76,11 @@ typedef BootstrapInitializer = Future<void> Function({
 });
 
 typedef BootstrapThemeModeLoader = Future<ThemeMode> Function();
+
+typedef BootstrapAppBuilder = Widget Function(
+  BuildContext context,
+  ThemeMode initialThemeMode,
+);
 
 class BootstrapFailure implements Exception {
   BootstrapFailure({
@@ -256,7 +263,7 @@ class AppBootstrapper {
     await _runNonFatal(
       phase: BootstrapPhase.loadingEnvironment,
       onPhaseChanged: onPhaseChanged,
-      task: () => dotenv.load(fileName: '.env', isOptional: true),
+      task: TotalsEngineClient.ensureEnvironmentInitialized,
     );
 
     await _runCritical(
@@ -288,6 +295,11 @@ class AppBootstrapper {
       onPhaseChanged: onPhaseChanged,
       task: DataSyncSettingsService.instance.ensureLoaded,
     );
+    await _runNonFatal(
+      phase: BootstrapPhase.initializingServices,
+      onPhaseChanged: onPhaseChanged,
+      task: TelegramBackupSettingsService.instance.ensureLoaded,
+    );
 
     if (_supportsBackgroundScheduling) {
       final workmanagerReady = await _runNonFatal(
@@ -316,6 +328,11 @@ class AppBootstrapper {
           phase: BootstrapPhase.schedulingBackgroundWork,
           onPhaseChanged: onPhaseChanged,
           task: DataSyncScheduler.sync,
+        );
+        await _runNonFatal(
+          phase: BootstrapPhase.schedulingBackgroundWork,
+          onPhaseChanged: onPhaseChanged,
+          task: TelegramBackupScheduler.sync,
         );
       }
     }
@@ -375,7 +392,7 @@ class AppBootstrapGate extends StatefulWidget {
     this.themeModeLoader,
   });
 
-  final WidgetBuilder appBuilder;
+  final BootstrapAppBuilder appBuilder;
   final BootstrapInitializer? bootstrapInitializer;
   final BootstrapThemeModeLoader? themeModeLoader;
 
@@ -387,13 +404,14 @@ class _AppBootstrapGateState extends State<AppBootstrapGate> {
   BootstrapPhase _phase = BootstrapPhase.preparing;
   BootstrapFailure? _failure;
   ThemeMode _themeMode = ThemeMode.system;
+  late final Future<void> _themeModeLoad;
   bool _isRunning = false;
   bool _isReady = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadThemeMode());
+    _themeModeLoad = _loadThemeMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initialize();
     });
@@ -432,6 +450,9 @@ class _AppBootstrapGateState extends State<AppBootstrapGate> {
           setState(() => _phase = phase);
         },
       );
+      // Keep startup work and preference loading concurrent, but do not replace
+      // the bootstrap tree until its resolved theme can be handed to the app.
+      await _themeModeLoad;
       if (!mounted) return;
       setState(() {
         _isRunning = false;
@@ -461,7 +482,7 @@ class _AppBootstrapGateState extends State<AppBootstrapGate> {
   @override
   Widget build(BuildContext context) {
     if (_isReady) {
-      return widget.appBuilder(context);
+      return widget.appBuilder(context, _themeMode);
     }
 
     return _BootstrapMaterialApp(
@@ -489,7 +510,7 @@ class _BootstrapMaterialApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
+      debugShowCheckedModeBanner: true,
       theme: RedesignTheme.light(),
       darkTheme: RedesignTheme.dark(),
       themeMode: themeMode,

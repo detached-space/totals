@@ -5,6 +5,21 @@ String accountBalanceResolverKey(Account account) {
   return '${account.bank}:${account.accountNumber}';
 }
 
+double includedAccountBalanceTotal({
+  required Iterable<Account> accounts,
+  Map<String, double> resolvedBalances = const <String, double>{},
+}) {
+  return accounts
+      .where((account) => account.includeInTotals && !account.isDormant)
+      .fold<double>(
+        0.0,
+        (sum, account) =>
+            sum +
+            (resolvedBalances[accountBalanceResolverKey(account)] ??
+                account.balance),
+      );
+}
+
 double resolveDisplayedAccountBalance({
   required Account account,
   required List<Transaction> accountTransactions,
@@ -48,8 +63,7 @@ double? latestParsedBalanceAfter(Iterable<Transaction> transactions) {
     }
 
     if (transactionTime != null &&
-        (latestTime == null ||
-            !transactionTime.isBefore(latestTime))) {
+        (latestTime == null || !transactionTime.isBefore(latestTime))) {
       latestBalance = parsedBalance;
       latestTime = transactionTime;
       continue;

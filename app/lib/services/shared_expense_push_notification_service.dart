@@ -4,7 +4,6 @@ import 'dart:ui';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:totals/models/shared_expense_group.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/notification_service.dart';
@@ -56,6 +55,7 @@ class SharedExpensePushNotificationService {
     if (!await _ensureFirebaseReady()) return;
 
     await NotificationService.instance.ensureInitialized();
+    await NotificationService.instance.dismissLegacySharedExpenseFallbacks();
     await FirebaseMessaging.instance.setAutoInitEnabled(true);
     await syncRegistration();
 
@@ -155,22 +155,16 @@ Future<void> sharedExpenseFirebaseMessagingBackgroundHandler(
 
   DartPluginRegistrant.ensureInitialized();
   try {
+    await TotalsEngineClient.ensureEnvironmentInitialized();
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp();
     }
-    // ALWAYS render our composed notification, even when FCM auto-displayed a
-    // generic one. Suppressing ours leaves the activity entry "unseen" until
-    // the next coordinator startup, which then marks it seen without
-    // notifying — the user would only ever see the generic. While the backend
-    // still ships a `notification` block, the user briefly sees both; this is
-    // a transitional cost until the backend goes data-only.
+    // The push is only a doorbell. A notification is rendered after the
+    // encrypted activity has been pulled and decrypted successfully.
     await _pullAndNotify(message, runningInBackground: true);
   } catch (error) {
     if (kDebugMode) {
       debugPrint('debug: Shared expense background push failed: $error');
-    }
-    if (message.notification == null) {
-      await _showGenericFallback(message);
     }
   }
 }
@@ -185,7 +179,6 @@ Future<void> _pullAndNotify(
 
   final stopwatch = Stopwatch()..start();
   final groupId = _cleanDataValue(message.data['groupId']);
-  final fcmAlreadyShowed = message.notification != null;
   final repository = SharedExpenseRepository();
 
   try {
@@ -244,18 +237,13 @@ Future<void> _pullAndNotify(
       SharedExpenseRealtimeBus.instance.publish(group);
     }
 
-    // Background-only generic fallback when sync threw AND FCM didn't show
-    // a generic.
-    if (syncThrew && runningInBackground && !fcmAlreadyShowed) {
-      await _showGenericFallback(message, group: group);
-    }
+    // Keep the payload pending when synchronization fails. The SSE stream or
+    // periodic catch-up will retry it and render the detailed notification;
+    // a vague fallback would otherwise remain beside that eventual detail.
     _logDoorbell(syncThrew ? 'sync-threw' : 'ok', stopwatch);
   } catch (error) {
     if (kDebugMode) {
       debugPrint('debug: Shared expense doorbell pull failed: $error');
-    }
-    if (!fcmAlreadyShowed && runningInBackground) {
-      await _showGenericFallback(message);
     }
     _logDoorbell('pull-failed', stopwatch);
   }
@@ -267,28 +255,6 @@ void _logDoorbell(String outcome, Stopwatch stopwatch) {
       'debug: SharedExpenseDoorbell outcome=$outcome elapsed=${stopwatch.elapsedMilliseconds}ms',
     );
   }
-}
-
-Future<void> _showGenericFallback(
-  RemoteMessage message, {
-  SharedExpenseGroup? group,
-}) async {
-  final enabled = await NotificationSettingsService.instance
-      .isSharedExpenseNotificationsEnabled();
-  if (!enabled) return;
-  final groupName = group?.name.trim().isNotEmpty == true ? group!.name : null;
-  final body = groupName == null
-      ? 'You have a new shared expense update.'
-      : '$groupName has a new update.';
-  final eventId = _cleanDataValue(message.data['payloadId']) ??
-      message.messageId ??
-      DateTime.now().millisecondsSinceEpoch.toString();
-  await NotificationService.instance.showSharedExpenseEventNotification(
-    eventId: eventId,
-    groupId: group?.id ?? _cleanDataValue(message.data['groupId']),
-    title: 'Shared Expenses has a new update',
-    body: body,
-  );
 }
 
 bool _isSharedExpenseMessage(RemoteMessage message) {

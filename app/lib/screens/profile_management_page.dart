@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/profile.dart';
 import 'package:totals/repositories/profile_repository.dart';
+import 'package:totals/services/account_ownership_service.dart';
 
 class ProfileManagementPage extends StatefulWidget {
   const ProfileManagementPage({super.key});
@@ -36,7 +37,7 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
   }
 
   Future<void> _setActiveProfile(int profileId) async {
-    await _profileRepo.setActiveProfile(profileId);
+    await AccountOwnershipService.instance.switchActiveProfile(profileId);
     _loadProfiles();
     // Notify settings page to refresh
     if (mounted) {
@@ -120,7 +121,9 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
         final remainingProfiles = await _profileRepo.getProfiles();
         if (remainingProfiles.isNotEmpty &&
             remainingProfiles.first.id != null) {
-          await _profileRepo.setActiveProfile(remainingProfiles.first.id!);
+          await AccountOwnershipService.instance.switchActiveProfile(
+            remainingProfiles.first.id!,
+          );
         }
       }
 

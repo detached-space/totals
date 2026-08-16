@@ -54,6 +54,7 @@ class _ResultHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isBatch = _isBatchAccountLabel(result.accountNumber);
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -74,7 +75,7 @@ class _ResultHeader extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _MetaLine(
-            label: 'Account',
+            label: isBatch ? 'Accounts' : 'Account',
             value:
                 '${result.bankLabel} ${_maskAccountNumber(result.accountNumber)}',
           ),
@@ -215,12 +216,17 @@ class _TransactionDebugTile extends StatelessWidget {
               _DebugChip(label: _formatTransactionTime(transaction.time)),
               if (_hasText(transaction.currentBalance))
                 _DebugChip(label: 'Balance ${transaction.currentBalance}'),
-              if (_hasText(transaction.accountNumber))
+              if (_hasText(transaction.ownerAccountNumber))
+                _DebugChip(
+                  label:
+                      'Owner ${_maskAccountNumber(transaction.ownerAccountNumber!)}',
+                )
+              else if (_hasText(transaction.accountNumber))
                 _DebugChip(label: 'Acct ${transaction.accountNumber}'),
             ],
           ),
           const SizedBox(height: 8),
-          _MetaLine(label: 'Reference', value: transaction.reference),
+          _MetaLine(label: 'Reference', value: transaction.displayReference),
           if (sourceLabel != null)
             _MetaLine(label: 'SMS source', value: sourceLabel),
         ],
@@ -325,8 +331,13 @@ String _shorten(String value) {
 String _maskAccountNumber(String accountNumber) {
   final trimmed = accountNumber.trim();
   if (trimmed.isEmpty) return '';
+  if (_isBatchAccountLabel(trimmed)) return trimmed;
   if (trimmed.length <= 4) return trimmed;
   return '****${trimmed.substring(trimmed.length - 4)}';
+}
+
+bool _isBatchAccountLabel(String value) {
+  return RegExp(r'^\d+\s+accounts?$').hasMatch(value.trim());
 }
 
 bool _hasText(String? value) => value != null && value.trim().isNotEmpty;

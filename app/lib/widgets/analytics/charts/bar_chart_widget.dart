@@ -171,7 +171,10 @@ class BarChartWidget extends StatelessWidget {
         ),
       );
 
-      final amount = transaction.amount.abs();
+      final amount = isIncome
+          ? provider.incomeAmountForTransaction(transaction)
+          : provider.netExpenseAmountForTransaction(transaction);
+      if (amount <= 0) continue;
       stat.bucketValues[bucketIndex] += amount;
       stat.total += amount;
     }

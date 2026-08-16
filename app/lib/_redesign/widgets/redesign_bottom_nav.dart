@@ -5,7 +5,7 @@ import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
-class RedesignBottomNav extends StatelessWidget {
+class RedesignBottomNav extends StatefulWidget {
   static const int _tabCount = 5;
 
   final int currentIndex;
@@ -25,11 +25,122 @@ class RedesignBottomNav extends StatelessWidget {
     this.onProfileLongPressAt,
   });
 
-  double _resolvePage() {
-    if (!pageController.hasClients) return currentIndex.toDouble();
-    final page = pageController.page;
-    if (page == null || !page.isFinite) return currentIndex.toDouble();
-    return page.clamp(0.0, (_tabCount - 1).toDouble()).toDouble();
+  @override
+  State<RedesignBottomNav> createState() => _RedesignBottomNavState();
+}
+
+class _RedesignBottomNavState extends State<RedesignBottomNav>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _selectionController;
+  late Animation<double> _selectionAnimation;
+  ValueNotifier<bool>? _pageScrollingNotifier;
+
+  double get _targetIndex =>
+      widget.currentIndex.clamp(0, RedesignBottomNav._tabCount - 1).toDouble();
+
+  @override
+  void initState() {
+    super.initState();
+    _selectionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _selectionAnimation = AlwaysStoppedAnimation<double>(_targetIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _attachPageScrollingListener();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant RedesignBottomNav oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.pageController != widget.pageController) {
+      _detachPageScrollingListener();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _attachPageScrollingListener();
+      });
+    }
+    if (oldWidget.currentIndex == widget.currentIndex) return;
+
+    if (_isPageScrolling) {
+      _selectionController.stop();
+      _selectionAnimation = AlwaysStoppedAnimation<double>(
+        _resolveControllerPage(),
+      );
+      return;
+    }
+
+    final currentPosition = _selectionAnimation.value;
+    _selectionController.stop();
+    _selectionController.reset();
+    _selectionAnimation = Tween<double>(
+      begin: currentPosition,
+      end: _targetIndex,
+    ).animate(
+      CurvedAnimation(
+        parent: _selectionController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    _selectionController.forward();
+  }
+
+  @override
+  void dispose() {
+    _detachPageScrollingListener();
+    _selectionController.dispose();
+    super.dispose();
+  }
+
+  bool get _isPageScrolling => _pageScrollingNotifier?.value ?? false;
+
+  double _resolveControllerPage() {
+    if (!widget.pageController.hasClients) return _targetIndex;
+    final page = widget.pageController.page;
+    if (page == null || !page.isFinite) return _targetIndex;
+    return page
+        .clamp(0.0, (RedesignBottomNav._tabCount - 1).toDouble())
+        .toDouble();
+  }
+
+  void _attachPageScrollingListener() {
+    if (!widget.pageController.hasClients) return;
+    final notifier = widget.pageController.position.isScrollingNotifier;
+    if (identical(_pageScrollingNotifier, notifier)) return;
+
+    _detachPageScrollingListener();
+    _pageScrollingNotifier = notifier;
+    notifier.addListener(_handlePageScrollingChanged);
+  }
+
+  void _detachPageScrollingListener() {
+    _pageScrollingNotifier?.removeListener(_handlePageScrollingChanged);
+    _pageScrollingNotifier = null;
+  }
+
+  void _handlePageScrollingChanged() {
+    if (_isPageScrolling) {
+      _selectionController.stop();
+      return;
+    }
+
+    _selectionController.stop();
+    setState(() {
+      _selectionAnimation = AlwaysStoppedAnimation<double>(
+        _resolveControllerPage(),
+      );
+    });
+  }
+
+  double _resolveSelectionPosition() {
+    if (_pageScrollingNotifier == null && widget.pageController.hasClients) {
+      _attachPageScrollingListener();
+    }
+    // Follow the finger while the PageView moves; use the independent tween
+    // for direct jumps, where PageController has no intermediate positions.
+    return _isPageScrolling
+        ? _resolveControllerPage()
+        : _selectionAnimation.value;
   }
 
   double _selectionProgress(double page, int index) {
@@ -51,7 +162,7 @@ class RedesignBottomNav extends StatelessWidget {
         label: context.l10n('nav.money', 'Money'),
         activeIcon: AppIcons.account_balance_wallet,
         inactiveIcon: AppIcons.account_balance_wallet_outlined,
-        onLongPress: onMoneyLongPress,
+        onLongPress: widget.onMoneyLongPress,
         onLongPressAt: null,
       ),
       (
@@ -65,7 +176,7 @@ class RedesignBottomNav extends StatelessWidget {
         label: context.l10n('nav.shared', 'Shared'),
         activeIcon: AppIcons.group,
         inactiveIcon: AppIcons.group_outlined,
-        onLongPress: onSharedLongPress,
+        onLongPress: widget.onSharedLongPress,
         onLongPressAt: null,
       ),
       (
@@ -73,73 +184,83 @@ class RedesignBottomNav extends StatelessWidget {
         activeIcon: AppIcons.person,
         inactiveIcon: AppIcons.person_outline,
         onLongPress: null,
-        onLongPressAt: onProfileLongPressAt,
+        onLongPressAt: widget.onProfileLongPressAt,
       ),
     ];
 
     return AnimatedBuilder(
-      animation: pageController,
+      animation: widget.pageController,
       builder: (context, child) {
-        final page = _resolvePage();
+        return AnimatedBuilder(
+          animation: _selectionController,
+          builder: (context, child) {
+            final page = _resolveSelectionPosition();
 
-        return SafeArea(
-          top: false,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.cardColor(context),
-              border: Border(
-                  top: BorderSide(color: AppColors.borderColor(context))),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.black.withValues(alpha: 0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final itemWidth = constraints.maxWidth / items.length;
-                final indicatorLeft =
-                    (page * itemWidth) + ((itemWidth - indicatorSize) / 2);
-
-                return Stack(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        for (var index = 0; index < items.length; index++)
-                          _NavItem(
-                            label: items[index].label,
-                            activeIcon: items[index].activeIcon,
-                            inactiveIcon: items[index].inactiveIcon,
-                            selectionProgress: _selectionProgress(page, index),
-                            onTap: () => onTap(index),
-                            onLongPress: items[index].onLongPress,
-                            onLongPressAt: items[index].onLongPressAt,
-                          ),
-                      ],
-                    ),
-                    Positioned(
-                      left: indicatorLeft,
-                      bottom: 0,
-                      child: IgnorePointer(
-                        child: Container(
-                          width: indicatorSize,
-                          height: indicatorSize,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppColors.primaryLight,
-                          ),
-                        ),
-                      ),
+            return SafeArea(
+              top: false,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.cardColor(context),
+                  border: Border(
+                      top: BorderSide(color: AppColors.borderColor(context))),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.black.withValues(alpha: 0.06),
+                      blurRadius: 12,
+                      offset: const Offset(0, -4),
                     ),
                   ],
-                );
-              },
-            ),
-          ),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final itemWidth = constraints.maxWidth / items.length;
+                    final indicatorLeft =
+                        (page * itemWidth) + ((itemWidth - indicatorSize) / 2);
+
+                    return Stack(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            for (var index = 0; index < items.length; index++)
+                              _NavItem(
+                                label: items[index].label,
+                                activeIcon: items[index].activeIcon,
+                                inactiveIcon: items[index].inactiveIcon,
+                                selectionProgress:
+                                    _selectionProgress(page, index),
+                                onTap: () => widget.onTap(index),
+                                onLongPress: items[index].onLongPress,
+                                onLongPressAt: items[index].onLongPressAt,
+                              ),
+                          ],
+                        ),
+                        Positioned(
+                          left: indicatorLeft,
+                          bottom: 0,
+                          child: IgnorePointer(
+                            child: Container(
+                              key: const ValueKey(
+                                'bottom-nav-selection-indicator',
+                              ),
+                              width: indicatorSize,
+                              height: indicatorSize,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.primaryLight,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            );
+          },
         );
       },
     );

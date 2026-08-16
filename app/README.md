@@ -65,12 +65,18 @@
    cd totals/app
    ```
 
-2. **Install dependencies**
+2. **Create local environment configuration**
+   ```bash
+   cp .env.example .env
+   ```
+   Set `SHARED_EXPENSES_URL` in `.env` before using shared expenses.
+
+3. **Install dependencies**
    ```bash
    flutter pub get
    ```
 
-3. **Run the app**
+4. **Run the app**
    ```bash
    flutter run
    ```

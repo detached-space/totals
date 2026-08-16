@@ -28,6 +28,7 @@ import 'package:totals/repositories/shared_expense_repository.dart';
 import 'package:totals/services/shared_expense_realtime_bus.dart';
 import 'package:totals/services/shared_expense_vault_service.dart';
 import 'package:totals/services/totals_engine_client.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart' show formatAmountCompact;
 
 part 'shared_expenses_page.analytics.dart';
@@ -926,12 +927,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
 
   List<AccountSummary> _selectablePaymentAccounts(
       TransactionProvider provider) {
-    final accounts = List<AccountSummary>.from(provider.accountSummaries)
-      ..sort((a, b) {
-        if (a.bankId == CashConstants.bankId) return -1;
-        if (b.bankId == CashConstants.bankId) return 1;
-        return a.bankId.compareTo(b.bankId);
-      });
+    final accounts = List<AccountSummary>.from(provider.accountSummaries);
     if (accounts.isEmpty) {
       accounts.add(
         AccountSummary(
@@ -947,6 +943,17 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
         ),
       );
     }
+    accounts.sort(
+      (left, right) => compareAccountDisplayFields(
+        leftBankId: left.bankId,
+        rightBankId: right.bankId,
+        leftHolderName: left.accountHolderName,
+        rightHolderName: right.accountHolderName,
+        leftAccountNumber: left.accountNumber,
+        rightAccountNumber: right.accountNumber,
+        bankNameForId: provider.getBankShortName,
+      ),
+    );
     return accounts;
   }
 
@@ -1930,8 +1937,7 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
                         const SizedBox(height: 8),
                         _SharedGroupsSectionHeader(
                           isRefreshing: _isRefreshing,
-                          onRefresh: () =>
-                              _loadGroups(refreshFromEngine: true),
+                          onRefresh: () => _loadGroups(refreshFromEngine: true),
                         ),
                       ],
                     ],
@@ -1986,7 +1992,6 @@ class _RedesignSharedExpensesPageState extends State<RedesignSharedExpensesPage>
     );
   }
 }
-
 
 // ============================================================================
 // Page top header — title + subtitle stacked on the left, compact Join + New
@@ -2495,9 +2500,7 @@ class _GroupSegmentBar extends StatelessWidget {
           children: [
             for (var i = 0; i < items.length; i++)
               Expanded(
-                flex: (items[i].balance.abs() * 1000)
-                    .round()
-                    .clamp(1, 1 << 30),
+                flex: (items[i].balance.abs() * 1000).round().clamp(1, 1 << 30),
                 child: Container(
                   color: items[i].colorOf(context),
                   margin: EdgeInsets.only(
@@ -2565,7 +2568,6 @@ String _heroSummarySubtitle(BuildContext context, _SharedHeroSummary s) {
       '${s.peopleCount} ${context.l10nText(s.peopleCount == 1 ? 'PERSON' : 'PEOPLE')}';
   return '$g · $p';
 }
-
 
 class _AvatarCircle extends StatelessWidget {
   final double size;

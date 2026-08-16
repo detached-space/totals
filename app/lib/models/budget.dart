@@ -289,6 +289,10 @@ class Budget {
     return !startsAfterRange && !endsBeforeRange;
   }
 
+  bool isEffectiveOn(DateTime date) {
+    return isActive && overlapsRange(date, date);
+  }
+
   AppCalendarOption get calendarOption =>
       AppCalendarOption.fromStorage(calendar);
 

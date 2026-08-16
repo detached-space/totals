@@ -5,16 +5,45 @@ import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 
 /// Handler for summary-related API endpoints
 class SummaryHandler {
   final AccountRepository _accountRepo = AccountRepository();
   final TransactionRepository _transactionRepo = TransactionRepository();
+  final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
   final BankConfigService _bankConfigService = BankConfigService();
   List<Bank>? _cachedBanks;
+
+  Future<Set<String>> _reimbursementReferences(
+    Iterable<Transaction> transactions,
+  ) async {
+    final references =
+        await _reimbursementRepo.getLinkedReimbursementReferences(
+      transactions.map((transaction) => transaction.reference),
+    );
+    final reimbursementCategoryIds =
+        (await CategoryRepository().getCategories())
+            .where(isReimbursementCategory)
+            .map((category) => category.id)
+            .whereType<int>()
+            .toSet();
+    for (final transaction in transactions) {
+      if (transaction.selectedCategoryIds
+          .any(reimbursementCategoryIds.contains)) {
+        references.add(transaction.reference.trim());
+      }
+    }
+    references.remove('');
+    return references;
+  }
 
   /// Returns a configured router with all summary routes
   Router get router {
@@ -36,7 +65,6 @@ class SummaryHandler {
   Future<List<Transaction>> _filterOrphanedTransactions(
       List<Transaction> transactions) async {
     final accounts = await _accountRepo.getAccounts();
-    final banks = await _bankConfigService.getBanks();
 
     return transactions.where((t) {
       if (t.bankId == null) return false;
@@ -52,28 +80,7 @@ class SummaryHandler {
             .any((account) => account.accountNumber == t.accountNumber);
       }
 
-      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
-        for (var account in bankAccounts) {
-          bool matches = false;
-          final bank = banks.firstWhere((b) => b.id == t.bankId);
-
-          if (bank.uniformMasking == true) {
-            matches = t.accountNumber!
-                    .substring(t.accountNumber!.length - bank.maskPattern!) ==
-                account.accountNumber.substring(
-                    account.accountNumber.length - bank.maskPattern!);
-          } else if (bank.uniformMasking == false) {
-            matches = true;
-          } else {
-            matches = t.accountNumber == account.accountNumber;
-          }
-
-          if (matches) return true;
-        }
-        return false;
-      } else {
-        return bankAccounts.length == 1;
-      }
+      return true;
     }).toList();
   }
 
@@ -84,6 +91,12 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final reimbursementReferences =
+          await _reimbursementReferences(transactions);
+      final reimbursedExpenses =
+          await _reimbursementRepo.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
 
       // Calculate totals
       double totalBalance = 0;
@@ -91,7 +104,11 @@ class SummaryHandler {
       double totalPendingCredit = 0;
 
       for (var account in accounts) {
-        totalBalance += account.balance;
+        if (account.bank != CashConstants.bankId &&
+            account.includeInTotals &&
+            !account.isDormant) {
+          totalBalance += account.balance;
+        }
         totalSettledBalance += account.settledBalance ?? 0;
         totalPendingCredit += account.pendingCredit ?? 0;
       }
@@ -101,10 +118,14 @@ class SummaryHandler {
       double totalDebit = 0;
 
       for (var t in transactions) {
-        if (t.type == 'CREDIT') {
+        if (t.type == 'CREDIT' &&
+            !reimbursementReferences.contains(t.reference.trim())) {
           totalCredit += t.amount.abs();
         } else if (t.type == 'DEBIT') {
-          totalDebit += t.amount.abs();
+          totalDebit += expenseAmountAfterReimbursement(
+            grossExpense: t.amount.abs(),
+            reimbursedAmount: reimbursedExpenses[t.reference.trim()] ?? 0.0,
+          );
         }
       }
 
@@ -136,6 +157,12 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final reimbursementReferences =
+          await _reimbursementReferences(transactions);
+      final reimbursedExpenses =
+          await _reimbursementRepo.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
 
       // Group accounts by bank
       final Map<int, List<Account>> accountsByBank = {};
@@ -167,7 +194,9 @@ class SummaryHandler {
           double pendingCredit = 0;
 
           for (var account in bankAccounts) {
-            totalBalance += account.balance;
+            if (account.includeInTotals && !account.isDormant) {
+              totalBalance += account.balance;
+            }
             settledBalance += account.settledBalance ?? 0;
             pendingCredit += account.pendingCredit ?? 0;
           }
@@ -177,10 +206,14 @@ class SummaryHandler {
           double totalDebit = 0;
 
           for (var t in bankTransactions) {
-            if (t.type == 'CREDIT') {
+            if (t.type == 'CREDIT' &&
+                !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
             } else if (t.type == 'DEBIT') {
-              totalDebit += t.amount.abs();
+              totalDebit += expenseAmountAfterReimbursement(
+                grossExpense: t.amount.abs(),
+                reimbursedAmount: reimbursedExpenses[t.reference.trim()] ?? 0.0,
+              );
             }
           }
 
@@ -216,6 +249,12 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final reimbursementReferences =
+          await _reimbursementReferences(transactions);
+      final reimbursedExpenses =
+          await _reimbursementRepo.getAppliedTotalsForExpenses(
+        transactions.map((transaction) => transaction.reference),
+      );
 
       final accountSummaries = await Future.wait(
         accounts.map((account) async {
@@ -224,49 +263,16 @@ class SummaryHandler {
           // Find transactions for this account
           final accountTransactions = transactions.where((t) {
             if (t.bankId != account.bank) return false;
-
-            // Match by account number (handling partial matches for different banks)
-            if (t.accountNumber == null) {
-              // Include transactions with no account number if this is the only account for the bank
-              final bankAccountCount =
-                  accounts.where((a) => a.bank == account.bank).length;
-              return bankAccountCount == 1;
+            if (account.bank == CashConstants.bankId) {
+              return t.accountNumber == account.accountNumber;
             }
-
-            // Different banks use different matching logic
-            switch (account.bank) {
-              case 1: // CBE - match last 4 digits
-                if (account.accountNumber.length >= 4 &&
-                    t.accountNumber!.length >= 4) {
-                  return t.accountNumber!
-                          .substring(t.accountNumber!.length - 4) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 4);
-                }
-                break;
-              case 4: // Dashen - match last 3 digits
-                if (account.accountNumber.length >= 3 &&
-                    t.accountNumber!.length >= 3) {
-                  return t.accountNumber!
-                          .substring(t.accountNumber!.length - 3) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 3);
-                }
-                break;
-              case 3: // Bank of Abyssinia - match last 2 digits
-                if (account.accountNumber.length >= 2 &&
-                    t.accountNumber!.length >= 2) {
-                  return t.accountNumber!
-                          .substring(t.accountNumber!.length - 2) ==
-                      account.accountNumber
-                          .substring(account.accountNumber.length - 2);
-                }
-                break;
-              default:
-                return t.bankId == account.bank;
-            }
-
-            return t.bankId == account.bank;
+            if (bank == null) return false;
+            return transactionBelongsToAccount(
+              transaction: t,
+              account: account,
+              bank: bank,
+              accounts: accounts,
+            );
           }).toList();
 
           // Calculate transaction totals
@@ -274,10 +280,14 @@ class SummaryHandler {
           double totalDebit = 0;
 
           for (var t in accountTransactions) {
-            if (t.type == 'CREDIT') {
+            if (t.type == 'CREDIT' &&
+                !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
             } else if (t.type == 'DEBIT') {
-              totalDebit += t.amount.abs();
+              totalDebit += expenseAmountAfterReimbursement(
+                grossExpense: t.amount.abs(),
+                reimbursedAmount: reimbursedExpenses[t.reference.trim()] ?? 0.0,
+              );
             }
           }
 
@@ -291,6 +301,9 @@ class SummaryHandler {
             'balance': account.balance,
             'settledBalance': account.settledBalance,
             'pendingCredit': account.pendingCredit,
+            'includeInTotals': account.includeInTotals,
+            'isDormant': account.isDormant,
+            'isDefault': account.isDefault,
             'totalCredit': totalCredit,
             'totalDebit': totalDebit,
             'transactionCount': accountTransactions.length,

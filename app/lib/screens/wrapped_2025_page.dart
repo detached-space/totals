@@ -157,7 +157,8 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
       );
 
       if (!isIncome) {
-        final amount = transaction.amount.abs();
+        final amount = provider.netExpenseAmountForTransaction(transaction);
+        if (amount <= 0) continue;
         monthSpend.update(
           monthKey,
           (value) => value + amount,
@@ -179,7 +180,8 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
           );
         }
       } else {
-        final amount = transaction.amount.abs();
+        final amount = provider.incomeAmountForTransaction(transaction);
+        if (amount <= 0) continue;
         final rawSender = _cleanCounterparty(transaction.creditor) ??
             _cleanCounterparty(transaction.receiver);
         if (rawSender != null) {
@@ -199,18 +201,24 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
         }
       }
 
-      final amountAbs = transaction.amount.abs();
+      final amountAbs = isIncome
+          ? provider.incomeAmountForTransaction(transaction)
+          : provider.netExpenseAmountForTransaction(transaction);
       if (amountAbs > biggestAmount) {
         biggestAmount = amountAbs;
         biggest = transaction;
       }
     }
 
-    final totalIncome =
-        income.fold(0.0, (sum, transaction) => sum + transaction.amount.abs());
+    final totalIncome = income.fold<double>(
+      0.0,
+      (sum, transaction) =>
+          sum + provider.incomeAmountForTransaction(transaction),
+    );
     final totalExpense = expenses.fold(
       0.0,
-      (sum, transaction) => sum + transaction.amount.abs(),
+      (sum, transaction) =>
+          sum + provider.netExpenseAmountForTransaction(transaction),
     );
     final netFlow = totalIncome - totalExpense;
 
@@ -275,7 +283,7 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
     if (biggest != null) {
       final date = _parseTransactionDate(biggest);
       biggestHighlight = _BiggestTransaction(
-        amount: biggest.amount.abs(),
+        amount: biggestAmount,
         isIncome: _isIncome(biggest),
         date: date,
       );
@@ -574,6 +582,8 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
       transactions: transactions,
       banks: _banks,
       year: _wrappedYear,
+      expenseAmountForTransaction: provider.netExpenseAmountForTransaction,
+      incomeAmountForTransaction: provider.incomeAmountForTransaction,
     );
     final totalPages = slides.length + 1;
     final indicatorAccent = _currentPage >= slides.length

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:totals/models/budget.dart';
 import 'package:totals/repositories/budget_repository.dart';
@@ -192,10 +194,15 @@ class BudgetProvider with ChangeNotifier {
     return await _budgetService.getBudgetStatus(budget);
   }
 
-  Future<void> refreshBudgetStatuses() async {
+  Future<void> refreshBudgetStatuses({bool waitForWidget = true}) async {
     await _refreshBudgetStatuses();
-    await _refreshBudgetWidgetSafe();
-    notifyListeners();
+    if (waitForWidget) {
+      await _refreshBudgetWidgetSafe();
+      notifyListeners();
+    } else {
+      notifyListeners();
+      unawaited(_refreshBudgetWidgetSafe());
+    }
   }
 
   // Check for budget alerts
@@ -222,7 +229,10 @@ class BudgetProvider with ChangeNotifier {
 
   Future<void> _refreshBudgetWidgetSafe() async {
     try {
-      await WidgetService.refreshBudgetWidget(calendar: _calendar);
+      await WidgetService.refreshBudgetWidget(
+        calendar: _calendar,
+        statuses: _budgetStatuses,
+      );
     } catch (e) {
       print("debug: Error refreshing budget widget: $e");
     }

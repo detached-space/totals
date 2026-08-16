@@ -14,6 +14,7 @@ import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_sort.dart';
 
 class VerifyPaymentsPage extends StatefulWidget {
   const VerifyPaymentsPage({super.key});
@@ -59,9 +60,23 @@ class _VerifyPaymentsPageState extends State<VerifyPaymentsPage> {
 
   Future<void> _loadAccounts() async {
     final accounts = await _accountRepo.getAccounts();
+    final banks = {
+      for (final bank in AllBanksFromAssets.getAllBanks()) bank.id: bank,
+    };
     final filtered = accounts
         .where((account) => account.bank != CashConstants.bankId)
-        .toList();
+        .toList()
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bank,
+          rightBankId: right.bank,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) => banks[bankId]?.name ?? 'Bank $bankId',
+        ),
+      );
     if (mounted) {
       setState(() {
         _accounts = filtered;
@@ -1347,7 +1362,7 @@ class _TransactionCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          transaction.reference,
+                          transaction.displayReference,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontFamily: 'monospace',
                             color: colorScheme.onSurface,

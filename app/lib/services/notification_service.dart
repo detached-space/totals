@@ -20,6 +20,7 @@ import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/widget_service.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -50,7 +51,6 @@ class NotificationService {
   static const int weeklySpendingTestNotificationId = 9004;
   static const int monthlySpendingNotificationId = 9005;
   static const int monthlySpendingTestNotificationId = 9006;
-  static const int sharedExpenseDigestNotificationId = 9007;
   static const int dataSyncResultNotificationId = 9008;
 
   final FlutterLocalNotificationsPlugin _plugin =
@@ -78,10 +78,8 @@ class NotificationService {
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
-    final androidPlugin = _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         _transactionChannelId,
@@ -190,8 +188,7 @@ class NotificationService {
       }
 
       // For regular taps, use the intent bus
-      final payload =
-          response.notificationResponseType ==
+      final payload = response.notificationResponseType ==
               NotificationResponseType.selectedNotificationAction
           ? response.actionId
           : response.payload;
@@ -235,6 +232,13 @@ class NotificationService {
         if (kDebugMode) {
           print('debug: Quick categorize: transaction not found');
         }
+        return;
+      }
+
+      final category = (await CategoryRepository().getCategories())
+          .where((candidate) => candidate.id == categoryId)
+          .firstOrNull;
+      if (category == null || isReimbursementCategory(category)) {
         return;
       }
 
@@ -447,19 +451,15 @@ class NotificationService {
       if (kIsWeb) return true;
 
       if (defaultTargetPlatform == TargetPlatform.android) {
-        final androidPlugin = _plugin
-            .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin
-            >();
+        final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
         final granted = await androidPlugin?.requestNotificationsPermission();
         if (granted != null) return granted;
         final status = await Permission.notification.request();
         return status.isGranted;
       } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-        final iosPlugin = _plugin
-            .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin
-            >();
+        final iosPlugin = _plugin.resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>();
         final granted = await iosPlugin?.requestPermissions(
           alert: true,
           badge: true,
@@ -539,12 +539,30 @@ class NotificationService {
           channel: _transactionChannelId,
           title: title,
           body: body,
+          transactionReference: transaction.reference,
         );
       }
     } catch (e) {
       if (kDebugMode) {
         print('debug: Failed to show transaction notification: $e');
       }
+    }
+  }
+
+  Future<void> dismissTransactionNotification(
+    Transaction transaction, {
+    bool removeFromHistory = false,
+  }) async {
+    try {
+      await ensureInitialized();
+      await _plugin.cancel(_notificationId(transaction));
+    } catch (e) {
+      if (kDebugMode) {
+        print('debug: Failed to dismiss transaction notification: $e');
+      }
+    }
+    if (removeFromHistory) {
+      await _removeTransactionNotificationFromHistory(transaction.reference);
     }
   }
 
@@ -559,6 +577,7 @@ class NotificationService {
         bankId: CashConstants.bankId,
         type: 'DEBIT',
         accountNumber: CashConstants.defaultAccountNumber,
+        ownerAccountNumber: CashConstants.defaultAccountNumber,
       );
 
       await TransactionRepository().saveTransaction(
@@ -646,7 +665,9 @@ class NotificationService {
       final List<models.Category> categories = [];
       for (final id in categoryIds) {
         final cat = allCategories.where((c) => c.id == id).firstOrNull;
-        if (cat != null) categories.add(cat);
+        if (cat != null && !isReimbursementCategory(cat)) {
+          categories.add(cat);
+        }
         if (categories.length >= 3) break;
       }
 
@@ -960,9 +981,8 @@ class NotificationService {
             _dataSyncChannelId,
             'Data Sync',
             channelDescription: 'Results of syncing your data to your backend',
-            importance: failed > 0
-                ? Importance.high
-                : Importance.defaultImportance,
+            importance:
+                failed > 0 ? Importance.high : Importance.defaultImportance,
             priority: failed > 0 ? Priority.high : Priority.defaultPriority,
             showProgress: false,
             ongoing: false,
@@ -1036,6 +1056,7 @@ class NotificationService {
 
   Future<void> showAccountSyncProgress({
     required String accountNumber,
+    String? accountLabel,
     required int bankId,
     required String stage,
     required double progress,
@@ -1048,7 +1069,9 @@ class NotificationService {
       final clamped = progress.clamp(0.0, 1.0);
       final percent = (clamped * 100).round();
       final title = bankLabel == null ? 'Syncing account' : '$bankLabel sync';
-      final maskedAccount = _maskAccountNumber(accountNumber);
+      final maskedAccount = accountLabel?.trim().isNotEmpty == true
+          ? accountLabel!.trim()
+          : _maskAccountNumber(accountNumber);
       final progressStage = includePercentInBody
           ? _formatSyncProgressStage(stage, percent)
           : stage.trim();
@@ -1342,10 +1365,10 @@ class NotificationService {
       final body = cleanPayee.isEmpty
           ? 'Pay $amountText${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.'
           : 'Pay $amountText to $cleanPayee'
-                '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
+              '${cleanGroup.isEmpty ? '' : ' on $cleanGroup'}.';
 
       await _plugin.show(
-        _sharedExpenseNudgeNotificationId(nudgeId),
+        _sharedExpenseNotificationId(nudgeId),
         title,
         body,
         const NotificationDetails(
@@ -1355,6 +1378,7 @@ class NotificationService {
             channelDescription: 'Nudges and reminders from shared expenses',
             importance: Importance.high,
             priority: Priority.high,
+            onlyAlertOnce: true,
           ),
           iOS: DarwinNotificationDetails(),
         ),
@@ -1385,7 +1409,7 @@ class NotificationService {
       await ensureInitialized();
 
       await _plugin.show(
-        _sharedExpenseNudgeNotificationId(eventId),
+        _sharedExpenseNotificationId(eventId),
         title,
         body,
         const NotificationDetails(
@@ -1395,6 +1419,7 @@ class NotificationService {
             channelDescription: 'Notifications from shared expenses',
             importance: Importance.high,
             priority: Priority.high,
+            onlyAlertOnce: true,
           ),
           iOS: DarwinNotificationDetails(),
         ),
@@ -1412,59 +1437,23 @@ class NotificationService {
     }
   }
 
-  Future<bool> showSharedExpenseDigestNotification({
-    required int updateCount,
-    required int groupCount,
-    String? groupName,
-    String? groupId,
-  }) async {
+  /// Removes generic shared-expense fallbacks left by older app versions.
+  Future<void> dismissLegacySharedExpenseFallbacks() async {
     try {
-      if (updateCount <= 0) return false;
-      final enabled = await NotificationSettingsService.instance
-          .isSharedExpenseNotificationsEnabled();
-      if (!enabled) return false;
       await ensureInitialized();
-
-      final cleanGroupName = groupName?.trim() ?? '';
-      final hasSingleGroup = groupCount == 1 && cleanGroupName.isNotEmpty;
-      const title = 'Shared Expenses has a new update';
-      final body = hasSingleGroup
-          ? updateCount == 1
-                ? '$cleanGroupName has a new shared expense update to review.'
-                : '$cleanGroupName has $updateCount new shared expense updates to review.'
-          : 'You have $updateCount new shared expense '
-                '${updateCount == 1 ? 'update' : 'updates'}'
-                '${groupCount > 1 ? ' across $groupCount shared groups' : ''}.';
-
-      await _plugin.show(
-        sharedExpenseDigestNotificationId,
-        title,
-        body,
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _sharedExpensesChannelId,
-            'Shared expenses',
-            channelDescription: 'Notifications from shared expenses',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
-          iOS: DarwinNotificationDetails(),
-        ),
-        payload: hasSingleGroup
-            ? _sharedExpensesNotificationPayload(groupId)
-            : _sharedExpensesPayload,
-      );
-      await _recordHistory(
-        channel: _sharedExpensesChannelId,
-        title: title,
-        body: body,
-      );
-      return true;
+      final activeNotifications = await _plugin.getActiveNotifications();
+      for (final notification in activeNotifications) {
+        final id = notification.id;
+        if (id == null) continue;
+        if (notification.title?.trim() != 'Shared Expenses has a new update') {
+          continue;
+        }
+        await _plugin.cancel(id, tag: notification.tag);
+      }
     } catch (e) {
       if (kDebugMode) {
-        print('debug: Failed to show shared expense digest notification: $e');
+        print('debug: Failed to dismiss legacy shared expense fallback: $e');
       }
-      return false;
     }
   }
 
@@ -1508,8 +1497,13 @@ class NotificationService {
     return 200000 + (reviewId.hashCode & 0x7fffffff);
   }
 
-  static int _sharedExpenseNudgeNotificationId(String nudgeId) {
-    return 300000 + (nudgeId.hashCode & 0x0fffffff);
+  static int _sharedExpenseNotificationId(String eventId) {
+    return 300000 + _stableNotificationHash(eventId);
+  }
+
+  @visibleForTesting
+  static int sharedExpenseNotificationIdForTesting(String eventId) {
+    return _sharedExpenseNotificationId(eventId);
   }
 
   static int _loanDebtReturnReminderNotificationId(String reference) {
@@ -1559,11 +1553,14 @@ class NotificationService {
   static void _configureLocalTimeZone() {
     final now = DateTime.now();
     final offset = now.timeZoneOffset.inMilliseconds;
-    final abbreviation = now.timeZoneName.trim().isEmpty
-        ? 'LOCAL'
-        : now.timeZoneName.trim();
+    final abbreviation =
+        now.timeZoneName.trim().isEmpty ? 'LOCAL' : now.timeZoneName.trim();
     tz.setLocalLocation(
-      tz.Location('device_local_$offset', [tz.minTime], [0], [
+      tz.Location('device_local_$offset', [
+        tz.minTime
+      ], [
+        0
+      ], [
         tz.TimeZone(offset, isDst: false, abbreviation: abbreviation),
       ]),
     );
@@ -1579,9 +1576,8 @@ class NotificationService {
     required LoanDebtDirection direction,
     required double? amount,
   }) {
-    final cleanName = personName.trim().isEmpty
-        ? 'this person'
-        : personName.trim();
+    final cleanName =
+        personName.trim().isEmpty ? 'this person' : personName.trim();
     final amountText = _formatLoanDebtReminderAmount(amount);
     final borrowed = direction == LoanDebtDirection.borrowed;
     final amountPhrase = amountText == null ? '' : ' $amountText';
@@ -1690,6 +1686,7 @@ class NotificationService {
     required String channel,
     required String title,
     required String body,
+    String? transactionReference,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1699,6 +1696,7 @@ class NotificationService {
         title: title,
         body: body,
         sentAt: DateTime.now(),
+        transactionReference: transactionReference,
       );
       rawEntries.insert(0, jsonEncode(entry.toJson()));
       if (rawEntries.length > _maxHistoryEntries) {
@@ -1709,6 +1707,31 @@ class NotificationService {
       // Ignore persistence failures for notification history.
     }
   }
+
+  Future<void> _removeTransactionNotificationFromHistory(
+    String transactionReference,
+  ) async {
+    final reference = transactionReference.trim();
+    if (reference.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawEntries = prefs.getStringList(_historyPrefsKey) ?? <String>[];
+      rawEntries.removeWhere((raw) {
+        try {
+          final jsonMap = jsonDecode(raw) as Map<String, dynamic>;
+          return NotificationHistoryEntry.fromJson(jsonMap)
+                  .transactionReference ==
+              reference;
+        } catch (_) {
+          return false;
+        }
+      });
+      await prefs.setStringList(_historyPrefsKey, rawEntries);
+    } catch (_) {
+      // Notification dismissal should not fail on history cleanup.
+    }
+  }
 }
 
 class NotificationHistoryEntry {
@@ -1716,12 +1739,14 @@ class NotificationHistoryEntry {
   final String title;
   final String body;
   final DateTime sentAt;
+  final String? transactionReference;
 
   const NotificationHistoryEntry({
     required this.channel,
     required this.title,
     required this.body,
     required this.sentAt,
+    this.transactionReference,
   });
 
   factory NotificationHistoryEntry.fromJson(Map<String, dynamic> json) {
@@ -1729,11 +1754,17 @@ class NotificationHistoryEntry {
     final title = (json['title'] as String?)?.trim();
     final body = (json['body'] as String?)?.trim();
     final sentAtRaw = json['sentAt'] as String?;
+    final transactionReference =
+        (json['transactionReference'] as String?)?.trim();
     return NotificationHistoryEntry(
       channel: (channel == null || channel.isEmpty) ? 'unknown' : channel,
       title: (title == null || title.isEmpty) ? 'Notification' : title,
       body: body ?? '',
       sentAt: DateTime.tryParse(sentAtRaw ?? '') ?? DateTime.now(),
+      transactionReference:
+          transactionReference == null || transactionReference.isEmpty
+              ? null
+              : transactionReference,
     );
   }
 
@@ -1743,6 +1774,8 @@ class NotificationHistoryEntry {
       'title': title,
       'body': body,
       'sentAt': sentAt.toIso8601String(),
+      if (transactionReference != null)
+        'transactionReference': transactionReference,
     };
   }
 }

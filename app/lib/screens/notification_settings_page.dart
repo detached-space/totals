@@ -9,6 +9,7 @@ import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_scheduler.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/shared_expense_push_notification_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_scheduler.dart';
 import 'package:totals/services/widget_refresh_settings_service.dart';
@@ -33,7 +34,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   bool _sharedExpensesEnabled = true;
   bool _loanDebtReturnRemindersEnabled = true;
   bool _dailyEnabled = true;
-  bool _weeklyEnabled = false;
+  bool _weeklyEnabled = true;
   bool _monthlyEnabled = false;
   TimeOfDay _dailyTime = const TimeOfDay(hour: 20, minute: 0);
   TimeOfDay _widgetRefreshTime = const TimeOfDay(hour: 0, minute: 0);
@@ -54,8 +55,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         await settings.isFailedParseReviewNotificationsEnabled();
     final budget = await settings.isBudgetAlertsEnabled();
     await DataSyncSettingsService.instance.ensureLoaded();
-    final dataSyncNotifications =
-        DataSyncSettingsService.instance.notify.value;
+    final dataSyncNotifications = DataSyncSettingsService.instance.notify.value;
     final sharedExpenses = await settings.isSharedExpenseNotificationsEnabled();
     final loanDebtReturnReminders =
         await settings.isLoanDebtReturnRemindersEnabled();
@@ -157,6 +157,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
     setState(() => _dailyTime = picked);
     await NotificationSettingsService.instance.setDailySummaryTime(picked);
     await NotificationScheduler.syncSpendingSummarySchedule();
+    await TelegramBackupScheduler.sync();
     await _load();
   }
 

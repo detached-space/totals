@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 28,
+        version: 33,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV28Schema(db);
+      await _validateV33Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -110,6 +110,7 @@ class DatabaseHelper {
         type TEXT,
         transactionLink TEXT,
         accountNumber TEXT,
+        ownerAccountNumber TEXT,
         categoryId INTEGER,
         categoryIds TEXT,
         year INTEGER,
@@ -119,7 +120,9 @@ class DatabaseHelper {
         profileId INTEGER,
         sourceType TEXT,
         sourceMessageId TEXT,
-        sourceFingerprint TEXT
+        sourceFingerprint TEXT,
+        sourceSubscriptionId INTEGER,
+        ownerAssignmentSource TEXT
       )
     ''');
 
@@ -174,6 +177,10 @@ class DatabaseHelper {
         settledBalance REAL,
         pendingCredit REAL,
         profileId INTEGER,
+        smsSubscriptionId INTEGER,
+        includeInTotals INTEGER NOT NULL DEFAULT 1,
+        isDormant INTEGER NOT NULL DEFAULT 0,
+        isDefault INTEGER NOT NULL DEFAULT 0,
         UNIQUE(accountNumber, bank)
       )
     ''');
@@ -309,6 +316,20 @@ class DatabaseHelper {
       'CREATE INDEX idx_transactions_sourceFingerprint ON transactions(sourceType, sourceFingerprint)',
     );
     await db.execute(
+      'CREATE INDEX idx_transactions_ownerAccount ON transactions(profileId, bankId, ownerAccountNumber, time)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_transactions_sourceSubscriptionId ON transactions(sourceType, sourceSubscriptionId)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_accounts_smsSubscriptionId ON accounts(bank, smsSubscriptionId)',
+    );
+    await db.execute('''
+      CREATE UNIQUE INDEX idx_accounts_one_default_per_bank
+      ON accounts(bank, COALESCE(profileId, -1))
+      WHERE isDefault = 1
+    ''');
+    await db.execute(
       'CREATE INDEX idx_user_accounts_bankId ON user_accounts(bankId)',
     );
     await db.execute(
@@ -316,6 +337,8 @@ class DatabaseHelper {
     );
 
     await _ensureLoanDebtSchema(db);
+    await _ensureReimbursementSchema(db);
+    await _ensureTransactionSourceSmsSchema(db);
 
     await _seedBuiltInCategories(db);
     await _ensureSyncSchema(db);
@@ -328,6 +351,76 @@ class DatabaseHelper {
     // path seeds modern category fields before those columns exist.
     if (oldVersion < 28) {
       await _migrateAnySchemaToV28(db);
+      if (newVersion >= 29) {
+        await _migrateV28ToV29(db);
+      }
+      if (newVersion >= 30) {
+        await _migrateV29ToV30(db);
+      }
+      if (newVersion >= 31) {
+        await _migrateV30ToV31(db);
+      }
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 29) {
+      await _migrateV28ToV29(db);
+      if (newVersion >= 30) {
+        await _migrateV29ToV30(db);
+      }
+      if (newVersion >= 31) {
+        await _migrateV30ToV31(db);
+      }
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 30) {
+      await _migrateV29ToV30(db);
+      if (newVersion >= 31) {
+        await _migrateV30ToV31(db);
+      }
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 31) {
+      await _migrateV30ToV31(db);
+      if (newVersion >= 32) {
+        await _migrateV31ToV32(db);
+      }
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 32) {
+      await _migrateV31ToV32(db);
+      if (newVersion >= 33) {
+        await _migrateV32ToV33(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 33) {
+      await _migrateV32ToV33(db);
       return;
     }
 
@@ -860,6 +953,99 @@ class DatabaseHelper {
     }
   }
 
+  Future<void> _migrateV28ToV29(Database db) async {
+    await _runV28Stage('v29 account ownership columns', () async {
+      await _v28EnsureColumns(db, 'transactions', {
+        'ownerAccountNumber':
+            'ALTER TABLE transactions ADD COLUMN ownerAccountNumber TEXT',
+        'sourceSubscriptionId':
+            'ALTER TABLE transactions ADD COLUMN sourceSubscriptionId INTEGER',
+      });
+      await _v28EnsureColumns(db, 'accounts', {
+        'smsSubscriptionId':
+            'ALTER TABLE accounts ADD COLUMN smsSubscriptionId INTEGER',
+      });
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_ownerAccount '
+        'ON transactions(profileId, bankId, ownerAccountNumber, time)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_sourceSubscriptionId '
+        'ON transactions(sourceType, sourceSubscriptionId)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_accounts_smsSubscriptionId '
+        'ON accounts(bank, smsSubscriptionId)',
+      );
+    });
+    await _runV28Stage('v29 final validation', () => _validateV29Schema(db));
+  }
+
+  Future<void> _migrateV29ToV30(Database db) async {
+    await _runV28Stage('v30 account preferences', () async {
+      await _v28EnsureColumns(db, 'accounts', {
+        'includeInTotals':
+            'ALTER TABLE accounts ADD COLUMN includeInTotals INTEGER NOT NULL DEFAULT 1',
+        'isDormant':
+            'ALTER TABLE accounts ADD COLUMN isDormant INTEGER NOT NULL DEFAULT 0',
+      });
+    });
+    await _runV28Stage('v30 final validation', () => _validateV30Schema(db));
+  }
+
+  Future<void> _migrateV30ToV31(Database db) async {
+    await _runV28Stage('v31 account assignment controls', () async {
+      await _v28EnsureColumns(db, 'accounts', {
+        'isDefault':
+            'ALTER TABLE accounts ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0',
+      });
+      await _v28EnsureColumns(db, 'transactions', {
+        'ownerAssignmentSource':
+            'ALTER TABLE transactions ADD COLUMN ownerAssignmentSource TEXT',
+      });
+
+      // Every bank starts with one deterministic default. When more accounts
+      // are added, this first account remains the default until the user
+      // explicitly changes it.
+      await db.execute('UPDATE accounts SET isDefault = 0');
+      await db.execute('''
+        UPDATE accounts
+        SET isDefault = 1
+        WHERE id IN (
+          SELECT MIN(id)
+          FROM accounts
+          GROUP BY bank, COALESCE(profileId, -1)
+        )
+      ''');
+      await db.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_default_per_bank
+        ON accounts(bank, COALESCE(profileId, -1))
+        WHERE isDefault = 1
+      ''');
+    });
+    await _runV28Stage('v31 final validation', () => _validateV31Schema(db));
+  }
+
+  Future<void> _migrateV31ToV32(Database db) async {
+    await _runV28Stage(
+      'v32 reimbursements',
+      () async {
+        await _ensureReimbursementSchema(db);
+        await _ensureReimbursementBuiltInCategory(db);
+        await _refineRefundCategoryDescription(db);
+      },
+    );
+    await _runV28Stage('v32 final validation', () => _validateV32Schema(db));
+  }
+
+  Future<void> _migrateV32ToV33(Database db) async {
+    await _runV28Stage(
+      'v33 transaction source SMS',
+      () => _ensureTransactionSourceSmsSchema(db),
+    );
+    await _runV28Stage('v33 final validation', () => _validateV33Schema(db));
+  }
+
   Future<void> _runV28Stage(
     String stage,
     Future<void> Function() action,
@@ -1323,7 +1509,9 @@ class DatabaseHelper {
         orderBy: 'id ASC',
         limit: 1,
       );
-      if (matches.isNotEmpty && matches.first['builtInKey'] == null) {
+      if (key != 'income_reimbursement' &&
+          matches.isNotEmpty &&
+          matches.first['builtInKey'] == null) {
         await db.update(
           'categories',
           {'builtIn': 1, 'builtInKey': key},
@@ -1724,6 +1912,260 @@ class DatabaseHelper {
         !categoryIndexes.contains('idx_categories_builtInKey')) {
       throw StateError('v28 category uniqueness indexes are missing');
     }
+  }
+
+  Future<void> _validateV29Schema(Database db) async {
+    await _validateV28Schema(db);
+    final transactionColumns = await _v28Columns(db, 'transactions');
+    const requiredTransactionColumns = {
+      'ownerAccountNumber',
+      'sourceSubscriptionId',
+    };
+    final missingTransactionColumns =
+        requiredTransactionColumns.difference(transactionColumns);
+    if (missingTransactionColumns.isNotEmpty) {
+      throw StateError(
+        'v29 invariant transactions missing '
+        '${missingTransactionColumns.join(', ')}',
+      );
+    }
+
+    final accountColumns = await _v28Columns(db, 'accounts');
+    if (!accountColumns.contains('smsSubscriptionId')) {
+      throw StateError('v29 invariant accounts missing smsSubscriptionId');
+    }
+  }
+
+  Future<void> _validateV30Schema(Database db) async {
+    await _validateV29Schema(db);
+    final accountColumns = await _v28Columns(db, 'accounts');
+    const requiredAccountColumns = {'includeInTotals', 'isDormant'};
+    final missingAccountColumns =
+        requiredAccountColumns.difference(accountColumns);
+    if (missingAccountColumns.isNotEmpty) {
+      throw StateError(
+        'v30 invariant accounts missing ${missingAccountColumns.join(', ')}',
+      );
+    }
+  }
+
+  Future<void> _validateV31Schema(Database db) async {
+    await _validateV30Schema(db);
+    final accountColumns = await _v28Columns(db, 'accounts');
+    if (!accountColumns.contains('isDefault')) {
+      throw StateError('v31 invariant accounts missing isDefault');
+    }
+    final transactionColumns = await _v28Columns(db, 'transactions');
+    if (!transactionColumns.contains('ownerAssignmentSource')) {
+      throw StateError(
+        'v31 invariant transactions missing ownerAssignmentSource',
+      );
+    }
+    final accountIndexes = (await db.rawQuery("PRAGMA index_list('accounts')"))
+        .map((row) => row['name'])
+        .toSet();
+    if (!accountIndexes.contains('idx_accounts_one_default_per_bank')) {
+      throw StateError('v31 invariant default-account index missing');
+    }
+  }
+
+  Future<void> _validateV32Schema(Database db) async {
+    await _validateV31Schema(db);
+    if (!await _v28TableExists(db, 'reimbursement_allocations')) {
+      throw StateError(
+        'v32 invariant missing table reimbursement_allocations',
+      );
+    }
+    final columns = await _v28Columns(db, 'reimbursement_allocations');
+    const requiredColumns = {
+      'id',
+      'reimbursementTransactionReference',
+      'expenseTransactionReference',
+      'appliedAmount',
+      'createdAt',
+      'updatedAt',
+    };
+    final missingColumns = requiredColumns.difference(columns);
+    if (missingColumns.isNotEmpty) {
+      throw StateError(
+        'v32 invariant reimbursement_allocations missing '
+        '${missingColumns.join(', ')}',
+      );
+    }
+    final indexes = (await db.rawQuery(
+      "PRAGMA index_list('reimbursement_allocations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    const requiredIndexes = {
+      'idx_reimbursement_allocations_reimbursement',
+      'idx_reimbursement_allocations_expense',
+      'idx_reimbursement_allocations_pair',
+    };
+    if (!indexes.containsAll(requiredIndexes)) {
+      throw StateError('v32 reimbursement allocation indexes are missing');
+    }
+  }
+
+  Future<void> _validateV33Schema(Database db) async {
+    await _validateV32Schema(db);
+    if (!await _v28TableExists(db, 'transaction_source_sms')) {
+      throw StateError('v33 invariant missing table transaction_source_sms');
+    }
+    final columns = await _v28Columns(db, 'transaction_source_sms');
+    const requiredColumns = {
+      'transactionReference',
+      'body',
+      'senderAddress',
+      'receivedAt',
+      'messageId',
+    };
+    final missingColumns = requiredColumns.difference(columns);
+    if (missingColumns.isNotEmpty) {
+      throw StateError(
+        'v33 invariant transaction_source_sms missing '
+        '${missingColumns.join(', ')}',
+      );
+    }
+    final triggers = await db.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'trg_transaction_source_sms_tx_delete'
+    ''');
+    if (triggers.isEmpty) {
+      throw StateError('v33 transaction source SMS delete trigger is missing');
+    }
+  }
+
+  Future<void> _ensureTransactionSourceSmsSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS transaction_source_sms (
+        transactionReference TEXT PRIMARY KEY NOT NULL,
+        body TEXT NOT NULL,
+        senderAddress TEXT,
+        receivedAt TEXT,
+        messageId TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_transaction_source_sms_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM transaction_source_sms
+        WHERE transactionReference = OLD.reference;
+      END
+    ''');
+  }
+
+  Future<void> _ensureReimbursementSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS reimbursement_allocations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reimbursementTransactionReference TEXT NOT NULL,
+        expenseTransactionReference TEXT NOT NULL,
+        appliedAmount REAL NOT NULL CHECK(appliedAmount > 0),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reimbursement_allocations_reimbursement
+      ON reimbursement_allocations(reimbursementTransactionReference)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_reimbursement_allocations_expense
+      ON reimbursement_allocations(expenseTransactionReference)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursement_allocations_pair
+      ON reimbursement_allocations(
+        reimbursementTransactionReference,
+        expenseTransactionReference
+      )
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_reimbursement_allocations_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM reimbursement_allocations
+        WHERE reimbursementTransactionReference = OLD.reference
+           OR expenseTransactionReference = OLD.reference;
+      END
+    ''');
+  }
+
+  Future<void> _ensureReimbursementBuiltInCategory(Database db) async {
+    const builtInKey = 'income_reimbursement';
+    final keyedRows = await db.query(
+      'categories',
+      columns: ['id'],
+      where: 'builtInKey = ?',
+      whereArgs: [builtInKey],
+      limit: 1,
+    );
+    if (keyedRows.isNotEmpty) {
+      await db.update(
+        'categories',
+        {'builtIn': 1, 'flow': 'income'},
+        where: 'builtInKey = ?',
+        whereArgs: [builtInKey],
+      );
+      return;
+    }
+
+    final definition = models.BuiltInCategories.all.firstWhere(
+      (category) => category.builtInKey == builtInKey,
+    );
+    var name = definition.name;
+    var suffix = 1;
+    while ((await db.query(
+      'categories',
+      columns: ['id'],
+      where: 'name = ? COLLATE NOCASE AND flow = ?',
+      whereArgs: [name, definition.flow],
+      limit: 1,
+    ))
+        .isNotEmpty) {
+      name = suffix == 1
+          ? '${definition.name} (Totals)'
+          : '${definition.name} (Totals $suffix)';
+      suffix++;
+    }
+    await db.insert('categories', {
+      'name': name,
+      'essential': definition.essential ? 1 : 0,
+      'uncategorized': definition.uncategorized ? 1 : 0,
+      'iconKey': definition.iconKey,
+      'colorKey': definition.colorKey,
+      'description': definition.description,
+      'flow': definition.flow,
+      'recurring': definition.recurring ? 1 : 0,
+      'builtIn': 1,
+      'builtInKey': builtInKey,
+    });
+  }
+
+  Future<void> _refineRefundCategoryDescription(Database db) async {
+    final definition = models.BuiltInCategories.all.firstWhere(
+      (category) => category.builtInKey == 'income_refund',
+    );
+    await db.update(
+      'categories',
+      {'description': definition.description},
+      where: '''
+        builtInKey = ?
+        AND (
+          description IS NULL
+          OR TRIM(description) = ''
+          OR description = ?
+        )
+      ''',
+      whereArgs: const [
+        'income_refund',
+        'Refunds and reimbursements',
+      ],
+    );
   }
 
   Future<void> _seedBuiltInCategories(Database db) async {

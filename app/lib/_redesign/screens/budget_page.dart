@@ -481,10 +481,18 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     }).toList();
   }
 
-  double _spentForBudget(Budget b, List<Transaction> debits) {
-    return debits
-        .where((t) => _transactionMatchesBudget(t, b))
-        .fold(0.0, (s, t) => s + t.amount);
+  double _spentForBudget(
+    Budget b,
+    List<Transaction> debits,
+    TransactionProvider transactionProvider,
+  ) {
+    return debits.where((t) => _transactionMatchesBudget(t, b)).fold(
+          0.0,
+          (sum, transaction) =>
+              sum +
+              transactionProvider
+                  .budgetExpenseAmountForTransaction(transaction),
+        );
   }
 
   bool _transactionMatchesBudget(Transaction transaction, Budget budget) {
@@ -574,8 +582,10 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
   ) {
     // Compute totals
     final totalAssigned = budgets.fold(0.0, (s, b) => s + b.amount);
-    final totalActivity =
-        budgets.fold(0.0, (s, b) => s + _spentForBudget(b, debits));
+    final totalActivity = budgets.fold(
+      0.0,
+      (sum, budget) => sum + _spentForBudget(budget, debits, tp),
+    );
     final totalAvailable = totalAssigned - totalActivity;
 
     // Split into NEEDS / WANTS
@@ -590,9 +600,25 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     }
 
     final needsAvailable = needsBudgets.fold(
-        0.0, (double s, b) => s + (b.amount - _spentForBudget(b, debits)));
+        0.0,
+        (double sum, budget) =>
+            sum +
+            (budget.amount -
+                _spentForBudget(
+                  budget,
+                  debits,
+                  tp,
+                )));
     final wantsAvailable = wantsBudgets.fold(
-        0.0, (double s, b) => s + (b.amount - _spentForBudget(b, debits)));
+        0.0,
+        (double sum, budget) =>
+            sum +
+            (budget.amount -
+                _spentForBudget(
+                  budget,
+                  debits,
+                  tp,
+                )));
 
     // Unbudgeted spending
     final budgetedCatIds = budgets.expand((b) => b.selectedCategoryIds).toSet();
@@ -603,7 +629,11 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
             if (tp.isSelfTransfer(t)) return false;
             return !t.selectedCategoryIds.any(budgetedCatIds.contains);
           }).toList();
-    final unbudgetedAmount = unbudgetedTxns.fold(0.0, (s, t) => s + t.amount);
+    final unbudgetedAmount = unbudgetedTxns.fold(
+      0.0,
+      (sum, transaction) =>
+          sum + tp.budgetExpenseAmountForTransaction(transaction),
+    );
 
     return RefreshIndicator(
       color: AppColors.primaryLight,
@@ -639,7 +669,11 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
               children: needsBudgets
                   .map((b) => _BudgetItemRow(
                         budget: b,
-                        spent: _spentForBudget(b, debits),
+                        spent: _spentForBudget(
+                          b,
+                          debits,
+                          tp,
+                        ),
                         categoryLabel: _categorySummaryForBudget(b, tp),
                         isOnHomescreenWidget: _isBudgetOnHomescreenWidget(b),
                         widgetBadgeColor: _widgetBadgeColorForBudget(b, tp),
@@ -663,7 +697,11 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
               children: wantsBudgets
                   .map((b) => _BudgetItemRow(
                         budget: b,
-                        spent: _spentForBudget(b, debits),
+                        spent: _spentForBudget(
+                          b,
+                          debits,
+                          tp,
+                        ),
                         categoryLabel: _categorySummaryForBudget(b, tp),
                         isOnHomescreenWidget: _isBudgetOnHomescreenWidget(b),
                         widgetBadgeColor: _widgetBadgeColorForBudget(b, tp),
@@ -717,7 +755,11 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     BudgetProvider bp,
     TransactionProvider tp,
   ) {
-    final spent = _spentForBudget(budget, debits);
+    final spent = _spentForBudget(
+      budget,
+      debits,
+      tp,
+    );
     final available = budget.amount - spent;
     final categorySummary = _categorySummaryForBudget(budget, tp);
 
@@ -828,6 +870,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                         ),
                         isCategorized: t.selectedCategoryIds.isNotEmpty,
                         isDebit: t.type?.toUpperCase() == 'DEBIT',
+                        isReimbursed: tp.isReimbursedExpense(t),
                         isSharing: tp.isSharingSharedExpenseTransaction(t),
                         isShared: tp.isSharedExpenseTransaction(t),
                         amount: _formatBudgetEtbFull(context, t.amount),
@@ -1585,6 +1628,7 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                     isDebit: !isCredit,
                     isSelfTransfer: isSelfTransfer,
                     isMisc: isMisc,
+                    isReimbursed: provider.isReimbursedExpense(t),
                     isSharing: provider.isSharingSharedExpenseTransaction(t),
                     isShared: provider.isSharedExpenseTransaction(t),
                     amount: _formatBudgetEtbFull(context, t.amount),

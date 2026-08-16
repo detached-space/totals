@@ -5,13 +5,19 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
@@ -73,6 +79,9 @@ class _TransactionDetailsSheet extends StatefulWidget {
 
 class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _categoryExpanded = false;
+  bool _accountExpanded = false;
+  bool _sourceSmsExpanded = false;
+  bool _isApplyingAccount = false;
   bool _isSavingCounterparty = false;
   bool _isSavingNote = false;
   bool _isApplyingCategory = false;
@@ -82,6 +91,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   String _draftColorKey = _kCategoryColorOptions.first.key;
   List<int> _quickCategoryIds = const [];
   List<int> _autoCategorizationDraftCategoryIds = const [];
+  Future<TransactionSourceSms?>? _sourceSmsFuture;
   late Transaction _transaction;
   final TextEditingController _counterpartyController = TextEditingController();
   final FocusNode _counterpartyFocus = FocusNode();
@@ -113,7 +123,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
-      !_currentCategories.any(_isLoanDebtManagedCategory);
+      !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
 
@@ -122,6 +132,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     super.initState();
     _categoryExpanded = widget.initiallyExpandCategory;
     _transaction = widget.transaction;
+    if (TransactionSmsSourceService.hasSmsSource(_transaction)) {
+      _sourceSmsFuture = TransactionSmsSourceService().resolve(_transaction);
+    }
     _syncAutoCategorizationCheckbox();
     _counterpartyController.text = _storedCounterpartyValue ?? '';
     _counterpartyFocus.addListener(_handleCounterpartyFocusChange);
@@ -162,6 +175,38 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   String get _bankShortName {
     return context.l10nText(_provider.getBankShortName(_tx.bankId));
+  }
+
+  String get _accountLabel {
+    final account = _provider.accountSummaryForTransaction(_tx);
+    if (account == null) return context.l10nText('Other transactions');
+
+    final holderName = account.accountHolderName.trim();
+    if (holderName.isEmpty) return account.accountNumber;
+    return '$holderName • ${account.accountNumber}';
+  }
+
+  List<AccountSummary> get _bankAccounts {
+    return _provider.accountSummaries
+        .where((account) => account.bankId == _tx.bankId)
+        .toList(growable: true)
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: _provider.getBankShortName,
+        ),
+      );
+  }
+
+  bool get _canEditAccount {
+    if (_bankAccounts.isEmpty) return false;
+    return _bankAccounts.length > 1 ||
+        _provider.accountSummaryForTransaction(_tx) == null;
   }
 
   String get _formattedAmount {
@@ -504,6 +549,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return isLoanDebtCategory(category) || isRepaymentCategory(category);
   }
 
+  bool _isLinkManagedCategory(Category category) {
+    return _isLoanDebtManagedCategory(category) ||
+        isReimbursementCategory(category);
+  }
+
   bool _isSelfCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     if (category == null) return false;
@@ -517,7 +567,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   }
 
   bool _canAutoCategorizeCategoryId(int id) {
-    return !_isSelfCategoryId(id) && !_isLoanDebtManagedCategoryId(id);
+    final category = _provider.getCategoryById(id);
+    return !_isSelfCategoryId(id) &&
+        !_isLoanDebtManagedCategoryId(id) &&
+        (category == null || !isReimbursementCategory(category));
   }
 
   bool _transactionHasRepaymentCategory(Transaction transaction) {
@@ -530,6 +583,24 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _isRepaymentCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     return category != null && isRepaymentCategory(category);
+  }
+
+  bool _transactionHasReimbursementCategory(Transaction transaction) {
+    return transaction.selectedCategoryIds.any((id) {
+      final category = _provider.getCategoryById(id);
+      return category != null && isReimbursementCategory(category);
+    });
+  }
+
+  bool _isReimbursementCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    return category != null && isReimbursementCategory(category);
+  }
+
+  List<int> _categoryIdsWithoutReimbursement(Transaction transaction) {
+    return transaction.selectedCategoryIds
+        .where((id) => !_isReimbursementCategoryId(id))
+        .toList(growable: false);
   }
 
   List<int> _categoryIdsWithoutRepayment(Transaction transaction) {
@@ -573,6 +644,28 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
   }
 
+  Future<bool> _removeUnlinkedReimbursementCategory(
+    Transaction transaction,
+  ) async {
+    final nextCategoryIds = _categoryIdsWithoutReimbursement(transaction);
+    try {
+      await ReimbursementRepository().deleteForReimbursement(
+        transaction.reference,
+      );
+      final updated = await _provider.updateCategoriesForTransaction(
+        transaction,
+        categoryIds: nextCategoryIds,
+        primaryCategoryId: _primaryCategoryForIds(transaction, nextCategoryIds),
+      );
+      if (mounted) {
+        setState(() => _transaction = updated);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Transaction?> _applyCategorySelection({
     required List<int> categoryIds,
     int? primaryCategoryId,
@@ -583,8 +676,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     final previousTransaction = _tx;
     final hadRepaymentCategory =
         _transactionHasRepaymentCategory(previousTransaction);
+    final hadReimbursementCategory =
+        _transactionHasReimbursementCategory(previousTransaction);
     final hasLoanDebtManagedCategory =
         categoryIds.any(_isLoanDebtManagedCategoryId);
+    final hasReimbursementCategory =
+        categoryIds.any(_isReimbursementCategoryId);
     final hadExistingRules = _provider
         .autoCategorizationRulesForTransaction(previousTransaction)
         .isNotEmpty;
@@ -593,6 +690,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     );
     final repaymentCleanupErrorMessage = context.l10nTextRead(
       'Category was saved, but repayment link could not be removed.',
+    );
+    final reimbursementCleanupErrorMessage = context.l10nTextRead(
+      'Category was saved, but reimbursement links could not be removed.',
     );
     _dismissComposerState(clearDraft: true);
     setState(() => _isApplyingCategory = true);
@@ -609,7 +709,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       );
       final shouldPersistAutoCategorization = shouldAutoCategorize &&
           nextAutoCategoryIds.isNotEmpty &&
-          !hasLoanDebtManagedCategory;
+          !hasLoanDebtManagedCategory &&
+          !hasReimbursementCategory;
       final removedRepaymentCategory =
           hadRepaymentCategory && !_transactionHasRepaymentCategory(updated);
       if (removedRepaymentCategory) {
@@ -622,6 +723,24 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
             messenger?.showSnackBar(
               SnackBar(
                 content: Text(repaymentCleanupErrorMessage),
+              ),
+            );
+          }
+        }
+      }
+      final removedReimbursementCategory = hadReimbursementCategory &&
+          !_transactionHasReimbursementCategory(updated);
+      if (removedReimbursementCategory) {
+        try {
+          await ReimbursementRepository().deleteForReimbursement(
+            updated.reference,
+          );
+          await _provider.refreshReimbursements();
+        } catch (_) {
+          if (mounted) {
+            messenger?.showSnackBar(
+              SnackBar(
+                content: Text(reimbursementCleanupErrorMessage),
               ),
             );
           }
@@ -690,6 +809,12 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       return;
     }
 
+    if (isReimbursementCategory(category)) {
+      nextIds.clear();
+    } else {
+      nextIds.removeWhere(_isReimbursementCategoryId);
+    }
+
     if (isRepaymentCategory(category)) {
       final unavailableMessage = context.l10nTextRead(
         'Add an active loan or debt first, then link a repayment.',
@@ -715,7 +840,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       primaryCategoryId: categoryId,
     );
     if (updated == null || !mounted) return;
-    if (isRepaymentCategory(category)) {
+    if (isReimbursementCategory(category)) {
+      await _openReimbursementLinkPrompt(updated);
+    } else if (isRepaymentCategory(category)) {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
@@ -727,7 +854,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   }
 
   void _copyReference({String message = 'Reference copied'}) {
-    Clipboard.setData(ClipboardData(text: _tx.reference));
+    Clipboard.setData(ClipboardData(text: _tx.displayReference));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -825,6 +952,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       type: _tx.type,
       transactionLink: _tx.transactionLink,
       accountNumber: _tx.accountNumber,
+      ownerAccountNumber: _tx.ownerAccountNumber,
+      ownerAssignmentSource: _tx.ownerAssignmentSource,
       categoryId: _tx.categoryId,
       categoryIds: _tx.categoryIds,
       profileId: _tx.profileId,
@@ -833,6 +962,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       sourceType: _tx.sourceType,
       sourceMessageId: _tx.sourceMessageId,
       sourceFingerprint: _tx.sourceFingerprint,
+      sourceSubscriptionId: _tx.sourceSubscriptionId,
     );
   }
 
@@ -869,6 +999,186 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         ),
       );
     }
+  }
+
+  void _toggleAccountPicker() {
+    if (!_canEditAccount || _isApplyingAccount) return;
+    setState(() => _accountExpanded = !_accountExpanded);
+  }
+
+  Future<void> _assignAccount(AccountSummary account) async {
+    if (_isApplyingAccount) return;
+    final current = _provider.accountSummaryForTransaction(_tx);
+    if (current?.accountNumber == account.accountNumber &&
+        _tx.hasManualOwnerAssignment) {
+      setState(() => _accountExpanded = false);
+      return;
+    }
+
+    setState(() => _isApplyingAccount = true);
+    try {
+      final updated = await _provider.updateAccountForTransaction(
+        _tx,
+        account.accountNumber,
+      );
+      if (!mounted) return;
+      setState(() {
+        _transaction = updated;
+        _accountExpanded = false;
+        _isApplyingAccount = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isApplyingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update account')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Widget _buildAccountPicker() {
+    final selectedAccount = _provider.accountSummaryForTransaction(_tx);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _bankAccounts
+            .map(
+              (account) => _TransactionAccountChip(
+                label: account.accountHolderName.trim().isEmpty
+                    ? account.accountNumber
+                    : '${account.accountHolderName} • ${account.accountNumber}',
+                selected:
+                    selectedAccount?.accountNumber == account.accountNumber,
+                isLoading: _isApplyingAccount,
+                onTap: () => _assignAccount(account),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+  }
+
+  Widget _buildSourceSmsSection() {
+    final sourceSmsFuture = _sourceSmsFuture;
+    if (sourceSmsFuture == null) return const SizedBox.shrink();
+
+    return FutureBuilder<TransactionSourceSms?>(
+      future: sourceSmsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _DetailRow(
+            label: 'Source SMS',
+            value: context.l10nText('Loading…'),
+          );
+        }
+
+        final sms = snapshot.data;
+        if (sms == null) {
+          return _DetailRow(
+            label: 'Source SMS',
+            value: context.l10nText('Unavailable'),
+          );
+        }
+
+        final sender = sms.senderAddress?.trim();
+        final collapsedValue = sender != null && sender.isNotEmpty
+            ? sender
+            : context.l10nText('View message');
+        return Column(
+          children: [
+            _DetailRow(
+              label: 'Source SMS',
+              value: collapsedValue,
+              onTap: () => setState(
+                () => _sourceSmsExpanded = !_sourceSmsExpanded,
+              ),
+              trailingIcon: _sourceSmsExpanded
+                  ? AppIcons.keyboard_arrow_up
+                  : AppIcons.keyboard_arrow_down,
+            ),
+            if (_sourceSmsExpanded) _buildExpandedSourceSms(sms),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildExpandedSourceSms(TransactionSourceSms sms) {
+    final metadata = <String>[
+      if (sms.senderAddress?.trim().isNotEmpty == true)
+        sms.senderAddress!.trim(),
+      if (sms.receivedAt != null)
+        AppDateFormat.monthDayMaybeYear(
+          sms.receivedAt!,
+          context: context,
+        ),
+      if (sms.messageId?.trim().isNotEmpty == true)
+        '${context.l10nText('SMS ID')} ${sms.messageId}',
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: AppColors.borderColor(context)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (metadata.isNotEmpty)
+            Text(
+              metadata.join(' • '),
+              style: TextStyle(
+                color: AppColors.textTertiary(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          if (metadata.isNotEmpty) const SizedBox(height: 8),
+          SelectableText(
+            sms.body,
+            style: TextStyle(
+              color: AppColors.textPrimary(context),
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => _copySourceSms(sms.body),
+              child: Text(context.l10nText('Copy SMS')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _copySourceSms(String body) async {
+    await Clipboard.setData(ClipboardData(text: body));
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(context.l10nTextRead('SMS copied')),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _saveNote() async {
@@ -1146,6 +1456,37 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
         content: Text(removed ? rollbackMessage : rollbackErrorMessage),
       ),
     );
+  }
+
+  Future<void> _openReimbursementLinkPrompt(
+    Transaction transaction,
+  ) async {
+    final hostContext = widget.hostContext;
+    final rollbackMessage = context.l10nTextRead(
+      'Reimbursement was not linked, so the category was removed.',
+    );
+    final rollbackErrorMessage = context.l10nTextRead(
+      'Could not remove the unlinked reimbursement category.',
+    );
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    final outcome = await showReimbursementLinkSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
+    if (outcome != ReimbursementLinkOutcome.cancelled) {
+      return;
+    }
+    final removed = await _removeUnlinkedReimbursementCategory(transaction);
+    if (!hostContext.mounted) return;
+    ScaffoldMessenger.maybeOf(hostContext)?.showSnackBar(
+      SnackBar(
+        content: Text(removed ? rollbackMessage : rollbackErrorMessage),
+      ),
+    );
     if (removed) {
       unawaited(_provider.loadData());
     }
@@ -1302,16 +1643,24 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                     children: [
                       _DetailRow(
                         label: 'Reference',
-                        value: _tx.reference,
-                        marquee: true,
+                        value: _tx.displayReference,
                         onTap: () {
                           unawaited(_handleReferenceTap());
                         },
                       ),
                       _DetailRow(label: 'Bank', value: _bankShortName),
-                      // if (_tx.accountNumber != null &&
-                      //     _tx.accountNumber!.isNotEmpty)
-                      //   _DetailRow(label: 'Account', value: _tx.accountNumber!),
+                      _DetailRow(
+                        label: 'Account',
+                        value: _accountLabel,
+                        onTap: _canEditAccount ? _toggleAccountPicker : null,
+                        trailingIcon: _canEditAccount
+                            ? (_accountExpanded
+                                ? AppIcons.keyboard_arrow_up
+                                : AppIcons.keyboard_arrow_down)
+                            : null,
+                      ),
+                      if (_accountExpanded && _canEditAccount)
+                        _buildAccountPicker(),
                       if (_formattedDate != null)
                         _DetailRow(
                             label: 'Date & Time', value: _formattedDate!),
@@ -1324,6 +1673,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                             value: _formattedServiceCharge!),
                       if (_formattedVat != null)
                         _DetailRow(label: 'VAT', value: _formattedVat!),
+                      if (_sourceSmsFuture != null) _buildSourceSmsSection(),
 
                       // Category row
                       if (isLockedSelfTransfer)
@@ -1340,6 +1690,15 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         _buildCategoryPicker(),
 
                       _buildNoteSection(),
+
+                      ReimbursementRelationshipsSection(
+                        transaction: _tx,
+                        provider: _provider,
+                        onTransactionUpdated: (updated) {
+                          if (!mounted) return;
+                          setState(() => _transaction = updated);
+                        },
+                      ),
 
                       const SizedBox(height: 20),
 
@@ -1407,8 +1766,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Widget _buildNoteSection() {
     final theme = Theme.of(context);
-    final valueColumnWidth =
-        (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+    final valueColumnWidth = _detailValueColumnWidth(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1472,8 +1830,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Widget _buildCategoryRow(Category? category) {
     final theme = Theme.of(context);
-    final valueColumnWidth =
-        (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+    final valueColumnWidth = _detailValueColumnWidth(context);
     final categoryLabel = context.l10nText(
       _provider.categoryLabelForTransaction(
         _tx,
@@ -1991,6 +2348,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
 const double _kLabelWidth = 110;
 
+double _detailValueColumnWidth(BuildContext context) {
+  return (MediaQuery.of(context).size.width * 0.3).clamp(96.0, 120.0);
+}
+
 class _CategoryColorOption {
   final String key;
   final Color color;
@@ -2028,59 +2389,115 @@ const List<_CategoryColorOption> _kCategoryColorOptions = [
 class _DetailRow extends StatelessWidget {
   final String label;
   final String value;
-  final bool marquee;
   final VoidCallback? onTap;
+  final IconData? trailingIcon;
 
   const _DetailRow({
     required this.label,
     required this.value,
-    this.marquee = false,
     this.onTap,
+    this.trailingIcon,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final valueColumnWidth = _detailValueColumnWidth(context);
     final valueStyle = theme.textTheme.bodyMedium?.copyWith(
       color: AppColors.textPrimary(context),
       fontWeight: FontWeight.w600,
     );
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        border: Border(
-            bottom:
-                BorderSide(color: AppColors.borderColor(context), width: 1)),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: _kLabelWidth,
-            child: Text(
-              context.l10nText(label),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: AppColors.textSecondary(context),
-              ),
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: AppColors.borderColor(context),
+              width: 1,
             ),
           ),
-          const Spacer(),
-          if (marquee)
-            Flexible(
-              child: GestureDetector(
-                onTap: onTap,
-                child: _MarqueeText(text: value, style: valueStyle),
-              ),
-            )
-          else
-            Flexible(
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: _kLabelWidth,
               child: Text(
-                value,
-                textAlign: TextAlign.end,
-                style: valueStyle,
+                context.l10nText(label),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textSecondary(context),
+                ),
               ),
             ),
-        ],
+            const Spacer(),
+            SizedBox(
+              width: valueColumnWidth,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _MarqueeText(text: value, style: valueStyle),
+                  ),
+                  if (trailingIcon != null) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      trailingIcon,
+                      size: 18,
+                      color: AppColors.textSecondary(context),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TransactionAccountChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _TransactionAccountChip({
+    required this.label,
+    required this.selected,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground =
+        selected ? AppColors.white : AppColors.textPrimary(context);
+    return InkWell(
+      onTap: isLoading ? null : onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primaryLight
+              : AppColors.surfaceColor(context),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected
+                ? AppColors.primaryLight
+                : AppColors.borderColor(context),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: foreground.withValues(alpha: isLoading ? 0.5 : 1),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }

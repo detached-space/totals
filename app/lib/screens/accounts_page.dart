@@ -9,7 +9,8 @@ import 'package:totals/widgets/add_user_account_form.dart';
 import 'package:totals/screens/account_share_qr_page.dart';
 import 'package:totals/screens/account_share_scan_page.dart';
 import 'package:totals/services/bank_config_service.dart';
-import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/utils/account_sort.dart';
 
 class AccountsPage extends StatefulWidget {
   const AccountsPage({super.key});
@@ -25,6 +26,7 @@ class _AccountsPageState extends State<AccountsPage> {
   List<Bank> _banks = [];
   List<UserAccount> _userAccounts = [];
   String _searchQuery = '';
+  int? _selectedBankId;
   bool _isLoading = true;
   Set<String> _selectedKeys = {};
 
@@ -68,7 +70,12 @@ class _AccountsPageState extends State<AccountsPage> {
         setState(() {
           _userAccounts = sortedAccounts;
           final accountKeys = sortedAccounts.map(_accountKey).toSet();
+          final accountBankIds =
+              sortedAccounts.map((account) => account.bankId).toSet();
           _selectedKeys = _selectedKeys.intersection(accountKeys);
+          if (!accountBankIds.contains(_selectedBankId)) {
+            _selectedBankId = null;
+          }
           _isLoading = false;
         });
       }
@@ -94,42 +101,28 @@ class _AccountsPageState extends State<AccountsPage> {
     return '${account.bankId}:${account.accountNumber}';
   }
 
-  String _normalizedSortText(String value) => value.trim().toLowerCase();
-
-  bool _isCashWallet(UserAccount account) {
-    return account.bankId == CashConstants.bankId ||
-        _normalizedSortText(account.accountHolderName) ==
-            _normalizedSortText(CashConstants.defaultAccountHolderName);
-  }
-
   int _compareUserAccounts(UserAccount a, UserAccount b) {
-    final aIsCash = _isCashWallet(a);
-    final bIsCash = _isCashWallet(b);
-    if (aIsCash != bIsCash) return aIsCash ? -1 : 1;
-
-    final holderComparison = _normalizedSortText(
-      a.accountHolderName,
-    ).compareTo(_normalizedSortText(b.accountHolderName));
-    if (holderComparison != 0) return holderComparison;
-
-    final aBank = _getBankInfo(a.bankId);
-    final bBank = _getBankInfo(b.bankId);
-    final bankComparison = _normalizedSortText(
-      aBank?.name ?? aBank?.shortName ?? 'Bank ${a.bankId}',
-    ).compareTo(
-      _normalizedSortText(
-          bBank?.name ?? bBank?.shortName ?? 'Bank ${b.bankId}'),
+    return compareAccountDisplayFields(
+      leftBankId: a.bankId,
+      rightBankId: b.bankId,
+      leftHolderName: a.accountHolderName,
+      rightHolderName: b.accountHolderName,
+      leftAccountNumber: a.accountNumber,
+      rightAccountNumber: b.accountNumber,
+      bankNameForId: (bankId) {
+        final bank = _getBankInfo(bankId);
+        return bank?.name ?? bank?.shortName ?? 'Bank $bankId';
+      },
     );
-    if (bankComparison != 0) return bankComparison;
-
-    return _normalizedSortText(
-      a.accountNumber,
-    ).compareTo(_normalizedSortText(b.accountNumber));
   }
 
   List<UserAccount> _filterAccounts(List<UserAccount> accounts) {
-    if (_searchQuery.isEmpty) return accounts;
     return accounts.where((account) {
+      if (_selectedBankId != null && account.bankId != _selectedBankId) {
+        return false;
+      }
+      if (_searchQuery.isEmpty) return true;
+
       final bank = _getBankInfo(account.bankId);
       final bankName = bank?.name.toLowerCase() ?? '';
       final bankShortName = bank?.shortName.toLowerCase() ?? '';
@@ -141,6 +134,31 @@ class _AccountsPageState extends State<AccountsPage> {
           bankName.contains(query) ||
           bankShortName.contains(query);
     }).toList();
+  }
+
+  List<int> get _availableBankIds {
+    final bankIds = _userAccounts.map((account) => account.bankId).toSet();
+    return bankIds.toList(growable: false)
+      ..sort((left, right) {
+        final leftBank = _getBankInfo(left);
+        final rightBank = _getBankInfo(right);
+        final comparison = compareDisplayText(
+          leftBank?.shortName ?? leftBank?.name ?? 'Bank $left',
+          rightBank?.shortName ?? rightBank?.name ?? 'Bank $right',
+        );
+        return comparison != 0 ? comparison : left.compareTo(right);
+      });
+  }
+
+  void _selectBank(int? bankId) {
+    FocusScope.of(context).unfocus();
+    setState(() => _selectedBankId = bankId);
+  }
+
+  void _clearFilters() {
+    FocusScope.of(context).unfocus();
+    _searchController.clear();
+    setState(() => _selectedBankId = null);
   }
 
   bool get _isSelectionMode => _selectedKeys.isNotEmpty;
@@ -203,7 +221,7 @@ class _AccountsPageState extends State<AccountsPage> {
               color: Theme.of(context).scaffoldBackgroundColor,
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               child: AddUserAccountForm(
                 onAccountAdded: () {
                   _loadData();
@@ -291,6 +309,33 @@ class _AccountsPageState extends State<AccountsPage> {
     );
   }
 
+  Future<void> _openQuickAccessShareQr() async {
+    if (_userAccounts.isEmpty) return;
+
+    final accounts = _userAccounts
+        .map(
+          (account) => AccountShareEntry(
+            bankId: account.bankId,
+            accountNumber: account.accountNumber,
+            name: account.accountHolderName.trim(),
+          ),
+        )
+        .toList(growable: false);
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AccountShareQrPage(
+          initialAccounts: accounts,
+          initialDisplayName: context.l10nTextRead('Your contacts'),
+          showAccountNames: true,
+          title: 'Share Quick Access Accounts',
+          shareMessage: 'Scan this QR code to add these account details',
+          qrDescription: 'Let someone scan this QR to add these accounts.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _openScanQr() async {
     final result = await Navigator.of(context).push(
       MaterialPageRoute(
@@ -308,6 +353,8 @@ class _AccountsPageState extends State<AccountsPage> {
     final colorScheme = theme.colorScheme;
 
     final filteredAccounts = _filterAccounts(_userAccounts);
+    final availableBankIds = _availableBankIds;
+    final hasActiveFilters = _searchQuery.isNotEmpty || _selectedBankId != null;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -349,7 +396,19 @@ class _AccountsPageState extends State<AccountsPage> {
               ]
             : [
                 IconButton(
-                  tooltip: context.l10nText('Share accounts'),
+                  key: const ValueKey<String>(
+                    'share-quick-access-accounts',
+                  ),
+                  tooltip: context.l10nText(
+                    'Share Quick Access Accounts',
+                  ),
+                  icon: const Icon(Icons.share_outlined),
+                  onPressed: _isLoading || _userAccounts.isEmpty
+                      ? null
+                      : _openQuickAccessShareQr,
+                ),
+                IconButton(
+                  tooltip: context.l10nText('Share Your Accounts'),
                   icon: const Icon(Icons.qr_code_rounded),
                   onPressed: _openShareQr,
                 ),
@@ -359,7 +418,7 @@ class _AccountsPageState extends State<AccountsPage> {
         children: [
           // Search bar
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: TextField(
               controller: _searchController,
               autofocus: false,
@@ -387,6 +446,46 @@ class _AccountsPageState extends State<AccountsPage> {
               ),
             ),
           ),
+          if (!_isLoading && availableBankIds.isNotEmpty) ...[
+            SizedBox(
+              height: 42,
+              child: ListView.separated(
+                key: const ValueKey<String>(
+                  'quick-access-bank-filter-list',
+                ),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: availableBankIds.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return _BankFilterChip(
+                      key: const ValueKey<String>(
+                        'quick-access-bank-filter-all',
+                      ),
+                      label: context.l10nText('All Banks'),
+                      selected: _selectedBankId == null,
+                      onSelected: () => _selectBank(null),
+                    );
+                  }
+
+                  final bankId = availableBankIds[index - 1];
+                  final bank = _getBankInfo(bankId);
+                  return _BankFilterChip(
+                    key: ValueKey<String>(
+                      'quick-access-bank-filter-$bankId',
+                    ),
+                    label: context.l10nText(
+                      bank?.shortName ?? bank?.name ?? 'Bank $bankId',
+                    ),
+                    selected: _selectedBankId == bankId,
+                    onSelected: () => _selectBank(bankId),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           // Accounts list
           Expanded(
             child: _isLoading
@@ -397,7 +496,7 @@ class _AccountsPageState extends State<AccountsPage> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
-                              _searchQuery.isNotEmpty
+                              hasActiveFilters
                                   ? Icons.search_off
                                   : Icons.account_balance_outlined,
                               size: 64,
@@ -405,7 +504,7 @@ class _AccountsPageState extends State<AccountsPage> {
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              _searchQuery.isNotEmpty
+                              hasActiveFilters
                                   ? context.l10nText('No accounts found')
                                   : context.l10nText('No accounts yet'),
                               style: theme.textTheme.titleLarge?.copyWith(
@@ -413,7 +512,7 @@ class _AccountsPageState extends State<AccountsPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            if (_searchQuery.isEmpty)
+                            if (!hasActiveFilters)
                               Text(
                                 context.l10nText(
                                   'Tap + to add your first account',
@@ -422,7 +521,18 @@ class _AccountsPageState extends State<AccountsPage> {
                                   color: colorScheme.onSurfaceVariant,
                                 ),
                               ),
-                            if (_searchQuery.isEmpty)
+                            if (hasActiveFilters)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: TextButton.icon(
+                                  onPressed: _clearFilters,
+                                  icon: const Icon(Icons.filter_alt_off),
+                                  label: Text(
+                                    context.l10nText('Clear filters'),
+                                  ),
+                                ),
+                              ),
+                            if (!hasActiveFilters)
                               Padding(
                                 padding: const EdgeInsets.only(top: 16),
                                 child: OutlinedButton.icon(
@@ -483,6 +593,49 @@ class _AccountsPageState extends State<AccountsPage> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _BankFilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onSelected;
+
+  const _BankFilterChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      showCheckmark: false,
+      onSelected: (_) => onSelected(),
+      selectedColor: colorScheme.primaryContainer,
+      backgroundColor: colorScheme.surface,
+      side: BorderSide(
+        color: selected
+            ? colorScheme.primary.withValues(alpha: 0.5)
+            : colorScheme.outline.withValues(alpha: 0.25),
+      ),
+      labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: selected
+                ? colorScheme.onPrimaryContainer
+                : colorScheme.onSurfaceVariant,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+          ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      visualDensity: VisualDensity.compact,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(999),
+      ),
     );
   }
 }

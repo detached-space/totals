@@ -28,15 +28,20 @@ class CategoryBreakdown extends StatelessWidget {
     final categoriesById = <int?, Category?>{};
 
     for (final transaction in transactions) {
+      final amount = transaction.type == 'CREDIT'
+          ? provider.incomeAmountForTransaction(transaction)
+          : transaction.type == 'DEBIT'
+              ? provider.netExpenseAmountForTransaction(transaction)
+              : transaction.amount.abs();
+      if (amount <= 0) continue;
       final category = provider.getCategoryById(transaction.categoryId);
       final key = category?.id;
       categoriesById[key] = category;
-      totals[key] = (totals[key] ?? 0) + transaction.amount.abs();
+      totals[key] = (totals[key] ?? 0) + amount;
       counts[key] = (counts[key] ?? 0) + 1;
     }
 
-    final totalAmount =
-        totals.values.fold(0.0, (sum, value) => sum + value);
+    final totalAmount = totals.values.fold(0.0, (sum, value) => sum + value);
     final stats = totals.entries
         .map((entry) => _CategoryStat(
               category: categoriesById[entry.key],

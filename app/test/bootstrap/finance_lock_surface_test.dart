@@ -74,8 +74,11 @@ void main() {
 
     await tester.pumpWidget(
       AppBootstrapGate(
-        appBuilder: (_) => const MaterialApp(
-          home: Text('Ready'),
+        appBuilder: (_, initialThemeMode) => MaterialApp(
+          theme: ThemeData.light(),
+          darkTheme: ThemeData.dark(),
+          themeMode: initialThemeMode,
+          home: const Text('Ready'),
         ),
         themeModeLoader: () async => ThemeMode.dark,
         bootstrapInitializer: ({required onPhaseChanged}) async {
@@ -99,5 +102,9 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('Ready'), findsOneWidget);
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.dark,
+    );
   });
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/services/budget_service.dart';
 import 'package:totals/services/budget_widget_data_provider.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_state_service.dart';
@@ -55,14 +56,22 @@ class WidgetService {
 
   /// Refresh all widgets and update global refresh timestamp.
   static Future<void> refreshAllWidgets() async {
+    await refreshExpenseWidget(updateRefreshState: false);
+    await refreshBudgetWidget(updateRefreshState: false);
+    await WidgetRefreshStateService.instance.setLastRefreshAt(DateTime.now());
+  }
+
+  static Future<void> refreshExpenseWidget({
+    bool updateRefreshState = true,
+  }) async {
     try {
       await _refreshExpenseWidget();
     } catch (e) {
       print('Error refreshing expense widget: $e');
     }
-
-    await refreshBudgetWidget(updateRefreshState: false);
-    await WidgetRefreshStateService.instance.setLastRefreshAt(DateTime.now());
+    if (updateRefreshState) {
+      await WidgetRefreshStateService.instance.setLastRefreshAt(DateTime.now());
+    }
   }
 
   static Future<void> _refreshExpenseWidget() async {
@@ -114,11 +123,13 @@ class WidgetService {
   static Future<void> refreshBudgetWidget({
     String? calendar,
     bool updateRefreshState = true,
+    List<BudgetStatus>? statuses,
   }) async {
     try {
       final resolvedCalendar = await _resolveBudgetWidgetCalendar(calendar);
       final payload = await budgetDataProvider.getWidgetPayload(
         calendar: resolvedCalendar,
+        statuses: statuses,
       );
       final selectedIds = await getBudgetWidgetSelectedIds(
         calendar: resolvedCalendar,

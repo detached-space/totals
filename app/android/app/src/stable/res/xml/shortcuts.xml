@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="add_expense"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_expense"
+        android:shortcutShortLabel="@string/shortcut_add_expense"
+        android:shortcutLongLabel="@string/shortcut_add_expense">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="totals://shortcut/add_expense"
+            android:targetPackage="detached.totals"
+            android:targetClass="detached.totals.ShortcutActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="add_income"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_income"
+        android:shortcutShortLabel="@string/shortcut_add_income"
+        android:shortcutLongLabel="@string/shortcut_add_income">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="totals://shortcut/add_income"
+            android:targetPackage="detached.totals"
+            android:targetClass="detached.totals.ShortcutActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="quick_accounts"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_accounts"
+        android:shortcutShortLabel="@string/shortcut_quick_accounts"
+        android:shortcutLongLabel="@string/shortcut_quick_accounts">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="totals://shortcut/quick_accounts"
+            android:targetPackage="detached.totals"
+            android:targetClass="detached.totals.ShortcutActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="verify_payments"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_verify_payments"
+        android:shortcutShortLabel="@string/shortcut_verify_payments"
+        android:shortcutLongLabel="@string/shortcut_verify_payments">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="totals://shortcut/verify_payments"
+            android:targetPackage="detached.totals"
+            android:targetClass="detached.totals.ShortcutActivity" />
+    </shortcut>
+</shortcuts>

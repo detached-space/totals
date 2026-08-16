@@ -28,6 +28,7 @@ class TotalsEngineException implements Exception {
   final String message;
   final int? statusCode;
   final Duration? retryAfter;
+
   /// Decoded body for non-2xx responses where the caller needs structured
   /// fields (e.g. a 429 with a `lockedUntil` timestamp).
   final Map<String, dynamic>? body;
@@ -162,7 +163,6 @@ class _SseEvent {
 }
 
 class TotalsEngineClient {
-  static const _defaultBaseUrl = 'https://engine-staging.totals.detached.space';
   static const _requestTimeout = Duration(seconds: 12);
   // SSE connect headroom — much longer than a regular request because some
   // proxies/engines flush response headers lazily. Once headers arrive, the
@@ -188,6 +188,16 @@ class TotalsEngineClient {
         _client = client ?? http.Client(),
         baseUrl = _normalizeBaseUrl(baseUrl ?? _configuredBaseUrl()) {
     _engineLog('initialized baseUrl=${this.baseUrl}');
+  }
+
+  /// Loads the bundled engine configuration in the current isolate.
+  ///
+  /// Firebase and WorkManager background callbacks do not share the main
+  /// isolate's `flutter_dotenv` state, so every entry point must call this
+  /// before constructing a [TotalsEngineClient].
+  static Future<void> ensureEnvironmentInitialized() async {
+    if (dotenv.isInitialized) return;
+    await dotenv.load(fileName: '.env');
   }
 
   Future<List<EngineGroup>> listGroups() async {
@@ -1033,19 +1043,17 @@ class TotalsEngineClient {
   }
 
   static String _configuredBaseUrl() {
-    const fromDefine = String.fromEnvironment('SHARED_EXPENSES_URL');
-    if (fromDefine.isNotEmpty) {
-      _engineLog('baseUrl from dart-define');
-      return fromDefine;
+    if (!dotenv.isInitialized) {
+      throw StateError(
+        'Shared expenses are not configured. Load .env before creating a '
+        'TotalsEngineClient.',
+      );
     }
-    if (dotenv.isInitialized) {
-      final fromEnv = dotenv.maybeGet('SHARED_EXPENSES_URL');
-      if (fromEnv != null && fromEnv.isNotEmpty) {
-        _engineLog('baseUrl from .env');
-        return fromEnv;
-      }
+    final fromEnv = dotenv.maybeGet('SHARED_EXPENSES_URL')?.trim();
+    if (fromEnv == null || fromEnv.isEmpty) {
+      throw StateError('SHARED_EXPENSES_URL is missing from .env.');
     }
-    _engineLog('baseUrl using default staging URL');
-    return _defaultBaseUrl;
+    _engineLog('baseUrl from .env');
+    return fromEnv;
   }
 }

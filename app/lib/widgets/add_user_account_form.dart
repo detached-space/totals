@@ -287,146 +287,179 @@ class _AddUserAccountFormState extends State<AddUserAccountForm> {
       );
     }
 
-    return Form(
-      key: _formKey,
-      child: SingleChildScrollView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom +
-              MediaQuery.of(context).viewPadding.bottom +
-              20,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Add Quick Access Account',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: colorScheme.onSurface,
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final formBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
+      child: SafeArea(
+        top: false,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: EdgeInsets.only(bottom: formBottomPadding),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Add Quick Access Account',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: Icon(
+                              Icons.close,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                            style: IconButton.styleFrom(
+                              backgroundColor: colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(
+                                alpha: 0.3,
+                              ),
+                              shape: const CircleBorder(),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        'Bank',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      InlineBankSelector(
+                        options: _bankOptions,
+                        selectedBankId: _selectedBankId,
+                        borderRadius: 12,
+                        onChanged: (bankId) {
+                          setState(() {
+                            _selectedBankId = bankId;
+                          });
+                        },
+                      ),
+                      if (!_hasSupportedBanks) ...[
+                        const SizedBox(height: 12),
+                        _buildUnsupportedBankNotice(
+                          context,
+                          message:
+                              'Only banks with parsing patterns can be added right now. Unsupported banks stay visible in the selector but cannot be chosen yet.',
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      CustomTextField(
+                        controller: _accountNumber,
+                        labelText: context.l10nText('Account Number'),
+                        keyboardType: TextInputType.number,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return context.l10nTextRead('Enter account number');
+                          }
+                          if (value.trim().isEmpty) {
+                            return context.l10nTextRead('Enter account number');
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      CustomTextField(
+                        controller: _accountHolderName,
+                        labelText: context.l10nText('Account Holder Name'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return context
+                                .l10nTextRead('Enter account holder name');
+                          }
+                          if (value.trim().isEmpty) {
+                            return context
+                                .l10nTextRead('Enter account holder name');
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
                 ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: Icon(
-                    Icons.close,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  style: IconButton.styleFrom(
-                    backgroundColor:
-                        colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.3,
-                    ),
-                    shape: const CircleBorder(),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
-            Text(
-              'Bank',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: colorScheme.onSurfaceVariant,
               ),
-            ),
-            const SizedBox(height: 8),
-            InlineBankSelector(
-              options: _bankOptions,
-              selectedBankId: _selectedBankId,
-              borderRadius: 12,
-              onChanged: (bankId) {
-                setState(() {
-                  _selectedBankId = bankId;
-                });
-              },
-            ),
-            if (!_hasSupportedBanks) ...[
-              const SizedBox(height: 12),
-              _buildUnsupportedBankNotice(
-                context,
-                message:
-                    'Only banks with parsing patterns can be added right now. Unsupported banks stay visible in the selector but cannot be chosen yet.',
+              SizedBox(height: actionTopGap),
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: bottomSafeArea + actionBottomGap,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: hintColor,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(context.l10nText('Cancel')),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton(
+                        key: const ValueKey<String>(
+                          'quick-access-add-account',
+                        ),
+                        onPressed: _canSubmit ? _submitForm : null,
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: colorScheme.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          disabledBackgroundColor:
+                              colorScheme.surfaceContainerHighest,
+                          disabledForegroundColor: colorScheme.onSurfaceVariant,
+                        ),
+                        child: Text(
+                          context.l10nText('Add Account'),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-            const SizedBox(height: 24),
-            CustomTextField(
-              controller: _accountNumber,
-              labelText: context.l10nText('Account Number'),
-              keyboardType: TextInputType.number,
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return context.l10nTextRead('Enter account number');
-                }
-                if (value.trim().isEmpty) {
-                  return context.l10nTextRead('Enter account number');
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 20),
-            CustomTextField(
-              controller: _accountHolderName,
-              labelText: context.l10nText('Account Holder Name'),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return context.l10nTextRead('Enter account holder name');
-                }
-                if (value.trim().isEmpty) {
-                  return context.l10nTextRead('Enter account holder name');
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 32),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: hintColor,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(context.l10nText('Cancel')),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: FilledButton(
-                    onPressed: _canSubmit ? _submitForm : null,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: colorScheme.primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      disabledBackgroundColor:
-                          colorScheme.surfaceContainerHighest,
-                      disabledForegroundColor: colorScheme.onSurfaceVariant,
-                    ),
-                    child: Text(
-                      context.l10nText('Add Account'),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-          ],
+          ),
         ),
       ),
     );

@@ -1,6 +1,6 @@
 # Privacy Policy for Totals
 
-Effective date: June 14, 2026
+Effective date: July 26, 2026
 
 Totals is a personal finance application published by Detached. This Privacy Policy explains how Totals accesses, uses, stores, and shares data when you use the Android application package `detached.totals`.
 
@@ -12,6 +12,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
   - Payment verification can send the image, payment reference, selected account number, and selected bank identifier you submit to our verification service to process your request.
   - Shared expenses lets you split expenses with friends in end-to-end encrypted groups. The Totals Engine relays encrypted payloads it cannot read, and push notifications are doorbell pings that do not include expense content.
   - Data Sync (optional, off by default) lets you push selected local records to a third-party server you configure. Only the fields and records your rules select are sent, to the destination you specify; Totals does not control or secure that destination.
+  - Telegram Backup is an optional advanced feature that encrypts a full backup, including retained original source SMS messages, on-device and sends the encrypted file and encrypted backup index to a private Telegram bot chat you connect. The recovery key is not sent to Telegram.
   - An optional identity backup vault lets you restore your shared-expense identity and group keys on a new device using a recovery code shown to you in the app plus a PIN you choose. Vault contents are encrypted on-device before being uploaded.
   - The app may download updated SMS parsing patterns and bank configuration files from our servers during setup, refresh, or manual update actions. This does not upload your SMS contents.
 - Totals does not require account registration.
@@ -34,6 +35,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - A Firebase Cloud Messaging device token, when shared-expense notifications are enabled, used to deliver doorbell pings.
 - The recovery code and PIN you provide when setting up or unlocking the optional identity backup vault. The PIN is used only on-device to derive an encryption key and is never transmitted.
 - Data Sync configuration you enter, such as destination names, server URLs, authentication type, and credentials, when you use the optional Data Sync feature.
+- Telegram Backup configuration you enter or pair, including the bot token, Telegram bot and private-chat identifiers, backup schedule, and recovery key. The bot token and recovery key are stored using secure device storage.
 
 ## How We Use Data
 
@@ -48,18 +50,20 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - To deliver doorbell push notifications that prompt the app to pull and decrypt new shared-expense activity locally.
 - To store and retrieve an optional encrypted identity vault so that you can restore your shared-expense identity and group keys on a new device.
 - To send the records and fields you select to the external server you configure when you enable the optional Data Sync feature.
+- To encrypt, upload, list, download, and restore backups in the private Telegram bot chat you connect when you enable Telegram Backup.
 
 ## When Data Leaves Your Device
 
-- Core SMS tracking: SMS contents used for normal transaction tracking stay on your device.
+- Core SMS tracking: SMS contents used for normal transaction tracking stay on your device unless you explicitly create an export or enable Telegram Backup. Available original source messages linked to exported transactions are included in those backups.
 - Payment verification: If you use the payment verification feature, the data you submit may be transmitted over HTTPS to our verification service hosted at `sms-parsing-visualizer.vercel.app` to process your request.
 - Configuration updates: When Totals downloads updated SMS parsing patterns or bank configuration files, it connects to our hosted configuration endpoints. The app may also perform basic connectivity checks to confirm internet access. These requests are used to download configuration, not to upload your SMS contents for normal tracking.
-- Shared expenses (optional): If you create or join a shared expense group, the app exchanges encrypted payloads with our Totals Engine service at `engine.totals.detached.space` over HTTPS. Each payload is encrypted on-device with a group symmetric key (for group-wide payloads) or with a one-to-one shared secret derived from device key pairs (for targeted payloads). The Totals Engine stores and relays the encrypted blobs and the public identifiers needed for delivery, such as the random group identifier and the sender and recipient device public keys. The Totals Engine cannot decrypt expense amounts, descriptions, member display names, or other group contents.
+- Shared expenses (optional): If you create or join a shared expense group, the app exchanges encrypted payloads with the configured Totals Engine service over HTTPS. Each payload is encrypted on-device with a group symmetric key (for group-wide payloads) or with a one-to-one shared secret derived from device key pairs (for targeted payloads). The Totals Engine stores and relays the encrypted blobs and the public identifiers needed for delivery, such as the random group identifier and the sender and recipient device public keys. The Totals Engine cannot decrypt expense amounts, descriptions, member display names, or other group contents.
 - Push notifications (optional): If you enable shared-expense notifications, the app registers a Firebase Cloud Messaging device token with the Totals Engine so the engine can wake the app when there is new activity. The push payload itself does not include expense content; the app pulls the encrypted payload over HTTPS and composes the notification text locally on your device.
 - Identity backup vault (optional): If you turn on the identity backup feature, the app encrypts your shared-expense identity seed and your group keys on-device using a key derived from a PIN you choose and a random recovery code shown to you in the app. The encrypted blob is then uploaded to the Totals Engine, indexed only by an opaque identifier derived from the recovery code. The PIN is not transmitted, and the engine cannot derive it or decrypt the blob.
 - Support and external links: If you open external links from the app, such as support pages, Telegram, or bank links, those services receive information according to their own privacy policies.
 - Local network dashboard: If you manually start the optional local web dashboard or server, your financial data may be available to devices on the same local network using the URL shown in the app until you stop the server.
 - Data Sync (optional, off by default): If you enable Data Sync and create one or more rules, Totals sends the records and fields you select to the destination URL you configure, using the authentication you provide. Depending on your rules this may include transaction amounts, references, dates, counterparties, balances, account numbers, bank identifiers, budgets, and any other fields you map. This is a one-way export controlled by you; Totals never pulls data back, and Totals cannot see, verify, or secure the destination, which is operated by you or a third party of your choosing.
+- Telegram Backup (optional, off by default): If you enable and connect this advanced feature, Totals creates a full export that includes available original source SMS messages linked to transactions and retained failed-message diagnostics, then compresses and encrypts it on-device with AES-256-GCM. Totals sends only the encrypted file to the private Telegram bot chat you paired. An encrypted pinned index lets Totals list and retrieve those files. Telegram receives the ciphertext and service metadata such as bot and chat identifiers, file size, filename, and upload time under Telegram's own privacy terms. The recovery key is generated and kept on-device unless you choose to copy or save it, and is never included in the Telegram upload.
 
 ## Sharing
 
@@ -70,9 +74,10 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 
 ## Storage and Retention
 
-- Most Totals data is stored locally on your device until you delete it, clear app data, or uninstall the app.
+- Most Totals data, including retained copies of original source SMS messages linked to transactions, is stored locally on your device until you delete the related transaction, clear app data, or uninstall the app.
 - Data Sync settings (destinations and rules) are stored locally in the app database, and any credentials you enter are stored using secure device storage. A local outbox queue records which selected records are pending, sent, or failed. Disabling Data Sync and choosing to wipe its data deletes these settings, credentials, and the queue from your device.
-- Exported backup files remain wherever you save or share them.
+- Exported backup files, including any original source SMS messages they contain, remain wherever you save or share them.
+- Telegram backup files and their encrypted index remain in the connected Telegram chat until you delete them there. Disconnecting the feature removes the local bot token, recovery key, and configuration but does not delete files already stored by Telegram.
 - QR scan results are processed locally in the app.
 - Payment verification submissions may be processed by the verification service and retained only for the period reasonably necessary to operate, secure, debug, and protect the service, or as required by law.
 - Downloaded SMS pattern files and bank configuration files may be cached on your device for future use.
@@ -94,6 +99,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - You can disable shared-expense push notifications from the in-app settings. This unregisters your Firebase Cloud Messaging token with the Totals Engine.
 - You can choose not to set up an identity backup vault, or delete an existing vault from within the app.
 - You can export or import your data using in-app tools.
+- You can disable the Telegram Backup advanced option, change or stop its schedule, disconnect it locally, and delete its messages from Telegram. Keep a separate copy of the recovery key if you want to restore on another device.
 - You can clear local app data or uninstall the app to remove locally stored data.
 - You can stop the optional local web dashboard or server at any time.
 
