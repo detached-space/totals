@@ -243,6 +243,18 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
     ColorScheme colorScheme,
     _AccountPreviewItem item,
   ) {
+    final bankLabel = context.l10nText(
+      item.bank?.shortName ?? item.bank?.name ?? 'Unknown Bank',
+    );
+    final hasBankLogo = item.bank?.image.isNotEmpty ?? false;
+    final entryHolderName = item.entry.name?.trim() ?? '';
+    final sharedHolderName = widget.payload.name.trim();
+    final accountHolderName = entryHolderName.isNotEmpty
+        ? entryHolderName
+        : sharedHolderName.isNotEmpty
+            ? sharedHolderName
+            : context.l10nText('Account Holder Name');
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(12),
@@ -266,7 +278,7 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
               color: colorScheme.surface,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: item.bank != null && item.bank!.image.isNotEmpty
+            child: hasBankLogo
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: Image.asset(
@@ -288,13 +300,15 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
 
           const SizedBox(width: 12),
 
-          // Bank name and account number
+          // Account holder and account number
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.bank?.shortName ?? item.bank?.name ?? 'Unknown Bank',
+                  accountHolderName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: colorScheme.onSurface,
@@ -302,7 +316,11 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  item.entry.accountNumber,
+                  hasBankLogo
+                      ? item.entry.accountNumber
+                      : '$bankLabel • ${item.entry.accountNumber}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontFamily: 'monospace',

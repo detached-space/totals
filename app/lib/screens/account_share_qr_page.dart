@@ -8,7 +8,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
-import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/repositories/account_repository.dart';
@@ -17,7 +16,22 @@ import 'package:totals/utils/account_sort.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
 
 class AccountShareQrPage extends StatefulWidget {
-  const AccountShareQrPage({super.key});
+  final List<AccountShareEntry>? initialAccounts;
+  final String? initialDisplayName;
+  final bool showAccountNames;
+  final String title;
+  final String shareMessage;
+  final String qrDescription;
+
+  const AccountShareQrPage({
+    super.key,
+    this.initialAccounts,
+    this.initialDisplayName,
+    this.showAccountNames = true,
+    this.title = 'Share Accounts',
+    this.shareMessage = 'Scan this QR code to add my account details',
+    this.qrDescription = 'Let someone scan this QR to add your accounts.',
+  });
 
   @override
   State<AccountShareQrPage> createState() => _AccountShareQrPageState();
@@ -29,7 +43,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
   final GlobalKey _qrKey = GlobalKey();
   static const String _sharedNameKey = 'account_share_display_name';
 
-  List<Account> _accounts = [];
+  List<AccountShareEntry> _accounts = [];
   List<Bank> _banks = [];
   bool _isLoading = true;
   Set<String> _selectedKeys = {};
@@ -47,7 +61,12 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
   }
 
   Future<void> _loadInitialState() async {
-    await _loadSavedDisplayName();
+    final initialDisplayName = widget.initialDisplayName?.trim();
+    if (initialDisplayName != null && initialDisplayName.isNotEmpty) {
+      _displayNameController.text = initialDisplayName;
+    } else if (widget.initialAccounts == null) {
+      await _loadSavedDisplayName();
+    }
     await _loadData();
   }
 
@@ -56,11 +75,22 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
       _isLoading = true;
     });
     try {
-      final allAccounts = await _accountRepo.getAccounts();
-      // Filter out cash account
-      final accounts = allAccounts
-          .where((account) => account.bank != CashConstants.bankId)
-          .toList();
+      final List<AccountShareEntry> accounts;
+      if (widget.initialAccounts != null) {
+        accounts = List<AccountShareEntry>.from(widget.initialAccounts!);
+      } else {
+        final allAccounts = await _accountRepo.getAccounts();
+        accounts = allAccounts
+            .where((account) => account.bank != CashConstants.bankId)
+            .map(
+              (account) => AccountShareEntry(
+                bankId: account.bank,
+                accountNumber: account.accountNumber,
+                name: account.accountHolderName.trim(),
+              ),
+            )
+            .toList(growable: false);
+      }
       final banks = AllBanksFromAssets.getAllBanks();
       if (!mounted) return;
       setState(() {
@@ -79,8 +109,8 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
     }
   }
 
-  String _accountKey(Account account) {
-    return '${account.bank}:${account.accountNumber}';
+  String _accountKey(AccountShareEntry account) {
+    return '${account.bankId}:${account.accountNumber}';
   }
 
   Bank? _getBankInfo(int bankId) {
@@ -96,8 +126,8 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
     if (_displayNameController.text.isEmpty) {
       for (final account in _accounts) {
         if (_selectedKeys.contains(_accountKey(account)) &&
-            account.accountHolderName.trim().isNotEmpty) {
-          final inferredName = account.accountHolderName.trim();
+            (account.name?.trim().isNotEmpty ?? false)) {
+          final inferredName = account.name!.trim();
           _displayNameController.text = inferredName;
           _saveDisplayName(inferredName);
           if (mounted) {
@@ -120,6 +150,8 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
   }
 
   Future<void> _saveDisplayName(String name) async {
+    if (widget.initialAccounts != null) return;
+
     final trimmed = name.trim();
     final prefs = await SharedPreferences.getInstance();
     if (trimmed.isEmpty) {
@@ -139,17 +171,12 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
     if (name.isEmpty) return null;
     final entries = _accounts
         .where((account) => _selectedKeys.contains(_accountKey(account)))
-        .map((account) => AccountShareEntry(
-              bankId: account.bank,
-              accountNumber: account.accountNumber,
-              name: account.accountHolderName.trim(),
-            ))
-        .toList();
+        .toList(growable: false);
     if (entries.isEmpty) return null;
     return AccountSharePayload(name: name, accounts: entries);
   }
 
-  void _toggleAccount(Account account, bool? isSelected) {
+  void _toggleAccount(AccountShareEntry account, bool? isSelected) {
     final key = _accountKey(account);
     setState(() {
       if (isSelected == true) {
@@ -174,8 +201,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
   }
 
   Future<void> _shareQrCode() async {
-    final shareText =
-        context.l10nTextRead('Scan this QR code to add my account details');
+    final shareText = context.l10nTextRead(widget.shareMessage);
     try {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
@@ -213,13 +239,13 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
     final colorScheme = theme.colorScheme;
     final payload = _buildPayload();
     final qrData = payload == null ? null : AccountSharePayload.encode(payload);
-    final sortedAccounts = List<Account>.from(_accounts)
+    final sortedAccounts = List<AccountShareEntry>.from(_accounts)
       ..sort(
         (left, right) => compareAccountDisplayFields(
-          leftBankId: left.bank,
-          rightBankId: right.bank,
-          leftHolderName: left.accountHolderName,
-          rightHolderName: right.accountHolderName,
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.name,
+          rightHolderName: right.name,
           leftAccountNumber: left.accountNumber,
           rightAccountNumber: right.accountNumber,
           bankNameForId: (bankId) =>
@@ -231,7 +257,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
-        title: Text(context.l10nText('Share Accounts')),
+        title: Text(context.l10nText(widget.title)),
         centerTitle: true,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -283,6 +309,7 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
                         sharedName: _displayNameController.text.trim(),
                         displayNameController: _displayNameController,
                         colorScheme: colorScheme,
+                        qrDescription: widget.qrDescription,
                         onDisplayNameChanged: _handleDisplayNameChanged,
                         onShare: _shareQrCode,
                       ),
@@ -310,7 +337,8 @@ class _AccountShareQrPageState extends State<AccountShareQrPage> {
                       for (final account in sortedAccounts) ...[
                         _AccountShareTile(
                           account: account,
-                          bank: _getBankInfo(account.bank),
+                          bank: _getBankInfo(account.bankId),
+                          showAccountName: widget.showAccountNames,
                           isSelected:
                               _selectedKeys.contains(_accountKey(account)),
                           onChanged: (value) => _toggleAccount(account, value),
@@ -330,6 +358,7 @@ class _QrPreviewCard extends StatelessWidget {
   final String? sharedName;
   final TextEditingController displayNameController;
   final ColorScheme colorScheme;
+  final String qrDescription;
   final ValueChanged<String> onDisplayNameChanged;
   final VoidCallback onShare;
 
@@ -339,6 +368,7 @@ class _QrPreviewCard extends StatelessWidget {
     required this.sharedName,
     required this.displayNameController,
     required this.colorScheme,
+    required this.qrDescription,
     required this.onDisplayNameChanged,
     required this.onShare,
   });
@@ -437,7 +467,7 @@ class _QrPreviewCard extends StatelessWidget {
                 ? context.l10nText(
                     'Select accounts below and enter a name to generate your QR.',
                   )
-                : '${context.l10nText('Sharing as')} $sharedName. ${context.l10nText('Let someone scan this QR to add your accounts.')}',
+                : '${context.l10nText('Sharing as')} $sharedName. ${context.l10nText(qrDescription)}',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
@@ -450,14 +480,16 @@ class _QrPreviewCard extends StatelessWidget {
 }
 
 class _AccountShareTile extends StatelessWidget {
-  final Account account;
+  final AccountShareEntry account;
   final Bank? bank;
+  final bool showAccountName;
   final bool isSelected;
   final ValueChanged<bool?> onChanged;
 
   const _AccountShareTile({
     required this.account,
     required this.bank,
+    required this.showAccountName,
     required this.isSelected,
     required this.onChanged,
   });
@@ -466,6 +498,24 @@ class _AccountShareTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final bankLabel = context.l10nText(
+      bank?.shortName ?? bank?.name ?? 'Unknown Bank',
+    );
+    final accountName = showAccountName ? account.name?.trim() ?? '' : '';
+    final accountNumber = account.accountNumber.isNotEmpty
+        ? account.accountNumber
+        : context.l10nText('Account');
+    final hasBankLogo = bank?.image.isNotEmpty ?? false;
+    final primaryLabel = showAccountName
+        ? accountName.isNotEmpty
+            ? accountName
+            : context.l10nText('Account Holder Name')
+        : accountNumber;
+    final secondaryLabel = showAccountName
+        ? hasBankLogo
+            ? accountNumber
+            : '$bankLabel • $accountNumber'
+        : bankLabel;
 
     return CheckboxListTile(
       value: isSelected,
@@ -480,7 +530,7 @@ class _AccountShareTile extends StatelessWidget {
           color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: bank != null
+        child: hasBankLogo
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: Image.asset(
@@ -500,16 +550,18 @@ class _AccountShareTile extends StatelessWidget {
               ),
       ),
       title: Text(
-        account.accountNumber.isNotEmpty
-            ? account.accountNumber
-            : context.l10nText('Account'),
+        primaryLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: theme.textTheme.titleSmall?.copyWith(
           fontWeight: FontWeight.w600,
           color: colorScheme.onSurface,
         ),
       ),
       subtitle: Text(
-        context.l10nText(bank?.shortName ?? bank?.name ?? 'Unknown Bank'),
+        secondaryLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall?.copyWith(
           color: colorScheme.onSurfaceVariant,
         ),

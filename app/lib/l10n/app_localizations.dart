@@ -232,6 +232,7 @@ class AppLocalizations {
     "shared.chooseWhereToAddAmount": "{amount} የት እንደሚጨመር ይምረጡ።",
     "shared.youAreOwedAmount": "{amount} ይከፈልዎታል",
     "shared.youOweAmount": "{amount} መክፈል አለብዎት",
+    "shared.peopleOweYouCount": "{count} ሰዎች ይከፍሉዎታል",
     "shared.updatedTime": "የተዘመነው {time}",
     "shared.timeJustNow": "አሁን",
     "shared.timeMinutesAgo": "ከ{count} ደቂቃ በፊት",
@@ -548,10 +549,14 @@ class AppLocalizations {
     "available for sharing": "ለማጋራት ዝግጁ",
     "Share Accounts": "አካውንቶችን አጋራ",
     "Share Your Accounts": "አካውንቶችዎን ያጋሩ",
+    "Share Quick Access Accounts": "የፈጣን መዳረሻ አካውንቶችን አጋራ",
+    "Your contacts": "የእርስዎ እውቂያዎች",
     "Name shown to recipient": "ለተቀባዩ የሚታይ ስም",
     "Share QR Code": "የQR ኮድ አጋራ",
     "Scan this QR code to add my account details":
         "የእኔን የአካውንት ዝርዝሮች ለማከል ይህን QR ኮድ ይቃኙ",
+    "Scan this QR code to add these account details":
+        "እነዚህን የአካውንት ዝርዝሮች ለማከል ይህን QR ኮድ ይቃኙ",
     "Error sharing QR code": "የQR ኮድ ማጋራት አልተቻለም",
     "Register accounts first, then generate a share QR.":
         "መጀመሪያ አካውንቶችን ይመዝግቡ፣ ከዚያ የማጋሪያ QR ይፍጠሩ።",
@@ -562,6 +567,8 @@ class AppLocalizations {
     "Sharing as": "በዚህ ስም በማጋራት ላይ",
     "Let someone scan this QR to add your accounts.":
         "አካውንቶችዎን ለማከል ሌላ ሰው ይህን QR እንዲቃኝ ያድርጉ።",
+    "Let someone scan this QR to add these accounts.":
+        "እነዚህን አካውንቶች ለማከል ሌላ ሰው ይህን QR እንዲቃኝ ያድርጉ።",
     "included": "ተካትቷል",
     "Too much data to render QR": "QR ለማሳየት ዳታው በጣም ብዙ ነው",
     "Add accounts first, then long-press Tools again to see your QR here.":

@@ -9,6 +9,7 @@ import 'package:totals/widgets/add_user_account_form.dart';
 import 'package:totals/screens/account_share_qr_page.dart';
 import 'package:totals/screens/account_share_scan_page.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/utils/account_share_payload.dart';
 import 'package:totals/utils/account_sort.dart';
 
 class AccountsPage extends StatefulWidget {
@@ -308,6 +309,33 @@ class _AccountsPageState extends State<AccountsPage> {
     );
   }
 
+  Future<void> _openQuickAccessShareQr() async {
+    if (_userAccounts.isEmpty) return;
+
+    final accounts = _userAccounts
+        .map(
+          (account) => AccountShareEntry(
+            bankId: account.bankId,
+            accountNumber: account.accountNumber,
+            name: account.accountHolderName.trim(),
+          ),
+        )
+        .toList(growable: false);
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AccountShareQrPage(
+          initialAccounts: accounts,
+          initialDisplayName: context.l10nTextRead('Your contacts'),
+          showAccountNames: true,
+          title: 'Share Quick Access Accounts',
+          shareMessage: 'Scan this QR code to add these account details',
+          qrDescription: 'Let someone scan this QR to add these accounts.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _openScanQr() async {
     final result = await Navigator.of(context).push(
       MaterialPageRoute(
@@ -368,7 +396,19 @@ class _AccountsPageState extends State<AccountsPage> {
               ]
             : [
                 IconButton(
-                  tooltip: context.l10nText('Share accounts'),
+                  key: const ValueKey<String>(
+                    'share-quick-access-accounts',
+                  ),
+                  tooltip: context.l10nText(
+                    'Share Quick Access Accounts',
+                  ),
+                  icon: const Icon(Icons.share_outlined),
+                  onPressed: _isLoading || _userAccounts.isEmpty
+                      ? null
+                      : _openQuickAccessShareQr,
+                ),
+                IconButton(
+                  tooltip: context.l10nText('Share Your Accounts'),
                   icon: const Icon(Icons.qr_code_rounded),
                   onPressed: _openShareQr,
                 ),
