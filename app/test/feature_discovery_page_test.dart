@@ -43,6 +43,15 @@ void main() {
       find.text('Track returned money against past spending'),
       findsOneWidget,
     );
+    expect(find.text('New'), findsOneWidget);
+    expect(
+      find.byKey(
+        const ValueKey<String>(
+          'feature-discovery-new-tutorials/v1/reimbursement.mp4',
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('Subscribe'), findsNothing);
 
     final cards = <Material>[

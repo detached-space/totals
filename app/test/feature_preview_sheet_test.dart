@@ -80,6 +80,11 @@ void main() {
       reimbursementPreview.videoPlaceholderAsset,
       reimbursementPreviewPlaceholderAsset,
     );
+    expect(reimbursementPreview.isNew, isTrue);
+    expect(
+      totalsFeaturePreviews.where((preview) => preview.isNew),
+      hasLength(1),
+    );
   });
 
   test('blurred first-frame placeholders are bundled as app assets', () async {

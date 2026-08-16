@@ -99,6 +99,7 @@ class FeaturePreviewItem {
     required this.videoPlaceholderAsset,
     required this.icon,
     required this.accentColor,
+    this.isNew = false,
   });
 
   final String title;
@@ -109,6 +110,7 @@ class FeaturePreviewItem {
   final String videoPlaceholderAsset;
   final IconData icon;
   final Color accentColor;
+  final bool isNew;
 }
 
 List<FeaturePreviewItem> get totalsFeaturePreviews =>
@@ -143,6 +145,7 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           videoPlaceholderAsset: reimbursementPreviewPlaceholderAsset,
           icon: Icons.currency_exchange_rounded,
           accentColor: AppColors.blue,
+          isNew: true,
         ),
       ],
     );

@@ -88,12 +88,21 @@ class _FeatureDiscoveryTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      context.l10nText(item.title),
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: AppColors.textPrimary(context),
-                        fontWeight: FontWeight.w800,
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          context.l10nText(item.title),
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: AppColors.textPrimary(context),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (item.isNew)
+                          _NewFeatureChip(cacheKey: item.videoCacheKey),
+                      ],
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -115,6 +124,37 @@ class _FeatureDiscoveryTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _NewFeatureChip extends StatelessWidget {
+  const _NewFeatureChip({required this.cacheKey});
+
+  final String cacheKey;
+
+  @override
+  Widget build(BuildContext context) {
+    const color = AppColors.primaryLight;
+
+    return Container(
+      key: ValueKey<String>('feature-discovery-new-$cacheKey'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        context.l10nText('New'),
+        style: const TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
       ),
     );
   }
