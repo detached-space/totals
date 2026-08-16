@@ -568,30 +568,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }).toList(growable: false);
   }
 
-  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
-    if (selection.isEmpty) return true;
-    if (categoryId == null) return selection.contains(null);
-    return selection.contains(categoryId);
-  }
-
-  bool _matchesCategoryFilter(Transaction transaction) {
+  bool _matchesCategoryFilter(
+    Transaction transaction,
+    TransactionProvider provider,
+  ) {
     if (_selectedTodayIncomeCategoryIds.isEmpty &&
         _selectedTodayExpenseCategoryIds.isEmpty) {
       return true;
     }
     if (transaction.type == 'CREDIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedTodayIncomeCategoryIds);
+      return provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedTodayIncomeCategoryIds,
+      );
     }
     if (transaction.type == 'DEBIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedTodayExpenseCategoryIds);
+      return provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedTodayExpenseCategoryIds,
+      );
     }
     return true;
   }
 
-  List<Transaction> _filterByCategory(List<Transaction> transactions) {
-    return transactions.where(_matchesCategoryFilter).toList(growable: false);
+  List<Transaction> _filterByCategory(
+    List<Transaction> transactions,
+    TransactionProvider provider,
+  ) {
+    return transactions
+        .where((transaction) => _matchesCategoryFilter(transaction, provider))
+        .toList(growable: false);
   }
 
   Future<void> _openTodayCategoryFilterSheet(
@@ -970,7 +976,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         ? Builder(
                             builder: (context) {
                               final today = _todayTransactions(provider);
-                              final filteredToday = _filterByCategory(today);
+                              final filteredToday = _filterByCategory(
+                                today,
+                                provider,
+                              );
                               final filteredReferences = filteredToday
                                   .map((transaction) => transaction.reference)
                                   .toSet();

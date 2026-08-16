@@ -346,6 +346,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                               const SizedBox(height: 12),
                               _InsightCard(
                                 message: insightMessage,
+                                showAmounts: _showBalance,
                                 showImportBackupPrompt: !hasAddedBankAccounts,
                                 isImportingBackup: _isImportingBackup,
                                 onImportBackupTap: () =>
@@ -954,8 +955,7 @@ class _TotalBalanceCard extends StatelessWidget {
                     style: IconButton.styleFrom(
                       foregroundColor: AppColors.white.withValues(alpha: 0.9),
                       padding: EdgeInsets.zero,
-                      minimumSize: const Size(24, 24),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      fixedSize: const Size.square(60),
                     ),
                     icon: Icon(
                       showBalance
@@ -1483,12 +1483,14 @@ String _localizedHomeInsight(BuildContext context, String message) {
 
 class _InsightCard extends StatelessWidget {
   final String message;
+  final bool showAmounts;
   final bool showImportBackupPrompt;
   final bool isImportingBackup;
   final VoidCallback? onImportBackupTap;
 
   const _InsightCard({
     required this.message,
+    required this.showAmounts,
     this.showImportBackupPrompt = false,
     this.isImportingBackup = false,
     this.onImportBackupTap,
@@ -1497,7 +1499,13 @@ class _InsightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final localizedMessage = _localizedHomeInsight(context, message);
+    final visibleMessage = showAmounts
+        ? message
+        : message.replaceAll(
+            RegExp(r'\bETB\s+\d[\d,]*(?:\.\d+)?'),
+            'ETB ***',
+          );
+    final localizedMessage = _localizedHomeInsight(context, visibleMessage);
 
     return Container(
       padding: const EdgeInsets.all(16),

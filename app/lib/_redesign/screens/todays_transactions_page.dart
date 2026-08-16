@@ -4,6 +4,7 @@ import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
+import 'package:totals/_redesign/widgets/category_filter_chip.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/models/category.dart';
@@ -12,6 +13,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/app_date_format.dart';
+import 'package:totals/utils/category_filter_utils.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -65,8 +67,10 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
           return false;
         }
       }
-      if (_filter.categoryId != null &&
-          !transaction.includesCategory(_filter.categoryId)) {
+      if (!provider.matchesCategoryFilterSelection(
+        transaction,
+        _filter.categoryIds,
+      )) {
         return false;
       }
       if (_filter.minAmount != null &&
@@ -99,7 +103,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
       } else if (bankId != null) {
         unmatchedBankIds.add(bankId);
       }
-      categoryIds.addAll(transaction.selectedCategoryIds);
+      categoryIds.addAll(provider.categoryIdsForFiltering(transaction));
     }
 
     final sortedBankIds = bankIds.toList(growable: true)
@@ -122,13 +126,9 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
               context.l10nText(provider.getBankShortName(bankId)),
         ),
       );
-    final categories = categoryIds
-        .map(provider.getCategoryById)
-        .whereType<Category>()
-        .toList(growable: true)
-      ..sort(
-        (left, right) => compareDisplayText(left.name, right.name),
-      );
+    final categories = orderedCategoriesForFilter(
+      categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
 
     final selected = await showModalBottomSheet<_TodayTransactionsFilter>(
       context: context,
@@ -401,7 +401,8 @@ class _TodayTransactionsFilter {
   final String? type;
   final int? bankId;
   final String? accountKey;
-  final int? categoryId;
+  // Empty = all categories; uncategorizedCategoryFilterId = none assigned.
+  final Set<int> categoryIds;
   final double? minAmount;
   final double? maxAmount;
 
@@ -409,7 +410,7 @@ class _TodayTransactionsFilter {
     this.type,
     this.bankId,
     this.accountKey,
-    this.categoryId,
+    this.categoryIds = const <int>{},
     this.minAmount,
     this.maxAmount,
   });
@@ -419,7 +420,7 @@ class _TodayTransactionsFilter {
     if (type != null) count++;
     if (bankId != null) count++;
     if (accountKey != null) count++;
-    if (categoryId != null) count++;
+    if (categoryIds.isNotEmpty) count++;
     if (minAmount != null || maxAmount != null) count++;
     return count;
   }
@@ -452,7 +453,7 @@ class _TodayTransactionsFilterSheetState
   late String? _selectedType;
   late int? _selectedBankId;
   late String? _selectedAccountKey;
-  late int? _selectedCategoryId;
+  late Set<int> _selectedCategoryIds;
   late final TextEditingController _minAmountController;
   late final TextEditingController _maxAmountController;
   String? _amountError;
@@ -463,7 +464,7 @@ class _TodayTransactionsFilterSheetState
     _selectedType = widget.currentFilter.type;
     _selectedBankId = widget.currentFilter.bankId;
     _selectedAccountKey = widget.currentFilter.accountKey;
-    _selectedCategoryId = widget.currentFilter.categoryId;
+    _selectedCategoryIds = <int>{...widget.currentFilter.categoryIds};
     _minAmountController = TextEditingController(
       text: _formatAmount(widget.currentFilter.minAmount),
     );
@@ -511,12 +512,20 @@ class _TodayTransactionsFilterSheetState
     });
   }
 
+  void _toggleCategory(int categoryId) {
+    setState(() {
+      if (!_selectedCategoryIds.add(categoryId)) {
+        _selectedCategoryIds.remove(categoryId);
+      }
+    });
+  }
+
   void _clearAll() {
     setState(() {
       _selectedType = null;
       _selectedBankId = null;
       _selectedAccountKey = null;
-      _selectedCategoryId = null;
+      _selectedCategoryIds.clear();
       _minAmountController.clear();
       _maxAmountController.clear();
       _amountError = null;
@@ -544,7 +553,7 @@ class _TodayTransactionsFilterSheetState
         type: _selectedType,
         bankId: _selectedBankId,
         accountKey: _selectedAccountKey,
-        categoryId: _selectedCategoryId,
+        categoryIds: Set<int>.unmodifiable(_selectedCategoryIds),
         minAmount: min,
         maxAmount: max,
       ),
@@ -792,32 +801,40 @@ class _TodayTransactionsFilterSheetState
                       ],
                     ),
                   ],
-                  if (widget.categories.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    _sectionLabel('CATEGORY'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _chip(
-                          label: 'All',
-                          selected: _selectedCategoryId == null,
-                          onTap: () =>
-                              setState(() => _selectedCategoryId = null),
+                  const SizedBox(height: 20),
+                  _sectionLabel('CATEGORY'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      CategoryFilterChip(
+                        label: 'All',
+                        selected: _selectedCategoryIds.isEmpty,
+                        onTap: () =>
+                            setState(() => _selectedCategoryIds.clear()),
+                      ),
+                      CategoryFilterChip(
+                        label: 'Uncategorized',
+                        selected: _selectedCategoryIds.contains(
+                          uncategorizedCategoryFilterId,
                         ),
-                        for (final category in widget.categories)
-                          if (category.id != null)
-                            _chip(
-                              label: category.name,
-                              selected: _selectedCategoryId == category.id,
-                              onTap: () => setState(
-                                () => _selectedCategoryId = category.id,
-                              ),
+                        onTap: () => _toggleCategory(
+                          uncategorizedCategoryFilterId,
+                        ),
+                      ),
+                      for (final category in widget.categories)
+                        if (category.id != null)
+                          CategoryFilterChip(
+                            label: category.name,
+                            flow: category.flow,
+                            selected: _selectedCategoryIds.contains(
+                              category.id,
                             ),
-                      ],
-                    ),
-                  ],
+                            onTap: () => _toggleCategory(category.id!),
+                          ),
+                    ],
+                  ),
                   const SizedBox(height: 20),
                   _sectionLabel('AMOUNT RANGE'),
                   const SizedBox(height: 8),

@@ -271,14 +271,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return true;
   }
 
-  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
-    if (selection.isEmpty) return true;
-    if (categoryId == null) return selection.contains(null);
-    return selection.contains(categoryId);
-  }
-
   List<Transaction> _filterByCategorySelections(
     List<Transaction> transactions,
+    TransactionProvider provider,
   ) {
     if (_selectedIncomeCategoryIds.isEmpty &&
         _selectedExpenseCategoryIds.isEmpty) {
@@ -288,15 +283,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final filtered = <Transaction>[];
     for (final transaction in transactions) {
       if (transaction.type == 'CREDIT') {
-        if (_matchesCategorySelection(
-            transaction.categoryId, _selectedIncomeCategoryIds)) {
+        if (provider.matchesCategoryFilterSelection(
+          transaction,
+          _selectedIncomeCategoryIds,
+        )) {
           filtered.add(transaction);
         }
         continue;
       }
       if (transaction.type == 'DEBIT') {
-        if (_matchesCategorySelection(
-            transaction.categoryId, _selectedExpenseCategoryIds)) {
+        if (provider.matchesCategoryFilterSelection(
+          transaction,
+          _selectedExpenseCategoryIds,
+        )) {
           filtered.add(transaction);
         }
         continue;
@@ -676,8 +675,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           accountsByBank,
           selectedAccount,
         );
-        final categoryFilteredBase =
-            _filterByCategorySelections(baseFilteredTransactions);
+        final categoryFilteredBase = _filterByCategorySelections(
+          baseFilteredTransactions,
+          provider,
+        );
         final filteredTransactions =
             _filterByPeriod(categoryFilteredBase, baseDate);
         _pruneSelection(filteredTransactions
@@ -690,7 +691,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           provider,
         );
         final pnlTransactions = _filterByCategorySelections(
-            _filterTransactionsForPnl(allTransactions, selectedAccount));
+          _filterTransactionsForPnl(allTransactions, selectedAccount),
+          provider,
+        );
 
         final chartData =
             _getChartData(filteredTransactions, baseDate, provider);

@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
+import 'package:totals/_redesign/widgets/category_filter_chip.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/data/consts.dart';
@@ -33,6 +34,7 @@ import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/account_reconciliation.dart';
+import 'package:totals/utils/category_filter_utils.dart';
 import 'package:totals/utils/reconciliation_ledger_filter.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -254,7 +256,7 @@ extension on _AnalyticsChartSection {
       count++;
     }
     if (showsBankFilter && filter.bankId != null) count++;
-    if (showsCategoryFilter && filter.categoryId != null) count++;
+    if (showsCategoryFilter && filter.categoryIds.isNotEmpty) count++;
     if (showsDateRangeFilter &&
         (filter.startDate != null || filter.endDate != null)) {
       count++;
@@ -326,7 +328,8 @@ class _TransactionFilter {
   final int? bankId; // null = All Banks
   // null = all activity; otherwise a registered-account key or other:<bankId>.
   final String? accountKey;
-  final int? categoryId; // null = All Categories
+  // Empty = all categories; uncategorizedCategoryFilterId = none assigned.
+  final Set<int> categoryIds;
   final double? minAmount;
   final double? maxAmount;
   final DateTime? startDate;
@@ -336,18 +339,18 @@ class _TransactionFilter {
     this.type,
     this.bankId,
     this.accountKey,
-    this.categoryId,
+    Set<int> categoryIds = const <int>{},
     this.minAmount,
     this.maxAmount,
     this.startDate,
     this.endDate,
-  });
+  }) : categoryIds = Set<int>.unmodifiable(categoryIds);
 
   bool get isActive =>
       type != null ||
       bankId != null ||
       accountKey != null ||
-      categoryId != null ||
+      categoryIds.isNotEmpty ||
       minAmount != null ||
       maxAmount != null ||
       startDate != null ||
@@ -358,7 +361,7 @@ class _TransactionFilter {
     if (type != null) count++;
     if (bankId != null) count++;
     if (accountKey != null) count++;
-    if (categoryId != null) count++;
+    if (categoryIds.isNotEmpty) count++;
     if (minAmount != null || maxAmount != null) count++;
     if (startDate != null || endDate != null) count++;
     return count;
@@ -397,7 +400,8 @@ class _AnalyticsHeatmapFilter {
   final _AnalyticsHeatmapMode mode;
   final _AnalyticsBarChartPeriod barPeriod;
   final int? bankId;
-  final int? categoryId;
+  // Empty = all categories; uncategorizedCategoryFilterId = none assigned.
+  final Set<int> categoryIds;
   final DateTime? startDate;
   final DateTime? endDate;
 
@@ -405,7 +409,7 @@ class _AnalyticsHeatmapFilter {
     this.mode = _AnalyticsHeatmapMode.all,
     this.barPeriod = _AnalyticsBarChartPeriod.monthly,
     this.bankId,
-    this.categoryId,
+    this.categoryIds = const <int>{},
     this.startDate,
     this.endDate,
   });
@@ -414,7 +418,7 @@ class _AnalyticsHeatmapFilter {
       mode != _AnalyticsHeatmapMode.all ||
       barPeriod != _AnalyticsBarChartPeriod.monthly ||
       bankId != null ||
-      categoryId != null ||
+      categoryIds.isNotEmpty ||
       startDate != null ||
       endDate != null;
 
@@ -423,7 +427,7 @@ class _AnalyticsHeatmapFilter {
     if (mode != _AnalyticsHeatmapMode.all) count++;
     if (barPeriod != _AnalyticsBarChartPeriod.monthly) count++;
     if (bankId != null) count++;
-    if (categoryId != null) count++;
+    if (categoryIds.isNotEmpty) count++;
     if (startDate != null || endDate != null) count++;
     return count;
   }
@@ -433,8 +437,8 @@ class _AnalyticsHeatmapFilter {
     _AnalyticsBarChartPeriod? barPeriod,
     int? bankId,
     bool clearBankId = false,
-    int? categoryId,
-    bool clearCategoryId = false,
+    Set<int>? categoryIds,
+    bool clearCategoryIds = false,
     DateTime? startDate,
     bool clearStartDate = false,
     DateTime? endDate,
@@ -444,7 +448,8 @@ class _AnalyticsHeatmapFilter {
       mode: mode ?? this.mode,
       barPeriod: barPeriod ?? this.barPeriod,
       bankId: clearBankId ? null : (bankId ?? this.bankId),
-      categoryId: clearCategoryId ? null : (categoryId ?? this.categoryId),
+      categoryIds:
+          clearCategoryIds ? const <int>{} : (categoryIds ?? this.categoryIds),
       startDate: clearStartDate ? null : (startDate ?? this.startDate),
       endDate: clearEndDate ? null : (endDate ?? this.endDate),
     );
@@ -472,6 +477,11 @@ class _ProviderContentVersion {
   int get hashCode => Object.hash(dataVersion, isLoading);
 }
 
+String _categoryFilterCacheKey(Set<int> categoryIds) {
+  final orderedIds = categoryIds.toList(growable: true)..sort();
+  return orderedIds.join(',');
+}
+
 class _ActivityTransactionsViewCacheKey {
   final int dataVersion;
   final String calendar;
@@ -480,7 +490,7 @@ class _ActivityTransactionsViewCacheKey {
   final String? type;
   final int? bankId;
   final String? accountKey;
-  final int? categoryId;
+  final String categoryIdsKey;
   final double? minAmount;
   final double? maxAmount;
   final int? startDateMillis;
@@ -495,7 +505,7 @@ class _ActivityTransactionsViewCacheKey {
     required this.type,
     required this.bankId,
     required this.accountKey,
-    required this.categoryId,
+    required this.categoryIdsKey,
     required this.minAmount,
     required this.maxAmount,
     required this.startDateMillis,
@@ -514,7 +524,7 @@ class _ActivityTransactionsViewCacheKey {
         other.type == type &&
         other.bankId == bankId &&
         other.accountKey == accountKey &&
-        other.categoryId == categoryId &&
+        other.categoryIdsKey == categoryIdsKey &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
         other.startDateMillis == startDateMillis &&
@@ -531,7 +541,7 @@ class _ActivityTransactionsViewCacheKey {
       type,
       bankId,
       accountKey,
-      categoryId,
+      categoryIdsKey,
       minAmount,
       maxAmount,
       startDateMillis,
@@ -562,7 +572,7 @@ class _BankTransactionsViewCacheKey {
   final String searchQuery;
   final String? type;
   final String? accountKey;
-  final int? categoryId;
+  final String categoryIdsKey;
   final double? minAmount;
   final double? maxAmount;
   final int? startDateMillis;
@@ -577,7 +587,7 @@ class _BankTransactionsViewCacheKey {
     required this.searchQuery,
     required this.type,
     required this.accountKey,
-    required this.categoryId,
+    required this.categoryIdsKey,
     required this.minAmount,
     required this.maxAmount,
     required this.startDateMillis,
@@ -596,7 +606,7 @@ class _BankTransactionsViewCacheKey {
         other.searchQuery == searchQuery &&
         other.type == type &&
         other.accountKey == accountKey &&
-        other.categoryId == categoryId &&
+        other.categoryIdsKey == categoryIdsKey &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
         other.startDateMillis == startDateMillis &&
@@ -613,7 +623,7 @@ class _BankTransactionsViewCacheKey {
         searchQuery,
         type,
         accountKey,
-        categoryId,
+        categoryIdsKey,
         minAmount,
         maxAmount,
         startDateMillis,
@@ -1781,8 +1791,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   ) {
     return provider.allTransactions
         .where(
-          (transaction) =>
-              _matchesAnalyticsHeatmapFilterValue(transaction, filter),
+          (transaction) => _matchesAnalyticsHeatmapFilterValue(
+            transaction,
+            filter,
+            matchesCategoryFilters: provider.matchesCategoryFilterSelection,
+          ),
         )
         .toList(growable: false);
   }
@@ -1864,16 +1877,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final categoryIds = <int>{};
     for (final transaction in provider.allTransactions) {
       if (transaction.bankId != null) bankIds.add(transaction.bankId!);
-      if (transaction.categoryId != null) {
-        categoryIds.add(transaction.categoryId!);
-      }
+      categoryIds.addAll(provider.categoryIdsForFiltering(transaction));
     }
 
-    final categories = categoryIds
-        .map((id) => provider.getCategoryById(id))
-        .whereType<Category>()
-        .toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final categories = orderedCategoriesForFilter(
+      categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
     final selectedFilter = await showModalBottomSheet<_AnalyticsHeatmapFilter>(
       context: context,
       isScrollControlled: true,
@@ -2394,10 +2403,14 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
-  bool _matchesAnalyticsHeatmapFilter(Transaction transaction) {
+  bool _matchesAnalyticsHeatmapFilter(
+    Transaction transaction,
+    TransactionProvider provider,
+  ) {
     return _matchesAnalyticsHeatmapFilterValue(
       transaction,
       _analyticsHeatmapFilter,
+      matchesCategoryFilters: provider.matchesCategoryFilterSelection,
     );
   }
 
@@ -2409,6 +2422,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       day: day,
       allTransactions: provider.allTransactions,
       filter: _analyticsHeatmapFilter,
+      matchesCategoryFilters: provider.matchesCategoryFilterSelection,
     );
   }
 
@@ -2442,7 +2456,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
   List<Widget> _buildAnalyticsSlivers(TransactionProvider provider) {
     final heatmapTransactions = provider.allTransactions
-        .where(_matchesAnalyticsHeatmapFilter)
+        .where(
+          (transaction) =>
+              _matchesAnalyticsHeatmapFilter(transaction, provider),
+        )
         .toList(growable: false);
     final heatmapSnapshot = _buildAnalyticsSnapshot(
       provider,
@@ -3342,7 +3359,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       type: _filter.type,
       bankId: _filter.bankId,
       accountKey: _filter.accountKey,
-      categoryId: _filter.categoryId,
+      categoryIdsKey: _categoryFilterCacheKey(_filter.categoryIds),
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
       startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
@@ -3685,15 +3702,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final categoryIds = <int>{};
     for (final t in allTxns) {
       if (t.bankId != null) bankIds.add(t.bankId!);
-      if (t.categoryId != null) categoryIds.add(t.categoryId!);
+      categoryIds.addAll(provider.categoryIdsForFiltering(t));
     }
 
     // Build category list from IDs found in transactions.
-    final categories = categoryIds
-        .map((id) => provider.getCategoryById(id))
-        .whereType<Category>()
-        .toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final categories = orderedCategoriesForFilter(
+      categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
     final unmatchedBankIds = bankIds
         .where(
           (bankId) =>
@@ -3804,9 +3819,15 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
 
     // Category filter
-    if (_filter.categoryId != null) {
-      result =
-          result.where((t) => t.includesCategory(_filter.categoryId)).toList();
+    if (_filter.categoryIds.isNotEmpty) {
+      result = result
+          .where(
+            (transaction) => provider.matchesCategoryFilterSelection(
+              transaction,
+              _filter.categoryIds,
+            ),
+          )
+          .toList();
     }
 
     // Amount range filter
@@ -5019,8 +5040,9 @@ double? _parseRunningBalance(String? raw) {
 
 bool _matchesAnalyticsHeatmapFilterValue(
   Transaction transaction,
-  _AnalyticsHeatmapFilter filter,
-) {
+  _AnalyticsHeatmapFilter filter, {
+  bool Function(Transaction, Set<int>)? matchesCategoryFilters,
+}) {
   final dt = _parseTransactionTime(transaction.time);
 
   switch (filter.mode) {
@@ -5037,8 +5059,10 @@ bool _matchesAnalyticsHeatmapFilterValue(
   if (filter.bankId != null && transaction.bankId != filter.bankId) {
     return false;
   }
-  if (filter.categoryId != null &&
-      !transaction.includesCategory(filter.categoryId)) {
+  final matchesCategorySelection = matchesCategoryFilters == null
+      ? matchesTransactionCategoryFilters(transaction, filter.categoryIds)
+      : matchesCategoryFilters(transaction, filter.categoryIds);
+  if (!matchesCategorySelection) {
     return false;
   }
   if (filter.startDate != null) {
@@ -5064,6 +5088,7 @@ List<Transaction> _transactionsForHeatmapDayWithFilter({
   required DateTime day,
   required List<Transaction> allTransactions,
   required _AnalyticsHeatmapFilter filter,
+  bool Function(Transaction, Set<int>)? matchesCategoryFilters,
 }) {
   final start = DateTime(day.year, day.month, day.day);
   final end = start.add(const Duration(days: 1));
@@ -5071,7 +5096,11 @@ List<Transaction> _transactionsForHeatmapDayWithFilter({
     final dt = _parseTransactionTime(transaction.time);
     if (dt == null) return false;
     if (dt.isBefore(start) || !dt.isBefore(end)) return false;
-    return _matchesAnalyticsHeatmapFilterValue(transaction, filter);
+    return _matchesAnalyticsHeatmapFilterValue(
+      transaction,
+      filter,
+      matchesCategoryFilters: matchesCategoryFilters,
+    );
   }).toList()
     ..sort((a, b) {
       final aTime = _parseTransactionTime(a.time);
@@ -12663,15 +12692,12 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   ) {
     final categoryIds = <int>{};
     for (final transaction in transactions) {
-      categoryIds.addAll(transaction.selectedCategoryIds);
+      categoryIds.addAll(provider.categoryIdsForFiltering(transaction));
     }
 
-    final categories = categoryIds
-        .map((id) => provider.getCategoryById(id))
-        .whereType<Category>()
-        .toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
-    return categories;
+    return orderedCategoriesForFilter(
+      categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
   }
 
   Future<void> _openFilterSheet(TransactionProvider provider) async {
@@ -12730,9 +12756,15 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
           .toList();
     }
 
-    if (_filter.categoryId != null) {
-      result =
-          result.where((t) => t.includesCategory(_filter.categoryId)).toList();
+    if (_filter.categoryIds.isNotEmpty) {
+      result = result
+          .where(
+            (transaction) => provider.matchesCategoryFilterSelection(
+              transaction,
+              _filter.categoryIds,
+            ),
+          )
+          .toList();
     }
 
     if (_filter.minAmount != null) {
@@ -12820,7 +12852,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       searchQuery: _searchQuery,
       type: _filter.type,
       accountKey: _filter.accountKey,
-      categoryId: _filter.categoryId,
+      categoryIdsKey: _categoryFilterCacheKey(_filter.categoryIds),
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
       startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
@@ -14305,6 +14337,7 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
       day: date,
       allTransactions: provider.allTransactions,
       filter: filter,
+      matchesCategoryFilters: provider.matchesCategoryFilterSelection,
     );
     final derivedBalancesByReference = _deriveCashBalancesByReference(
       allTxns: provider.allTransactions,
@@ -18977,7 +19010,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   late String? _selectedType;
   late int? _selectedBankId;
   late String? _selectedAccountKey;
-  late int? _selectedCategoryId;
+  late Set<int> _selectedCategoryIds;
   late final TextEditingController _minAmountController;
   late final TextEditingController _maxAmountController;
   String? _amountErrorText;
@@ -18994,7 +19027,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
         currentAccountKey != null && _accountKeyIsVisible(currentAccountKey)
             ? currentAccountKey
             : null;
-    _selectedCategoryId = widget.currentFilter.categoryId;
+    _selectedCategoryIds = <int>{...widget.currentFilter.categoryIds};
     _minAmountController = TextEditingController(
       text: _formatAmountInput(widget.currentFilter.minAmount),
     );
@@ -19012,12 +19045,20 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     super.dispose();
   }
 
+  void _toggleCategory(int categoryId) {
+    setState(() {
+      if (!_selectedCategoryIds.add(categoryId)) {
+        _selectedCategoryIds.remove(categoryId);
+      }
+    });
+  }
+
   void _clearAll() {
     setState(() {
       _selectedType = null;
       _selectedBankId = null;
       _selectedAccountKey = null;
-      _selectedCategoryId = null;
+      _selectedCategoryIds.clear();
       _minAmountController.clear();
       _maxAmountController.clear();
       _amountErrorText = null;
@@ -19048,7 +19089,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
         type: _selectedType,
         bankId: _selectedBankId,
         accountKey: _selectedAccountKey,
-        categoryId: _selectedCategoryId,
+        categoryIds: Set<int>.unmodifiable(_selectedCategoryIds),
         minAmount: minAmount,
         maxAmount: maxAmount,
         startDate: _startDate,
@@ -19380,46 +19421,58 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                     ),
                   ],
 
-                  if (widget.categories.isNotEmpty) ...[
-                    const SizedBox(height: 20),
+                  const SizedBox(height: 20),
 
-                    // ── CATEGORY ──
-                    _sectionLabel('CATEGORY'),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      // Break out of parent horizontal padding so the
-                      // scroll starts and ends edge-to-edge.
-                      width: MediaQuery.of(context).size.width,
-                      child: Transform.translate(
-                        offset: const Offset(-20, 0),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Row(
-                            children: [
-                              _FilterChip(
-                                label: 'All',
-                                selected: _selectedCategoryId == null,
-                                onTap: () =>
-                                    setState(() => _selectedCategoryId = null),
+                  // ── CATEGORY ──
+                  _sectionLabel('CATEGORY'),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    // Break out of parent horizontal padding so the
+                    // scroll starts and ends edge-to-edge.
+                    width: MediaQuery.of(context).size.width,
+                    child: Transform.translate(
+                      offset: const Offset(-20, 0),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Row(
+                          children: [
+                            CategoryFilterChip(
+                              label: 'All',
+                              selected: _selectedCategoryIds.isEmpty,
+                              onTap: () =>
+                                  setState(() => _selectedCategoryIds.clear()),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: CategoryFilterChip(
+                                label: 'Uncategorized',
+                                selected: _selectedCategoryIds.contains(
+                                  uncategorizedCategoryFilterId,
+                                ),
+                                onTap: () => _toggleCategory(
+                                  uncategorizedCategoryFilterId,
+                                ),
                               ),
-                              for (final cat in widget.categories)
-                                if (cat.id != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 8),
-                                    child: _FilterChip(
-                                      label: cat.name,
-                                      selected: _selectedCategoryId == cat.id,
-                                      onTap: () => setState(
-                                          () => _selectedCategoryId = cat.id),
+                            ),
+                            for (final category in widget.categories)
+                              if (category.id != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: CategoryFilterChip(
+                                    label: category.name,
+                                    flow: category.flow,
+                                    selected: _selectedCategoryIds.contains(
+                                      category.id,
                                     ),
+                                    onTap: () => _toggleCategory(category.id!),
                                   ),
-                            ],
-                          ),
+                                ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
+                  ),
 
                   const SizedBox(height: 20),
 
@@ -19987,7 +20040,7 @@ class _AnalyticsChartFilterSheetState
   late _AnalyticsHeatmapMode _selectedMode;
   late _AnalyticsBarChartPeriod _selectedBarPeriod;
   late int? _selectedBankId;
-  late int? _selectedCategoryId;
+  late Set<int> _selectedCategoryIds;
   DateTime? _startDate;
   DateTime? _endDate;
 
@@ -19997,9 +20050,17 @@ class _AnalyticsChartFilterSheetState
     _selectedMode = widget.currentFilter.mode;
     _selectedBarPeriod = widget.currentFilter.barPeriod;
     _selectedBankId = widget.currentFilter.bankId;
-    _selectedCategoryId = widget.currentFilter.categoryId;
+    _selectedCategoryIds = <int>{...widget.currentFilter.categoryIds};
     _startDate = widget.currentFilter.startDate;
     _endDate = widget.currentFilter.endDate;
+  }
+
+  void _toggleCategory(int categoryId) {
+    setState(() {
+      if (!_selectedCategoryIds.add(categoryId)) {
+        _selectedCategoryIds.remove(categoryId);
+      }
+    });
   }
 
   void _clearAll() {
@@ -20014,7 +20075,7 @@ class _AnalyticsChartFilterSheetState
         _selectedBankId = null;
       }
       if (widget.chartSection.showsCategoryFilter) {
-        _selectedCategoryId = null;
+        _selectedCategoryIds.clear();
       }
       if (widget.chartSection.showsDateRangeFilter) {
         _startDate = null;
@@ -20033,9 +20094,9 @@ class _AnalyticsChartFilterSheetState
             ? _selectedBarPeriod
             : widget.currentFilter.barPeriod,
         bankId: widget.chartSection.showsBankFilter ? _selectedBankId : null,
-        categoryId: widget.chartSection.showsCategoryFilter
-            ? _selectedCategoryId
-            : null,
+        categoryIds: widget.chartSection.showsCategoryFilter
+            ? Set<int>.unmodifiable(_selectedCategoryIds)
+            : const <int>{},
         startDate: widget.chartSection.showsDateRangeFilter
             ? _startDate
             : widget.currentFilter.startDate,
@@ -20096,8 +20157,7 @@ class _AnalyticsChartFilterSheetState
     final navBarPadding = MediaQuery.of(context).padding.bottom;
     final showsBankSection =
         widget.chartSection.showsBankFilter && widget.bankIds.isNotEmpty;
-    final showsCategorySection =
-        widget.chartSection.showsCategoryFilter && widget.categories.isNotEmpty;
+    final showsCategorySection = widget.chartSection.showsCategoryFilter;
 
     return Container(
       constraints: BoxConstraints(
@@ -20315,24 +20375,37 @@ class _AnalyticsChartFilterSheetState
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Row(
                             children: [
-                              _FilterChip(
+                              CategoryFilterChip(
                                 label: 'All',
-                                selected: _selectedCategoryId == null,
+                                selected: _selectedCategoryIds.isEmpty,
                                 onTap: () => setState(
-                                  () => _selectedCategoryId = null,
+                                  () => _selectedCategoryIds.clear(),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: CategoryFilterChip(
+                                  label: 'Uncategorized',
+                                  selected: _selectedCategoryIds.contains(
+                                    uncategorizedCategoryFilterId,
+                                  ),
+                                  onTap: () => _toggleCategory(
+                                    uncategorizedCategoryFilterId,
+                                  ),
                                 ),
                               ),
                               for (final category in widget.categories)
                                 if (category.id != null)
                                   Padding(
                                     padding: const EdgeInsets.only(left: 8),
-                                    child: _FilterChip(
+                                    child: CategoryFilterChip(
                                       label: category.name,
-                                      selected:
-                                          _selectedCategoryId == category.id,
-                                      onTap: () => setState(
-                                        () => _selectedCategoryId = category.id,
+                                      flow: category.flow,
+                                      selected: _selectedCategoryIds.contains(
+                                        category.id,
                                       ),
+                                      onTap: () =>
+                                          _toggleCategory(category.id!),
                                     ),
                                   ),
                             ],

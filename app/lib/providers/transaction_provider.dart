@@ -29,6 +29,7 @@ import 'package:totals/utils/account_reconciliation.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/auto_categorization_rules_share_payload.dart';
+import 'package:totals/utils/category_filter_utils.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/text_utils.dart';
@@ -543,6 +544,45 @@ class TransactionProvider with ChangeNotifier {
 
   bool isSelfTransfer(Transaction transaction) {
     return _isSelfTransfer(transaction);
+  }
+
+  List<int> categoryIdsForFiltering(Transaction transaction) {
+    final categoryIds = transaction.selectedCategoryIds.toSet();
+    if (!_isSelfTransfer(transaction)) {
+      return List<int>.unmodifiable(categoryIds);
+    }
+
+    final transactionFlow = switch (transaction.type?.trim().toUpperCase()) {
+      'CREDIT' => 'income',
+      'DEBIT' => 'expense',
+      _ => null,
+    };
+    for (final category in _categories) {
+      final categoryId = category.id;
+      if (categoryId == null || !isSelfCategoryFilter(category)) continue;
+      if (transactionFlow != null &&
+          category.flow.trim().toLowerCase() != transactionFlow) {
+        continue;
+      }
+      categoryIds.add(categoryId);
+    }
+    return List<int>.unmodifiable(categoryIds);
+  }
+
+  bool matchesCategoryFilterSelection(
+    Transaction transaction,
+    Iterable<int?> selectedCategoryIds,
+  ) {
+    final isSelfTransfer = _isSelfTransfer(transaction);
+    final normalizedSelection = selectedCategoryIds
+        .map((categoryId) => categoryId ?? uncategorizedCategoryFilterId)
+        .toSet();
+    return matchesTransactionCategoryFilters(
+      transaction,
+      normalizedSelection,
+      effectiveCategoryIds: categoryIdsForFiltering(transaction),
+      hasDerivedCategory: isSelfTransfer,
+    );
   }
 
   bool isReimbursementTransaction(Transaction transaction) {

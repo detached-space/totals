@@ -164,24 +164,25 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
-    if (selection.isEmpty) return true;
-    if (categoryId == null) return selection.contains(null);
-    return selection.contains(categoryId);
-  }
-
-  bool _matchesCategoryFilter(Transaction transaction) {
+  bool _matchesCategoryFilter(
+    Transaction transaction,
+    TransactionProvider provider,
+  ) {
     if (_selectedIncomeCategoryIds.isEmpty &&
         _selectedExpenseCategoryIds.isEmpty) {
       return true;
     }
     if (transaction.type == 'CREDIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedIncomeCategoryIds);
+      return provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedIncomeCategoryIds,
+      );
     }
     if (transaction.type == 'DEBIT') {
-      return _matchesCategorySelection(
-          transaction.categoryId, _selectedExpenseCategoryIds);
+      return provider.matchesCategoryFilterSelection(
+        transaction,
+        _selectedExpenseCategoryIds,
+      );
     }
     return true;
   }
@@ -516,8 +517,11 @@ class _AccountDetailPageState extends State<AccountDetailPage> {
       }
 
       // Apply Category Filters
-      visibleTransaction =
-          visibleTransaction.where(_matchesCategoryFilter).toList();
+      visibleTransaction = visibleTransaction
+          .where(
+            (transaction) => _matchesCategoryFilter(transaction, provider),
+          )
+          .toList();
 
       // Sort by date desc
       visibleTransaction.sort((a, b) =>
