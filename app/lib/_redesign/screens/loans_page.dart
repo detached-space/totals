@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -70,10 +71,12 @@ Future<void> openLoansPersonPage({
 
 class LoansPage extends StatefulWidget {
   final String? initialPersonName;
+  final LoanDebtRepository? repository;
 
   const LoansPage({
     super.key,
     this.initialPersonName,
+    this.repository,
   });
 
   @override
@@ -83,6 +86,8 @@ class LoansPage extends StatefulWidget {
 enum _LoanDebtTransactionFilter { all, lent, borrowed }
 
 enum _LoanDebtStatusFilter { all, active, settled, forgiven }
+
+enum _LoansMainTab { people, linked, unlinked }
 
 class _LoanDebtFilterSelection {
   final _LoanDebtTransactionFilter transactionFilter;
@@ -118,9 +123,27 @@ class _LoanDebtFilterSelection {
 }
 
 class _LoansPageState extends State<LoansPage> {
-  final LoanDebtRepository _repository = LoanDebtRepository();
+  static const int _transactionsBatchSize = 20;
+
+  late final LoanDebtRepository _repository;
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _overviewKey = GlobalKey();
+  final TextEditingController _linkedSearchController = TextEditingController();
+  final TextEditingController _unlinkedSearchController =
+      TextEditingController();
+  final ValueNotifier<bool> _showPinnedHeaderDivider =
+      ValueNotifier<bool>(false);
   late Future<_LoanDebtData> _loanDebtDataFuture;
   late String? _pendingInitialPersonName;
+  _LoansMainTab _selectedMainTab = _LoansMainTab.people;
+  String _linkedSearchQuery = '';
+  String _unlinkedSearchQuery = '';
+  int _linkedVisibleCount = _transactionsBatchSize;
+  int _unlinkedVisibleCount = _transactionsBatchSize;
+  int _linkedAvailableCount = 0;
+  int _unlinkedAvailableCount = 0;
+  bool _isAppendingTransactions = false;
+  bool _loadMoreCheckScheduled = false;
   String? _selectedPerson;
   _LoanDebtTransactionFilter _transactionFilter =
       _LoanDebtTransactionFilter.all;
@@ -141,6 +164,7 @@ class _LoansPageState extends State<LoansPage> {
   @override
   void initState() {
     super.initState();
+    _repository = widget.repository ?? LoanDebtRepository();
     _pendingInitialPersonName = normalizeLoanDebtPersonName(
       widget.initialPersonName ?? '',
     );
@@ -148,6 +172,94 @@ class _LoansPageState extends State<LoansPage> {
       _pendingInitialPersonName = null;
     }
     _loanDebtDataFuture = _loadLoanDebtData();
+    _scrollController.addListener(_handleScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _syncPinnedHeaderDivider();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
+    _linkedSearchController.dispose();
+    _unlinkedSearchController.dispose();
+    _showPinnedHeaderDivider.dispose();
+    super.dispose();
+  }
+
+  double get _pinnedHeaderStartOffset {
+    final renderObject = _overviewKey.currentContext?.findRenderObject();
+    if (renderObject is RenderBox && renderObject.hasSize) {
+      return renderObject.size.height;
+    }
+    return double.infinity;
+  }
+
+  void _syncPinnedHeaderDivider([double? offset]) {
+    final pixels =
+        offset ?? (_scrollController.hasClients ? _scrollController.offset : 0);
+    final shouldShow = pixels > _pinnedHeaderStartOffset;
+    if (_showPinnedHeaderDivider.value == shouldShow) return;
+    _showPinnedHeaderDivider.value = shouldShow;
+  }
+
+  void _handleScroll() {
+    _syncPinnedHeaderDivider();
+    if (_isNearTransactionListEnd) {
+      _scheduleLoadMoreCheck();
+    }
+  }
+
+  bool get _isNearTransactionListEnd {
+    if (!_scrollController.hasClients ||
+        _selectedMainTab == _LoansMainTab.people) {
+      return false;
+    }
+    final position = _scrollController.position;
+    final loadThreshold = math.max(320.0, position.viewportDimension * 0.75);
+    return position.extentAfter <= loadThreshold;
+  }
+
+  void _scheduleLoadMoreCheck() {
+    if (_loadMoreCheckScheduled) return;
+    _loadMoreCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadMoreCheckScheduled = false;
+      if (!mounted) return;
+      _loadMoreTransactionsIfNeeded();
+    });
+  }
+
+  void _loadMoreTransactionsIfNeeded() {
+    if (_isAppendingTransactions || !_isNearTransactionListEnd) {
+      return;
+    }
+
+    final isLinked = _selectedMainTab == _LoansMainTab.linked;
+    final visibleCount = isLinked ? _linkedVisibleCount : _unlinkedVisibleCount;
+    final availableCount =
+        isLinked ? _linkedAvailableCount : _unlinkedAvailableCount;
+    if (visibleCount >= availableCount) return;
+
+    _isAppendingTransactions = true;
+    setState(() {
+      final nextVisibleCount = math.min(
+        visibleCount + _transactionsBatchSize,
+        availableCount,
+      );
+      if (isLinked) {
+        _linkedVisibleCount = nextVisibleCount;
+      } else {
+        _unlinkedVisibleCount = nextVisibleCount;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isAppendingTransactions = false;
+      if (!mounted) return;
+      _scheduleLoadMoreCheck();
+    });
   }
 
   Future<_LoanDebtData> _loadLoanDebtData() async {
@@ -275,6 +387,7 @@ class _LoansPageState extends State<LoansPage> {
       _maxAmount = selected.maxAmount;
       _startDate = selected.startDate;
       _endDate = selected.endDate;
+      _linkedVisibleCount = _transactionsBatchSize;
     });
   }
 
@@ -306,6 +419,39 @@ class _LoansPageState extends State<LoansPage> {
       _unassignedMaxAmount = selected.maxAmount;
       _unassignedStartDate = selected.startDate;
       _unassignedEndDate = selected.endDate;
+      _unlinkedVisibleCount = _transactionsBatchSize;
+    });
+  }
+
+  void _selectMainTab(_LoansMainTab tab) {
+    if (_selectedMainTab == tab) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _selectedMainTab = tab);
+    HapticFeedback.selectionClick();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _syncPinnedHeaderDivider();
+    });
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  void _setLinkedSearchQuery(String value) {
+    setState(() {
+      _linkedSearchQuery = value;
+      _linkedVisibleCount = _transactionsBatchSize;
+    });
+  }
+
+  void _setUnlinkedSearchQuery(String value) {
+    setState(() {
+      _unlinkedSearchQuery = value;
+      _unlinkedVisibleCount = _transactionsBatchSize;
     });
   }
 
@@ -369,6 +515,7 @@ class _LoansPageState extends State<LoansPage> {
     await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
+      enableDrag: true,
       backgroundColor: Colors.transparent,
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _LoanDebtDetailsSheet(
@@ -380,6 +527,269 @@ class _LoansPageState extends State<LoansPage> {
     _refreshEntries();
   }
 
+  bool _matchesLinkedSearch(
+    _LoanDebtTimelineRow row,
+    TransactionProvider provider,
+  ) {
+    final loanDebtItem = row.loanDebtItem;
+    final repaymentItem = row.repaymentItem;
+    final transaction = loanDebtItem?.transaction ?? repaymentItem!.transaction;
+    final direction = loanDebtItem?.direction ?? repaymentItem!.direction;
+    final status = loanDebtItem?.status ?? repaymentItem!.status;
+    final personName = loanDebtItem?.personName ?? repaymentItem!.personName;
+
+    return _matchesLoanDebtSearch(
+      provider: provider,
+      transaction: transaction,
+      query: _linkedSearchQuery,
+      extraValues: [
+        personName,
+        direction.storageValue,
+        _loanDebtDirectionLabel(context, direction),
+        status.storageValue,
+        _loanDebtStatusLabel(context, status),
+        loanDebtItem?.dateLabel(context) ?? repaymentItem!.dateLabel(context),
+        loanDebtItem?.timeLabel(context) ?? repaymentItem!.timeLabel(context),
+        '${loanDebtItem?.amount ?? repaymentItem!.amount}',
+        if (repaymentItem != null) ...[
+          'repayment',
+          context.l10nText('Repayment'),
+        ],
+      ],
+    );
+  }
+
+  bool _matchesUnlinkedSearch(
+    _LoanDebtItem item,
+    TransactionProvider provider,
+  ) {
+    return _matchesLoanDebtSearch(
+      provider: provider,
+      transaction: item.transaction,
+      query: _unlinkedSearchQuery,
+      extraValues: [
+        item.direction.storageValue,
+        _loanDebtDirectionLabel(context, item.direction),
+        item.status.storageValue,
+        _loanDebtStatusLabel(context, item.status),
+        item.dateLabel(context),
+        item.timeLabel(context),
+        '${item.amount}',
+        context.l10nText('Needs a person'),
+      ],
+    );
+  }
+
+  Widget _buildPinnedHeader({
+    required List<_LoanDebtPersonSummary> people,
+    required List<int> assignedBankIds,
+    required List<int> unassignedBankIds,
+    required int linkedResultCount,
+    required int linkedTotalCount,
+    required int unlinkedResultCount,
+    required int unlinkedTotalCount,
+  }) {
+    final isLinked = _selectedMainTab == _LoansMainTab.linked;
+    final isUnlinked = _selectedMainTab == _LoansMainTab.unlinked;
+    final isSearchable = isLinked || isUnlinked;
+    final resultCount = isLinked ? linkedResultCount : unlinkedResultCount;
+    final totalCount = isLinked ? linkedTotalCount : unlinkedTotalCount;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(color: AppColors.background(context)),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _LoansMainTabBar(
+                  selectedTab: _selectedMainTab,
+                  onTabChanged: _selectMainTab,
+                ),
+                if (isSearchable) ...[
+                  const SizedBox(height: 12),
+                  _LoanDebtSearchFilterRow(
+                    key: ValueKey<_LoansMainTab>(_selectedMainTab),
+                    controller: isLinked
+                        ? _linkedSearchController
+                        : _unlinkedSearchController,
+                    onChanged: isLinked
+                        ? _setLinkedSearchQuery
+                        : _setUnlinkedSearchQuery,
+                    onFilterTap: isLinked
+                        ? () => _openTransactionFilterSheet(
+                              people: people,
+                              bankIds: assignedBankIds,
+                            )
+                        : () => _openUnassignedTransactionFilterSheet(
+                              bankIds: unassignedBankIds,
+                            ),
+                    activeFilterCount: isLinked
+                        ? _assignedFilterSelection.activeCount
+                        : _unassignedFilterSelection.activeCount,
+                  ),
+                  const SizedBox(height: 10),
+                  _LoanDebtResultsSummary(
+                    linked: isLinked,
+                    resultCount: resultCount,
+                    totalCount: totalCount,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _showPinnedHeaderDivider,
+                builder: (context, showDivider, child) => AnimatedOpacity(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  opacity: showDivider ? 1 : 0,
+                  child: child,
+                ),
+                child: Container(
+                  height: 1,
+                  color: AppColors.borderColor(context),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildPeopleTab({
+    required BuildContext context,
+    required _LoanDebtDashboard dashboard,
+    required List<_LoanDebtPersonSummary> people,
+  }) {
+    if (people.isEmpty) {
+      final hasUnlinkedTransactions = dashboard.unassignedItems.isNotEmpty;
+      return [
+        _EmptyPanel(
+          icon: hasUnlinkedTransactions
+              ? AppIcons.person_outline
+              : AppIcons.debts,
+          title: context.l10nText(
+            hasUnlinkedTransactions ? 'No people yet' : 'No loans or debts yet',
+          ),
+          subtitle: context.l10nText(
+            hasUnlinkedTransactions
+                ? 'Assign a person to an unlinked loan or debt to see them here.'
+                : 'Categorize a transaction as Loan or Debt to track who it belongs to.',
+          ),
+        ),
+      ];
+    }
+
+    return [
+      _SectionHeader(
+        title: context.l10nText('People'),
+        subtitle: context.l10nText('Current balances'),
+      ),
+      const SizedBox(height: 10),
+      for (final person in people)
+        _PersonBalanceTile(
+          person: person,
+          onTap: () => _openPersonPage(
+            person: person,
+            items: dashboard.itemsForPerson(person.name),
+            repaymentItems: dashboard.repaymentsForPerson(person.name),
+          ),
+        ),
+    ];
+  }
+
+  List<Widget> _buildLinkedTab({
+    required BuildContext context,
+    required _LoanDebtDashboard dashboard,
+    required List<_LoanDebtTimelineRow> items,
+  }) {
+    final hasLinkedTransactions = dashboard.assignedItems.isNotEmpty ||
+        dashboard.repaymentItems.isNotEmpty;
+    final isNarrowed = _assignedFilterSelection.activeCount > 0 ||
+        _linkedSearchQuery.trim().isNotEmpty;
+
+    return [
+      if (items.isEmpty)
+        _EmptyPanel(
+          icon: isNarrowed ? AppIcons.filter_list : AppIcons.debts,
+          title: context.l10nText(
+            isNarrowed || hasLinkedTransactions
+                ? 'No matching transactions'
+                : 'No linked transactions yet',
+          ),
+          subtitle: context.l10nText(
+            isNarrowed || hasLinkedTransactions
+                ? 'Change the filter or choose another person.'
+                : 'Assign a person to an unlinked loan or debt to see it here.',
+          ),
+        )
+      else
+        for (final section in _loanDebtTimelineSections(items)) ...[
+          _LoanDebtDayHeader(date: section.date),
+          for (final row in section.rows)
+            if (row.loanDebtItem != null)
+              _LoanDebtTransactionTile(
+                item: row.loanDebtItem!,
+                onTap: () => _openLoanDebtDetailsSheet(row.loanDebtItem!),
+              )
+            else
+              _LoanDebtRepaymentTile(
+                item: row.repaymentItem!,
+                onTap: () => _openRepaymentLinkSheet(row.repaymentItem!),
+              ),
+        ],
+    ];
+  }
+
+  List<Widget> _buildUnlinkedTab({
+    required BuildContext context,
+    required List<_LoanDebtItem> items,
+  }) {
+    final isNarrowed = _unassignedFilterSelection.activeCount > 0 ||
+        _unlinkedSearchQuery.trim().isNotEmpty;
+
+    return [
+      if (items.isEmpty)
+        _EmptyPanel(
+          icon:
+              isNarrowed ? AppIcons.filter_list : AppIcons.check_circle_rounded,
+          title: context.l10nText(
+            isNarrowed
+                ? 'No matching transactions'
+                : 'No unlinked transactions',
+          ),
+          subtitle: context.l10nText(
+            isNarrowed
+                ? 'Change the filter to see other unlinked debts and loans.'
+                : 'Every loan and debt has been assigned to a person.',
+          ),
+        )
+      else
+        for (final section in _loanDebtTimelineSections(
+          _loanDebtTimelineRows(
+            loanDebtItems: items,
+            repaymentItems: const <_LoanDebtRepaymentItem>[],
+          ),
+        )) ...[
+          _LoanDebtDayHeader(date: section.date),
+          for (final row in section.rows)
+            _UnassignedLoanDebtTile(
+              item: row.loanDebtItem!,
+              onTap: () => _openLoanDebtDetailsSheet(row.loanDebtItem!),
+            ),
+        ],
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TransactionProvider>();
@@ -387,173 +797,148 @@ class _LoansPageState extends State<LoansPage> {
     return Scaffold(
       backgroundColor: AppColors.background(context),
       body: SafeArea(
-        child: FutureBuilder<_LoanDebtData>(
-          future: _loanDebtDataFuture,
-          builder: (context, snapshot) {
-            final data = snapshot.data ?? const _LoanDebtData.empty();
-            final dashboard = _LoanDebtDashboard.from(
-              transactions: provider.allTransactions,
-              categories: provider.categories,
-              entries: data.entries,
-              repayments: data.repayments,
-            );
-            final people = dashboard.people;
-            _openPendingInitialPersonPage(dashboard);
-            final selectedPerson = _selectedPerson;
-            final visibleItems = selectedPerson == null
-                ? dashboard.assignedItems
-                : dashboard.assignedItems
-                    .where((item) => item.personName == selectedPerson)
-                    .toList(growable: false);
-            final visibleRepaymentItems = selectedPerson == null
-                ? dashboard.repaymentItems
-                : dashboard.repaymentItems
-                    .where((item) => item.personName == selectedPerson)
-                    .toList(growable: false);
-            final filteredVisibleItems = _filterItems(visibleItems);
-            final filteredVisibleRepaymentItems =
-                _filterRepaymentItems(visibleRepaymentItems);
-            final timelineRows = _loanDebtTimelineRows(
-              loanDebtItems: filteredVisibleItems,
-              repaymentItems: filteredVisibleRepaymentItems,
-            );
-            final filteredUnassignedItems = _filteredLoanDebtItems(
-              dashboard.unassignedItems,
-              _unassignedTransactionFilter,
-              bankId: _unassignedBankId,
-              minAmount: _unassignedMinAmount,
-              maxAmount: _unassignedMaxAmount,
-              startDate: _unassignedStartDate,
-              endDate: _unassignedEndDate,
-            );
-            final assignedBankIds = _bankIdsForTimelineRows(
-              items: dashboard.assignedItems,
-              repaymentItems: dashboard.repaymentItems,
-            );
-            final unassignedBankIds =
-                _bankIdsForItems(dashboard.unassignedItems);
-
-            return RefreshIndicator(
-              onRefresh: () async {
-                await provider.loadData();
-                _refreshEntries();
-                await _loanDebtDataFuture;
-              },
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-                children: [
-                  const _LoansHeader(),
-                  const SizedBox(height: 18),
-                  _LoansSummaryRow(dashboard: dashboard),
-                  const SizedBox(height: 18),
-                  if (dashboard.hasAnyLoanDebtTransaction) ...[
-                    if (people.isNotEmpty) ...[
-                      _SectionHeader(
-                        title: context.l10nText('People'),
-                        subtitle: context.l10nText('Current balances'),
-                      ),
-                      const SizedBox(height: 10),
-                      for (final person in people)
-                        _PersonBalanceTile(
-                          person: person,
-                          onTap: () => _openPersonPage(
-                            person: person,
-                            items: dashboard.itemsForPerson(person.name),
-                            repaymentItems:
-                                dashboard.repaymentsForPerson(person.name),
-                          ),
-                        ),
-                      const SizedBox(height: 12),
-                    ],
-                    _TransactionsHeader(
-                      title: context.l10nText('Transactions'),
-                      subtitle: selectedPerson ??
-                          context.l10nText(
-                            'Linked loans, debts, and repayments',
-                          ),
-                      activeFilterCount: _assignedFilterSelection.activeCount,
-                      onFilterTap: () => _openTransactionFilterSheet(
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
+              child: _LoansHeader(),
+            ),
+            Expanded(
+              child: FutureBuilder<_LoanDebtData>(
+                future: _loanDebtDataFuture,
+                builder: (context, snapshot) {
+                  final data = snapshot.data ?? const _LoanDebtData.empty();
+                  final dashboard = _LoanDebtDashboard.from(
+                    transactions: provider.allTransactions,
+                    categories: provider.categories,
+                    entries: data.entries,
+                    repayments: data.repayments,
+                  );
+                  final people = dashboard.people;
+                  _openPendingInitialPersonPage(dashboard);
+                  final selectedPerson = _selectedPerson;
+                  final visibleItems = selectedPerson == null
+                      ? dashboard.assignedItems
+                      : dashboard.assignedItems
+                          .where((item) => item.personName == selectedPerson)
+                          .toList(growable: false);
+                  final visibleRepaymentItems = selectedPerson == null
+                      ? dashboard.repaymentItems
+                      : dashboard.repaymentItems
+                          .where((item) => item.personName == selectedPerson)
+                          .toList(growable: false);
+                  final filteredVisibleItems = _filterItems(visibleItems);
+                  final filteredVisibleRepaymentItems =
+                      _filterRepaymentItems(visibleRepaymentItems);
+                  final timelineRows = _loanDebtTimelineRows(
+                    loanDebtItems: filteredVisibleItems,
+                    repaymentItems: filteredVisibleRepaymentItems,
+                  );
+                  final searchedTimelineRows = timelineRows
+                      .where((row) => _matchesLinkedSearch(row, provider))
+                      .toList(growable: false);
+                  _linkedAvailableCount = searchedTimelineRows.length;
+                  final linkedItems = _visibleLoanDebtItems(
+                    searchedTimelineRows,
+                    visibleCount: _linkedVisibleCount,
+                  );
+                  final filteredUnassignedItems = _filteredLoanDebtItems(
+                    dashboard.unassignedItems,
+                    _unassignedTransactionFilter,
+                    bankId: _unassignedBankId,
+                    minAmount: _unassignedMinAmount,
+                    maxAmount: _unassignedMaxAmount,
+                    startDate: _unassignedStartDate,
+                    endDate: _unassignedEndDate,
+                  );
+                  final searchedUnassignedItems = filteredUnassignedItems
+                      .where((item) => _matchesUnlinkedSearch(item, provider))
+                      .toList(growable: false);
+                  _unlinkedAvailableCount = searchedUnassignedItems.length;
+                  final unlinkedItems = _visibleLoanDebtItems(
+                    searchedUnassignedItems,
+                    visibleCount: _unlinkedVisibleCount,
+                  );
+                  final assignedBankIds = _bankIdsForTimelineRows(
+                    items: dashboard.assignedItems,
+                    repaymentItems: dashboard.repaymentItems,
+                  );
+                  final unassignedBankIds =
+                      _bankIdsForItems(dashboard.unassignedItems);
+                  final mainTabContent = switch (_selectedMainTab) {
+                    _LoansMainTab.people => _buildPeopleTab(
+                        context: context,
+                        dashboard: dashboard,
                         people: people,
-                        bankIds: assignedBankIds,
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (timelineRows.isEmpty)
-                      _EmptyPanel(
-                        icon: AppIcons.filter_list,
-                        title: context.l10nText('No matching transactions'),
-                        subtitle: context.l10nText(
-                          'Change the filter or choose another person.',
+                    _LoansMainTab.linked => _buildLinkedTab(
+                        context: context,
+                        dashboard: dashboard,
+                        items: linkedItems,
+                      ),
+                    _LoansMainTab.unlinked => _buildUnlinkedTab(
+                        context: context,
+                        items: unlinkedItems,
+                      ),
+                  };
+                  final hasMoreTransactions = switch (_selectedMainTab) {
+                    _LoansMainTab.people => false,
+                    _LoansMainTab.linked =>
+                      linkedItems.length < searchedTimelineRows.length,
+                    _LoansMainTab.unlinked =>
+                      unlinkedItems.length < searchedUnassignedItems.length,
+                  };
+                  if (hasMoreTransactions) {
+                    _scheduleLoadMoreCheck();
+                  }
+
+                  return RefreshIndicator(
+                    color: AppColors.primaryLight,
+                    onRefresh: () async {
+                      await provider.loadData();
+                      _refreshEntries();
+                      await _loanDebtDataFuture;
+                    },
+                    child: CustomScrollView(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            key: _overviewKey,
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                            child: _LoansSummaryRow(dashboard: dashboard),
+                          ),
                         ),
-                      )
-                    else
-                      for (final section
-                          in _loanDebtTimelineSections(timelineRows)) ...[
-                        _LoanDebtDayHeader(date: section.date),
-                        for (final row in section.rows)
-                          if (row.loanDebtItem != null)
-                            _LoanDebtTransactionTile(
-                              item: row.loanDebtItem!,
-                              onTap: () =>
-                                  _openLoanDebtDetailsSheet(row.loanDebtItem!),
-                            )
-                          else
-                            _LoanDebtRepaymentTile(
-                              item: row.repaymentItem!,
-                              onTap: () =>
-                                  _openRepaymentLinkSheet(row.repaymentItem!),
-                            ),
+                        PinnedHeaderSliver(
+                          child: _buildPinnedHeader(
+                            people: people,
+                            assignedBankIds: assignedBankIds,
+                            unassignedBankIds: unassignedBankIds,
+                            linkedResultCount: searchedTimelineRows.length,
+                            linkedTotalCount: dashboard.assignedItems.length +
+                                dashboard.repaymentItems.length,
+                            unlinkedResultCount: searchedUnassignedItems.length,
+                            unlinkedTotalCount:
+                                dashboard.unassignedItems.length,
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                          sliver: SliverList(
+                            delegate: SliverChildListDelegate(mainTabContent),
+                          ),
+                        ),
+                        const SliverPadding(
+                          padding: EdgeInsets.only(bottom: 28),
+                        ),
                       ],
-                    if (dashboard.unassignedItems.isNotEmpty &&
-                        selectedPerson == null) ...[
-                      const SizedBox(height: 18),
-                      _TransactionsHeader(
-                        title: context.l10nText('Unlinked debts and loans'),
-                        subtitle: context.l10nText('Needs a person'),
-                        activeFilterCount:
-                            _unassignedFilterSelection.activeCount,
-                        onFilterTap: () =>
-                            _openUnassignedTransactionFilterSheet(
-                          bankIds: unassignedBankIds,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (filteredUnassignedItems.isEmpty)
-                        _EmptyPanel(
-                          icon: AppIcons.filter_list,
-                          title: context.l10nText('No matching transactions'),
-                          subtitle: context.l10nText(
-                            'Change the filter to see other unlinked debts and loans.',
-                          ),
-                        )
-                      else
-                        for (final section in _loanDebtTimelineSections(
-                          _loanDebtTimelineRows(
-                            loanDebtItems: filteredUnassignedItems,
-                            repaymentItems: const <_LoanDebtRepaymentItem>[],
-                          ),
-                        )) ...[
-                          _LoanDebtDayHeader(date: section.date),
-                          for (final row in section.rows)
-                            _UnassignedLoanDebtTile(
-                              item: row.loanDebtItem!,
-                              onTap: () =>
-                                  _openLoanDebtDetailsSheet(row.loanDebtItem!),
-                            ),
-                        ],
-                    ],
-                  ] else
-                    _EmptyPanel(
-                      icon: AppIcons.debts,
-                      title: context.l10nText('No loans or debts yet'),
-                      subtitle: context.l10nText(
-                        'Categorize a transaction as Loan or Debt to track who it belongs to.',
-                      ),
                     ),
-                ],
+                  );
+                },
               ),
-            );
-          },
+            ),
+          ],
         ),
       ),
     );
@@ -1227,6 +1612,265 @@ class _SummaryMetric extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LoansMainTabBar extends StatelessWidget {
+  final _LoansMainTab selectedTab;
+  final ValueChanged<_LoansMainTab> onTabChanged;
+
+  const _LoansMainTabBar({
+    required this.selectedTab,
+    required this.onTabChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.mutedFill(context).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _LoansMainTabButton(
+              label: 'People',
+              selected: selectedTab == _LoansMainTab.people,
+              onTap: () => onTabChanged(_LoansMainTab.people),
+            ),
+          ),
+          Expanded(
+            child: _LoansMainTabButton(
+              label: 'Linked',
+              selected: selectedTab == _LoansMainTab.linked,
+              onTap: () => onTabChanged(_LoansMainTab.linked),
+            ),
+          ),
+          Expanded(
+            child: _LoansMainTabButton(
+              label: 'Unlinked',
+              selected: selectedTab == _LoansMainTab.unlinked,
+              onTap: () => onTabChanged(_LoansMainTab.unlinked),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LoansMainTabButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _LoansMainTabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primaryDark : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            style: TextStyle(
+              color:
+                  selected ? AppColors.white : AppColors.textSecondary(context),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+            child: Text(
+              context.l10nText(label),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoanDebtSearchFilterRow extends StatefulWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onFilterTap;
+  final int activeFilterCount;
+
+  const _LoanDebtSearchFilterRow({
+    super.key,
+    required this.controller,
+    required this.onChanged,
+    required this.onFilterTap,
+    this.activeFilterCount = 0,
+  });
+
+  @override
+  State<_LoanDebtSearchFilterRow> createState() =>
+      _LoanDebtSearchFilterRowState();
+}
+
+class _LoanDebtSearchFilterRowState extends State<_LoanDebtSearchFilterRow>
+    with WidgetsBindingObserver {
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _wasKeyboardVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _searchFocusNode.addListener(_handleFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _searchFocusNode.removeListener(_handleFocusChanged);
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final keyboardVisible = View.of(context).viewInsets.bottom > 0;
+    if (_wasKeyboardVisible && !keyboardVisible && _searchFocusNode.hasFocus) {
+      _searchFocusNode.unfocus();
+    }
+    _wasKeyboardVisible = keyboardVisible;
+  }
+
+  void _handleFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: SizedBox(
+            height: 44,
+            child: PopScope<void>(
+              canPop: !_searchFocusNode.hasFocus,
+              onPopInvokedWithResult: (didPop, _) {
+                if (!didPop && _searchFocusNode.hasFocus) {
+                  _searchFocusNode.unfocus();
+                }
+              },
+              child: TextField(
+                controller: widget.controller,
+                focusNode: _searchFocusNode,
+                textInputAction: TextInputAction.search,
+                onChanged: widget.onChanged,
+                onSubmitted: (_) => _searchFocusNode.unfocus(),
+                onTapOutside: (_) => _searchFocusNode.unfocus(),
+                style: TextStyle(
+                  color: AppColors.textPrimary(context),
+                  fontSize: 14,
+                ),
+                decoration: InputDecoration(
+                  hintText: context.l10nText('Search Transactions'),
+                  hintStyle: TextStyle(
+                    color: AppColors.textTertiary(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  filled: true,
+                  fillColor: AppColors.surfaceColor(context),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                        BorderSide(color: AppColors.borderColor(context)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide:
+                        BorderSide(color: AppColors.borderColor(context)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                      color: AppColors.primaryLight,
+                      width: 1.3,
+                    ),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  isDense: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        _LoanDebtFilterActionButton(
+          onTap: widget.onFilterTap,
+          activeFilterCount: widget.activeFilterCount,
+        ),
+      ],
+    );
+  }
+}
+
+class _LoanDebtResultsSummary extends StatelessWidget {
+  final bool linked;
+  final int resultCount;
+  final int totalCount;
+
+  const _LoanDebtResultsSummary({
+    required this.linked,
+    required this.resultCount,
+    required this.totalCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final singular = resultCount == 1 && resultCount == totalCount;
+    final transactionLabel = context.l10nText(
+      linked
+          ? singular
+              ? 'linked transaction'
+              : 'linked transactions'
+          : singular
+              ? 'unlinked transaction'
+              : 'unlinked transactions',
+    );
+    final count =
+        resultCount == totalCount ? '$resultCount' : '$resultCount/$totalCount';
+    final countLabel = '$count $transactionLabel';
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        countLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: AppColors.textSecondary(context),
+              fontWeight: FontWeight.w700,
+            ),
+      ),
     );
   }
 }
@@ -3804,8 +4448,6 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     final title = _isBorrowed
         ? context.l10nText('Debt details')
         : context.l10nText('Loan details');
-    final status =
-        _isBorrowed ? context.l10nText('Borrowed') : context.l10nText('Lent');
     final statusColor = _loanDebtStatusColor(_item.status, _directionColor);
     final subtitle =
         _needsPerson ? context.l10nText('Needs a person') : _item.personName;
@@ -3845,18 +4487,15 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      _TinyStatusPill(label: status, color: _directionColor),
-                      if (!_item.isActive) ...[
-                        const SizedBox(height: 5),
-                        _TinyStatusPill(
-                          label: _loanDebtStatusLabel(context, _item.status),
-                          color: statusColor,
-                        ),
-                      ],
-                    ],
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: context.l10nText('Close'),
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary(context),
+                      backgroundColor: AppColors.surfaceColor(context),
+                    ),
+                    icon: const Icon(AppIcons.close_rounded, size: 20),
                   ),
                 ],
               ),
@@ -4277,7 +4916,7 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     addRow(
       icon: AppIcons.receipt_long_rounded,
       label: context.l10nText('Reference'),
-      value: _transaction.reference,
+      value: _transaction.displayReference,
     );
 
     return Container(
@@ -4402,58 +5041,68 @@ class _LoanDebtDetailsSheetState extends State<_LoanDebtDetailsSheet> {
     final keyboardLiftBuffer = bottomInset > 0 ? 28.0 : 0.0;
     final sheetBottomPadding = bottomSafeArea + (bottomInset > 0 ? 12.0 : 20.0);
 
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      padding: EdgeInsets.only(bottom: bottomInset + keyboardLiftBuffer),
-      child: Container(
-        constraints: BoxConstraints(maxHeight: mediaQuery.size.height * 0.9),
-        decoration: BoxDecoration(
-          color: AppColors.cardColor(context),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border.all(color: AppColors.borderColor(context)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: EdgeInsets.fromLTRB(20, 10, 20, sheetBottomPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.borderColor(context),
-                      borderRadius: BorderRadius.circular(999),
+    return DraggableScrollableSheet(
+      initialChildSize: 0.82,
+      minChildSize: 0.45,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(bottom: bottomInset + keyboardLiftBuffer),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.cardColor(context),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border.all(color: AppColors.borderColor(context)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                controller: scrollController,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(20, 10, 20, sheetBottomPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 44,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.borderColor(context),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 18),
+                    _buildHeader(context),
+                    const SizedBox(height: 18),
+                    if (_needsPerson)
+                      _buildPersonAssignmentSection(context)
+                    else
+                      _buildLinkedPersonPanel(context),
+                    if (!_needsPerson) ...[
+                      const SizedBox(height: 14),
+                      _buildReturnDateSection(context),
+                    ],
+                    const SizedBox(height: 14),
+                    _buildDetailRows(context, provider),
+                    if (!_needsPerson) ...[
+                      const SizedBox(height: 14),
+                      _buildActionsSection(context),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 18),
-                _buildHeader(context),
-                const SizedBox(height: 18),
-                if (_needsPerson)
-                  _buildPersonAssignmentSection(context)
-                else
-                  _buildLinkedPersonPanel(context),
-                if (!_needsPerson) ...[
-                  const SizedBox(height: 14),
-                  _buildReturnDateSection(context),
-                ],
-                const SizedBox(height: 14),
-                _buildDetailRows(context, provider),
-                if (!_needsPerson) ...[
-                  const SizedBox(height: 14),
-                  _buildActionsSection(context),
-                ],
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -4808,9 +5457,10 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
   }
 
   Future<void> _openLoanDebtDetailsSheet(_LoanDebtItem item) async {
-    final result = await showModalBottomSheet<_LoanDebtDetailsResult>(
+    await showModalBottomSheet<_LoanDebtDetailsResult>(
       context: context,
       isScrollControlled: true,
+      enableDrag: true,
       backgroundColor: Colors.transparent,
       barrierColor: AppColors.black.withValues(alpha: 0.5),
       builder: (_) => _LoanDebtDetailsSheet(
@@ -4818,7 +5468,7 @@ class _LoanDebtPersonDetailPageState extends State<_LoanDebtPersonDetailPage> {
         repository: widget.repository,
       ),
     );
-    if (!mounted || result == null) return;
+    if (!mounted) return;
     await _reloadItemsFromStore();
   }
 
@@ -5902,11 +6552,6 @@ class _LoanDebtDashboard {
     required this.totalBorrowed,
   });
 
-  bool get hasAnyLoanDebtTransaction =>
-      assignedItems.isNotEmpty ||
-      unassignedItems.isNotEmpty ||
-      repaymentItems.isNotEmpty;
-
   List<_LoanDebtItem> itemsForPerson(String personName) {
     final normalized = personName.trim().toLowerCase();
     if (normalized.isEmpty) return const <_LoanDebtItem>[];
@@ -6208,6 +6853,54 @@ class _LoanDebtRepaymentItem {
     final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
     return '$hour12:$minute $period';
   }
+}
+
+List<T> _visibleLoanDebtItems<T>(
+  List<T> items, {
+  required int visibleCount,
+}) {
+  if (visibleCount >= items.length) return items;
+  return List<T>.unmodifiable(items.take(visibleCount));
+}
+
+bool _matchesLoanDebtSearch({
+  required TransactionProvider provider,
+  required Transaction transaction,
+  required String query,
+  required Iterable<String?> extraValues,
+}) {
+  final normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.isEmpty) return true;
+
+  final searchableValues = <String?>[
+    transaction.displayReference,
+    transaction.reference,
+    transaction.receiver,
+    transaction.creditor,
+    transaction.note,
+    transaction.time,
+    transaction.status,
+    transaction.type,
+    transaction.accountNumber,
+    transaction.ownerAccountNumber,
+    transaction.currentBalance,
+    transaction.sourceMessageId,
+    '${transaction.amount}',
+    formatNumberWithComma(transaction.amount),
+    provider.getBankName(transaction.bankId),
+    provider.getBankShortName(transaction.bankId),
+    provider.categoryLabelForTransaction(transaction),
+    'ETB',
+    ...extraValues,
+  ];
+  final searchableText = searchableValues
+      .whereType<String>()
+      .map((value) => value.trim().toLowerCase())
+      .where((value) => value.isNotEmpty)
+      .join(' ');
+  final terms =
+      normalizedQuery.split(RegExp(r'\s+')).where((term) => term.isNotEmpty);
+  return terms.every(searchableText.contains);
 }
 
 class _LoanDebtTimelineRow {

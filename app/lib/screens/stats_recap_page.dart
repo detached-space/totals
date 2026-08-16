@@ -52,6 +52,8 @@ class _StatsRecapPageState extends State<StatsRecapPage> {
           transactions: provider.allTransactions,
           banks: _banks,
           year: _recapYear,
+          expenseAmountForTransaction: provider.netExpenseAmountForTransaction,
+          incomeAmountForTransaction: provider.incomeAmountForTransaction,
         );
 
         return Scaffold(
@@ -475,11 +477,19 @@ class StatsRecapData {
     required List<Transaction> transactions,
     required List<Bank> banks,
     required int year,
+    double Function(Transaction)? expenseAmountForTransaction,
+    double Function(Transaction)? incomeAmountForTransaction,
   }) {
     final filtered = _filterTransactionsForYear(transactions, year);
     final topBanks = _topBanks(filtered, banks);
-    final sentTo = _topSentTo(filtered);
-    final receivedFrom = _topReceivedFrom(filtered);
+    final sentTo = _topSentTo(
+      filtered,
+      expenseAmountForTransaction: expenseAmountForTransaction,
+    );
+    final receivedFrom = _topReceivedFrom(
+      filtered,
+      incomeAmountForTransaction: incomeAmountForTransaction,
+    );
     final monthLabel = DateFormat('MMMM').format(
       DateTime(year, DateTime.now().month),
     );
@@ -544,29 +554,39 @@ class StatsRecapData {
     return filtered;
   }
 
-  static List<StatsRecapEntry> _topSentTo(List<Transaction> transactions) {
+  static List<StatsRecapEntry> _topSentTo(
+    List<Transaction> transactions, {
+    double Function(Transaction)? expenseAmountForTransaction,
+  }) {
     final totals = <String, double>{};
     for (final transaction in transactions) {
       if (_isIncome(transaction)) continue;
+      final amount = expenseAmountForTransaction?.call(transaction) ??
+          transaction.amount.abs();
+      if (amount <= 0) continue;
       final raw = _cleanCounterparty(transaction.receiver) ??
           _cleanCounterparty(transaction.creditor);
       if (raw == null) continue;
       final label = _normalizeTelebirrName(transaction, raw);
       totals.update(
         label,
-        (value) => value + transaction.amount.abs(),
-        ifAbsent: () => transaction.amount.abs(),
+        (value) => value + amount,
+        ifAbsent: () => amount,
       );
     }
     return _topCounterparties(totals);
   }
 
   static List<StatsRecapEntry> _topReceivedFrom(
-    List<Transaction> transactions,
-  ) {
+    List<Transaction> transactions, {
+    double Function(Transaction)? incomeAmountForTransaction,
+  }) {
     final totals = <String, double>{};
     for (final transaction in transactions) {
       if (!_isIncome(transaction)) continue;
+      final amount = incomeAmountForTransaction?.call(transaction) ??
+          transaction.amount.abs();
+      if (amount <= 0) continue;
       final raw = _cleanCounterparty(transaction.creditor) ??
           _cleanCounterparty(transaction.receiver);
       if (raw == null) continue;
@@ -576,8 +596,8 @@ class StatsRecapData {
       final label = _normalizeTelebirrName(transaction, raw);
       totals.update(
         label,
-        (value) => value + transaction.amount.abs(),
-        ifAbsent: () => transaction.amount.abs(),
+        (value) => value + amount,
+        ifAbsent: () => amount,
       );
     }
     return _topCounterparties(totals);

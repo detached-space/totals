@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 
 class NotificationSettingsService {
   NotificationSettingsService._();
@@ -134,7 +135,7 @@ class NotificationSettingsService {
 
   Future<bool> isWeeklySummaryEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_kWeeklyEnabled) ?? false;
+    return prefs.getBool(_kWeeklyEnabled) ?? true;
   }
 
   Future<void> setWeeklySummaryEnabled(bool enabled) async {
@@ -268,7 +269,8 @@ class NotificationSettingsService {
           (category) =>
               category.id != null &&
               category.flow.toLowerCase() == flow &&
-              !category.uncategorized,
+              !category.uncategorized &&
+              !isReimbursementCategory(category),
         )
         .toList(growable: false);
 

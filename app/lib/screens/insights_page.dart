@@ -27,6 +27,8 @@ class InsightsPage extends StatelessWidget {
     final insightsService = InsightsService(
       () => transactions,
       getCategoryById: txProvider.getCategoryById,
+      isExcludedFromIncome: txProvider.isReimbursementTransaction,
+      expenseAmountForTransaction: txProvider.netExpenseAmountForTransaction,
     );
 
     final insights = insightsService.summarize();
@@ -106,7 +108,8 @@ class InsightsPage extends StatelessWidget {
                 height: 300,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.05),
+                  color:
+                      Theme.of(context).colorScheme.primary.withOpacity(0.05),
                 ),
               ),
             ),
@@ -118,7 +121,8 @@ class InsightsPage extends StatelessWidget {
                 height: 200,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Theme.of(context).colorScheme.secondary.withOpacity(0.03),
+                  color:
+                      Theme.of(context).colorScheme.secondary.withOpacity(0.03),
                 ),
               ),
             ),
@@ -364,7 +368,8 @@ class InsightsPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -372,7 +377,8 @@ class InsightsPage extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 14),
+                        const Icon(Icons.auto_awesome_rounded,
+                            color: Colors.white, size: 14),
                         const SizedBox(width: 6),
                         Text(
                           'Coverage: $coveragePercent%',
@@ -554,10 +560,8 @@ class InsightsPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSurface
-                    .withOpacity(0.04),
+                color:
+                    Theme.of(context).colorScheme.onSurface.withOpacity(0.04),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
@@ -680,7 +684,10 @@ class InsightsPage extends StatelessWidget {
                 ),
               ),
               Icon(Icons.chevron_right_rounded,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5)),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurfaceVariant
+                      .withOpacity(0.5)),
             ],
           ),
         ),
@@ -769,7 +776,8 @@ class InsightsPage extends StatelessWidget {
                   color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: Theme.of(context).colorScheme.primary, size: 20),
+                child: Icon(icon,
+                    color: Theme.of(context).colorScheme.primary, size: 20),
               ),
               const SizedBox(width: 14),
               Text(
@@ -828,7 +836,8 @@ class InsightsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          ...expenses.take(3).map((t) => _buildTransactionRow(context, t, formatter, isIncome: false)),
+          ...expenses.take(3).map((t) =>
+              _buildTransactionRow(context, t, formatter, isIncome: false)),
           if (income.isNotEmpty) const SizedBox(height: 20),
         ],
         if (income.isNotEmpty) ...[
@@ -842,7 +851,8 @@ class InsightsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          ...income.take(3).map((t) => _buildTransactionRow(context, t, formatter, isIncome: true)),
+          ...income.take(3).map((t) =>
+              _buildTransactionRow(context, t, formatter, isIncome: true)),
         ],
       ],
     );
@@ -888,7 +898,10 @@ class InsightsPage extends StatelessWidget {
                   _dateLabel(t.time),
                   style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withOpacity(0.7),
                   ),
                 ),
               ],
@@ -925,7 +938,10 @@ class InsightsPage extends StatelessWidget {
                 fontSize: 14,
                 color: isHighlight
                     ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.8),
+                    : Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withOpacity(0.8),
                 fontWeight: isHighlight ? FontWeight.w900 : FontWeight.w600,
               ),
             ),
@@ -1028,7 +1044,10 @@ class _ExpandableRecurringCardState extends State<_ExpandableRecurringCard> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(Icons.repeat_rounded,
@@ -1051,15 +1070,23 @@ class _ExpandableRecurringCardState extends State<_ExpandableRecurringCard> {
                           '${widget.recurring.length} regular payments detected',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant
+                                .withOpacity(0.7),
                           ),
                         ),
                       ],
                     ),
                   ),
                   Icon(
-                    _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5),
+                    _isExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withOpacity(0.5),
                   ),
                 ],
               ),
@@ -1089,7 +1116,8 @@ class _ExpandableRecurringCardState extends State<_ExpandableRecurringCard> {
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text(
-                              widget.formatter.format(widget.toDouble(map['avg'])),
+                              widget.formatter
+                                  .format(widget.toDouble(map['avg'])),
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w900,
@@ -1099,7 +1127,10 @@ class _ExpandableRecurringCardState extends State<_ExpandableRecurringCard> {
                               '${map['count']} payments',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.6),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant
+                                    .withOpacity(0.6),
                               ),
                             ),
                           ],

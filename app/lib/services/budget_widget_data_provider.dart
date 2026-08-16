@@ -68,11 +68,15 @@ class BudgetWidgetDataProvider {
   })  : _budgetService = budgetService ?? BudgetService(),
         _categoryRepository = categoryRepository ?? CategoryRepository();
 
-  Future<BudgetWidgetPayload> getWidgetPayload({String? calendar}) async {
-    final statuses = await _budgetService.getAllBudgetStatuses(
-      calendar: calendar,
-    );
-    final visibleStatuses = statuses
+  Future<BudgetWidgetPayload> getWidgetPayload({
+    String? calendar,
+    List<BudgetStatus>? statuses,
+  }) async {
+    final resolvedStatuses = statuses ??
+        await _budgetService.getAllBudgetStatuses(
+          calendar: calendar,
+        );
+    final visibleStatuses = resolvedStatuses
         .where(
           (status) => status.budget.overlapsRange(
             status.periodStart,

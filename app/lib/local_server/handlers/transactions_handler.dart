@@ -7,6 +7,7 @@ import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
 
 /// Handler for transaction-related API endpoints
 class TransactionsHandler {
@@ -168,7 +169,6 @@ class TransactionsHandler {
   Future<List<Transaction>> _filterOrphanedTransactions(
       List<Transaction> transactions) async {
     final accounts = await _accountRepo.getAccounts();
-    final banks = await _bankConfigService.getBanks();
 
     return transactions.where((t) {
       if (t.bankId == null) return false;
@@ -184,28 +184,9 @@ class TransactionsHandler {
             .any((account) => account.accountNumber == t.accountNumber);
       }
 
-      if (t.accountNumber != null && t.accountNumber!.isNotEmpty) {
-        for (var account in bankAccounts) {
-          bool matches = false;
-          final bank = banks.firstWhere((b) => b.id == t.bankId);
-
-          if (bank.uniformMasking == true) {
-            matches = t.accountNumber!
-                    .substring(t.accountNumber!.length - bank.maskPattern!) ==
-                account.accountNumber.substring(
-                    account.accountNumber.length - bank.maskPattern!);
-          } else if (bank.uniformMasking == false) {
-            matches = true;
-          } else {
-            matches = t.accountNumber == account.accountNumber;
-          }
-
-          if (matches) return true;
-        }
-        return false;
-      } else {
-        return bankAccounts.length == 1;
-      }
+      // Account ownership can be unresolved for legacy SMS, but it still
+      // belongs in bank-wide activity as long as the bank is registered.
+      return true;
     }).toList();
   }
 
@@ -220,6 +201,7 @@ class TransactionsHandler {
     String? toDate,
   }) async {
     final banks = await _bankConfigService.getBanks();
+    final accounts = await _accountRepo.getAccounts();
     return transactions.where((t) {
       // Filter by bankId
       if (bankId != null && t.bankId != bankId) {
@@ -228,26 +210,38 @@ class TransactionsHandler {
 
       // Filter by accountNumber if provided
       if (accountNumber != null && bankId != null) {
-        bool matchesAccount = false;
-        // This will be validated against accounts, so we can use simple matching here
-        if (t.accountNumber != null) {
-          if (t.bankId == CashConstants.bankId) {
-            matchesAccount = t.accountNumber == accountNumber;
-          } else {
-            final bank = banks.firstWhere((b) => b.id == t.bankId);
-            if (bank.uniformMasking == true) {
-              matchesAccount = t.accountNumber!
-                      .substring(t.accountNumber!.length - bank.maskPattern!) ==
-                  accountNumber
-                      .substring(accountNumber.length - bank.maskPattern!);
-            } else if (bank.uniformMasking == false) {
-              matchesAccount = true;
-            } else {
-              matchesAccount = t.accountNumber == accountNumber;
+        if (bankId == CashConstants.bankId) {
+          if (t.bankId != bankId || t.accountNumber != accountNumber) {
+            return false;
+          }
+        } else {
+          Bank? bank;
+          for (final candidate in banks) {
+            if (candidate.id == bankId) {
+              bank = candidate;
+              break;
             }
           }
+          if (bank == null) return false;
+          final bankAccounts =
+              accounts.where((account) => account.bank == bankId).toList();
+          final targets = bankAccounts
+              .where((account) => registeredAccountNumbersMatch(
+                    bank!,
+                    account.accountNumber,
+                    accountNumber,
+                  ))
+              .toList();
+          if (targets.length != 1 ||
+              !transactionBelongsToAccount(
+                transaction: t,
+                account: targets.single,
+                bank: bank,
+                accounts: bankAccounts,
+              )) {
+            return false;
+          }
         }
-        if (!matchesAccount) return false;
       }
 
       // Filter by type (CREDIT/DEBIT)
@@ -296,6 +290,7 @@ class TransactionsHandler {
     return {
       'amount': transaction.amount,
       'reference': transaction.reference,
+      'bankReference': transaction.displayReference,
       'creditor': transaction.creditor,
       'receiver': transaction.receiver,
       'note': transaction.note,
@@ -311,6 +306,8 @@ class TransactionsHandler {
       'type': transaction.type,
       'transactionLink': transaction.transactionLink,
       'accountNumber': transaction.accountNumber,
+      'ownerAccountNumber': transaction.ownerAccountNumber,
+      'ownerAssignmentSource': transaction.ownerAssignmentSource,
       'categoryId': transaction.categoryId,
       'categoryIds': transaction.selectedCategoryIds.isEmpty
           ? null

@@ -43,7 +43,7 @@ class ThemeProvider extends ChangeNotifier {
     24,
     32,
   ];
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode;
   double _uiScale = _defaultUiScale;
   double _appTopPadding = _defaultAppTopPadding;
   AppFontOption _appFont = AppFontOption.appDefault;
@@ -84,8 +84,11 @@ class ThemeProvider extends ChangeNotifier {
     }
   }
 
-  ThemeProvider() {
-    _loadThemeMode();
+  ThemeProvider({ThemeMode? initialThemeMode})
+      : _themeMode = initialThemeMode ?? ThemeMode.system {
+    if (initialThemeMode == null) {
+      _loadThemeMode();
+    }
     _loadUiScale();
     _loadAppTopPadding();
     _loadAppFont();

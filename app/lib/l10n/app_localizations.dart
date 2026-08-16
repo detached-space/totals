@@ -232,6 +232,7 @@ class AppLocalizations {
     "shared.chooseWhereToAddAmount": "{amount} የት እንደሚጨመር ይምረጡ።",
     "shared.youAreOwedAmount": "{amount} ይከፈልዎታል",
     "shared.youOweAmount": "{amount} መክፈል አለብዎት",
+    "shared.peopleOweYouCount": "{count} ሰዎች ይከፍሉዎታል",
     "shared.updatedTime": "የተዘመነው {time}",
     "shared.timeJustNow": "አሁን",
     "shared.timeMinutesAgo": "ከ{count} ደቂቃ በፊት",
@@ -432,6 +433,7 @@ class AppLocalizations {
     "Money": "ገንዘብ",
     "Budget": "በጀት",
     "Shared": "የጋራ",
+    "Reimbursed": "ካሳ የተከፈለ",
     "Tools": "መሳሪያዎች",
     "You": "የእርስዎ",
     "Settings": "ቅንብሮች",
@@ -459,6 +461,7 @@ class AppLocalizations {
     "Later": "በኋላ",
     "Allow": "ፍቀድ",
     "Not now": "አሁን አይደለም",
+    "Open settings": "ቅንብሮችን ክፈት",
     "No": "አይ",
     "Yes": "አዎ",
     "Skip": "ዘልለው ይለፉ",
@@ -546,10 +549,14 @@ class AppLocalizations {
     "available for sharing": "ለማጋራት ዝግጁ",
     "Share Accounts": "አካውንቶችን አጋራ",
     "Share Your Accounts": "አካውንቶችዎን ያጋሩ",
+    "Share Quick Access Accounts": "የፈጣን መዳረሻ አካውንቶችን አጋራ",
+    "Your contacts": "የእርስዎ እውቂያዎች",
     "Name shown to recipient": "ለተቀባዩ የሚታይ ስም",
     "Share QR Code": "የQR ኮድ አጋራ",
     "Scan this QR code to add my account details":
         "የእኔን የአካውንት ዝርዝሮች ለማከል ይህን QR ኮድ ይቃኙ",
+    "Scan this QR code to add these account details":
+        "እነዚህን የአካውንት ዝርዝሮች ለማከል ይህን QR ኮድ ይቃኙ",
     "Error sharing QR code": "የQR ኮድ ማጋራት አልተቻለም",
     "Register accounts first, then generate a share QR.":
         "መጀመሪያ አካውንቶችን ይመዝግቡ፣ ከዚያ የማጋሪያ QR ይፍጠሩ።",
@@ -560,6 +567,8 @@ class AppLocalizations {
     "Sharing as": "በዚህ ስም በማጋራት ላይ",
     "Let someone scan this QR to add your accounts.":
         "አካውንቶችዎን ለማከል ሌላ ሰው ይህን QR እንዲቃኝ ያድርጉ።",
+    "Let someone scan this QR to add these accounts.":
+        "እነዚህን አካውንቶች ለማከል ሌላ ሰው ይህን QR እንዲቃኝ ያድርጉ።",
     "included": "ተካትቷል",
     "Too much data to render QR": "QR ለማሳየት ዳታው በጣም ብዙ ነው",
     "Add accounts first, then long-press Tools again to see your QR here.":
@@ -812,8 +821,7 @@ class AppLocalizations {
     "Backup is paused": "ምትኬ ቆሟል",
     "Set a PIN so you can restore your groups on a new phone.":
         "ቡድኖችዎን በአዲስ ስልክ ላይ መመለስ እንዲችሉ PIN ያዘጋጁ።",
-    "Unlock with your PIN to resume backing up.":
-        "ምትኬውን ለመቀጠል በPINዎ ይክፈቱ።",
+    "Unlock with your PIN to resume backing up.": "ምትኬውን ለመቀጠል በPINዎ ይክፈቱ።",
     "Set up": "አዋቅር",
     "Unlock": "ክፈት",
     "Restore from another device": "ከሌላ መሳሪያ መልስ",
@@ -1179,7 +1187,22 @@ class AppLocalizations {
     "Track who owes whom from transactions.": "ከትራንዛክሽኖች ማን ለማን እንዳለበት ይከታተሉ።",
     "Current balances": "የአሁኑ ቀሪ ሂሳቦች",
     "Linked loans and debts": "የተገናኙ ብድሮች እና እዳዎች",
+    "Unlinked": "ያልተገናኙ",
     "Unlinked debts and loans": "ያልተገናኙ እዳዎች እና ብድሮች",
+    "No people yet": "እስካሁን ሰዎች የሉም",
+    "Assign a person to an unlinked loan or debt to see them here.":
+        "እዚህ ለማየት ያልተገናኘውን ብድር ወይም እዳ ከአንድ ሰው ጋር ያገናኙ።",
+    "No linked transactions yet": "እስካሁን የተገናኙ ትራንዛክሽኖች የሉም",
+    "linked transaction": "የተገናኘ ትራንዛክሽን",
+    "linked transactions": "የተገናኙ ትራንዛክሽኖች",
+    "Assign a person to an unlinked loan or debt to see it here.":
+        "እዚህ ለማየት ያልተገናኘውን ብድር ወይም እዳ ከአንድ ሰው ጋር ያገናኙ።",
+    "No unlinked transactions": "ያልተገናኙ ትራንዛክሽኖች የሉም",
+    "unlinked transaction": "ያልተገናኘ ትራንዛክሽን",
+    "unlinked transactions": "ያልተገናኙ ትራንዛክሽኖች",
+    "Every loan and debt has been assigned to a person.":
+        "እያንዳንዱ ብድር እና እዳ ለአንድ ሰው ተመድቧል።",
+    "Page": "ገጽ",
     "Change the filter or choose another person.":
         "ማጣሪያውን ይቀይሩ ወይም ሌላ ሰው ይምረጡ።",
     "Change the filter to see other unlinked debts and loans.":
@@ -1655,8 +1678,8 @@ class AppLocalizations {
         "የክፍያ ማረጋገጫ፦ የክፍያ ማረጋገጫ ባህሪውን ከተጠቀሙ፣ ያስገቡት ዳታ ጥያቄዎን ለማስኬድ በ`sms-parsing-visualizer.vercel.app` ወደሚስተናገደው የማረጋገጫ አገልግሎታችን በHTTPS ሊተላለፍ ይችላል።",
     "Configuration updates: When Totals downloads updated SMS parsing patterns or bank configuration files, it connects to our hosted configuration endpoints. The app may also perform basic connectivity checks to confirm internet access. These requests are used to download configuration, not to upload your SMS contents for normal tracking.":
         "የውቅር ዝማኔዎች፦ Totals የተዘመኑ የኤስኤምኤስ መተንተኛ ንድፎችን ወይም የባንክ ውቅር ፋይሎችን ሲያወርድ ከተስተናገዱ የውቅር መጨረሻ ነጥቦቻችን ጋር ይገናኛል። መተግበሪያው የኢንተርኔት መዳረሻን ለማረጋገጥ መሰረታዊ የግንኙነት ፍተሻዎችንም ሊያከናውን ይችላል። እነዚህ ጥያቄዎች ውቅርን ለማውረድ እንጂ የኤስኤምኤስ ይዘትዎን ለመደበኛ ክትትል ለመስቀል አይደሉም።",
-    "Shared expenses (optional): If you create or join a shared expense group, the app exchanges encrypted payloads with our Totals Engine service at `engine.totals.detached.space` over HTTPS. Each payload is encrypted on-device with a group symmetric key (for group-wide payloads) or with a one-to-one shared secret derived from device key pairs (for targeted payloads). The Totals Engine stores and relays the encrypted blobs and the public identifiers needed for delivery, such as the random group identifier and the sender and recipient device public keys. The Totals Engine cannot decrypt expense amounts, descriptions, member display names, or other group contents.":
-        "የጋራ ወጪዎች (አማራጭ)፦ የጋራ ወጪ ቡድን ከፈጠሩ ወይም ከተቀላቀሉ፣ መተግበሪያው በ`engine.totals.detached.space` ላይ ካለው የTotals Engine አገልግሎታችን ጋር በHTTPS የተመሰጠሩ ይዘቶችን ይለዋወጣል። እያንዳንዱ ይዘት በመሳሪያዎ ላይ በቡድን ሲሜትሪክ ቁልፍ (ለቡድን ሁሉ የሚላኩ ይዘቶች) ወይም ከመሳሪያ ቁልፍ ጥንዶች በተወሰደ አንድ-ለ-አንድ የጋራ ሚስጥር (ለተወሰኑ ይዘቶች) ይመሰጠራል። Totals Engine የተመሰጠሩትን ይዘቶች እና ለማድረስ የሚያስፈልጉ የህዝብ መለያዎችን፣ ለምሳሌ የተሰጠ የቡድን መለያ እና የላኪና ተቀባይ መሳሪያ የህዝብ ቁልፎችን፣ ያከማቻል እና ያስተላልፋል። Totals Engine የወጪ መጠኖችን፣ መግለጫዎችን፣ የአባላት የሚታዩ ስሞችን ወይም ሌላ የቡድን ይዘትን መፍታት አይችልም።",
+    "Shared expenses (optional): If you create or join a shared expense group, the app exchanges encrypted payloads with the configured Totals Engine service over HTTPS. Each payload is encrypted on-device with a group symmetric key (for group-wide payloads) or with a one-to-one shared secret derived from device key pairs (for targeted payloads). The Totals Engine stores and relays the encrypted blobs and the public identifiers needed for delivery, such as the random group identifier and the sender and recipient device public keys. The Totals Engine cannot decrypt expense amounts, descriptions, member display names, or other group contents.":
+        "የጋራ ወጪዎች (አማራጭ)፦ የጋራ ወጪ ቡድን ከፈጠሩ ወይም ከተቀላቀሉ፣ መተግበሪያው በተዋቀረው መጨረሻ ነጥብ ላይ ካለው የTotals Engine አገልግሎታችን ጋር በHTTPS የተመሰጠሩ ይዘቶችን ይለዋወጣል። እያንዳንዱ ይዘት በመሳሪያዎ ላይ በቡድን ሲሜትሪክ ቁልፍ (ለቡድን ሁሉ የሚላኩ ይዘቶች) ወይም ከመሳሪያ ቁልፍ ጥንዶች በተወሰደ አንድ-ለ-አንድ የጋራ ሚስጥር (ለተወሰኑ ይዘቶች) ይመሰጠራል። Totals Engine የተመሰጠሩትን ይዘቶች እና ለማድረስ የሚያስፈልጉ የህዝብ መለያዎችን፣ ለምሳሌ የተሰጠ የቡድን መለያ እና የላኪና ተቀባይ መሳሪያ የህዝብ ቁልፎችን፣ ያከማቻል እና ያስተላልፋል። Totals Engine የወጪ መጠኖችን፣ መግለጫዎችን፣ የአባላት የሚታዩ ስሞችን ወይም ሌላ የቡድን ይዘትን መፍታት አይችልም።",
     "Push notifications (optional): If you enable shared-expense notifications, the app registers a Firebase Cloud Messaging device token with the Totals Engine so the engine can wake the app when there is new activity. The push payload itself does not include expense content; the app pulls the encrypted payload over HTTPS and composes the notification text locally on your device.":
         "Push ማሳወቂያዎች (አማራጭ)፦ የጋራ ወጪ ማሳወቂያዎችን ካበሩ፣ አዲስ እንቅስቃሴ ሲኖር Engine መተግበሪያውን እንዲያነቃ መተግበሪያው የFirebase Cloud Messaging የመሳሪያ ቶከንን በTotals Engine ይመዘግባል። የpush ይዘቱ ራሱ የወጪ ይዘት አያካትትም፤ መተግበሪያው የተመሰጠረውን ይዘት በHTTPS ያወርዳል እና የማሳወቂያውን ጽሑፍ በመሳሪያዎ ላይ ያዘጋጃል።",
     "Identity backup vault (optional): If you turn on the identity backup feature, the app encrypts your shared-expense identity seed and your group keys on-device using a key derived from a PIN you choose and a random recovery code shown to you in the app. The encrypted blob is then uploaded to the Totals Engine, indexed only by an opaque identifier derived from the recovery code. The PIN is not transmitted, and the engine cannot derive it or decrypt the blob.":
@@ -1736,7 +1759,15 @@ class AppLocalizations {
     "Lock app": "መተግበሪያውን ቆልፍ",
     "Your Data, Your Control": "የእርስዎ ዳታ፣ የእርስዎ ቁጥጥር",
     "No Ads or Analytics": "ምንም ማስታወቂያዎች ወይም ትንታኔዎች የሉም",
-    "SMS Stays On Device": "ኤስኤምኤስ በመሳሪያው ላይ ብቻ ይቆያል",
+    "Data Stays On Device": "ዳታዎ በመሳሪያው ላይ ይቆያል",
+    "Your full transaction history stays on this device and is not uploaded unless you explicitly enable Data Sync. Even then, you choose which records to send and which server receives them.":
+        "የተሟላ የትራንዛክሽን ታሪክዎ Data Syncን በግልጽ ካላነቁ በስተቀር በመሳሪያዎ ላይ ይቆያል እና አይሰቀልም። ያንን ሲያነቁም የትኞቹ መዝገቦች እንደሚላኩ እና የትኛው ሰርቨር እንደሚቀበላቸው እርስዎ ይመርጣሉ።",
+    "Your data stays on this device by default. Optional online features, including Shared Expenses and payment verification, send only the specific information you choose to use with that feature.":
+        "ዳታዎ በነባሪነት በዚህ መሳሪያ ላይ ይቆያል። Shared Expensesን እና የክፍያ ማረጋገጫን ጨምሮ አማራጭ የመስመር ላይ ባህሪያት ለዚያ ባህሪ ለመጠቀም የመረጡትን የተወሰነ መረጃ ብቻ ይልካሉ።",
+    "Your data stays on this device by default. Optional online features connect only when used. Payment verification sends only the images and transaction details you choose to submit; remote config only downloads app rules.":
+        "ዳታዎ በነባሪነት በዚህ መሳሪያ ላይ ይቆያል። አማራጭ የመስመር ላይ ባህሪያት ሲጠቀሙባቸው ብቻ ይገናኛሉ። የክፍያ ማረጋገጫ እርስዎ ለመላክ የመረጧቸውን ምስሎች እና የትራንዛክሽን ዝርዝሮች ብቻ ይልካል፤ የርቀት ውቅር የመተግበሪያውን ህጎች ብቻ ያወርዳል።",
+    "You can continue without SMS access and add transactions manually.":
+        "ያለ ኤስኤምኤስ መዳረሻ መቀጠል እና ትራንዛክሽኖችን በእጅ ማከል ይችላሉ።",
     "GETTING STARTED": "መጀመር",
     "Link a bank account so Totals can match your transactions. You can always add more later.":
         "Totals የእርስዎን ትራንዛክሽኖች ማዛመድ እንዲችል የባንክ አካውንት ያገናኙ። በኋላ ላይ ሁልጊዜ ተጨማሪ ማከል ይችላሉ።",
@@ -1794,8 +1825,8 @@ class AppLocalizations {
     "This week": "በዚህ ሳምንት",
     "This month": "በዚህ ወር",
     "Last 7 days": "ያለፉት 7 ቀናት",
-    "Last 90 days cash flow used in this score":
-        "በዚህ ውጤት ውስጥ ጥቅም ላይ የዋለ ያለፉት 90 ቀናት የጥሬ ገንዘብ ፍሰት",
+    "Last 90 days money flow used in this score":
+        "በዚህ ውጤት ውስጥ ጥቅም ላይ የዋለ ያለፉት 90 ቀናት የገንዘብ ፍሰት",
     "Daily": "በየቀኑ",
     "Weekly": "በየሳምንቱ",
     "Monthly": "በየወሩ",
@@ -1854,12 +1885,12 @@ class AppLocalizations {
     "Analytics": "ትንታኔ",
     "Ledger": "መዝገብ",
     "Cash Flow": "የገንዘብ ፍሰት",
-    "Cash Flow (90 Days)": "የገንዘብ ፍሰት (90 ቀናት)",
+    "Money Flow (90 Days)": "የገንዘብ ፍሰት (90 ቀናት)",
     "Runway": "የቆይታ ጊዜ",
     "Stability": "መረጋጋት",
     "Fixed Costs": "ቋሚ ወጪዎች",
     "Tap to see how this score works": "ይህ ውጤት እንዴት እንደሚሰራ ለማየት ይንኩ",
-    "This score blends your last 90 days of cash flow with balance runway, recent consistency, and essential-cost pressure.":
+    "This score blends your last 90 days of money flow with balance runway, recent consistency, and essential-cost pressure.":
         "ይህ ውጤት ያለፉትን 90 ቀናት የገንዘብ ፍሰት ከቀሪ ሂሳብ ቆይታ፣ ከቅርብ ጊዜ መረጋጋት እና ከአስፈላጊ ወጪዎች ጫና ጋር ያቀላቅላል።",
     "balance": "ቀሪ ሂሳብ",
     "avg monthly expense": "አማካይ ወርሃዊ ወጪ",
@@ -1911,6 +1942,11 @@ class AppLocalizations {
     "Apply auto-categorization": "ራስ-ሰር ምደባን ተግብር",
     "Run saved auto-category rules on uncategorized matched or newly imported transactions.":
         "በማይመደቡ ተዛማጅ ወይም አዲስ የገቡ ትራንዛክሽኖች ላይ የተቀመጡ ራስ-ሰር ምደባ ህጎችን ያስኬዳል።",
+    "Repair legacy transaction directions": "የቆዩ ትራንዛክሽን አቅጣጫዎችን አስተካክል",
+    "Fix incorrect credit or debit directions in old imports with generated references.":
+        "በተፈጠሩ ማጣቀሻዎች የገቡ የቆዩ ትራንዛክሽኖች የተሳሳተ የገቢ ወይም የወጪ አቅጣጫን ያስተካክላል።",
+    "Reparse may be slow for accounts with a large transaction history.":
+        "ብዙ የትራንዛክሽን ታሪክ ላላቸው አካውንቶች ዳግም ትንታኔው ሊዘገይ ይችላል።",
     "Save Expense": "ወጪን አስቀምጥ",
     "Save Income": "ገቢን አስቀምጥ",
     "To": "ወደ",
@@ -1923,18 +1959,34 @@ class AppLocalizations {
         "አካውንትዎን በመጨመር ላይ ነን። መተግበሪያውን መዝጋት ይችላሉ፣ ሲጠናቀቅ እናሳውቅዎታለን።",
     "Import past transactions": "ያለፉ ትራንዛክሽኖችን አስገባ",
     "Nothing saved for quick access": "ለፈጣን መዳረሻ የተቀመጠ ነገር የለም",
+    "Quick Access accounts": "የፈጣን መዳረሻ አካውንቶች",
+    "Includes saved accounts belonging to other people.":
+        "የሌሎች ሰዎች የተቀመጡ አካውንቶችን ያካትታል።",
     "Do nothing": "ምንም አታድርግ",
     "Clear Data": "ዳታ አጽዳ",
     "Select what you want to clear. This action cannot be undone.":
         "ማጽዳት የሚፈልጉትን ይምረጡ። ይህን ድርጊት መመለስ አይቻልም።",
+    "Banks and wallets": "ባንኮች እና ዋሌቶች",
+    "Transactions and accounts from selected institutions will be permanently deleted.":
+        "ከተመረጡት ተቋማት የተገኙ ትራንዛክሽኖች እና አካውንቶች በቋሚነት ይሰረዛሉ።",
+    "No bank or wallet data was found.": "የባንክ ወይም የዋሌት ዳታ አልተገኘም።",
+    "Clear all": "ሁሉንም አጽዳ",
+    "Additional data": "ተጨማሪ ዳታ",
     "Transactions & Accounts": "ትራንዛክሽኖች እና አካውንቶች",
     "All transaction history and bank accounts":
         "ሁሉም የትራንዛክሽን ታሪክ እና የባንክ አካውንቶች",
+    "Saved accounts belonging to other people": "የሌሎች ሰዎች የተቀመጡ አካውንቶች",
     "Budgets": "በጀቶች",
     "All budget rules and limits": "ሁሉም የበጀት ህጎች እና ገደቦች",
+    "Auto-categorization rules": "የራስ-ሰር ምደባ ህጎች",
+    "Learned rules and dismissed suggestions": "የተማሩ ህጎች እና የተሰረዙ ጥቆማዎች",
+    "Loans and debts": "ብድሮች እና እዳዎች",
+    "Loan, debt, and repayment tracking": "የብድር፣ የእዳ እና የክፍያ ክትትል",
     "Failed Parses": "ያልተሳኩ ትንታኔዎች",
+    "Failed message diagnostics": "ያልተሳኩ መልዕክቶች ምርመራ",
     "Failed SMS parsing records": "ያልተሳኩ የኤስኤምኤስ ትንታኔ መዝገቦች",
     "Please select at least one option": "እባክዎ ቢያንስ አንድ አማራጭ ይምረጡ",
+    "Clear selected": "የተመረጡትን አጽዳ",
     "Data cleared successfully": "ዳታ በተሳካ ሁኔታ ተጠርጓል",
     "Error clearing data": "ዳታን ማጽዳት አልተሳካም",
     "Camera By Feature": "ካሜራ በባህሪ",
@@ -2234,6 +2286,38 @@ class AppLocalizations {
     "Pink": "ሮዝ",
     "Brown": "ቡናማ",
     "Gray": "ግራጫ",
+    "Telegram Backup": "የTelegram ምትኬ",
+    "Show encrypted Telegram backups in Settings":
+        "የተመሰጠሩ የTelegram ምትኬዎችን በቅንብሮች አሳይ",
+    "Could not update the Telegram Backup setting.":
+        "የTelegram ምትኬ ቅንብርን ማዘመን አልተቻለም።",
+    "Connect your bot for encrypted backups": "ለተመሰጠሩ ምትኬዎች ቦትዎን ያገናኙ",
+    "Connected to": "ከዚህ ጋር ተገናኝቷል",
+    "Start the bot": "ቦቱን ያስጀምሩ",
+    "I tapped Start": "Startን ነካሁ",
+    "Recovery key needed": "የመመለሻ ቁልፍ ያስፈልጋል",
+    "Recovery key": "የመመለሻ ቁልፍ",
+    "Connect": "አገናኝ",
+    "Encrypted backup sent to Telegram": "የተመሰጠረ ምትኬ ወደ Telegram ተልኳል",
+    "Save your recovery key": "የመመለሻ ቁልፍዎን ያስቀምጡ",
+    "Recovery key copied": "የመመለሻ ቁልፉ ተቀድቷል",
+    "Recovery key saved": "የመመለሻ ቁልፉ ተቀምጧል",
+    "Disconnect Telegram Backup?": "የTelegram ምትኬን ይቋረጥ?",
+    "Disconnect Telegram Backup": "የTelegram ምትኬን አቋርጥ",
+    "Disconnect": "አቋርጥ",
+    "Automatic backups": "ራስ-ሰር ምትኬዎች",
+    "Schedule": "መርሐግብር",
+    "Manual": "በእጅ",
+    "Backups in Telegram": "በTelegram ውስጥ ያሉ ምትኬዎች",
+    "No backups yet": "እስካሁን ምትኬ የለም",
+    "Private chat": "የግል ውይይት",
+    "Last backup": "የመጨረሻ ምትኬ",
+    "Open Telegram": "Telegramን ክፈት",
+    "Refresh": "አድስ",
+    "Bot token": "የቦት ቶከን",
+    "Connect Telegram bot": "የTelegram ቦትን አገናኝ",
+    "Connect your bot": "ቦትዎን ያገናኙ",
+    "Back up now": "አሁን ምትኬ ያድርጉ",
   };
 
   static String translate(

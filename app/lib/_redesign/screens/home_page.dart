@@ -24,11 +24,13 @@ import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/transaction_amounts.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/screens/todays_transactions_page.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
@@ -110,6 +112,21 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     setState(() => _isRefreshingTodaySms = true);
 
     try {
+      final hasSmsPermission = await SmsPermissionPrompt.ensureGranted(
+        context,
+        userInitiated: true,
+      );
+      if (!hasSmsPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.l10nTextRead('SMS permission denied.')),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
       final result = await _smsService.syncTodayBankSms();
       if (!mounted) return;
 
@@ -184,6 +201,44 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     }
   }
 
+  Future<void> _categorizeSelected(TransactionProvider provider) async {
+    if (_selectedRefs.isEmpty) return;
+    final references = Set<String>.from(_selectedRefs);
+    final transactions = provider.allTransactions
+        .where((transaction) => references.contains(transaction.reference))
+        .toList(growable: false);
+    try {
+      final changed = await showBatchTransactionCategorySheet(
+        context: context,
+        transactions: transactions,
+        provider: provider,
+      );
+      if (!mounted || changed == null) return;
+      _clearSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            changed == 0
+                ? context.l10nTextRead('Categories were already assigned.')
+                : '${context.l10nTextRead('Categorized')} $changed '
+                    '${context.l10nTextRead(changed == 1 ? 'transaction' : 'transactions')}',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update category')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -195,9 +250,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = Provider.of<TransactionProvider>(context, listen: false);
-      if (provider.dataVersion == 0) {
-        await provider.loadData();
-      }
+      await provider.ensureDataLoaded();
       if (mounted) {
         setState(() => _isBootstrapping = false);
       }
@@ -240,8 +293,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
         final todayCount = todaySorted.length;
         final monthTransactionsCount = provider.monthTransactions.length;
         final todayList = todaySorted.take(3).toList(growable: false);
-        final todayTotals = provider.todayTotals;
-        final weekTotals = provider.weekTotals;
+        final todayCashFlowTotals = provider.todayCashFlowTotals;
+        final weekCashFlowTotals = provider.weekCashFlowTotals;
         final monthTotals = provider.monthTotals;
         final thirtyDayTotals = provider.thirtyDayTotals;
         final selfTransferCount = provider.selfTransferCount;
@@ -270,10 +323,10 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                             children: [
                               _TotalBalanceCard(
                                 totalBalance: totalBalance,
-                                todayIncome: todayTotals.income,
-                                todayExpense: todayTotals.expense,
-                                weekIncome: weekTotals.income,
-                                weekExpense: weekTotals.expense,
+                                todayIncome: todayCashFlowTotals.income,
+                                todayExpense: todayCashFlowTotals.expense,
+                                weekIncome: weekCashFlowTotals.income,
+                                weekExpense: weekCashFlowTotals.expense,
                                 showBalance: _showBalance,
                                 onToggleBalance: () {
                                   setState(() {
@@ -293,6 +346,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                               const SizedBox(height: 12),
                               _InsightCard(
                                 message: insightMessage,
+                                showAmounts: _showBalance,
                                 showImportBackupPrompt: !hasAddedBankAccounts,
                                 isImportingBackup: _isImportingBackup,
                                 onImportBackupTap: () =>
@@ -342,6 +396,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                 const SizedBox(height: 8),
                                 _SelectionBar(
                                   count: _selectedRefs.length,
+                                  onCategorize: () =>
+                                      _categorizeSelected(provider),
                                   onDelete: () => _deleteSelected(provider),
                                   onClear: _clearSelection,
                                 ),
@@ -396,6 +452,8 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                                     isDebit: !isCredit,
                                     isSelfTransfer: isSelfTransfer,
                                     isMisc: isMisc,
+                                    isReimbursed: provider
+                                        .isReimbursedExpense(transaction),
                                     isSharing: provider
                                         .isSharingSharedExpenseTransaction(
                                             transaction),
@@ -744,9 +802,7 @@ Map<String, double> _deriveCashBalancesForHomeBreakdown({
   if (cashTransactions.isEmpty) return const <String, double>{};
 
   final netCashDelta = cashTransactions.fold<double>(0.0, (sum, transaction) {
-    if (transaction.type == 'DEBIT') return sum - transaction.amount;
-    if (transaction.type == 'CREDIT') return sum + transaction.amount;
-    return sum;
+    return sum + transactionBalanceDelta(transaction);
   });
 
   // Account balances are stored as present totals; reverse the transaction
@@ -766,11 +822,7 @@ Map<String, double> _deriveCashBalancesForHomeBreakdown({
 
   final derived = <String, double>{};
   for (final transaction in byTimeAsc) {
-    if (transaction.type == 'DEBIT') {
-      rollingBalance -= transaction.amount;
-    } else if (transaction.type == 'CREDIT') {
-      rollingBalance += transaction.amount;
-    }
+    rollingBalance += transactionBalanceDelta(transaction);
 
     final parsed = double.tryParse(transaction.currentBalance ?? '');
     if (parsed != null) {
@@ -903,8 +955,7 @@ class _TotalBalanceCard extends StatelessWidget {
                     style: IconButton.styleFrom(
                       foregroundColor: AppColors.white.withValues(alpha: 0.9),
                       padding: EdgeInsets.zero,
-                      minimumSize: const Size(24, 24),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      fixedSize: const Size.square(60),
                     ),
                     icon: Icon(
                       showBalance
@@ -1432,12 +1483,14 @@ String _localizedHomeInsight(BuildContext context, String message) {
 
 class _InsightCard extends StatelessWidget {
   final String message;
+  final bool showAmounts;
   final bool showImportBackupPrompt;
   final bool isImportingBackup;
   final VoidCallback? onImportBackupTap;
 
   const _InsightCard({
     required this.message,
+    required this.showAmounts,
     this.showImportBackupPrompt = false,
     this.isImportingBackup = false,
     this.onImportBackupTap,
@@ -1446,7 +1499,13 @@ class _InsightCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final localizedMessage = _localizedHomeInsight(context, message);
+    final visibleMessage = showAmounts
+        ? message
+        : message.replaceAll(
+            RegExp(r'\bETB\s+\d[\d,]*(?:\.\d+)?'),
+            'ETB ***',
+          );
+    final localizedMessage = _localizedHomeInsight(context, visibleMessage);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1577,7 +1636,6 @@ class _QuickCashActions extends StatelessWidget {
             label: 'Income',
             icon: AppIcons.download_rounded,
             color: AppColors.incomeSuccess,
-            filled: true,
             onTap: onIncomeTap,
           ),
         ),
@@ -1590,7 +1648,6 @@ class _QuickCashActionButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final bool filled;
   final VoidCallback onTap;
 
   const _QuickCashActionButton({
@@ -1598,19 +1655,14 @@ class _QuickCashActionButton extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.onTap,
-    this.filled = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = filled
-        ? color.withValues(alpha: AppColors.isDark(context) ? 0.14 : 0.09)
-        : AppColors.cardColor(context);
-    final borderColor = filled
-        ? color.withValues(alpha: AppColors.isDark(context) ? 0.42 : 0.28)
-        : AppColors.borderColor(context).withValues(
-            alpha: AppColors.isDark(context) ? 0.72 : 0.9,
-          );
+    final backgroundColor = AppColors.cardColor(context);
+    final borderColor = AppColors.borderColor(context).withValues(
+      alpha: AppColors.isDark(context) ? 0.72 : 0.9,
+    );
 
     return CustomPaint(
       foregroundPainter: _DottedRoundedBorderPainter(
@@ -1636,11 +1688,9 @@ class _QuickCashActionButton extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: filled
-                          ? color
-                          : AppColors.textPrimary(context).withValues(
-                              alpha: AppColors.isDark(context) ? 0.9 : 0.76,
-                            ),
+                      color: AppColors.textPrimary(context).withValues(
+                        alpha: AppColors.isDark(context) ? 0.9 : 0.76,
+                      ),
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
@@ -2213,11 +2263,13 @@ class _StaticRangeToggleButton extends StatelessWidget {
 
 class _SelectionBar extends StatelessWidget {
   final int count;
+  final VoidCallback onCategorize;
   final VoidCallback onDelete;
   final VoidCallback onClear;
 
   const _SelectionBar({
     required this.count,
+    required this.onCategorize,
     required this.onDelete,
     required this.onClear,
   });
@@ -2243,6 +2295,15 @@ class _SelectionBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          GestureDetector(
+            onTap: onCategorize,
+            child: const Icon(
+              AppIcons.category,
+              size: 20,
+              color: AppColors.primaryLight,
+            ),
+          ),
+          const SizedBox(width: 16),
           GestureDetector(
             onTap: onDelete,
             child: const Icon(AppIcons.delete_outline_rounded,

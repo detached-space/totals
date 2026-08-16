@@ -35,6 +35,9 @@ class TransactionTile extends StatelessWidget {
   /// Whether this transaction is currently being linked to a shared expense.
   final bool isSharing;
 
+  /// Whether this expense has a reimbursement linked to it.
+  final bool isReimbursed;
+
   final String amount;
   final Color amountColor;
   final String name;
@@ -63,6 +66,7 @@ class TransactionTile extends StatelessWidget {
     this.isMisc = false,
     this.isShared = false,
     this.isSharing = false,
+    this.isReimbursed = false,
     this.timestamp,
     this.selected = false,
     this.onTap,
@@ -134,6 +138,11 @@ class TransactionTile extends StatelessWidget {
                             isMisc: isMisc,
                             onTap: onCategoryTap,
                           ),
+                          if (isReimbursed)
+                            _TransactionStatusChip(
+                              label: context.l10nText('Reimbursed'),
+                              color: AppColors.incomeSuccess,
+                            ),
                           if (resolvedPersonLabel != null &&
                               resolvedPersonLabel.isNotEmpty)
                             _TransactionPersonChip(
@@ -144,12 +153,12 @@ class TransactionTile extends StatelessWidget {
                                   : () => onPersonTap!(resolvedPersonLabel),
                             ),
                           if (isSharing)
-                            _SharedTransactionChip(
+                            _TransactionStatusChip(
                               label: context.l10nText('Sharing'),
                               color: AppColors.amber,
                             )
                           else if (isShared)
-                            _SharedTransactionChip(
+                            _TransactionStatusChip(
                               label: context.l10nText('Shared'),
                               color: AppColors.primaryLight,
                             ),
@@ -204,11 +213,11 @@ class TransactionTile extends StatelessWidget {
   }
 }
 
-class _SharedTransactionChip extends StatelessWidget {
+class _TransactionStatusChip extends StatelessWidget {
   final String label;
   final Color color;
 
-  const _SharedTransactionChip({
+  const _TransactionStatusChip({
     required this.label,
     required this.color,
   });

@@ -5,9 +5,11 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:totals/_redesign/screens/feature_discovery_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/screens/tools_page.dart';
 import 'package:totals/_redesign/screens/advanced_settings_page.dart';
+import 'package:totals/_redesign/screens/telegram_backup_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/categories_page.dart';
@@ -19,11 +21,16 @@ import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/data_export_import_service.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/advanced_settings_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_settings_service.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/theme/app_font_option.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
+import 'package:totals/widgets/data_export_options_sheet.dart';
+import 'package:totals/widgets/data_import_options_sheet.dart';
 
 // ── Support links ───────────────────────────────────────────────────────────
 Future<void> _openSupportLink() async {
@@ -60,11 +67,21 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
   final DataExportImportService _exportImportService =
       DataExportImportService();
   final SmsConfigService _smsConfigService = SmsConfigService();
+  late final Future<void> _telegramBackupSettingsLoad;
 
   bool _isExporting = false;
   bool _isImporting = false;
   bool _isFetchingSmsPatterns = false;
   bool _isCheckingForUpdates = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _telegramBackupSettingsLoad = Future.wait([
+      AdvancedSettingsService.instance.ensureLoaded(),
+      TelegramBackupSettingsService.instance.ensureLoaded(),
+    ]);
+  }
 
   Future<void> _checkForUpdates() async {
     if (_isCheckingForUpdates) return;
@@ -849,6 +866,25 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
   Future<void> _exportData() async {
     if (!mounted) return;
 
+    late final DataExportOptions exportOptions;
+    try {
+      final banks = await _exportImportService.getExportBankSummaries();
+      if (!mounted) return;
+      final selectedOptions = await showDataExportOptionsSheet(
+        context: context,
+        banks: banks,
+      );
+      if (selectedOptions == null || !mounted) return;
+      exportOptions = selectedOptions;
+    } catch (e) {
+      if (mounted) {
+        _showErrorSnack(
+          '${context.l10nTextRead('Could not prepare export')}: $e',
+        );
+      }
+      return;
+    }
+
     final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -888,7 +924,9 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
 
     setState(() => _isExporting = true);
     try {
-      final jsonData = await _exportImportService.exportAllData();
+      final jsonData = await _exportImportService.exportAllData(
+        options: exportOptions,
+      );
       final timestamp =
           DateTime.now().toIso8601String().replaceAll(':', '-').split('.')[0];
       final fileName = 'totals_export_$timestamp.json';
@@ -1035,48 +1073,18 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
         final jsonData = await file.readAsString();
 
         if (!mounted) return;
-        final confirmed = await showDialog<bool>(
+        final summary =
+            DataExportImportService.inspectImportPayload(jsonData);
+        final importOptions = await showDataImportOptionsSheet(
           context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.cardColor(ctx),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(
-              ctx.l10nText('Import Data'),
-              style: TextStyle(color: AppColors.textPrimary(ctx)),
-            ),
-            content: Text(
-              ctx.l10nText(
-                'This will add the imported data to your existing data. Duplicates will be skipped.',
-              ),
-              style: TextStyle(color: AppColors.textSecondary(ctx)),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(
-                  ctx.l10nText('Cancel'),
-                  style: TextStyle(color: AppColors.textSecondary(ctx)),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryDark,
-                  foregroundColor: AppColors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(ctx.l10nText('Import')),
-              ),
-            ],
-          ),
+          summary: summary,
         );
 
-        if (confirmed == true && mounted) {
-          await _exportImportService.importAllData(jsonData);
+        if (importOptions != null && mounted) {
+          await _exportImportService.importAllData(
+            jsonData,
+            options: importOptions,
+          );
           if (mounted) {
             Provider.of<TransactionProvider>(context, listen: false).loadData();
             _showSnack(context.l10nTextRead('Data imported successfully'));
@@ -1451,6 +1459,45 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                 onTap: _isFetchingSmsPatterns ? null : _fetchSmsPatterns,
               ),
 
+              FutureBuilder<void>(
+                future: _telegramBackupSettingsLoad,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const SizedBox.shrink();
+                  }
+                  return ValueListenableBuilder<bool>(
+                    valueListenable:
+                        AdvancedSettingsService.instance.telegramBackupEnabled,
+                    builder: (context, enabled, _) {
+                      if (!enabled) return const SizedBox.shrink();
+                      return ValueListenableBuilder<TelegramBackupConfig?>(
+                        valueListenable:
+                            TelegramBackupSettingsService.instance.config,
+                        builder: (context, config, _) {
+                          return _SettingTile(
+                            icon: Icons.send_rounded,
+                            iconColor: AppColors.primaryLight,
+                            title: context.l10nText('Telegram Backup'),
+                            subtitle: config == null
+                                ? context.l10nText(
+                                    'Connect your bot for encrypted backups',
+                                  )
+                                : '${context.l10nText('Connected to')} '
+                                    '@${config.botUsername}',
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const TelegramBackupPage(),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+
               _SettingTile(
                 icon: AppIcons.upload_rounded,
                 iconColor: AppColors.incomeSuccess,
@@ -1534,6 +1581,25 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                       )
                     : null,
                 onTap: _isCheckingForUpdates ? null : _checkForUpdates,
+              ),
+
+              _SettingTile(
+                leading: Image.asset(
+                  'assets/icon/totals_icon.png',
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
+                ),
+                iconColor: AppColors.primaryLight,
+                title: context.l10nText('Discover Totals'),
+                subtitle: context.l10nText(
+                  'Preview new features and tutorials',
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const FeatureDiscoveryPage(),
+                  ),
+                ),
               ),
 
               _SettingTile(
@@ -1706,23 +1772,25 @@ class _ProfileCard extends StatelessWidget {
 }
 
 class _SettingTile extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
   final Color iconColor;
   final String title;
   final String subtitle;
+  final Widget? leading;
   final Widget? trailing;
   final VoidCallback? onTap;
   final bool showChevron;
 
   const _SettingTile({
-    required this.icon,
+    this.icon,
     required this.iconColor,
     required this.title,
     required this.subtitle,
+    this.leading,
     this.trailing,
     this.onTap,
     this.showChevron = true,
-  });
+  }) : assert(icon != null || leading != null);
 
   @override
   Widget build(BuildContext context) {
@@ -1747,11 +1815,12 @@ class _SettingTile extends StatelessWidget {
                 Container(
                   width: 40,
                   height: 40,
+                  clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     color: iconColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(icon, color: iconColor, size: 20),
+                  child: leading ?? Icon(icon, color: iconColor, size: 20),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1949,7 +2018,7 @@ class _RedesignAboutPage extends StatelessWidget {
 
             _AboutFeatureCard(
               icon: AppIcons.sms_outlined,
-              title: context.l10nText('SMS Stays On Device'),
+              title: context.l10nText('Data Stays On Device'),
               description: context.l10nText(
                 'For core transaction tracking, Totals reads and parses supported bank SMS messages locally on your device. Those SMS contents are not sent to our servers.',
               ),
@@ -1958,7 +2027,7 @@ class _RedesignAboutPage extends StatelessWidget {
               icon: AppIcons.cloud_download,
               title: context.l10nText('Optional Online Features'),
               description: context.l10nText(
-                'Payment verification and remote config updates can connect to online services. Verification may transmit images, payment references, selected account numbers, and bank identifiers that you submit.',
+                'Your data stays on this device by default. Optional online features connect only when used. Payment verification sends only the images and transaction details you choose to submit; remote config only downloads app rules.',
               ),
             ),
             _AboutFeatureCard(
@@ -2044,7 +2113,7 @@ class _RedesignAboutPage extends StatelessWidget {
             const SizedBox(height: 8),
             Center(
               child: Text(
-                '${context.l10nText('Version')} 1.6',
+                '${context.l10nText('Version')} 1.7',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color:
                       AppColors.textSecondary(context).withValues(alpha: 0.6),

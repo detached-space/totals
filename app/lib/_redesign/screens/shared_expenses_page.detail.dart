@@ -1708,8 +1708,26 @@ class _DebtAmountRow extends StatelessWidget {
 
   const _DebtAmountRow({required this.amount});
 
+  Future<void> _copyAmount(BuildContext context) async {
+    final copyableAmount = _formatExpenseAmountInput(amount);
+    if (copyableAmount.isEmpty) return;
+
+    await Clipboard.setData(ClipboardData(text: copyableAmount));
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10nTextRead('Copied to clipboard')),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final formattedAmount = _formatEtb(amount, context);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Row(
@@ -1725,16 +1743,51 @@ class _DebtAmountRow extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Text(
-              _formatEtb(amount, context),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textPrimary(context),
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Semantics(
+                button: true,
+                label: context.l10nText('Copy'),
+                value: formattedAmount,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _copyAmount(context),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            formattedAmount,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.right,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: AppColors.textPrimary(context),
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0,
+                                ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            AppIcons.copy,
+                            size: 17,
+                            color: AppColors.textSecondary(context),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
+                ),
+              ),
             ),
           ),
         ],

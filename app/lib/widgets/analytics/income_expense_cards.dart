@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/models/bank.dart';
+import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:intl/intl.dart';
 import 'package:totals/constants/cash_constants.dart';
+import 'package:totals/utils/account_identity.dart';
 
 class IncomeExpenseCards extends StatelessWidget {
   final String? selectedCard;
@@ -41,11 +43,10 @@ class IncomeExpenseCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allTransactions =
-        Provider.of<TransactionProvider>(context, listen: false)
-            .allTransactions;
-    final accounts = Provider.of<TransactionProvider>(context, listen: false)
-        .accountSummaries;
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
+    final allTransactions = provider.allTransactions;
+    final accounts = provider.accountSummaries;
+    final registeredAccounts = provider.accounts;
 
     final BankConfigService bankConfigService = BankConfigService();
     final banksFuture = bankConfigService.getBanks();
@@ -123,44 +124,47 @@ class IncomeExpenseCards extends StatelessWidget {
                 .where((t) => t.bankId == CashConstants.bankId)
                 .toList();
           } else {
-            final account = accounts.firstWhere(
-              (a) =>
-                  a.accountNumber == selectedAccountFilter &&
-                  a.bankId == selectedBankFilter,
-              orElse: () => accounts.firstWhere(
-                (a) => a.bankId == selectedBankFilter,
-                orElse: () {
-                  if (accounts.isEmpty) {
-                    throw StateError('No accounts available');
-                  }
-                  return accounts.first;
-                },
-              ),
-            );
-            final bank = banks.firstWhere(
-              (b) => b.id == account.bankId,
-              orElse: () => Bank(
-                id: account.bankId,
-                name: '',
-                shortName: '',
-                codes: const [],
-                image: '',
-              ),
-            );
-            periodFiltered = periodFiltered.where((t) {
-              if (bank.uniformMasking == true &&
-                  bank.maskPattern != null &&
-                  t.accountNumber != null &&
-                  account.accountNumber.length >= bank.maskPattern! &&
-                  t.accountNumber!.length >= bank.maskPattern!) {
-                return t.accountNumber!.substring(
-                        t.accountNumber!.length - bank.maskPattern!) ==
-                    account.accountNumber.substring(
-                        account.accountNumber.length - bank.maskPattern!);
-              } else {
-                return t.bankId == account.bankId;
+            AccountSummary? account;
+            for (final candidate in accounts) {
+              if (candidate.accountNumber == selectedAccountFilter &&
+                  candidate.bankId == selectedBankFilter) {
+                account = candidate;
+                break;
               }
-            }).toList();
+            }
+            if (account == null) {
+              periodFiltered = <Transaction>[];
+            } else {
+              final selectedAccount = account;
+              final bank = banks.firstWhere(
+                (b) => b.id == selectedAccount.bankId,
+                orElse: () => Bank(
+                  id: selectedAccount.bankId,
+                  name: '',
+                  shortName: '',
+                  codes: const [],
+                  image: '',
+                ),
+              );
+              periodFiltered = periodFiltered.where((t) {
+                for (final target in registeredAccounts) {
+                  if (target.bank == selectedAccount.bankId &&
+                      registeredAccountNumbersMatch(
+                        bank,
+                        target.accountNumber,
+                        selectedAccount.accountNumber,
+                      )) {
+                    return transactionBelongsToAccount(
+                      transaction: t,
+                      account: target,
+                      bank: bank,
+                      accounts: registeredAccounts,
+                    );
+                  }
+                }
+                return false;
+              }).toList();
+            }
           }
         }
 
@@ -170,13 +174,19 @@ class IncomeExpenseCards extends StatelessWidget {
                 t.type == 'CREDIT' &&
                 _matchesCategorySelection(
                     t.categoryId, selectedIncomeCategoryIds))
-            .fold(0.0, (sum, t) => sum + t.amount);
+            .fold(
+              0.0,
+              (sum, t) => sum + provider.incomeAmountForTransaction(t),
+            );
         final periodExpenses = periodFiltered
             .where((t) =>
                 t.type == 'DEBIT' &&
                 _matchesCategorySelection(
                     t.categoryId, selectedExpenseCategoryIds))
-            .fold(0.0, (sum, t) => sum + t.amount);
+            .fold(
+              0.0,
+              (sum, t) => sum + provider.netExpenseAmountForTransaction(t),
+            );
 
         return Row(
           children: [

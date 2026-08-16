@@ -5,12 +5,15 @@ import 'package:flutter/scheduler.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
+import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/utils/category_sort.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
+import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 Future<void> showTransactionCategorySheet({
@@ -32,6 +35,705 @@ Future<void> showTransactionCategorySheet({
       allowAutoCategorizationRuleUpdates: allowAutoCategorizationRuleUpdates,
     ),
   );
+}
+
+/// Opens a compact batch picker and adds a category to each selected
+/// transaction without removing its current categories. Mixed debit/credit
+/// selections receive separate, flow-correct category choices.
+Future<int?> showBatchTransactionCategorySheet({
+  required BuildContext context,
+  required Iterable<Transaction> transactions,
+  required TransactionProvider provider,
+}) async {
+  final selectedByReference = <String, Transaction>{
+    for (final transaction in transactions)
+      if (transaction.reference.trim().isNotEmpty)
+        transaction.reference: transaction,
+  };
+  final selected = selectedByReference.values.where((transaction) {
+    final type = transaction.type?.trim().toUpperCase();
+    return type == 'DEBIT' || type == 'CREDIT';
+  }).toList(growable: false);
+  if (selected.isEmpty) return 0;
+
+  FocusManager.instance.primaryFocus?.unfocus();
+  final selection = await showModalBottomSheet<_BatchCategorySelection>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _BatchTransactionCategorySheet(
+      transactions: selected,
+      provider: provider,
+    ),
+  );
+  if (selection == null) return null;
+
+  return provider.setCategoriesForTransactionsByType(
+    selected,
+    debitCategory: selection.debitCategory,
+    creditCategory: selection.creditCategory,
+  );
+}
+
+class _BatchCategorySelection {
+  final Category? debitCategory;
+  final Category? creditCategory;
+
+  const _BatchCategorySelection({
+    required this.debitCategory,
+    required this.creditCategory,
+  });
+}
+
+class _BatchTransactionCategorySheet extends StatefulWidget {
+  final List<Transaction> transactions;
+  final TransactionProvider provider;
+
+  const _BatchTransactionCategorySheet({
+    required this.transactions,
+    required this.provider,
+  });
+
+  @override
+  State<_BatchTransactionCategorySheet> createState() =>
+      _BatchTransactionCategorySheetState();
+}
+
+class _BatchTransactionCategorySheetState
+    extends State<_BatchTransactionCategorySheet> {
+  Category? _debitCategory;
+  Category? _creditCategory;
+  final TextEditingController _newCategoryController = TextEditingController();
+  final FocusNode _newCategoryFocus = FocusNode();
+  final GlobalKey _newCategoryComposerKey = GlobalKey();
+  String? _newCategoryFlow;
+  String _newCategoryColorKey = _kCategoryColorOptions.first.key;
+  bool _showNewCategoryColors = false;
+  bool _isCreatingCategory = false;
+
+  List<Transaction> get _debits => widget.transactions
+      .where((transaction) => transaction.type?.trim().toUpperCase() == 'DEBIT')
+      .toList(growable: false);
+
+  List<Transaction> get _credits => widget.transactions
+      .where(
+        (transaction) => transaction.type?.trim().toUpperCase() == 'CREDIT',
+      )
+      .toList(growable: false);
+
+  List<Category> _categoriesForFlow(String flow) {
+    return sortCategoriesAlphabetically(
+      widget.provider.categories.where(
+        (category) =>
+            category.id != null &&
+            category.flow.toLowerCase() == flow &&
+            !isLoanDebtCategory(category) &&
+            !isRepaymentCategory(category) &&
+            !isReimbursementCategory(category),
+      ),
+    );
+  }
+
+  Category? _commonCategory(List<Transaction> transactions, String flow) {
+    if (transactions.isEmpty) return null;
+    if (transactions.any(
+      (transaction) => transaction.selectedCategoryIds.length != 1,
+    )) {
+      return null;
+    }
+    final categoryIds =
+        transactions.map((transaction) => transaction.categoryId).toSet();
+    if (categoryIds.length != 1) return null;
+    final category = widget.provider.getCategoryById(categoryIds.single);
+    if (category == null ||
+        category.flow.toLowerCase() != flow ||
+        isLoanDebtCategory(category) ||
+        isRepaymentCategory(category) ||
+        isReimbursementCategory(category)) {
+      return null;
+    }
+    return category;
+  }
+
+  Category? _findCategoryByNameAndFlow({
+    required String name,
+    required String flow,
+    Set<int> excludeIds = const <int>{},
+  }) {
+    final normalizedName = name.trim().toLowerCase();
+    final normalizedFlow = flow.trim().toLowerCase();
+    for (final category in widget.provider.categories.reversed) {
+      if (category.name.trim().toLowerCase() == normalizedName &&
+          category.flow.trim().toLowerCase() == normalizedFlow &&
+          !excludeIds.contains(category.id)) {
+        return category;
+      }
+    }
+    return null;
+  }
+
+  void _toggleNewCategoryComposer(String flow) {
+    if (_isCreatingCategory) return;
+    final shouldClose = _newCategoryFlow == flow;
+    setState(() {
+      _newCategoryFlow = shouldClose ? null : flow;
+      _showNewCategoryColors = false;
+      if (!shouldClose) {
+        _newCategoryColorKey = _kCategoryColorOptions.first.key;
+      }
+      _newCategoryController.clear();
+    });
+    if (shouldClose) {
+      _newCategoryFocus.unfocus();
+      return;
+    }
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _newCategoryFocus.requestFocus();
+      final composerContext = _newCategoryComposerKey.currentContext;
+      if (composerContext != null) {
+        Scrollable.ensureVisible(
+          composerContext,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          alignment: 0.45,
+        );
+      }
+    });
+  }
+
+  Future<void> _createNewCategory() async {
+    final flow = _newCategoryFlow;
+    final name = _newCategoryController.text.trim();
+    if (_isCreatingCategory || flow == null || name.isEmpty) return;
+    if (_findCategoryByNameAndFlow(name: name, flow: flow) != null) {
+      _newCategoryFocus.requestFocus();
+      return;
+    }
+
+    final knownCategoryIds = widget.provider.categories
+        .map((category) => category.id)
+        .whereType<int>()
+        .toSet();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final errorMessage = context.l10nTextRead('Could not create category');
+    setState(() => _isCreatingCategory = true);
+
+    try {
+      await widget.provider.createCategory(
+        name: name,
+        essential: false,
+        flow: flow,
+        colorKey: _newCategoryColorKey,
+      );
+      if (!mounted) return;
+      final created = _findCategoryByNameAndFlow(
+            name: name,
+            flow: flow,
+            excludeIds: knownCategoryIds,
+          ) ??
+          _findCategoryByNameAndFlow(name: name, flow: flow);
+      if (created == null) {
+        messenger?.showSnackBar(SnackBar(content: Text(errorMessage)));
+        return;
+      }
+      setState(() {
+        if (flow == 'expense') {
+          _debitCategory = created;
+        } else {
+          _creditCategory = created;
+        }
+        _newCategoryFlow = null;
+        _showNewCategoryColors = false;
+        _newCategoryController.clear();
+      });
+      _newCategoryFocus.unfocus();
+    } catch (_) {
+      messenger?.showSnackBar(SnackBar(content: Text(errorMessage)));
+    } finally {
+      if (mounted) setState(() => _isCreatingCategory = false);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _debitCategory = _commonCategory(_debits, 'expense');
+    _creditCategory = _commonCategory(_credits, 'income');
+  }
+
+  @override
+  void dispose() {
+    _newCategoryController.dispose();
+    _newCategoryFocus.dispose();
+    super.dispose();
+  }
+
+  bool get _canApply =>
+      (_debits.isEmpty || _debitCategory != null) &&
+      (_credits.isEmpty || _creditCategory != null);
+
+  void _apply() {
+    if (!_canApply) return;
+    Navigator.pop(
+      context,
+      _BatchCategorySelection(
+        debitCategory: _debitCategory,
+        creditCategory: _creditCategory,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final debits = _debits;
+    final credits = _credits;
+    final hasMixedFlows = debits.isNotEmpty && credits.isNotEmpty;
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardInset = mediaQuery.viewInsets.bottom;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap = keyboardInset > 0
+        ? 4.0
+        : (mediaQuery.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final contentBottomPadding = keyboardInset > 0 ? 16.0 : 8.0;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: keyboardInset + keyboardLiftBuffer),
+      child: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final preferredMaxHeight = mediaQuery.size.height * 0.78;
+            final maxHeight = constraints.hasBoundedHeight &&
+                    constraints.maxHeight < preferredMaxHeight
+                ? constraints.maxHeight
+                : preferredMaxHeight;
+            return Container(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              decoration: BoxDecoration(
+                color: AppColors.cardColor(context),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.textTertiary(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                context.l10nText('Categorize transactions'),
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: AppColors.textPrimary(context),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                hasMixedFlows
+                                    ? context.l10nText(
+                                        'Choose a category to add to expenses and one to add to income.',
+                                      )
+                                    : '${widget.transactions.length} ${context.l10nText(widget.transactions.length == 1 ? 'transaction selected' : 'transactions selected')}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary(context),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _isCreatingCategory
+                              ? null
+                              : () => Navigator.pop(context),
+                          icon: const Icon(AppIcons.close, size: 20),
+                          color: AppColors.textSecondary(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        8,
+                        20,
+                        contentBottomPadding,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (debits.isNotEmpty)
+                            _buildFlowSection(
+                              flow: 'expense',
+                              label: 'Expenses',
+                              count: debits.length,
+                              categories: _categoriesForFlow('expense'),
+                              selected: _debitCategory,
+                              onSelected: (category) =>
+                                  setState(() => _debitCategory = category),
+                            ),
+                          if (debits.isNotEmpty && credits.isNotEmpty)
+                            const SizedBox(height: 20),
+                          if (credits.isNotEmpty)
+                            _buildFlowSection(
+                              flow: 'income',
+                              label: 'Income',
+                              count: credits.length,
+                              categories: _categoriesForFlow('income'),
+                              selected: _creditCategory,
+                              onSelected: (category) =>
+                                  setState(() => _creditCategory = category),
+                            ),
+                          const SizedBox(height: 16),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                AppIcons.info_outline_rounded,
+                                size: 15,
+                                color: AppColors.textTertiary(context),
+                              ),
+                              const SizedBox(width: 7),
+                              Expanded(
+                                child: Text(
+                                  context.l10nText(
+                                    'Loan and repayment categories are assigned individually so their links are preserved.',
+                                  ),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppColors.textSecondary(context),
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      actionTopGap,
+                      20,
+                      bottomSafeArea + actionBottomGap,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        key: const ValueKey<String>('batch-category-apply'),
+                        onPressed:
+                            _canApply && !_isCreatingCategory ? _apply : null,
+                        icon: const Icon(AppIcons.category, size: 18),
+                        label: Text(context.l10nText('Apply category')),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primaryLight,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              AppColors.borderColor(context),
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFlowSection({
+    required String flow,
+    required String label,
+    required int count,
+    required List<Category> categories,
+    required Category? selected,
+    required ValueChanged<Category> onSelected,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${context.l10nText(label)} · $count',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        const SizedBox(height: 10),
+        if (categories.isEmpty) ...[
+          Text(
+            context.l10nText('No categories are available for this type.'),
+            style: TextStyle(color: AppColors.textSecondary(context)),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ...categories.map(
+              (category) => _CategoryPickerChip(
+                label: category.name,
+                color: _batchCategoryColor(category),
+                isSelected: selected?.id == category.id,
+                onTap: _isCreatingCategory ? null : () => onSelected(category),
+              ),
+            ),
+            _CategoryPickerChip(
+              label: _newCategoryFlow == flow ? 'Cancel' : '+ New',
+              color: _newCategoryFlow == flow
+                  ? AppColors.red
+                  : AppColors.textSecondary(context),
+              isSelected: false,
+              isRemove: _newCategoryFlow == flow,
+              showColorDot: false,
+              onTap: _isCreatingCategory
+                  ? null
+                  : () => _toggleNewCategoryComposer(flow),
+            ),
+          ],
+        ),
+        if (_newCategoryFlow == flow) _buildNewCategoryComposer(flow),
+      ],
+    );
+  }
+
+  Widget _buildNewCategoryComposer(String flow) {
+    final draftName = _newCategoryController.text.trim();
+    final isDuplicate = draftName.isNotEmpty &&
+        _findCategoryByNameAndFlow(name: draftName, flow: flow) != null;
+    final canCreate =
+        draftName.isNotEmpty && !isDuplicate && !_isCreatingCategory;
+    final selectedColor = _batchColorFromKey(_newCategoryColorKey);
+
+    return Container(
+      key: _newCategoryComposerKey,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceColor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10nText(
+              flow == 'expense'
+                  ? 'New expense category'
+                  : 'New income category',
+            ),
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppColors.textPrimary(context),
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _newCategoryController,
+                  focusNode: _newCategoryFocus,
+                  enabled: !_isCreatingCategory,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.done,
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) {
+                    if (canCreate) _createNewCategory();
+                  },
+                  onTapOutside: (_) => _newCategoryFocus.unfocus(),
+                  style: TextStyle(
+                    color: AppColors.textPrimary(context),
+                    fontSize: 14,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: context.l10nText('Category name'),
+                    hintStyle: TextStyle(
+                      color: AppColors.textTertiary(context),
+                    ),
+                    errorText: isDuplicate
+                        ? context.l10nText(
+                            'A category with this name already exists.',
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: AppColors.cardColor(context),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 11,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(
+                        color: isDuplicate
+                            ? AppColors.red
+                            : AppColors.borderColor(context),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(
+                        color: isDuplicate
+                            ? AppColors.red
+                            : AppColors.primaryLight,
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: _isCreatingCategory
+                    ? null
+                    : () => setState(
+                          () =>
+                              _showNewCategoryColors = !_showNewCategoryColors,
+                        ),
+                child: Container(
+                  width: 44,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppColors.cardColor(context),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.borderColor(context)),
+                  ),
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: selectedColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 42,
+                child: FilledButton(
+                  onPressed: canCreate ? _createNewCategory : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primaryDark,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: _isCreatingCategory
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          context.l10nText('Add'),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                ),
+              ),
+            ],
+          ),
+          if (_showNewCategoryColors) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 9,
+              runSpacing: 9,
+              children: _kCategoryColorOptions.map((option) {
+                final isSelected = option.key == _newCategoryColorKey;
+                return GestureDetector(
+                  onTap: _isCreatingCategory
+                      ? null
+                      : () => setState(() {
+                            _newCategoryColorKey = option.key;
+                            _showNewCategoryColors = false;
+                          }),
+                  child: Container(
+                    width: 27,
+                    height: 27,
+                    decoration: BoxDecoration(
+                      color: option.color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.textPrimary(context)
+                            : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(growable: false),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Color _batchColorFromKey(String colorKey) {
+    for (final option in _kCategoryColorOptions) {
+      if (option.key == colorKey) return option.color;
+    }
+    return _kCategoryColorOptions.first.color;
+  }
+
+  Color _batchCategoryColor(Category category) {
+    final colorKey = category.colorKey?.trim();
+    if (colorKey != null && colorKey.isNotEmpty) {
+      for (final option in _kCategoryColorOptions) {
+        if (option.key == colorKey) return option.color;
+      }
+    }
+    final seed = '${category.flow}:${category.name.toLowerCase()}';
+    var hash = 0;
+    for (final code in seed.codeUnits) {
+      hash = (hash + code) & 0x7fffffff;
+    }
+    return _kCategoryColorOptions[hash % _kCategoryColorOptions.length].color;
+  }
 }
 
 class _TransactionCategorySheet extends StatefulWidget {
@@ -79,7 +781,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
-      !_currentCategories.any(_isLoanDebtManagedCategory);
+      !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
 
@@ -317,6 +1019,11 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     return isLoanDebtCategory(category) || isRepaymentCategory(category);
   }
 
+  bool _isLinkManagedCategory(Category category) {
+    return _isLoanDebtManagedCategory(category) ||
+        isReimbursementCategory(category);
+  }
+
   bool _isSelfCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     if (category == null) return false;
@@ -330,7 +1037,10 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   }
 
   bool _canAutoCategorizeCategoryId(int id) {
-    return !_isSelfCategoryId(id) && !_isLoanDebtManagedCategoryId(id);
+    final category = _provider.getCategoryById(id);
+    return !_isSelfCategoryId(id) &&
+        !_isLoanDebtManagedCategoryId(id) &&
+        (category == null || !isReimbursementCategory(category));
   }
 
   bool _transactionHasRepaymentCategory(Transaction transaction) {
@@ -343,6 +1053,24 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   bool _isRepaymentCategoryId(int id) {
     final category = _provider.getCategoryById(id);
     return category != null && isRepaymentCategory(category);
+  }
+
+  bool _transactionHasReimbursementCategory(Transaction transaction) {
+    return transaction.selectedCategoryIds.any((id) {
+      final category = _provider.getCategoryById(id);
+      return category != null && isReimbursementCategory(category);
+    });
+  }
+
+  bool _isReimbursementCategoryId(int id) {
+    final category = _provider.getCategoryById(id);
+    return category != null && isReimbursementCategory(category);
+  }
+
+  List<int> _categoryIdsWithoutReimbursement(Transaction transaction) {
+    return transaction.selectedCategoryIds
+        .where((id) => !_isReimbursementCategoryId(id))
+        .toList(growable: false);
   }
 
   List<int> _categoryIdsWithoutRepayment(Transaction transaction) {
@@ -386,6 +1114,28 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     }
   }
 
+  Future<bool> _removeUnlinkedReimbursementCategory(
+    Transaction transaction,
+  ) async {
+    final nextCategoryIds = _categoryIdsWithoutReimbursement(transaction);
+    try {
+      await ReimbursementRepository().deleteForReimbursement(
+        transaction.reference,
+      );
+      final updated = await _provider.updateCategoriesForTransaction(
+        transaction,
+        categoryIds: nextCategoryIds,
+        primaryCategoryId: _primaryCategoryForIds(transaction, nextCategoryIds),
+      );
+      if (mounted) {
+        setState(() => _transaction = updated);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Transaction?> _applyCategorySelection({
     required List<int> categoryIds,
     int? primaryCategoryId,
@@ -396,13 +1146,20 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     final previousTransaction = _tx;
     final hadRepaymentCategory =
         _transactionHasRepaymentCategory(previousTransaction);
+    final hadReimbursementCategory =
+        _transactionHasReimbursementCategory(previousTransaction);
     final hasLoanDebtManagedCategory =
         categoryIds.any(_isLoanDebtManagedCategoryId);
+    final hasReimbursementCategory =
+        categoryIds.any(_isReimbursementCategoryId);
     final updateErrorMessage = context.l10nTextRead(
       'Could not update category. Changes were reverted.',
     );
     final repaymentCleanupErrorMessage = context.l10nTextRead(
       'Category was saved, but repayment link could not be removed.',
+    );
+    final reimbursementCleanupErrorMessage = context.l10nTextRead(
+      'Category was saved, but reimbursement links could not be removed.',
     );
     final hadExistingRules = _provider
         .autoCategorizationRulesForTransaction(previousTransaction)
@@ -422,7 +1179,8 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       );
       final shouldPersistAutoCategorization = shouldAutoCategorize &&
           nextAutoCategoryIds.isNotEmpty &&
-          !hasLoanDebtManagedCategory;
+          !hasLoanDebtManagedCategory &&
+          !hasReimbursementCategory;
       final removedRepaymentCategory =
           hadRepaymentCategory && !_transactionHasRepaymentCategory(updated);
       if (removedRepaymentCategory) {
@@ -435,6 +1193,24 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
             messenger?.showSnackBar(
               SnackBar(
                 content: Text(repaymentCleanupErrorMessage),
+              ),
+            );
+          }
+        }
+      }
+      final removedReimbursementCategory = hadReimbursementCategory &&
+          !_transactionHasReimbursementCategory(updated);
+      if (removedReimbursementCategory) {
+        try {
+          await ReimbursementRepository().deleteForReimbursement(
+            updated.reference,
+          );
+          await _provider.refreshReimbursements();
+        } catch (_) {
+          if (mounted) {
+            messenger?.showSnackBar(
+              SnackBar(
+                content: Text(reimbursementCleanupErrorMessage),
               ),
             );
           }
@@ -504,6 +1280,12 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       return;
     }
 
+    if (isReimbursementCategory(category)) {
+      nextIds.clear();
+    } else {
+      nextIds.removeWhere(_isReimbursementCategoryId);
+    }
+
     if (isRepaymentCategory(category)) {
       final unavailableMessage = context.l10nTextRead(
         'Add an active loan or debt first, then link a repayment.',
@@ -529,7 +1311,9 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       primaryCategoryId: categoryId,
     );
     if (updated == null || !mounted) return;
-    if (isRepaymentCategory(category)) {
+    if (isReimbursementCategory(category)) {
+      await _openReimbursementLinkPrompt(updated);
+    } else if (isRepaymentCategory(category)) {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
@@ -580,6 +1364,39 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       return;
     }
     final removed = await _removeUnlinkedRepaymentCategory(transaction);
+    if (!hostContext.mounted) return;
+    ScaffoldMessenger.maybeOf(hostContext)?.showSnackBar(
+      SnackBar(
+        content: Text(removed ? rollbackMessage : rollbackErrorMessage),
+      ),
+    );
+  }
+
+  Future<void> _openReimbursementLinkPrompt(
+    Transaction transaction,
+  ) async {
+    final hostContext = widget.hostContext;
+    final rollbackMessage = context.l10nTextRead(
+      'Reimbursement was not linked, so the category was removed.',
+    );
+    final rollbackErrorMessage = context.l10nTextRead(
+      'Could not remove the unlinked reimbursement category.',
+    );
+    _dismissComposerState(clearDraft: true);
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    final outcome = await showReimbursementLinkSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
+    if (outcome != ReimbursementLinkOutcome.cancelled) {
+      return;
+    }
+    final removed = await _removeUnlinkedReimbursementCategory(transaction);
     if (!hostContext.mounted) return;
     ScaffoldMessenger.maybeOf(hostContext)?.showSnackBar(
       SnackBar(

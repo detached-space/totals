@@ -196,7 +196,9 @@ class _BankDetailState extends State<BankDetail> {
     double totalDebit = 0;
 
     for (var account in widget.accountSummaries) {
-      totalBalance += account.balance;
+      if (account.includeInTotals && !account.isDormant) {
+        totalBalance += account.balance;
+      }
       totalCredit += account.totalCredit;
       totalDebit += account.totalDebit;
     }

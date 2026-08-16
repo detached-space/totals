@@ -13,6 +13,8 @@ import 'package:totals/services/widget_service.dart';
 import 'package:totals/services/widget_data_provider.dart';
 import 'package:totals/services/widget_refresh_settings_service.dart';
 import 'package:totals/services/widget_refresh_state_service.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
+import 'package:totals/services/telegram_backup/telegram_backup_service.dart';
 
 const String dailySpendingSummaryTask = 'dailySpendingSummary';
 const String dailySpendingSummaryUniqueName = 'dailySpendingSummaryUnique';
@@ -26,7 +28,6 @@ const String dataSyncDrainTask = 'dataSyncDrain';
 const String dataSyncDrainUniqueName = 'dataSyncDrainUnique';
 const String dataSyncImmediateDrainTask = 'dataSyncImmediateDrain';
 const String dataSyncImmediateDrainUniqueName = 'dataSyncImmediateDrainUnique';
-
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
@@ -53,7 +54,7 @@ void callbackDispatcher() {
 
       if (task == sharedExpenseNotificationCatchupTask) {
         await SharedExpenseBackgroundNotificationService.instance
-            .sendMissedActivityDigestIfNeeded();
+            .sendMissedActivityNotificationsIfNeeded();
         return true;
       }
 
@@ -64,6 +65,28 @@ void callbackDispatcher() {
         return true;
       }
 
+      if (task == telegramBackupCheckTask) {
+        try {
+          final skipSmsCatchup = inputData?['skipSmsCatchup'] == true;
+          if (!skipSmsCatchup) {
+            await _syncMissedBankSmsBestEffort(SmsService());
+          }
+          final result = await TelegramBackupService.instance.backupIfDue();
+          if (kDebugMode) {
+            final trigger = inputData?['trigger'] as String? ?? 'periodic';
+            debugPrint(
+              'debug: Telegram backup $trigger check: ${result.name}',
+            );
+          }
+          return result != TelegramBackupAttemptResult.retry;
+        } catch (error) {
+          if (kDebugMode) {
+            debugPrint('debug: Telegram backup worker failed: $error');
+          }
+          return false;
+        }
+      }
+
       if (task != dailySpendingSummaryTask) return true;
 
       final settings = NotificationSettingsService.instance;
@@ -72,23 +95,11 @@ void callbackDispatcher() {
       final scheduledTime = await settings.getDailySummaryTime();
 
       final now = DateTime.now();
-      try {
-        final catchupResult =
-            await smsService.syncMissedBankSmsSinceLastCatchup();
-        if (kDebugMode && catchupResult.added > 0) {
-          debugPrint(
-            'debug: Background SMS catch-up added '
-            '${catchupResult.added} transaction(s)',
-          );
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('debug: Background SMS catch-up failed: $e');
-        }
-      }
+      await _syncMissedBankSmsBestEffort(smsService);
 
       if (!_isAfterOrEqualTimeOfDay(now, scheduledTime)) return true;
 
+      var summaryDelivered = false;
       final dailyEnabled = await settings.isDailySummaryEnabled();
       if (dailyEnabled) {
         final lastDailySent = await settings.getDailySummaryLastSentAt();
@@ -100,6 +111,7 @@ void callbackDispatcher() {
           );
           if (shown) {
             await settings.setDailySummaryLastSentAt(now);
+            summaryDelivered = true;
           }
         }
       }
@@ -120,6 +132,7 @@ void callbackDispatcher() {
           );
           if (shown) {
             await settings.setWeeklySummaryLastSentAt(now);
+            summaryDelivered = true;
           }
         }
       }
@@ -140,8 +153,13 @@ void callbackDispatcher() {
           );
           if (shown) {
             await settings.setMonthlySummaryLastSentAt(now);
+            summaryDelivered = true;
           }
         }
+      }
+
+      if (summaryDelivered) {
+        await TelegramBackupScheduler.enqueueAfterSummary();
       }
 
       return true;
@@ -152,6 +170,22 @@ void callbackDispatcher() {
       return true;
     }
   });
+}
+
+Future<void> _syncMissedBankSmsBestEffort(SmsService smsService) async {
+  try {
+    final catchupResult = await smsService.syncMissedBankSmsSinceLastCatchup();
+    if (kDebugMode && catchupResult.added > 0) {
+      debugPrint(
+        'debug: Background SMS catch-up added '
+        '${catchupResult.added} transaction(s)',
+      );
+    }
+  } catch (error) {
+    if (kDebugMode) {
+      debugPrint('debug: Background SMS catch-up failed: $error');
+    }
+  }
 }
 
 bool _isSameDay(DateTime a, DateTime b) {

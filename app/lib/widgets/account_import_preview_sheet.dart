@@ -3,6 +3,7 @@ import 'package:totals/data/all_banks_from_assets.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 class _AccountPreviewItem {
@@ -45,6 +46,9 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
 
   Future<void> _loadPreviewData() async {
     final banks = AllBanksFromAssets.getAllBanks();
+    final bankNamesById = <int, String>{
+      for (final bank in banks) bank.id: bank.name,
+    };
     final items = <_AccountPreviewItem>[];
 
     for (final entry in widget.payload.accounts) {
@@ -71,10 +75,17 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
       ));
     }
 
-    // Sort: new accounts first
-    items.sort((a, b) {
-      if (a.exists == b.exists) return 0;
-      return a.exists ? 1 : -1;
+    // Use the same display order as every other account list.
+    items.sort((left, right) {
+      return compareAccountDisplayFields(
+        leftBankId: left.entry.bankId,
+        rightBankId: right.entry.bankId,
+        leftHolderName: left.entry.name,
+        rightHolderName: right.entry.name,
+        leftAccountNumber: left.entry.accountNumber,
+        rightAccountNumber: right.entry.accountNumber,
+        bankNameForId: (bankId) => bankNamesById[bankId] ?? 'Unknown Bank',
+      );
     });
 
     if (mounted) {
@@ -232,6 +243,18 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
     ColorScheme colorScheme,
     _AccountPreviewItem item,
   ) {
+    final bankLabel = context.l10nText(
+      item.bank?.shortName ?? item.bank?.name ?? 'Unknown Bank',
+    );
+    final hasBankLogo = item.bank?.image.isNotEmpty ?? false;
+    final entryHolderName = item.entry.name?.trim() ?? '';
+    final sharedHolderName = widget.payload.name.trim();
+    final accountHolderName = entryHolderName.isNotEmpty
+        ? entryHolderName
+        : sharedHolderName.isNotEmpty
+            ? sharedHolderName
+            : context.l10nText('Account Holder Name');
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(12),
@@ -255,7 +278,7 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
               color: colorScheme.surface,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: item.bank != null && item.bank!.image.isNotEmpty
+            child: hasBankLogo
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: Image.asset(
@@ -277,13 +300,15 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
 
           const SizedBox(width: 12),
 
-          // Bank name and account number
+          // Account holder and account number
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.bank?.shortName ?? item.bank?.name ?? 'Unknown Bank',
+                  accountHolderName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: colorScheme.onSurface,
@@ -291,7 +316,11 @@ class _AccountImportPreviewSheetState extends State<AccountImportPreviewSheet> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  item.entry.accountNumber,
+                  hasBankLogo
+                      ? item.entry.accountNumber
+                      : '$bankLabel • ${item.entry.accountNumber}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontFamily: 'monospace',

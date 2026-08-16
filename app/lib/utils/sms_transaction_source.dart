@@ -4,6 +4,8 @@ import 'package:totals/sms_handler/telephony.dart';
 
 class SmsTransactionSource {
   static const String smsType = 'sms';
+  static const int _telebirrBankId = 6;
+  static const String _telebirrLegMarker = '__totals_tb_leg_';
 
   final String sourceType;
   final String? sourceMessageId;
@@ -50,6 +52,80 @@ class SmsTransactionSource {
 
   bool get hasIdentity =>
       _hasText(sourceMessageId) || _hasText(sourceFingerprint);
+
+  /// Gives each side of a Telebirr transfer a stable row identity.
+  ///
+  /// Wallet-to-wallet transfers can produce a debit and a credit receipt with
+  /// the same bank transaction number. The database still requires a unique
+  /// `reference`, so debit/credit direction is kept in a private suffix while
+  /// the original bank reference remains available through [displayReference].
+  String? scopeReference({
+    required int bankId,
+    required String? reference,
+    required String? transactionType,
+  }) {
+    final bankReference = displayReference(
+      bankId: bankId,
+      storedReference: reference,
+    );
+    if (!_hasText(bankReference)) return null;
+    if (bankId != _telebirrBankId || !hasIdentity) return bankReference;
+
+    final direction = transactionType?.trim().toLowerCase();
+    if (direction != 'debit' && direction != 'credit') return bankReference;
+    return '$bankReference$_telebirrLegMarker$direction';
+  }
+
+  /// Removes Totals' private SMS identity suffix for display/copy/receipt use.
+  static String displayReference({
+    required int? bankId,
+    required String? storedReference,
+  }) {
+    final value = storedReference?.trim() ?? '';
+    if (bankId != _telebirrBankId) return value;
+    return value.replaceFirst(
+      RegExp(
+        '${RegExp.escape(_telebirrLegMarker)}(?:debit|credit)\$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+  }
+
+  /// Normalized bank reference for identity comparisons.
+  ///
+  /// Older parsers sometimes captured the sentence-ending period after a
+  /// transaction number. That punctuation is presentation, not part of the
+  /// bank's reference, and must not prevent a legacy row from matching its
+  /// current SMS-backed counterpart.
+  static String canonicalReference({
+    required int? bankId,
+    required String? storedReference,
+  }) {
+    return displayReference(
+      bankId: bankId,
+      storedReference: storedReference,
+    )
+        .trim()
+        .replaceAll(RegExp(r'[\s.,;:]+$'), '')
+        .replaceAll(RegExp(r'\s+'), '')
+        .toUpperCase();
+  }
+
+  /// Canonical key used when comparing a legacy unsuffixed row with a scoped
+  /// debit/credit row for the same wallet ledger leg.
+  static String logicalLegKey({
+    required int? bankId,
+    required String? reference,
+    required String? transactionType,
+  }) {
+    final external = canonicalReference(
+      bankId: bankId,
+      storedReference: reference,
+    );
+    final direction = transactionType?.trim().toUpperCase() ?? '';
+    return '${bankId ?? ''}|$external|$direction';
+  }
 
   Map<String, dynamic> toJson() {
     return {

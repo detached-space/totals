@@ -19,6 +19,7 @@ import 'package:totals/_redesign/screens/settings_page.dart';
 import 'package:totals/_redesign/screens/shared_expenses_page.dart';
 import 'package:totals/_redesign/widgets/redesign_bottom_nav.dart';
 import 'package:totals/screens/accounts_page.dart';
+import 'package:totals/screens/verify_payments_page.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/profile.dart';
 import 'package:totals/models/transaction.dart';
@@ -28,12 +29,11 @@ import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
+import 'package:totals/services/account_ownership_service.dart';
 import 'package:totals/services/app_update_service.dart';
 import 'package:totals/services/account_reparse_result_service.dart';
 import 'package:totals/services/bank_detection_startup_service.dart';
 import 'package:totals/services/bank_config_service.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_intent_bus.dart';
 import 'package:totals/services/shared_expense_notification_coordinator.dart';
@@ -47,11 +47,13 @@ import 'package:totals/services/sms_config_service.dart';
 import 'package:totals/services/sms_service.dart';
 import 'package:totals/services/widget_launch_intent_service.dart';
 import 'package:totals/utils/account_share_payload.dart';
+import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/widgets/account_share_qr_code.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/l10n/app_localizations.dart';
+import 'package:totals/widgets/sms_permission_privacy_dialog.dart';
 
 class RedesignShell extends StatefulWidget {
   const RedesignShell({super.key});
@@ -61,10 +63,7 @@ class RedesignShell extends StatefulWidget {
 }
 
 class RedesignShellState extends State<RedesignShell>
-    with WidgetsBindingObserver {
-  // Temporary kill switch for the automatic battery optimization prompt.
-  // Users can still request the exemption manually from notification settings.
-  static const bool _autoShowBatteryOptimizationPrompt = false;
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const int _homeIndex = 0;
   static const int _moneyIndex = 1;
   static const int _budgetIndex = 2;
@@ -82,6 +81,8 @@ class RedesignShellState extends State<RedesignShell>
       ValueNotifier<bool>(false);
   final PageController _pageController =
       PageController(initialPage: _homeIndex);
+  late final AnimationController _directPageTransitionController;
+  int _directPageTransitionDirection = 1;
   DateTime? _lastProfileTabTapAt;
   int _currentIndex = _homeIndex;
   int? _activeProfileId;
@@ -102,6 +103,7 @@ class RedesignShellState extends State<RedesignShell>
   bool _isAuthenticating = false;
   bool _hasInitializedSmsPermissions = false;
   bool _hasCheckedNotificationPermissions = false;
+  WidgetLaunchTarget? _pendingWidgetLaunchTarget;
   String? _pendingNotificationReference;
   OpenSharedExpensesIntent? _pendingSharedExpensesIntent;
   OpenAccountReparseResultIntent? _pendingReparseResultIntent;
@@ -109,6 +111,11 @@ class RedesignShellState extends State<RedesignShell>
   @override
   void initState() {
     super.initState();
+    _directPageTransitionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+      value: 1,
+    );
     WidgetsBinding.instance.addObserver(this);
     BackgroundRefreshSignalService.instance.ensureListening();
     // Data Sync: listen for outbox nudges from background isolates, react to
@@ -127,8 +134,8 @@ class RedesignShellState extends State<RedesignShell>
 
     _widgetLaunchIntentSub = WidgetLaunchIntentService.instance.stream.listen(
       (target) {
-        if (target != WidgetLaunchTarget.budget) return;
-        _onTabSelected(_budgetIndex);
+        WidgetLaunchIntentService.instance.consumePendingTarget();
+        unawaited(_handleWidgetLaunchTarget(target));
       },
     );
 
@@ -202,8 +209,8 @@ class RedesignShellState extends State<RedesignShell>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final initialTarget =
           WidgetLaunchIntentService.instance.consumePendingTarget();
-      if (initialTarget != WidgetLaunchTarget.budget) return;
-      _onTabSelected(_budgetIndex);
+      if (initialTarget == null) return;
+      unawaited(_handleWidgetLaunchTarget(initialTarget));
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -211,10 +218,7 @@ class RedesignShellState extends State<RedesignShell>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _checkNotificationPermissions();
-      await _initSmsPermissions();
-      unawaited(BankDetectionStartupService.runOnAppOpen());
-      if (mounted) _authenticateIfAvailable();
+      if (mounted) await _authenticateIfAvailable();
     });
   }
 
@@ -229,6 +233,7 @@ class RedesignShellState extends State<RedesignShell>
     unawaited(SharedExpenseNotificationCoordinator.instance.stop());
     _homeToolsMenuOpenNotifier.dispose();
     _sharedExpenseFabController.dispose();
+    _directPageTransitionController.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -238,6 +243,9 @@ class RedesignShellState extends State<RedesignShell>
     if (state == AppLifecycleState.resumed) {
       unawaited(SmsConfigService().syncRemoteConfig());
       unawaited(SyncService.instance.requestDrain(reason: 'resume'));
+      if (_isAuthenticated && !_hasInitializedSmsPermissions) {
+        unawaited(_initSmsPermissions());
+      }
     }
 
     if (state == AppLifecycleState.resumed && _isAuthenticated) {
@@ -270,8 +278,14 @@ class RedesignShellState extends State<RedesignShell>
     _hasInitializedSmsPermissions = true;
 
     try {
+      final granted = await SmsPermissionPrompt.ensureGranted(context);
+      if (!granted) {
+        _hasInitializedSmsPermissions = false;
+        return;
+      }
       await _smsService.init();
     } catch (e) {
+      _hasInitializedSmsPermissions = false;
       if (kDebugMode) {
         print('debug: SMS permission init failed: $e');
       }
@@ -290,64 +304,23 @@ class RedesignShellState extends State<RedesignShell>
     }
   }
 
-  static const String _batteryOptDismissedKey =
-      'battery_optimization_prompt_dismissed';
-
-  Future<void> _checkBatteryOptimization() async {
-    if (!_autoShowBatteryOptimizationPrompt) return;
-    if (kIsWeb) return;
-    if (defaultTargetPlatform != TargetPlatform.android) return;
-    if (!mounted) return;
-
-    try {
-      final status = await Permission.ignoreBatteryOptimizations.status;
-      if (status.isGranted) return;
-
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_batteryOptDismissedKey) == true) return;
-
-      if (!mounted) return;
-
-      final shouldRequest = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(ctx.l10nText('Keep transaction alerts active')),
-          content: Text(
-            ctx.l10nText(
-              'To make sure you get notified instantly when a transaction happens, Totals needs to be excluded from battery optimization. Without this, your phone may stop delivering notifications in the background.',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                prefs.setBool(_batteryOptDismissedKey, true);
-                Navigator.pop(ctx, false);
-              },
-              child: Text(ctx.l10nText('Not now')),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(ctx.l10nText('Allow')),
-            ),
-          ],
-        ),
-      );
-
-      if (shouldRequest == true) {
-        await Permission.ignoreBatteryOptimizations.request();
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('debug: Battery optimization check failed: $e');
-      }
-    }
-  }
-
   void _onAuthSuccess() {
     if (!mounted) return;
     setState(() => _isAuthenticated = true);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      if (!mounted || !_isAuthenticated) return;
+      await _initSmsPermissions();
+      if (!mounted || !_isAuthenticated) return;
+      await _checkNotificationPermissions();
+      if (!mounted || !_isAuthenticated) return;
+      unawaited(BankDetectionStartupService.runOnAppOpen());
+
+      final pendingWidgetLaunchTarget = _pendingWidgetLaunchTarget;
+      if (pendingWidgetLaunchTarget != null) {
+        _pendingWidgetLaunchTarget = null;
+        await _openWidgetLaunchTarget(pendingWidgetLaunchTarget);
+      }
+
       final pendingReference = _pendingNotificationReference;
       if (pendingReference != null) {
         _pendingNotificationReference = null;
@@ -367,7 +340,6 @@ class RedesignShellState extends State<RedesignShell>
       }
 
       if (mounted) {
-        unawaited(_checkBatteryOptimization());
         unawaited(AppUpdateService.instance.checkOnLaunch(context));
       }
     });
@@ -524,14 +496,28 @@ class RedesignShellState extends State<RedesignShell>
     }
 
     final previousIndex = _currentIndex;
+    if (previousIndex == index) return;
+
     setState(() {
       _currentIndex = index;
     });
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
-    );
+
+    final pageDistance = (index - previousIndex).abs();
+    // A distant PageView animation exposes every tab in between. Keep the
+    // native slide for neighbors and transition distant destinations directly.
+    if (pageDistance == 1) {
+      _directPageTransitionController.value = 1;
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _directPageTransitionDirection = index > previousIndex ? 1 : -1;
+      _pageController.jumpToPage(index);
+      _directPageTransitionController.forward(from: 0);
+    }
+
     if (index == _sharedIndex && previousIndex != _sharedIndex) {
       _sharedExpenseNavigationController.refresh();
     }
@@ -593,6 +579,68 @@ class RedesignShellState extends State<RedesignShell>
       provider: provider,
       accountNumber: _cashAccountNumber(provider),
       initialIsDebit: true,
+    );
+  }
+
+  Future<void> _handleWidgetLaunchTarget(WidgetLaunchTarget target) async {
+    if (!_isAuthenticated) {
+      _pendingWidgetLaunchTarget = target;
+      await _authenticateIfAvailable();
+      return;
+    }
+
+    await _openWidgetLaunchTarget(target);
+  }
+
+  Future<void> _openWidgetLaunchTarget(WidgetLaunchTarget target) async {
+    if (!mounted) return;
+
+    switch (target) {
+      case WidgetLaunchTarget.budget:
+        _onTabSelected(_budgetIndex);
+        return;
+      case WidgetLaunchTarget.addExpense:
+        await _showShortcutCashTransactionSheet(isDebit: true);
+        return;
+      case WidgetLaunchTarget.addIncome:
+        await _showShortcutCashTransactionSheet(isDebit: false);
+        return;
+      case WidgetLaunchTarget.quickAccounts:
+        unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const AccountsPage()),
+          ),
+        );
+        return;
+      case WidgetLaunchTarget.verifyPayments:
+        unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const VerifyPaymentsPage(),
+            ),
+          ),
+        );
+        return;
+    }
+  }
+
+  Future<void> _showShortcutCashTransactionSheet({
+    required bool isDebit,
+  }) async {
+    final provider = Provider.of<TransactionProvider>(context, listen: false);
+    if (provider.dataVersion == 0) {
+      await provider.loadData();
+    }
+    if (!mounted) return;
+
+    unawaited(
+      showAddCashTransactionSheet(
+        context: context,
+        provider: provider,
+        accountNumber: _cashAccountNumber(provider),
+        initialIsDebit: isDebit,
+        showTypeSelector: false,
+      ),
     );
   }
 
@@ -697,6 +745,33 @@ class RedesignShellState extends State<RedesignShell>
     for (final bank in AllBanksFromAssets.getAllBanks()) {
       banksById.putIfAbsent(bank.id, () => bank);
     }
+    final sortedQuickAccessAccounts = List<UserAccount>.from(
+      quickAccessAccounts,
+    )..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bankId,
+          rightBankId: right.bankId,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) => banksById[bankId]?.name ?? 'Bank $bankId',
+        ),
+      );
+    final sortedUserAccounts = userAccounts
+        .where((account) => account.bank != CashConstants.bankId)
+        .toList(growable: true)
+      ..sort(
+        (left, right) => compareAccountDisplayFields(
+          leftBankId: left.bank,
+          rightBankId: right.bank,
+          leftHolderName: left.accountHolderName,
+          rightHolderName: right.accountHolderName,
+          leftAccountNumber: left.accountNumber,
+          rightAccountNumber: right.accountNumber,
+          bankNameForId: (bankId) => banksById[bankId]?.name ?? 'Bank $bankId',
+        ),
+      );
 
     await showModalBottomSheet<void>(
       context: context,
@@ -704,10 +779,8 @@ class RedesignShellState extends State<RedesignShell>
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return _QuickAccessAccountsSheet(
-          quickAccessAccounts: quickAccessAccounts,
-          userAccounts: userAccounts
-              .where((account) => account.bank != CashConstants.bankId)
-              .toList(growable: false),
+          quickAccessAccounts: sortedQuickAccessAccounts,
+          userAccounts: sortedUserAccounts,
           banksById: banksById,
           onManageAccounts: () {
             Navigator.of(sheetContext).pop();
@@ -768,7 +841,9 @@ class RedesignShellState extends State<RedesignShell>
     }
 
     final selected = profiles.where((p) => p.id == selectedProfileId).toList();
-    await _profileRepo.setActiveProfile(selectedProfileId);
+    await AccountOwnershipService.instance.switchActiveProfile(
+      selectedProfileId,
+    );
     if (!mounted) return;
 
     final txProvider = Provider.of<TransactionProvider>(context, listen: false);
@@ -925,40 +1000,67 @@ class RedesignShellState extends State<RedesignShell>
                           _sharedExpenseNavigationController.handleSystemBack();
                       if (handled) return false;
                     }
+                    if (_currentIndex != _homeIndex) {
+                      _onTabSelected(_homeIndex);
+                      return false;
+                    }
                     return true;
                   },
                   child: Scaffold(
                     extendBody: true,
-                    body: PageView(
-                      controller: _pageController,
-                      physics: const PageScrollPhysics(),
-                      onPageChanged: (index) {
-                        _homeToolsMenuOpenNotifier.value = false;
-                        if (_currentIndex == index || !mounted) return;
-                        setState(() {
-                          _currentIndex = index;
-                        });
-                        if (index == _sharedIndex) {
-                          _sharedExpenseNavigationController.refresh();
-                        }
-                      },
-                      children: [
-                        RedesignHomePage(
-                          toolsMenuOpenNotifier: _homeToolsMenuOpenNotifier,
-                        ),
-                        RedesignMoneyPage(key: _moneyPageKey),
-                        RedesignBudgetPage(key: _budgetPageKey),
-                        RedesignSharedExpensesPage(
-                          navigationController:
-                              _sharedExpenseNavigationController,
-                          fabController: _sharedExpenseFabController,
-                        ),
-                        RedesignSettingsPage(
-                          key: ValueKey(
-                            'settings-${_activeProfileId ?? 'none'}',
+                    body: AnimatedBuilder(
+                      animation: _directPageTransitionController,
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const PageScrollPhysics(),
+                        onPageChanged: (index) {
+                          _homeToolsMenuOpenNotifier.value = false;
+                          if (_currentIndex == index || !mounted) return;
+                          setState(() {
+                            _currentIndex = index;
+                          });
+                          if (index == _sharedIndex) {
+                            _sharedExpenseNavigationController.refresh();
+                          }
+                        },
+                        children: [
+                          RedesignHomePage(
+                            toolsMenuOpenNotifier: _homeToolsMenuOpenNotifier,
                           ),
-                        ),
-                      ],
+                          RedesignMoneyPage(key: _moneyPageKey),
+                          RedesignBudgetPage(key: _budgetPageKey),
+                          RedesignSharedExpensesPage(
+                            navigationController:
+                                _sharedExpenseNavigationController,
+                            fabController: _sharedExpenseFabController,
+                          ),
+                          RedesignSettingsPage(
+                            key: ValueKey(
+                              'settings-${_activeProfileId ?? 'none'}',
+                            ),
+                          ),
+                        ],
+                      ),
+                      builder: (context, child) {
+                        final progress = Curves.easeOutCubic.transform(
+                          _directPageTransitionController.value,
+                        );
+
+                        return ClipRect(
+                          child: FractionalTranslation(
+                            translation: Offset(
+                              _directPageTransitionDirection *
+                                  (1 - progress) *
+                                  0.12,
+                              0,
+                            ),
+                            child: Opacity(
+                              opacity: 0.88 + (0.12 * progress),
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     floatingActionButtonLocation:
                         FloatingActionButtonLocation.endFloat,
@@ -1076,7 +1178,8 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (_tabController.index == _selectedTabIndex) return;
-      _selectedTabIndex = _tabController.index;
+      if (!mounted) return;
+      setState(() => _selectedTabIndex = _tabController.index);
       if (_selectedTabIndex != 0) {
         FocusScope.of(context).unfocus();
       }
@@ -1150,11 +1253,13 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final theme = Theme.of(context);
-    final maxAvailableHeight = (media.size.height - media.viewInsets.bottom)
-        .clamp(240.0, media.size.height)
-        .toDouble();
-    final sheetHeight =
-        (media.size.height * 0.82).clamp(240.0, maxAvailableHeight).toDouble();
+    final keyboardInset = media.viewInsets.bottom;
+    final bottomSafeArea = media.viewPadding.bottom;
+    final keyboardLiftBuffer = keyboardInset > 0 ? 28.0 : 0.0;
+    final actionBottomGap =
+        keyboardInset > 0 ? 4.0 : (media.size.height * 0.014).clamp(8.0, 14.0);
+    final actionTopGap = keyboardInset > 0 ? 12.0 : 20.0;
+    final sheetHeight = media.size.height * 0.82;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -1162,9 +1267,11 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
       child: SafeArea(
         top: false,
         child: AnimatedPadding(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(
+            bottom: keyboardInset + keyboardLiftBuffer,
+          ),
           child: Container(
             height: sheetHeight,
             decoration: BoxDecoration(
@@ -1181,7 +1288,7 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
               ],
             ),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1303,7 +1410,6 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                             searchController: _searchController,
                             query: _query,
                             onCopyAccount: widget.onCopyAccount,
-                            onManageAccounts: widget.onManageAccounts,
                           ),
                         ),
                         Padding(
@@ -1319,6 +1425,42 @@ class _QuickAccessAccountsSheetState extends State<_QuickAccessAccountsSheet>
                       ],
                     ),
                   ),
+                  if (_selectedTabIndex == 0) ...[
+                    SizedBox(height: actionTopGap),
+                    Padding(
+                      padding: EdgeInsets.only(
+                        bottom: bottomSafeArea + actionBottomGap,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          key: const ValueKey<String>(
+                            'quick-access-manage-accounts',
+                          ),
+                          onPressed: widget.onManageAccounts,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.primaryLight,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(
+                            context.l10nText(
+                              widget.quickAccessAccounts.isEmpty
+                                  ? 'Add Accounts'
+                                  : 'Manage Accounts',
+                            ),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ] else
+                    const SizedBox(height: 18),
                 ],
               ),
             ),
@@ -1336,7 +1478,6 @@ class _QuickAccessAccountsTab extends StatelessWidget {
   final TextEditingController searchController;
   final String query;
   final ValueChanged<UserAccount> onCopyAccount;
-  final VoidCallback onManageAccounts;
 
   const _QuickAccessAccountsTab({
     required this.accounts,
@@ -1345,7 +1486,6 @@ class _QuickAccessAccountsTab extends StatelessWidget {
     required this.searchController,
     required this.query,
     required this.onCopyAccount,
-    required this.onManageAccounts,
   });
 
   @override
@@ -1354,6 +1494,7 @@ class _QuickAccessAccountsTab extends StatelessWidget {
     final hasAccounts = accounts.isNotEmpty;
 
     return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.zero,
       children: [
         const SizedBox(height: 14),
@@ -1383,12 +1524,10 @@ class _QuickAccessAccountsTab extends StatelessWidget {
             if (index != accounts.length - 1) const SizedBox(height: 10),
           ]
         else
-          _EmptyAccountsState(
+          const _EmptyAccountsState(
             title: 'Nothing saved for quick access',
             subtitle:
                 'Add bank accounts from the Tools screen and they will show up here.',
-            actionLabel: 'Add Accounts',
-            onAction: onManageAccounts,
           ),
         if (hasAccounts) ...[
           const SizedBox(height: 12),
@@ -1399,24 +1538,6 @@ class _QuickAccessAccountsTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: onManageAccounts,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primaryLight,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              child: Text(
-                context.l10nText('Manage Accounts'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
         ],
       ],
     );

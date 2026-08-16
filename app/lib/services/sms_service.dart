@@ -12,12 +12,16 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/failed_parse.dart';
+import 'package:totals/models/transaction_source_sms.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
+import 'package:totals/repositories/transaction_source_sms_repository.dart';
 import 'package:flutter/widgets.dart';
 import 'package:totals/services/failed_parse_review_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/self_transfer_notification_resolver.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/services/background_refresh_signal_service.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -27,7 +31,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/sms_transaction_source.dart';
+import 'package:totals/utils/sms_message_classifier.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
+import 'package:totals/services/account_ownership_service.dart';
+import 'package:totals/utils/account_identity.dart';
 
 enum ParseStatus {
   success,
@@ -103,6 +110,8 @@ onBackgroundMessage(SmsMessage message) async {
       final transaction = await SmsService.processMessage(body, address!,
           notifyUser: true,
           messageDate: receivedAt,
+          sourceMessageId: message.id,
+          sourceSubscriptionId: message.subscriptionId,
           allowRemoteBankFetch: false,
           allowRemotePatternFetch: false);
       if (transaction != null) {
@@ -121,6 +130,9 @@ onBackgroundMessage(SmsMessage message) async {
 class SmsService {
   final Telephony _telephony = Telephony.instance;
   static final BankConfigService _bankConfigService = BankConfigService();
+  static final SelfTransferNotificationResolver
+      _selfTransferNotificationResolver = SelfTransferNotificationResolver();
+  static Future<void> _transactionNotificationTurn = Future<void>.value();
   static List<Bank>? _cachedBanks;
   static bool _cachedBanksLoadedWithRemoteFetch = false;
   static const String _atmCashCutoffPrefPrefix =
@@ -146,9 +158,18 @@ class SmsService {
   }
 
   Future<void> init() async {
-    final bool? result = await _telephony.requestSmsPermissions;
-    if (result != null && result) {
+    final permissionStatus = await Permission.sms.status;
+    if (permissionStatus.isGranted) {
       _registerIncomingSmsListener();
+      unawaited(() async {
+        try {
+          await AccountOwnershipService.instance.runPendingMigration();
+        } catch (error) {
+          debugPrint(
+            'debug: Pending account ownership migration failed: $error',
+          );
+        }
+      }());
     } else {
       print("debug: SMS Permission denied");
     }
@@ -165,7 +186,10 @@ class SmsService {
             : DateTime.fromMillisecondsSinceEpoch(message.date!);
         final tx = await SmsService.processMessage(
             message.body!, message.address!,
-            notifyUser: true, messageDate: receivedAt);
+            notifyUser: true,
+            messageDate: receivedAt,
+            sourceMessageId: message.id,
+            sourceSubscriptionId: message.subscriptionId);
         if (tx != null && onTransactionSaved != null) {
           onTransactionSaved!(tx);
         }
@@ -176,8 +200,8 @@ class SmsService {
   }
 
   Future<TodaySmsSyncResult> syncTodayBankSms() async {
-    final bool? permissionGranted = await _telephony.requestSmsPermissions;
-    if (permissionGranted != true) {
+    final permissionStatus = await Permission.sms.status;
+    if (!permissionStatus.isGranted) {
       return const TodaySmsSyncResult(permissionDenied: true);
     }
 
@@ -247,6 +271,13 @@ class SmsService {
         : startFilter.and(SmsColumn.DATE).lessThan(upperBound);
 
     final messages = await _telephony.getInboxSms(
+      columns: const [
+        SmsColumn.ID,
+        SmsColumn.ADDRESS,
+        SmsColumn.BODY,
+        SmsColumn.DATE,
+        SmsColumn.SUBSCRIPTION_ID,
+      ],
       filter: filter,
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
     );
@@ -289,6 +320,7 @@ class SmsService {
           address,
           messageDate: messageDate,
           sourceMessageId: message.id,
+          sourceSubscriptionId: message.subscriptionId,
           notifyUser: false,
           recordFailure: false,
         );
@@ -569,6 +601,7 @@ class SmsService {
         SmsColumn.ADDRESS,
         SmsColumn.BODY,
         SmsColumn.DATE,
+        SmsColumn.SUBSCRIPTION_ID,
       ],
       filter: filter,
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
@@ -633,6 +666,7 @@ class SmsService {
         inboxMessage.address!,
         messageDate: inboxDate,
         sourceMessageId: inboxMessage.id,
+        sourceSubscriptionId: inboxMessage.subscriptionId,
         notifyUser: false,
         skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
         skipAutoCategorization: skipAutoCategorization,
@@ -656,35 +690,6 @@ class SmsService {
     return null;
   }
 
-  static Account? _accountForBank(List<Account> accounts, int bankId) {
-    for (final account in accounts) {
-      if (account.bank == bankId) return account;
-    }
-    return null;
-  }
-
-  static Account? _maskedAccountMatch(
-    List<Account> accounts, {
-    required int bankId,
-    required String extractedAccount,
-    required int? maskPattern,
-  }) {
-    final trimmedAccount = extractedAccount.trim();
-    if (trimmedAccount.isEmpty) return null;
-
-    final suffix = maskPattern != null &&
-            maskPattern > 0 &&
-            trimmedAccount.length > maskPattern
-        ? trimmedAccount.substring(trimmedAccount.length - maskPattern)
-        : trimmedAccount;
-
-    for (final account in accounts) {
-      if (account.bank != bankId) continue;
-      if (account.accountNumber.endsWith(suffix)) return account;
-    }
-    return null;
-  }
-
   static Future<void> _saveUpdatedAccountBalance(
     AccountRepository accRepo,
     Account account,
@@ -698,6 +703,7 @@ class SmsService {
       settledBalance: account.settledBalance,
       pendingCredit: account.pendingCredit,
       profileId: account.profileId,
+      smsSubscriptionId: account.smsSubscriptionId,
     );
     await accRepo.saveAccount(updated);
     print("debug: Account balance updated for ${account.accountHolderName}");
@@ -769,6 +775,7 @@ class SmsService {
           (currentCashBalance + withdrawal.amount).toStringAsFixed(2),
       transactionLink: withdrawal.reference,
       accountNumber: CashConstants.defaultAccountNumber,
+      ownerAccountNumber: CashConstants.defaultAccountNumber,
     );
 
     await TransactionRepository().saveTransaction(cashTransaction);
@@ -898,26 +905,26 @@ class SmsService {
     );
   }
 
-  static bool _hasSmsSourceDuplicate(
+  static Transaction? _findSmsSourceDuplicate(
     Map<String, dynamic> details,
     List<Transaction> existingTransactions,
   ) {
     final sourceType = details['sourceType']?.toString().trim();
-    if (sourceType != SmsTransactionSource.smsType) return false;
+    if (sourceType != SmsTransactionSource.smsType) return null;
 
     final sourceMessageId = details['sourceMessageId']?.toString().trim();
     final sourceFingerprint = details['sourceFingerprint']?.toString().trim();
     final hasMessageId = sourceMessageId != null && sourceMessageId.isNotEmpty;
     final hasFingerprint =
         sourceFingerprint != null && sourceFingerprint.isNotEmpty;
-    if (!hasMessageId && !hasFingerprint) return false;
+    if (!hasMessageId && !hasFingerprint) return null;
 
     for (final transaction in existingTransactions) {
       if (transaction.sourceType != SmsTransactionSource.smsType) continue;
 
       if (hasFingerprint &&
           transaction.sourceFingerprint == sourceFingerprint) {
-        return true;
+        return transaction;
       }
 
       if (!hasMessageId || transaction.sourceMessageId != sourceMessageId) {
@@ -929,11 +936,96 @@ class SmsService {
           existingFingerprint == null ||
           existingFingerprint.isEmpty ||
           existingFingerprint == sourceFingerprint) {
-        return true;
+        return transaction;
       }
     }
 
-    return false;
+    return null;
+  }
+
+  static Future<void> _captureTransactionSourceSms({
+    required String transactionReference,
+    required String body,
+    required String senderAddress,
+    required DateTime? receivedAt,
+    required int? messageId,
+  }) async {
+    final reference = transactionReference.trim();
+    if (reference.isEmpty || body.trim().isEmpty) return;
+    try {
+      await TransactionSourceSmsRepository().upsert(
+        TransactionSourceSms(
+          transactionReference: reference,
+          body: body,
+          senderAddress: senderAddress.trim(),
+          receivedAt: receivedAt,
+          messageId: messageId?.toString(),
+        ),
+      );
+    } catch (error) {
+      debugPrint(
+        'debug: Could not retain source SMS for $reference: $error',
+      );
+    }
+  }
+
+  static Future<void> _showTransactionNotificationUnlessSelfTransfer(
+    Transaction transaction,
+  ) async {
+    final previousTurn = _transactionNotificationTurn;
+    final currentTurn = Completer<void>();
+    _transactionNotificationTurn = currentTurn.future;
+    try {
+      await previousTurn;
+      await _showTransactionNotificationUnlessSelfTransferNow(transaction);
+    } finally {
+      currentTurn.complete();
+    }
+  }
+
+  static Future<void> _showTransactionNotificationUnlessSelfTransferNow(
+    Transaction transaction,
+  ) async {
+    try {
+      final transactions = await TransactionRepository().getTransactions();
+      final banks = await _bankConfigService.getBanks(allowRemoteFetch: false);
+      final accounts = await AccountRepository().getAccounts();
+      final categories = await CategoryRepository().getCategories();
+      final suppressedTransactions =
+          _selfTransferNotificationResolver.transactionsToSuppress(
+        transaction: transaction,
+        transactions: transactions,
+        banks: banks,
+        accounts: accounts,
+        categories: categories,
+      );
+
+      if (suppressedTransactions.isNotEmpty) {
+        final dismissedReferences = <String>{};
+        for (final suppressedTransaction in suppressedTransactions) {
+          if (!dismissedReferences.add(suppressedTransaction.reference)) {
+            continue;
+          }
+          await NotificationService.instance.dismissTransactionNotification(
+            suppressedTransaction,
+            removeFromHistory: true,
+          );
+        }
+        debugPrint(
+          'debug: Transaction notification skipped — self transfer detected',
+        );
+        return;
+      }
+    } catch (error) {
+      debugPrint(
+        'debug: Could not check self-transfer notification: $error',
+      );
+    }
+
+    await NotificationService.instance.showTransactionNotification(
+      transaction: transaction,
+      bankId: transaction.bankId,
+    );
   }
 
   // Static processing logic so it can be used by background handler too.
@@ -947,12 +1039,61 @@ class SmsService {
     bool allowRemoteBankFetch = true,
     bool allowRemotePatternFetch = false,
     int? sourceMessageId,
+    int? sourceSubscriptionId,
   }) async {
+    var effectiveBody = messageBody;
+    var effectiveSender = senderAddress;
+    var effectiveDate = messageDate;
+    var effectiveMessageId = sourceMessageId;
+    var effectiveSubscriptionId = sourceSubscriptionId;
+
+    if (effectiveMessageId == null || effectiveSubscriptionId == null) {
+      try {
+        final bank = await getRelevantBank(
+          senderAddress,
+          allowRemoteFetch: allowRemoteBankFetch,
+        );
+        if (bank?.simBased == true) {
+          final banks = await _bankConfigService.getBanks(
+            allowRemoteFetch: allowRemoteBankFetch,
+          );
+          for (var attempt = 0;
+              attempt < _canonicalInboxLookupAttempts;
+              attempt++) {
+            if (attempt > 0) {
+              await Future<void>.delayed(_canonicalInboxLookupDelay);
+            }
+            final inboxMessage = await _findCanonicalInboxCopy(
+              originalBody: messageBody,
+              senderAddress: senderAddress,
+              messageDate: messageDate,
+              bank: bank!,
+              banks: banks,
+            );
+            if (inboxMessage?.body == null || inboxMessage?.address == null) {
+              continue;
+            }
+            effectiveBody = inboxMessage!.body!;
+            effectiveSender = inboxMessage.address!;
+            effectiveDate = inboxMessage.date == null
+                ? messageDate
+                : DateTime.fromMillisecondsSinceEpoch(inboxMessage.date!);
+            effectiveMessageId = inboxMessage.id;
+            effectiveSubscriptionId = inboxMessage.subscriptionId;
+            break;
+          }
+        }
+      } catch (error) {
+        debugPrint('debug: Could not enrich incoming SMS ownership: $error');
+      }
+    }
+
     final result = await _processMessageInternal(
-      messageBody,
-      senderAddress,
-      messageDate: messageDate,
-      sourceMessageId: sourceMessageId,
+      effectiveBody,
+      effectiveSender,
+      messageDate: effectiveDate,
+      sourceMessageId: effectiveMessageId,
+      sourceSubscriptionId: effectiveSubscriptionId,
       notifyUser: notifyUser,
       skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
       skipAutoCategorization: skipAutoCategorization,
@@ -970,12 +1111,14 @@ class SmsService {
     bool skipDashenExpenseDuplicates = true,
     bool skipAutoCategorization = false,
     int? sourceMessageId,
+    int? sourceSubscriptionId,
   }) async {
     return _processMessageInternal(
       messageBody,
       senderAddress,
       messageDate: messageDate,
       sourceMessageId: sourceMessageId,
+      sourceSubscriptionId: sourceSubscriptionId,
       notifyUser: false,
       skipDashenExpenseDuplicates: skipDashenExpenseDuplicates,
       skipAutoCategorization: skipAutoCategorization,
@@ -994,6 +1137,7 @@ class SmsService {
     bool allowRemotePatternFetch = false,
     bool recordFailure = true,
     int? sourceMessageId,
+    int? sourceSubscriptionId,
   }) async {
     print("debug: Processing message: $messageBody");
 
@@ -1007,6 +1151,21 @@ class SmsService {
       return const ParseResult(
         status: ParseStatus.noBank,
         reason: "No matching bank",
+      );
+    }
+
+    if (bank.id == 6 &&
+        SmsMessageClassifier.isTelebirrAtmAuthorization(messageBody)) {
+      return const ParseResult(
+        status: ParseStatus.duplicate,
+        reason: 'Ignored Telebirr ATM authorization notice',
+      );
+    }
+    if (bank.id == 6 &&
+        SmsMessageClassifier.isTelebirrAirtimeReceipt(messageBody)) {
+      return const ParseResult(
+        status: ParseStatus.duplicate,
+        reason: 'Ignored Telebirr airtime receipt acknowledgement',
       );
     }
 
@@ -1069,9 +1228,8 @@ class SmsService {
           if (canonicalResult != null) {
             if (canonicalResult.status == ParseStatus.success &&
                 canonicalResult.transaction != null) {
-              await NotificationService.instance.showTransactionNotification(
-                transaction: canonicalResult.transaction!,
-                bankId: canonicalResult.transaction!.bankId,
+              await _showTransactionNotificationUnlessSelfTransfer(
+                canonicalResult.transaction!,
               );
             }
             return canonicalResult;
@@ -1137,6 +1295,47 @@ class SmsService {
     }
 
     final parsedBankId = (details['bankId'] as num?)?.toInt() ?? bank.id;
+    final ownershipBank = parsedBankId == bank.id
+        ? bank
+        : _bankById(
+            await _bankConfigService.getBanks(
+              allowRemoteFetch: allowRemoteBankFetch,
+            ),
+            parsedBankId,
+          );
+    Account? resolvedOwner;
+    if (ownershipBank != null) {
+      final bankAccounts = registeredAccounts
+          .where((account) => account.bank == parsedBankId)
+          .toList(growable: false);
+      final greetingName = accountHolderNameFromGreeting(
+        messageBody,
+        bankAccounts,
+      );
+      resolvedOwner = resolveSmsOwnership(
+        bank: ownershipBank,
+        accounts: bankAccounts,
+        messageBody: messageBody,
+        parsedAccountNumber: details['accountNumber']?.toString(),
+        sourceSubscriptionId: sourceSubscriptionId,
+      );
+      if (resolvedOwner != null) {
+        details['ownerAccountNumber'] = resolvedOwner.accountNumber;
+        details['ownerAssignmentSource'] = Transaction.automaticOwnerAssignment;
+        if (sourceSubscriptionId != null && sourceSubscriptionId >= 0) {
+          details['sourceSubscriptionId'] = sourceSubscriptionId;
+          // Learn a SIM binding only from explicit owner context. Parsed wallet
+          // numbers can describe the transfer counterparty.
+          if (greetingName != null) {
+            await AccountRepository().bindSmsSubscription(
+              accountNumber: resolvedOwner.accountNumber,
+              bank: parsedBankId,
+              subscriptionId: sourceSubscriptionId,
+            );
+          }
+        }
+      }
+    }
     final smsSource = SmsTransactionSource.fromParts(
       bankId: parsedBankId,
       messageId: sourceMessageId,
@@ -1145,12 +1344,34 @@ class SmsService {
       dateMillis: messageDate?.millisecondsSinceEpoch,
     );
     details.addAll(smsSource.toJson());
+    details['reference'] = smsSource.scopeReference(
+      bankId: parsedBankId,
+      reference: details['reference']?.toString(),
+      transactionType: details['type']?.toString(),
+    );
 
     // 3. Check duplicate transaction
     TransactionRepository txRepo = TransactionRepository();
     List<Transaction> existingTx = await txRepo.getTransactions();
 
-    if (_hasSmsSourceDuplicate(details, existingTx)) {
+    final smsSourceDuplicate = _findSmsSourceDuplicate(details, existingTx);
+    if (smsSourceDuplicate != null) {
+      if (resolvedOwner != null) {
+        await txRepo.updateTransactionOwnership(
+          reference: smsSourceDuplicate.reference,
+          ownerAccountNumber: resolvedOwner.accountNumber,
+          ownerAssignmentSource: Transaction.automaticOwnerAssignment,
+          sourceSubscriptionId: sourceSubscriptionId,
+          sourceMessageId: sourceMessageId?.toString(),
+        );
+      }
+      await _captureTransactionSourceSms(
+        transactionReference: smsSourceDuplicate.reference,
+        body: messageBody,
+        senderAddress: senderAddress,
+        receivedAt: messageDate,
+        messageId: sourceMessageId,
+      );
       print("debug: Duplicate SMS source skipped");
       return const ParseResult(
         status: ParseStatus.duplicate,
@@ -1160,7 +1381,26 @@ class SmsService {
 
     String? newRef = details['reference'];
     if (newRef != null && existingTx.any((t) => t.reference == newRef)) {
+      // A shared bank reference is not ownership evidence. Telebirr debit and
+      // credit legs are scoped above; any remaining exact collision is the
+      // same logical row and must never overwrite another SMS owner's fields.
       print("debug: Duplicate transaction skipped");
+      if (resolvedOwner != null) {
+        await txRepo.updateTransactionOwnership(
+          reference: newRef,
+          ownerAccountNumber: resolvedOwner.accountNumber,
+          ownerAssignmentSource: Transaction.automaticOwnerAssignment,
+          sourceSubscriptionId: sourceSubscriptionId,
+          sourceMessageId: sourceMessageId?.toString(),
+        );
+      }
+      await _captureTransactionSourceSms(
+        transactionReference: newRef,
+        body: messageBody,
+        senderAddress: senderAddress,
+        receivedAt: messageDate,
+        messageId: sourceMessageId,
+      );
       if (_isAtmWithdrawal(details, messageBody)) {
         try {
           final existing = existingTx
@@ -1204,49 +1444,13 @@ class SmsService {
       );
     }
 
-    // 4. Update Account Balance
-    // We need to match the Bank ID from the pattern, not just assume 1 (CBE)
-    int bankId = parsedBankId;
-    final banks = await _bankConfigService.getBanks(
-        allowRemoteFetch: allowRemoteBankFetch);
-    final currentBank = _bankById(banks, bankId);
-    if (currentBank == null) {
-      print("debug: No bank config found for bank $bankId");
-    } else if (currentBank.uniformMasking == false) {
-      AccountRepository accRepo = AccountRepository();
-      List<Account> accounts = await accRepo.getAccounts();
-      final account = _accountForBank(accounts, bankId);
-      if (account == null) {
-        print("debug: No matching account found for bank $bankId");
-      } else {
-        final newBalance = details['currentBalance'] != null
-            ? sanitizeAmount(details['currentBalance'])
-            : account.balance;
-        await _saveUpdatedAccountBalance(accRepo, account, newBalance);
-      }
-    } else if (details['accountNumber'] != null) {
-      AccountRepository accRepo = AccountRepository();
-      List<Account> accounts = await accRepo.getAccounts();
-
-      final extractedAccount = details['accountNumber'].toString();
-      final account = currentBank.uniformMasking == true
-          ? _maskedAccountMatch(
-              accounts,
-              bankId: bankId,
-              extractedAccount: extractedAccount,
-              maskPattern: currentBank.maskPattern,
-            )
-          : null;
-
-      if (account != null) {
-        final newBalance = details['currentBalance'] != null
-            ? sanitizeAmount(details['currentBalance'])
-            : account.balance;
-        await _saveUpdatedAccountBalance(accRepo, account, newBalance);
-      } else {
-        print(
-            "No matching account found for bank $bankId and account $extractedAccount");
-      }
+    if (resolvedOwner != null && details['currentBalance'] != null) {
+      final newBalance = sanitizeAmount(details['currentBalance']);
+      await _saveUpdatedAccountBalance(
+        AccountRepository(),
+        resolvedOwner,
+        newBalance,
+      );
     }
 
     // 5. Save Transaction
@@ -1259,6 +1463,13 @@ class SmsService {
     );
     final savedTx =
         await txRepo.getTransactionByReference(newTx.reference) ?? newTx;
+    await _captureTransactionSourceSms(
+      transactionReference: savedTx.reference,
+      body: messageBody,
+      senderAddress: senderAddress,
+      receivedAt: messageDate,
+      messageId: sourceMessageId,
+    );
 
     print("debug: New transaction saved: ${savedTx.reference}");
 
@@ -1271,10 +1482,7 @@ class SmsService {
     }
 
     if (notifyUser) {
-      await NotificationService.instance.showTransactionNotification(
-        transaction: savedTx,
-        bankId: bankId,
-      );
+      await _showTransactionNotificationUnlessSelfTransfer(savedTx);
     }
 
     if (savedTx.type == 'DEBIT') {

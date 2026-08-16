@@ -68,10 +68,7 @@ class _BanksSummaryListState extends State<BanksSummaryList> {
 
   Future<void> _loadUnregisteredBanks({bool forceRefresh = false}) async {
     try {
-      var permissionStatus = await Permission.sms.status;
-      if (!permissionStatus.isGranted) {
-        permissionStatus = await Permission.sms.request();
-      }
+      final permissionStatus = await Permission.sms.status;
       if (!permissionStatus.isGranted) return;
 
       final banks = await _detectionService.detectUnregisteredBanks(

@@ -27,6 +27,8 @@ class InsightsDialog extends StatelessWidget {
     final insightsService = InsightsService(
       () => transactions,
       getCategoryById: txProvider.getCategoryById,
+      isExcludedFromIncome: txProvider.isReimbursementTransaction,
+      expenseAmountForTransaction: txProvider.netExpenseAmountForTransaction,
     );
     final insights = insightsService.summarize();
 

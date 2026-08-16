@@ -30,6 +30,7 @@ class SharedExpenseNotificationCoordinator {
   final Map<String, StreamSubscription<SharedExpenseGroup>>
       _groupSubscriptions = {};
   final Map<String, Timer> _groupReconnectTimers = {};
+  final Map<String, Future<void>> _groupNotificationTails = {};
   final Set<String> _forbiddenGroupIds = {};
 
   StreamSubscription<void>? _groupListSubscription;
@@ -272,7 +273,7 @@ class SharedExpenseNotificationCoordinator {
 
   Future<void> _handleGroupUpdated(SharedExpenseGroup group) async {
     if (!_started || group.id.isEmpty || _myPublicKey.isEmpty) return;
-    await _processGroupForNotifications(group, respectStartupGrace: true);
+    await _enqueueNotificationPass(group, respectStartupGrace: true);
   }
 
   /// One-shot notification render pass for a freshly-synced group, callable
@@ -291,17 +292,84 @@ class SharedExpenseNotificationCoordinator {
       }
     }
     if (_myPublicKey.isEmpty) return;
-    await _processGroupForNotifications(group, respectStartupGrace: false);
+    await _enqueueNotificationPass(group, respectStartupGrace: false);
+  }
+
+  /// Renders detailed notifications only for activity entries introduced by
+  /// a background catch-up sync.
+  Future<void> notifyForActivityIds(
+    SharedExpenseGroup group,
+    Iterable<String> eventIds,
+  ) async {
+    if (group.id.isEmpty) return;
+    final eligibleEventIds =
+        eventIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet();
+    if (eligibleEventIds.isEmpty) return;
+
+    if (_myPublicKey.isEmpty) {
+      try {
+        _myPublicKey = await _repository.myPublicKey();
+      } catch (error) {
+        _sharedExpenseNotificationLog(
+            'notifyForActivityIds pubkey load failed: $error');
+        return;
+      }
+    }
+    if (_myPublicKey.isEmpty) return;
+    await _enqueueNotificationPass(
+      group,
+      respectStartupGrace: false,
+      eligibleEventIds: eligibleEventIds,
+    );
+  }
+
+  Future<void> _enqueueNotificationPass(
+    SharedExpenseGroup group, {
+    required bool respectStartupGrace,
+    Set<String>? eligibleEventIds,
+  }) async {
+    final groupId = group.id;
+    final previous = _groupNotificationTails[groupId] ?? Future<void>.value();
+    final current = () async {
+      try {
+        await previous;
+      } catch (error, stackTrace) {
+        _sharedExpenseNotificationLog(
+          'previous notification pass failed for group=$groupId: $error',
+        );
+        if (kDebugMode) debugPrintStack(stackTrace: stackTrace);
+      }
+      await _processGroupForNotifications(
+        group,
+        respectStartupGrace: respectStartupGrace,
+        eligibleEventIds: eligibleEventIds,
+      );
+    }();
+    _groupNotificationTails[groupId] = current;
+
+    try {
+      await current;
+    } finally {
+      if (identical(_groupNotificationTails[groupId], current)) {
+        _groupNotificationTails.remove(groupId);
+      }
+    }
   }
 
   Future<void> _processGroupForNotifications(
     SharedExpenseGroup group, {
     required bool respectStartupGrace,
+    Set<String>? eligibleEventIds,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final seen = prefs.getStringList(_seenKey(group.id))?.toSet() ?? <String>{};
     final unseenEntries = group.activity
-        .where((entry) => entry.id.isNotEmpty && !seen.contains(entry.id))
+        .where(
+          (entry) =>
+              entry.id.isNotEmpty &&
+              !seen.contains(entry.id) &&
+              (eligibleEventIds == null || eligibleEventIds.contains(entry.id)),
+        )
         .toList(growable: false)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
@@ -689,8 +757,7 @@ class SharedExpenseNotificationCoordinator {
     SharedExpenseGroup group,
     SharedActivityEntry entry,
   ) async {
-    final fallbackName =
-        _stringValue(entry.data['displayName']).trim();
+    final fallbackName = _stringValue(entry.data['displayName']).trim();
     final actorName = fallbackName.isNotEmpty
         ? fallbackName
         : group.displayNameFor(_myPublicKey, entry.actor);

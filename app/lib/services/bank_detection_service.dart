@@ -7,6 +7,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/fallback_sms_parser.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/bank_sender_matcher.dart';
 
 /// Represents a bank detected from SMS messages
@@ -15,13 +16,20 @@ class DetectedBank {
   final String senderAddress;
   final int messageCount;
   final DateTime? lastMessageDate;
+  final List<String> accountHolderSuggestions;
+  final bool holderSuggestionsScanned;
 
   DetectedBank({
     required this.bank,
     required this.senderAddress,
     required this.messageCount,
     this.lastMessageDate,
+    this.accountHolderSuggestions = const <String>[],
+    this.holderSuggestionsScanned = true,
   });
+
+  String? get suggestedAccountHolderName =>
+      accountHolderSuggestions.isEmpty ? null : accountHolderSuggestions.first;
 
   /// Convert to JSON for caching
   Map<String, dynamic> toJson() {
@@ -30,6 +38,8 @@ class DetectedBank {
       'senderAddress': senderAddress,
       'messageCount': messageCount,
       'lastMessageDate': lastMessageDate?.toIso8601String(),
+      'accountHolderSuggestions': accountHolderSuggestions,
+      'holderSuggestionsScanned': holderSuggestionsScanned,
     };
   }
 
@@ -50,6 +60,12 @@ class DetectedBank {
         lastMessageDate: json['lastMessageDate'] != null
             ? DateTime.parse(json['lastMessageDate'] as String)
             : null,
+        accountHolderSuggestions:
+            (json['accountHolderSuggestions'] as List<dynamic>? ?? const [])
+                .map((value) => value.toString().trim())
+                .where((value) => value.isNotEmpty)
+                .toList(growable: false),
+        holderSuggestionsScanned: json['holderSuggestionsScanned'] == true,
       );
     } catch (e) {
       print("debug: Error parsing DetectedBank from JSON: $e");
@@ -62,6 +78,7 @@ class DetectedBank {
 class BankDetectionService {
   static const String _cacheKey = 'detected_banks_cache';
   static const String _cacheTimestampKey = 'detected_banks_cache_timestamp';
+  static const Duration _cacheMaxAge = Duration(hours: 24);
 
   final Telephony _telephony = Telephony.instance;
   final AccountRepository _accountRepo = AccountRepository();
@@ -70,7 +87,18 @@ class BankDetectionService {
   List<Bank>? _cachedBanks;
 
   bool _hasDetectedBanksCache(List<DetectedBank>? banks) {
-    return banks != null && banks.isNotEmpty;
+    return banks != null &&
+        banks.every((bank) => bank.holderSuggestionsScanned);
+  }
+
+  Future<bool> _isCacheFresh() async {
+    final prefs = await SharedPreferences.getInstance();
+    final timestamp = prefs.getString(_cacheTimestampKey);
+    final cachedAt = timestamp == null ? null : DateTime.tryParse(timestamp);
+    if (cachedAt == null) return false;
+
+    final age = DateTime.now().difference(cachedAt);
+    return !age.isNegative && age <= _cacheMaxAge;
   }
 
   Future<Set<int>> _getSupportedBankIds() async {
@@ -89,8 +117,8 @@ class BankDetectionService {
 
   /// Scans the SMS inbox and returns banks that the user has messages from
   /// but hasn't registered an account for yet.
-  /// Uses cached results for faster loading. Scans SMS only when cache is empty
-  /// or forceRefresh is true.
+  /// Uses recent cached results for faster loading. Scans SMS when the cache is
+  /// missing, older than 24 hours, or forceRefresh is true.
   Future<List<DetectedBank>> detectUnregisteredBanks({
     bool forceRefresh = false,
   }) async {
@@ -102,7 +130,7 @@ class BankDetectionService {
       final supportedBankIds = await _getSupportedBankIds();
 
       // Try to get cached data first (unless force refresh)
-      if (!forceRefresh) {
+      if (!forceRefresh && await _isCacheFresh()) {
         final cachedBanks = await _getCachedBanks();
         if (_hasDetectedBanksCache(cachedBanks)) {
           // Filter out already registered banks from cache
@@ -238,7 +266,7 @@ class BankDetectionService {
 
     // Get SMS messages from inbox
     List<SmsMessage> messages = await _telephony.getInboxSms(
-      columns: [SmsColumn.ADDRESS, SmsColumn.DATE],
+      columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
     );
 
@@ -252,10 +280,14 @@ class BankDetectionService {
       // Check if this message is from a known bank
       Bank? matchedBank = _getMatchingBank(address);
       if (matchedBank == null) continue;
+      final holderSuggestion =
+          suggestedAccountHolderNameFromSms(message.body ?? '');
 
       // Update or create detection data
       if (allDetectedBanksMap.containsKey(matchedBank.id)) {
-        allDetectedBanksMap[matchedBank.id]!.messageCount++;
+        final detection = allDetectedBanksMap[matchedBank.id]!;
+        detection.messageCount++;
+        detection.addHolderSuggestion(holderSuggestion);
       } else {
         DateTime? messageDate;
         if (message.date != null) {
@@ -266,7 +298,7 @@ class BankDetectionService {
           senderAddress: address,
           messageCount: 1,
           lastMessageDate: messageDate,
-        );
+        )..addHolderSuggestion(holderSuggestion);
       }
     }
 
@@ -277,6 +309,8 @@ class BankDetectionService {
               senderAddress: data.senderAddress,
               messageCount: data.messageCount,
               lastMessageDate: data.lastMessageDate,
+              accountHolderSuggestions: data.accountHolderSuggestions,
+              holderSuggestionsScanned: true,
             ))
         .toList();
 
@@ -311,7 +345,7 @@ class BankDetectionService {
   Future<List<DetectedBank>> detectAllBanks({bool forceRefresh = false}) async {
     try {
       // Try cache first
-      if (!forceRefresh) {
+      if (!forceRefresh && await _isCacheFresh()) {
         final cachedBanks = await _getCachedBanks();
         if (_hasDetectedBanksCache(cachedBanks)) {
           return cachedBanks!;
@@ -327,7 +361,7 @@ class BankDetectionService {
 
       // Scan all banks
       List<SmsMessage> messages = await _telephony.getInboxSms(
-        columns: [SmsColumn.ADDRESS, SmsColumn.DATE],
+        columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
         sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
       );
 
@@ -339,9 +373,13 @@ class BankDetectionService {
 
         Bank? matchedBank = _getMatchingBank(address);
         if (matchedBank == null) continue;
+        final holderSuggestion =
+            suggestedAccountHolderNameFromSms(message.body ?? '');
 
         if (detectedBanksMap.containsKey(matchedBank.id)) {
-          detectedBanksMap[matchedBank.id]!.messageCount++;
+          final detection = detectedBanksMap[matchedBank.id]!;
+          detection.messageCount++;
+          detection.addHolderSuggestion(holderSuggestion);
         } else {
           DateTime? messageDate;
           if (message.date != null) {
@@ -352,7 +390,7 @@ class BankDetectionService {
             senderAddress: address,
             messageCount: 1,
             lastMessageDate: messageDate,
-          );
+          )..addHolderSuggestion(holderSuggestion);
         }
       }
 
@@ -362,6 +400,8 @@ class BankDetectionService {
                 senderAddress: data.senderAddress,
                 messageCount: data.messageCount,
                 lastMessageDate: data.lastMessageDate,
+                accountHolderSuggestions: data.accountHolderSuggestions,
+                holderSuggestionsScanned: true,
               ))
           .toList();
 
@@ -386,6 +426,8 @@ class DetectedBankData {
   final String senderAddress;
   int messageCount;
   final DateTime? lastMessageDate;
+  final Map<String, int> _holderSuggestionCounts = <String, int>{};
+  final Map<String, String> _holderSuggestionLabels = <String, String>{};
 
   DetectedBankData({
     required this.bank,
@@ -393,4 +435,26 @@ class DetectedBankData {
     required this.messageCount,
     this.lastMessageDate,
   });
+
+  void addHolderSuggestion(String? suggestion) {
+    final label = suggestion?.trim();
+    final key = canonicalAccountHolderName(label);
+    if (label == null || label.isEmpty || key == null) return;
+    _holderSuggestionLabels.putIfAbsent(key, () => label);
+    _holderSuggestionCounts[key] = (_holderSuggestionCounts[key] ?? 0) + 1;
+  }
+
+  List<String> get accountHolderSuggestions {
+    final keys = _holderSuggestionCounts.keys.toList(growable: false)
+      ..sort((left, right) {
+        final countOrder = (_holderSuggestionCounts[right] ?? 0)
+            .compareTo(_holderSuggestionCounts[left] ?? 0);
+        if (countOrder != 0) return countOrder;
+        return left.compareTo(right);
+      });
+    return keys
+        .take(3)
+        .map((key) => _holderSuggestionLabels[key]!)
+        .toList(growable: false);
+  }
 }
