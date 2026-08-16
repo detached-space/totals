@@ -23,13 +23,16 @@ void main() {
   });
 
   test('default previews use versioned R2 videos and cache keys', () {
-    expect(totalsFeaturePreviews, hasLength(3));
+    expect(totalsFeaturePreviews, hasLength(4));
     final autoCategorizationPreview = totalsFeaturePreviews.first;
     final quickAccessAccountPreview = totalsFeaturePreviews.firstWhere(
       (preview) => preview.title == 'Quick Account Access',
     );
     final reimbursementPreview = totalsFeaturePreviews.firstWhere(
       (preview) => preview.title == 'Link Reimbursements',
+    );
+    final telegramBackupPreview = totalsFeaturePreviews.firstWhere(
+      (preview) => preview.title == 'Telegram Backup',
     );
 
     expect(autoCategorizationPreview.videoUrl, autoCategorizationPreviewUrl);
@@ -81,9 +84,25 @@ void main() {
       reimbursementPreviewPlaceholderAsset,
     );
     expect(reimbursementPreview.isNew, isTrue);
+
+    expect(telegramBackupPreview.videoUrl, telegramBackupPreviewUrl);
+    expect(
+      telegramBackupPreview.videoUrl,
+      'https://tutorials.example.invalid/'
+      'tutorials/v1/telegram-backup.mp4',
+    );
+    expect(
+      telegramBackupPreview.videoCacheKey,
+      telegramBackupPreviewCacheKey,
+    );
+    expect(
+      telegramBackupPreview.videoPlaceholderAsset,
+      telegramBackupPreviewPlaceholderAsset,
+    );
+    expect(telegramBackupPreview.isNew, isTrue);
     expect(
       totalsFeaturePreviews.where((preview) => preview.isNew),
-      hasLength(1),
+      hasLength(2),
     );
   });
 

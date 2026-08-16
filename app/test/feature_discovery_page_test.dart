@@ -43,11 +43,24 @@ void main() {
       find.text('Track returned money against past spending'),
       findsOneWidget,
     );
-    expect(find.text('New'), findsOneWidget);
+    expect(find.text('Telegram Backup'), findsOneWidget);
+    expect(
+      find.text('Encrypted backups in your private bot chat'),
+      findsOneWidget,
+    );
+    expect(find.text('New'), findsNWidgets(2));
     expect(
       find.byKey(
         const ValueKey<String>(
           'feature-discovery-new-tutorials/v1/reimbursement.mp4',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const ValueKey<String>(
+          'feature-discovery-new-tutorials/v1/telegram-backup.mp4',
         ),
       ),
       findsOneWidget,
@@ -73,6 +86,13 @@ void main() {
         find.byKey(
           const ValueKey<String>(
             'feature-discovery-card-tutorials/v1/reimbursement.mp4',
+          ),
+        ),
+      ),
+      tester.widget<Material>(
+        find.byKey(
+          const ValueKey<String>(
+            'feature-discovery-card-tutorials/v1/telegram-backup.mp4',
           ),
         ),
       ),

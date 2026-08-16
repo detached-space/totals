@@ -26,6 +26,11 @@ const String reimbursementPreviewPlaceholderAsset =
 const String reimbursementPreviewCacheKey = 'tutorials/v1/reimbursement.mp4';
 const String reimbursementPreviewDescription =
     'Open an incoming transaction and link it to the original expense as a reimbursement. Totals adjusts your spending and budgets by the amount you received.';
+const String telegramBackupPreviewPlaceholderAsset =
+    'assets/images/tutorials/telegram_backup_blurred.webp';
+const String telegramBackupPreviewCacheKey = 'tutorials/v1/telegram-backup.mp4';
+const String telegramBackupPreviewDescription =
+    'Connect your own private Telegram bot for encrypted backups. Totals encrypts everything on your device, supports automatic weekly backups, and restores with your recovery key.';
 const int _featurePreviewCacheSize = 100 * 1024 * 1024;
 const int _featurePreviewCacheFileSize = 20 * 1024 * 1024;
 
@@ -37,6 +42,9 @@ String get quickAccessAccountPreviewUrl =>
 
 String get reimbursementPreviewUrl =>
     _tutorialVideoUrl(reimbursementPreviewCacheKey);
+
+String get telegramBackupPreviewUrl =>
+    _tutorialVideoUrl(telegramBackupPreviewCacheKey);
 
 String _tutorialVideoUrl(String objectKey) {
   if (!dotenv.isInitialized) {
@@ -145,6 +153,17 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           videoPlaceholderAsset: reimbursementPreviewPlaceholderAsset,
           icon: Icons.currency_exchange_rounded,
           accentColor: AppColors.blue,
+          isNew: true,
+        ),
+        FeaturePreviewItem(
+          title: 'Telegram Backup',
+          summary: 'Encrypted backups in your private bot chat',
+          description: telegramBackupPreviewDescription,
+          videoUrl: telegramBackupPreviewUrl,
+          videoCacheKey: telegramBackupPreviewCacheKey,
+          videoPlaceholderAsset: telegramBackupPreviewPlaceholderAsset,
+          icon: Icons.send_rounded,
+          accentColor: AppColors.primaryLight,
           isNew: true,
         ),
       ],
