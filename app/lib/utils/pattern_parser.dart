@@ -1,20 +1,32 @@
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/sms_pattern.dart';
-import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/utils/bank_sender_matcher.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 
 class PatternParser {
-  /// Iterates through [patterns] that match the [senderAddress].
+  /// Resolves [senderAddress] to a bank, then checks only that bank's patterns.
   /// Returns a map of extracted data if a match is found, or null otherwise.
   static Future<Map<String, dynamic>?> extractTransactionDetails(
       String messageBody,
       String senderAddress,
       DateTime? messageDate,
       List<SmsPattern> patterns,
-      {List<Bank>? banks}) async {
+      {required List<Bank> banks}) async {
     String cleanBody = messageBody.trim();
+    final senderBank = findBestBankForSenderAddress(senderAddress, banks);
+    if (senderBank == null) {
+      print(
+          "debug: No bank matched sender '$senderAddress'; skipping pattern matching.");
+      return null;
+    }
 
-    for (var pattern in patterns) {
+    final bankPatterns = patterns
+        .where((pattern) => pattern.bankId == senderBank.id)
+        .toList(growable: false);
+    print(
+        "debug: Sender '$senderAddress' resolved to ${senderBank.name} (${senderBank.id}); checking ${bankPatterns.length} patterns.");
+
+    for (final pattern in bankPatterns) {
       print("debug: Pattern Regex: ${[pattern.bankId]} ${pattern.regex}");
 
       // 2. Try to match regex
@@ -54,17 +66,13 @@ class PatternParser {
             print("debug: Raw account value: '$raw'");
 
             if (raw != null) {
-              final availableBanks =
-                  banks ?? await BankConfigService().getBanks();
-              final bank =
-                  availableBanks.firstWhere((b) => b.id == pattern.bankId);
-
               // Use bank configuration for account extraction
-              if (bank.uniformMasking == true && bank.maskPattern != null) {
+              if (senderBank.uniformMasking == true &&
+                  senderBank.maskPattern != null) {
                 // Extract last N digits based on mask pattern
-                if (raw.length >= bank.maskPattern!) {
+                if (raw.length >= senderBank.maskPattern!) {
                   extracted['accountNumber'] =
-                      raw.substring(raw.length - bank.maskPattern!);
+                      raw.substring(raw.length - senderBank.maskPattern!);
                   print(
                       "Cleaned account (masked): ${extracted['accountNumber']}");
                 } else {
@@ -197,6 +205,12 @@ class PatternParser {
           if (requiresAccount && extracted['accountNumber'] == null) {
             print(
                 "✗ Pattern '${pattern.description}' matched but account missing. Skipping.");
+            continue;
+          }
+          if (pattern.bankId != senderBank.id ||
+              extracted['bankId'] != senderBank.id) {
+            print(
+                "✗ Pattern '${pattern.description}' belongs to bank ${pattern.bankId}, not sender bank ${senderBank.id}. Skipping.");
             continue;
           }
 

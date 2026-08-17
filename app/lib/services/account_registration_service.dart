@@ -279,7 +279,7 @@ class AccountRegistrationService {
                     message.address!,
                     messageDate,
                     relevantPatterns,
-                    banks: _cachedBanks,
+                    banks: _cachedBanks!,
                   );
             details ??= await FallbackSmsParser.extractTransactionDetails(
               messageBody: cleanedBody,

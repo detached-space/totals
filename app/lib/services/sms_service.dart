@@ -1198,7 +1198,7 @@ class SmsService {
       senderAddress,
       messageDate,
       relevantPatterns,
-      banks: _cachedBanks,
+      banks: _cachedBanks!,
     );
 
     if (details == null && FallbackSmsParser.isEnabled) {
