@@ -8,6 +8,7 @@ import 'package:totals/models/bank.dart';
 import 'package:totals/models/budget.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/models/transaction_category_split.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/reimbursement_allocation.dart';
@@ -188,7 +189,7 @@ class BackupImportSummary {
 }
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 11;
+  static const int currentSchemaVersion = 12;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
@@ -651,7 +652,32 @@ class DataExportImportService {
           }
 
           final sourceCategoryIds = transaction.selectedCategoryIds;
-          if (sourceCategoryIds.isNotEmpty) {
+          var mappedSplitAmounts = false;
+          if (transaction.hasCategorySplit) {
+            final mappedSplits = <TransactionCategorySplit>[];
+            for (final split in transaction.categorySplits!) {
+              final mappedId = categoryIdMap[split.categoryId] ??
+                  (categoryIdsCanBeMapped ? null : split.categoryId);
+              if (mappedId == null) continue;
+              mappedSplits.add(
+                TransactionCategorySplit(
+                  categoryId: mappedId,
+                  amountMinor: split.amountMinor,
+                ),
+              );
+            }
+            if (mappedSplits.length == transaction.categorySplits!.length) {
+              final mapped = transaction.copyWith(
+                categorySplits: mappedSplits,
+              );
+              if (mapped.hasCategorySplit) {
+                transaction = mapped;
+                mappedSplitAmounts = true;
+              }
+            }
+          }
+
+          if (!mappedSplitAmounts && sourceCategoryIds.isNotEmpty) {
             final mappedCategoryIds = <int>[];
             for (final sourceId in sourceCategoryIds) {
               final mappedId = categoryIdMap[sourceId];
@@ -1338,6 +1364,10 @@ class DataExportImportService {
         _asInt(data['schemaVersion']) ?? _asInt(data['schema_version']);
     if (explicit != null) return explicit;
 
+    if (_containsTransactionCategorySplits(data)) {
+      return 12;
+    }
+
     if (_hasAnySection(data, const [
       'transactionSourceSms',
       'transaction_source_sms',
@@ -1400,6 +1430,18 @@ class DataExportImportService {
       final value = data[key];
       if (value is List || value is Map) return true;
       if (value != null) return true;
+    }
+    return false;
+  }
+
+  static bool _containsTransactionCategorySplits(Map<String, dynamic> data) {
+    final transactions = _readList(data, 'transactions');
+    for (final transaction in transactions) {
+      if (transaction is! Map) continue;
+      if (transaction.containsKey('categorySplits') ||
+          transaction.containsKey('category_splits')) {
+        return true;
+      }
     }
     return false;
   }

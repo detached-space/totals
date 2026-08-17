@@ -146,37 +146,41 @@ class BarChartWidget extends StatelessWidget {
       if (!isIncome && transaction.type != 'DEBIT') {
         continue;
       }
-      if (!_matchesCategorySelection(
-          transaction.categoryId, selectedCategoryIds)) {
-        continue;
-      }
-
       final transactionDate = _resolveDate(transaction);
       if (transactionDate == null) continue;
       final bucketIndex = _bucketIndexFor(transactionDate);
       if (bucketIndex == null) continue;
 
-      final category = provider.getCategoryById(transaction.categoryId);
-      final key =
-          category?.id != null ? 'category:${category!.id}' : 'uncategorized';
-      final stat = statsByKey.putIfAbsent(
-        key,
-        () => _BarCategoryStat(
-          label: _categoryLabel(category),
-          color: category == null
-              ? otherColor
-              : categoryPaletteColor(category, fallback: categoryFallback),
-          bucketValues: List<double>.filled(data.length, 0.0),
-          orderSeed: statsByKey.length,
-        ),
-      );
-
       final amount = isIncome
           ? provider.incomeAmountForTransaction(transaction)
           : provider.netExpenseAmountForTransaction(transaction);
       if (amount <= 0) continue;
-      stat.bucketValues[bucketIndex] += amount;
-      stat.total += amount;
+      final categoryAmounts = transaction.categoryAmounts(totalAmount: amount);
+      for (final allocation in categoryAmounts.entries) {
+        if (allocation.value <= 0 ||
+            !_matchesCategorySelection(
+              allocation.key,
+              selectedCategoryIds,
+            )) {
+          continue;
+        }
+        final category = provider.getCategoryById(allocation.key);
+        final key =
+            category?.id != null ? 'category:${category!.id}' : 'uncategorized';
+        final stat = statsByKey.putIfAbsent(
+          key,
+          () => _BarCategoryStat(
+            label: _categoryLabel(category),
+            color: category == null
+                ? otherColor
+                : categoryPaletteColor(category, fallback: categoryFallback),
+            bucketValues: List<double>.filled(data.length, 0.0),
+            orderSeed: statsByKey.length,
+          ),
+        );
+        stat.bucketValues[bucketIndex] += allocation.value;
+        stat.total += allocation.value;
+      }
     }
 
     final categories = statsByKey.values.toList()

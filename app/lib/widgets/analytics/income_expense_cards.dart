@@ -35,12 +35,6 @@ class IncomeExpenseCards extends StatelessWidget {
     return DateTime(dateTime.year, dateTime.month, dateTime.day);
   }
 
-  bool _matchesCategorySelection(int? categoryId, Set<int?> selection) {
-    if (selection.isEmpty) return true;
-    if (categoryId == null) return selection.contains(null);
-    return selection.contains(categoryId);
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<TransactionProvider>(context, listen: false);
@@ -169,24 +163,26 @@ class IncomeExpenseCards extends StatelessWidget {
         }
 
         // Calculate income and expenses for the period
-        final periodIncome = periodFiltered
-            .where((t) =>
-                t.type == 'CREDIT' &&
-                _matchesCategorySelection(
-                    t.categoryId, selectedIncomeCategoryIds))
-            .fold(
-              0.0,
-              (sum, t) => sum + provider.incomeAmountForTransaction(t),
-            );
-        final periodExpenses = periodFiltered
-            .where((t) =>
-                t.type == 'DEBIT' &&
-                _matchesCategorySelection(
-                    t.categoryId, selectedExpenseCategoryIds))
-            .fold(
-              0.0,
-              (sum, t) => sum + provider.netExpenseAmountForTransaction(t),
-            );
+        final periodIncome =
+            periodFiltered.where((t) => t.type == 'CREDIT').fold(
+                  0.0,
+                  (sum, t) =>
+                      sum +
+                      provider.amountForCategorySelection(
+                        t,
+                        selectedIncomeCategoryIds,
+                      ),
+                );
+        final periodExpenses =
+            periodFiltered.where((t) => t.type == 'DEBIT').fold(
+                  0.0,
+                  (sum, t) =>
+                      sum +
+                      provider.amountForCategorySelection(
+                        t,
+                        selectedExpenseCategoryIds,
+                      ),
+                );
 
         return Row(
           children: [

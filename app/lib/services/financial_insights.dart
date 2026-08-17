@@ -16,7 +16,10 @@ class InsightsService {
   // function that maps categoryId to Category? (nullable Category)
   final Category? Function(int? categoryId)? _getCategoryById;
   final bool Function(Transaction transaction)? _isExcludedFromIncome;
+  final double Function(Transaction transaction)? _incomeAmountForTransaction;
   final double Function(Transaction transaction)? _expenseAmountForTransaction;
+  final Map<int?, double> Function(Transaction transaction)?
+      _categoryAmountsForTransaction;
 
   // small memoization cache, will be cleared
   // when transactions change
@@ -26,10 +29,15 @@ class InsightsService {
     this._getTransactions, {
     Category? Function(int? categoryId)? getCategoryById,
     bool Function(Transaction transaction)? isExcludedFromIncome,
+    double Function(Transaction transaction)? incomeAmountForTransaction,
     double Function(Transaction transaction)? expenseAmountForTransaction,
+    Map<int?, double> Function(Transaction transaction)?
+        categoryAmountsForTransaction,
   })  : _getCategoryById = getCategoryById,
         _isExcludedFromIncome = isExcludedFromIncome,
-        _expenseAmountForTransaction = expenseAmountForTransaction;
+        _incomeAmountForTransaction = incomeAmountForTransaction,
+        _expenseAmountForTransaction = expenseAmountForTransaction,
+        _categoryAmountsForTransaction = categoryAmountsForTransaction;
 
   void invalidate() => _cache = null;
 
@@ -41,7 +49,7 @@ class InsightsService {
     // use the existing type + sign approach
     // to split income/expense
     final income = transactions.where(_isEarnedIncome).toList();
-    final totalIncome = MathUtils.findTransactionSum(income);
+    final totalIncome = MathUtils.findSum(income.map(_incomeAmount).toList());
 
     final expenses = transactions
         .where((transaction) =>
@@ -224,30 +232,28 @@ class InsightsService {
       if (_isIncome(t)) continue; // we only care about expenses here
 
       final amount = _expenseAmount(t);
-      final category = _getCategoryById?.call(t.categoryId);
+      final categoryAmounts = _categoryAmountsForTransaction?.call(t) ??
+          t.categoryAmounts(totalAmount: amount);
+      for (final allocation in categoryAmounts.entries) {
+        final category = _getCategoryById?.call(allocation.key);
+        final allocatedAmount = allocation.value;
 
-      if (category == null) {
-        uncategorized += amount;
-        continue;
-      }
+        if (category == null || category.uncategorized) {
+          uncategorized += allocatedAmount;
+          continue;
+        }
 
-      // Categories with uncategorized flag should be treated as uncategorized
-      // (e.g., built-in "Misc" category)
-      if (category.uncategorized) {
-        uncategorized += amount;
-        continue;
-      }
+        // Treat an income category attached to an expense as discretionary.
+        if (category.flow.toLowerCase() == "income") {
+          nonEssential += allocatedAmount;
+          continue;
+        }
 
-      // if an "income" category is attached to an expense
-      if (category.flow.toLowerCase() == "income") {
-        nonEssential += amount;
-        continue;
-      }
-
-      if (category.essential) {
-        essential += amount;
-      } else {
-        nonEssential += amount;
+        if (category.essential) {
+          essential += allocatedAmount;
+        } else {
+          nonEssential += allocatedAmount;
+        }
       }
     }
 
@@ -441,8 +447,16 @@ class InsightsService {
         receiverCounts[tx.receiver!.trim()] =
             (receiverCounts[tx.receiver!.trim()] ?? 0) + 1;
       }
-      if (tx.categoryId != null && _getCategoryById != null) {
-        final category = _getCategoryById(tx.categoryId);
+      final selectedCategoryIds = _categoryAmountsForTransaction
+              ?.call(tx)
+              .keys
+              .whereType<int>()
+              .toSet() ??
+          <int>{
+            if (tx.categoryId != null) tx.categoryId!,
+          };
+      for (final categoryId in selectedCategoryIds) {
+        final category = _getCategoryById?.call(categoryId);
         if (category != null && category.name.trim().isNotEmpty) {
           categoryCounts[category.name] =
               (categoryCounts[category.name] ?? 0) + 1;
@@ -578,10 +592,17 @@ class InsightsService {
     return amount;
   }
 
+  double _incomeAmount(Transaction transaction) {
+    final amount =
+        _incomeAmountForTransaction?.call(transaction) ?? transaction.amount;
+    if (!amount.isFinite || amount <= 0) return 0.0;
+    return amount;
+  }
+
   double _insightAmount(Transaction transaction) {
     return _isExpense(transaction)
         ? _expenseAmount(transaction)
-        : transaction.amount;
+        : _incomeAmount(transaction);
   }
 }
 

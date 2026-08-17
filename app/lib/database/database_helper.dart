@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 33,
+        version: 34,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV33Schema(db);
+      await _validateV34Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -113,6 +113,7 @@ class DatabaseHelper {
         ownerAccountNumber TEXT,
         categoryId INTEGER,
         categoryIds TEXT,
+        categorySplits TEXT,
         year INTEGER,
         month INTEGER,
         day INTEGER,
@@ -366,6 +367,9 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
       return;
     }
 
@@ -383,6 +387,9 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
       return;
     }
 
@@ -397,6 +404,9 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
       return;
     }
 
@@ -408,6 +418,9 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
       return;
     }
 
@@ -416,11 +429,22 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
       return;
     }
 
     if (oldVersion < 33) {
       await _migrateV32ToV33(db);
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 34) {
+      await _migrateV33ToV34(db);
       return;
     }
 
@@ -1044,6 +1068,16 @@ class DatabaseHelper {
       () => _ensureTransactionSourceSmsSchema(db),
     );
     await _runV28Stage('v33 final validation', () => _validateV33Schema(db));
+  }
+
+  Future<void> _migrateV33ToV34(Database db) async {
+    await _runV28Stage('v34 category splits', () async {
+      await _v28EnsureColumns(db, 'transactions', {
+        'categorySplits':
+            'ALTER TABLE transactions ADD COLUMN categorySplits TEXT',
+      });
+    });
+    await _runV28Stage('v34 final validation', () => _validateV34Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -2035,6 +2069,16 @@ class DatabaseHelper {
     ''');
     if (triggers.isEmpty) {
       throw StateError('v33 transaction source SMS delete trigger is missing');
+    }
+  }
+
+  Future<void> _validateV34Schema(Database db) async {
+    await _validateV33Schema(db);
+    final columns = await _v28Columns(db, 'transactions');
+    if (!columns.contains('categorySplits')) {
+      throw StateError(
+        'v34 invariant transactions missing categorySplits',
+      );
     }
   }
 

@@ -304,7 +304,7 @@ void main() {
       }),
     );
 
-    expect(DataExportImportService.currentSchemaVersion, 11);
+    expect(DataExportImportService.currentSchemaVersion, 12);
     expect(normalized['schemaVersion'], 9);
 
     final account = Map<String, dynamic>.from(
@@ -339,12 +339,34 @@ void main() {
       }),
     );
 
-    expect(normalized['schemaVersion'], 11);
+    expect(normalized['schemaVersion'], 12);
     expect(
       ((normalized['transactions'] as List).single
           as Map)['ownerAccountNumber'],
       '0911000001',
     );
+  });
+
+  test('schema-less category splits are recognized as schema v12', () {
+    final normalized = DataExportImportService.normalizeImportPayload(
+      jsonEncode({
+        'transactions': [
+          {
+            'amount': 100,
+            'reference': 'split-row',
+            'categorySplits': [
+              {'categoryId': 3, 'amountMinor': 2500},
+              {'categoryId': 7, 'amountMinor': 7500},
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(normalized['schemaVersion'], 12);
+    final transaction =
+        (normalized['transactions'] as List<dynamic>).single as Map;
+    expect(transaction['categorySplits'], hasLength(2));
   });
 
   test('source SMS aliases normalize as portable schema v11 records', () {

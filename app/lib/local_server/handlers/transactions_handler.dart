@@ -312,6 +312,11 @@ class TransactionsHandler {
       'categoryIds': transaction.selectedCategoryIds.isEmpty
           ? null
           : transaction.selectedCategoryIds,
+      'categorySplits': transaction.hasCategorySplit
+          ? transaction.categorySplits!
+              .map((split) => split.toJson())
+              .toList(growable: false)
+          : null,
       'sourceType': transaction.sourceType,
       'sourceMessageId': transaction.sourceMessageId,
       'sourceFingerprint': transaction.sourceFingerprint,
