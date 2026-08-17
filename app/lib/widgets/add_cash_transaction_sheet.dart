@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +12,7 @@ import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/services/transaction_location_capture_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/category_icons.dart';
@@ -531,6 +534,10 @@ class _AddCashTransactionContentState
       );
 
       await widget.provider.addTransaction(transaction);
+      unawaited(
+        TransactionLocationCaptureService.instance
+            .captureForTransaction(transaction),
+      );
       if (selectedAccount.bankId == CashConstants.bankId &&
           enteredBalanceAfter != null) {
         await widget.provider.setCashWalletBalance(

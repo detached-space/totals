@@ -59,6 +59,9 @@ class AppIcons {
   static const IconData light_mode_rounded = PhosphorIconsRegular.sun;
   static const IconData lightbulb_outline = PhosphorIconsRegular.lightbulb;
   static const IconData lock_outline_rounded = PhosphorIconsRegular.lock;
+  static const IconData map_rounded = PhosphorIconsRegular.mapTrifold;
+  static const IconData map_pin_rounded = PhosphorIconsRegular.mapPin;
+  static const IconData myLocationRounded = PhosphorIconsRegular.gpsFix;
   static const IconData more_horiz = PhosphorIconsRegular.dotsThree;
   static const IconData more_vert = PhosphorIconsRegular.dotsThreeVertical;
   static const IconData notifications_outlined = PhosphorIconsRegular.bell;
@@ -78,6 +81,8 @@ class AppIcons {
       PhosphorIconsRegular.minusCircle;
   static const IconData savings = PhosphorIconsFill.piggyBank;
   static const IconData savings_outlined = PhosphorIconsRegular.piggyBank;
+  static const IconData satelliteView =
+      PhosphorIconsRegular.globeHemisphereEast;
   static const IconData schedule_rounded = PhosphorIconsRegular.clock;
   static const IconData search = PhosphorIconsRegular.magnifyingGlass;
   static const IconData sms_outlined = PhosphorIconsRegular.chatText;

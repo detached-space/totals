@@ -34,6 +34,7 @@ import 'package:totals/utils/sms_transaction_source.dart';
 import 'package:totals/utils/sms_message_classifier.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 import 'package:totals/services/account_ownership_service.dart';
+import 'package:totals/services/transaction_location_capture_service.dart';
 import 'package:totals/utils/account_identity.dart';
 
 enum ParseStatus {
@@ -1101,7 +1102,12 @@ class SmsService {
       allowRemotePatternFetch: allowRemotePatternFetch,
       recordFailure: true,
     );
-    return result.transaction;
+    final transaction = result.transaction;
+    if (transaction != null) {
+      await TransactionLocationCaptureService.instance
+          .captureForTransaction(transaction);
+    }
+    return transaction;
   }
 
   static Future<ParseResult> retryFailedParse(

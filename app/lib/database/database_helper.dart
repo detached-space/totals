@@ -49,7 +49,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 34,
+        version: 35,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +59,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV34Schema(db);
+      await _validateV35Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -340,6 +340,7 @@ class DatabaseHelper {
     await _ensureLoanDebtSchema(db);
     await _ensureReimbursementSchema(db);
     await _ensureTransactionSourceSmsSchema(db);
+    await _ensureTransactionLocationSchema(db);
 
     await _seedBuiltInCategories(db);
     await _ensureSyncSchema(db);
@@ -370,6 +371,9 @@ class DatabaseHelper {
       if (newVersion >= 34) {
         await _migrateV33ToV34(db);
       }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
       return;
     }
 
@@ -390,6 +394,9 @@ class DatabaseHelper {
       if (newVersion >= 34) {
         await _migrateV33ToV34(db);
       }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
       return;
     }
 
@@ -407,6 +414,9 @@ class DatabaseHelper {
       if (newVersion >= 34) {
         await _migrateV33ToV34(db);
       }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
       return;
     }
 
@@ -421,6 +431,9 @@ class DatabaseHelper {
       if (newVersion >= 34) {
         await _migrateV33ToV34(db);
       }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
       return;
     }
 
@@ -432,6 +445,9 @@ class DatabaseHelper {
       if (newVersion >= 34) {
         await _migrateV33ToV34(db);
       }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
       return;
     }
 
@@ -440,11 +456,22 @@ class DatabaseHelper {
       if (newVersion >= 34) {
         await _migrateV33ToV34(db);
       }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
       return;
     }
 
     if (oldVersion < 34) {
       await _migrateV33ToV34(db);
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 35) {
+      await _migrateV34ToV35(db);
       return;
     }
 
@@ -1078,6 +1105,14 @@ class DatabaseHelper {
       });
     });
     await _runV28Stage('v34 final validation', () => _validateV34Schema(db));
+  }
+
+  Future<void> _migrateV34ToV35(Database db) async {
+    await _runV28Stage(
+      'v35 transaction locations',
+      () => _ensureTransactionLocationSchema(db),
+    );
+    await _runV28Stage('v35 final validation', () => _validateV35Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -2080,6 +2115,71 @@ class DatabaseHelper {
         'v34 invariant transactions missing categorySplits',
       );
     }
+  }
+
+  Future<void> _validateV35Schema(Database db) async {
+    await _validateV34Schema(db);
+    if (!await _v28TableExists(db, 'transaction_locations')) {
+      throw StateError('v35 invariant missing table transaction_locations');
+    }
+    final columns = await _v28Columns(db, 'transaction_locations');
+    const requiredColumns = {
+      'transactionReference',
+      'profileId',
+      'latitude',
+      'longitude',
+      'accuracy',
+      'capturedAt',
+    };
+    final missingColumns = requiredColumns.difference(columns);
+    if (missingColumns.isNotEmpty) {
+      throw StateError(
+        'v35 invariant transaction_locations missing '
+        '${missingColumns.join(', ')}',
+      );
+    }
+    final indexes = (await db.rawQuery(
+      "PRAGMA index_list('transaction_locations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    if (!indexes.contains('idx_transaction_locations_profile_captured')) {
+      throw StateError('v35 transaction location index is missing');
+    }
+    final triggers = await db.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'trg_transaction_locations_tx_delete'
+    ''');
+    if (triggers.isEmpty) {
+      throw StateError('v35 transaction location delete trigger is missing');
+    }
+  }
+
+  Future<void> _ensureTransactionLocationSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS transaction_locations (
+        transactionReference TEXT PRIMARY KEY NOT NULL,
+        profileId INTEGER,
+        latitude REAL NOT NULL CHECK(latitude >= -90 AND latitude <= 90),
+        longitude REAL NOT NULL CHECK(longitude >= -180 AND longitude <= 180),
+        accuracy REAL,
+        capturedAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_transaction_locations_profile_captured
+      ON transaction_locations(profileId, capturedAt)
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_transaction_locations_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM transaction_locations
+        WHERE transactionReference = OLD.reference;
+      END
+    ''');
   }
 
   Future<void> _ensureTransactionSourceSmsSchema(Database db) async {

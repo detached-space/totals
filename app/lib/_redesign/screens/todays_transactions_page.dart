@@ -20,7 +20,19 @@ import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 class TodaysTransactionsPage extends StatefulWidget {
-  const TodaysTransactionsPage({super.key});
+  const TodaysTransactionsPage({
+    super.key,
+    this.transactionReferences,
+    this.title,
+    this.subtitle,
+  });
+
+  /// When provided, the page shows only these transactions instead of today's
+  /// transactions. This lets feature-specific entry points reuse the same
+  /// redesigned transaction list and filters.
+  final Set<String>? transactionReferences;
+  final String? title;
+  final String? subtitle;
 
   @override
   State<TodaysTransactionsPage> createState() => _TodaysTransactionsPageState();
@@ -246,12 +258,21 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
 
     return Consumer<TransactionProvider>(
       builder: (context, provider, _) {
-        final allTransactions = provider.todayTransactions;
+        final references = widget.transactionReferences;
+        final allTransactions = references == null
+            ? provider.todayTransactions
+            : provider.allTransactions
+                .where(
+                  (transaction) => references.contains(transaction.reference),
+                )
+                .toList(growable: false);
         final transactions = _filteredTransactions(provider, allTransactions);
 
         String pageTitle;
         if (_isSelecting) {
           pageTitle = '${_selectedRefs.length} selected';
+        } else if (widget.title != null) {
+          pageTitle = widget.title!;
         } else if (isEC) {
           pageTitle =
               AppDateFormat.monthDayYear(DateTime.now(), context: context);
@@ -273,14 +294,32 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(AppIcons.arrow_back_rounded),
                   ),
-            title: Text(
-              pageTitle,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: _isSelecting
-                    ? AppColors.primaryDark
-                    : AppColors.textPrimary(context),
-              ),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  pageTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: _isSelecting
+                        ? AppColors.primaryDark
+                        : AppColors.textPrimary(context),
+                  ),
+                ),
+                if (!_isSelecting && widget.subtitle != null)
+                  Text(
+                    widget.subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppColors.textSecondary(context),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+              ],
             ),
             actions: [
               if (!_isSelecting)
@@ -321,7 +360,9 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                       Text(
                         context.l10nText(
                           allTransactions.isEmpty
-                              ? 'No transactions today'
+                              ? references == null
+                                  ? 'No transactions today'
+                                  : 'No transactions found'
                               : 'No transactions match these filters',
                         ),
                         style: theme.textTheme.bodyMedium?.copyWith(
