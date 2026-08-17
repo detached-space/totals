@@ -6,6 +6,7 @@ import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
+import 'package:totals/_redesign/widgets/transaction_split_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
@@ -771,6 +772,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   TransactionProvider get _provider => widget.provider;
 
   bool get _isCredit => _tx.type == 'CREDIT';
+  bool get _canSplitAmount => hasSplittableCategorySelection(_tx, _provider);
 
   List<Category> get _currentCategories =>
       _provider.categoriesForTransaction(_tx);
@@ -781,6 +783,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
+      !_tx.hasCategorySplit &&
       !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
@@ -1273,10 +1276,16 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       final nextPrimary = _tx.categoryId == categoryId
           ? (nextIds.isEmpty ? null : nextIds.first)
           : _tx.categoryId;
-      await _applyCategorySelection(
+      final updated = await _applyCategorySelection(
         categoryIds: nextIds,
         primaryCategoryId: nextPrimary,
       );
+      if (updated != null &&
+          mounted &&
+          hasSplittableCategorySelection(updated, _provider) &&
+          !updated.hasCategorySplit) {
+        await _openAmountSplit();
+      }
       return;
     }
 
@@ -1317,11 +1326,29 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
+    } else if (hasSplittableCategorySelection(updated, _provider) &&
+        !updated.hasCategorySplit) {
+      await _openAmountSplit();
     }
   }
 
   Future<void> _clearCategory() async {
     await _applyCategorySelection(categoryIds: const <int>[]);
+  }
+
+  Future<void> _openAmountSplit() async {
+    if (_isApplyingCategory || !_canSplitAmount) return;
+    final hostContext = widget.hostContext;
+    final transaction = _tx;
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    await showTransactionSplitSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
   }
 
   Future<void> _openLoanDebtPersonPrompt(Transaction transaction) async {

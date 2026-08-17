@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
+import 'package:totals/_redesign/widgets/transaction_split_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
@@ -110,6 +111,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       widget.hostContext.mounted &&
       _tx.reference.trim().isNotEmpty &&
       _tx.type?.toUpperCase() == 'DEBIT';
+  bool get _canSplitByCategory =>
+      hasSplittableCategorySelection(_tx, _provider);
   bool get _isAlreadySharedExpense => _provider.isSharedExpenseTransaction(_tx);
   bool get _isSharingSharedExpense =>
       _provider.isSharingSharedExpenseTransaction(_tx);
@@ -123,6 +126,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
+      !_tx.hasCategorySplit &&
       !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
@@ -802,10 +806,16 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       final nextPrimary = _tx.categoryId == categoryId
           ? (nextIds.isEmpty ? null : nextIds.first)
           : _tx.categoryId;
-      await _applyCategorySelection(
+      final updated = await _applyCategorySelection(
         categoryIds: nextIds,
         primaryCategoryId: nextPrimary,
       );
+      if (updated != null &&
+          mounted &&
+          hasSplittableCategorySelection(updated, _provider) &&
+          !updated.hasCategorySplit) {
+        await _openAmountSplit();
+      }
       return;
     }
 
@@ -846,11 +856,29 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
+    } else if (hasSplittableCategorySelection(updated, _provider) &&
+        !updated.hasCategorySplit) {
+      await _openAmountSplit();
     }
   }
 
   Future<void> _clearCategory() async {
     await _applyCategorySelection(categoryIds: const <int>[]);
+  }
+
+  Future<void> _openAmountSplit() async {
+    if (_isApplyingCategory || !_canSplitByCategory) return;
+    final hostContext = widget.hostContext;
+    final transaction = _tx;
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    await showTransactionSplitSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
   }
 
   void _copyReference({String message = 'Reference copied'}) {
@@ -956,6 +984,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       ownerAssignmentSource: _tx.ownerAssignmentSource,
       categoryId: _tx.categoryId,
       categoryIds: _tx.categoryIds,
+      categorySplits: _tx.categorySplits,
       profileId: _tx.profileId,
       serviceCharge: _tx.serviceCharge,
       vat: _tx.vat,
@@ -1688,6 +1717,16 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       // Category picker chips
                       if (_categoryExpanded && !isLockedSelfTransfer)
                         _buildCategoryPicker(),
+
+                      if (!isLockedSelfTransfer && _canSplitByCategory)
+                        _DetailRow(
+                          label: 'Amount split',
+                          value: _tx.hasCategorySplit
+                              ? transactionSplitAmountSummary(_tx)
+                              : context.l10nText('Set amounts'),
+                          onTap: _isApplyingCategory ? null : _openAmountSplit,
+                          trailingIcon: AppIcons.chevron_right,
+                        ),
 
                       _buildNoteSection(),
 

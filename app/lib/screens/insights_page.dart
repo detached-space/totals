@@ -14,11 +14,15 @@ import '../utils/map_keys.dart';
 class InsightsPage extends StatelessWidget {
   final List<Transaction> transactions;
   final String? periodLabel;
+  final Set<int?> selectedIncomeCategoryIds;
+  final Set<int?> selectedExpenseCategoryIds;
 
   const InsightsPage({
     super.key,
     required this.transactions,
     this.periodLabel,
+    this.selectedIncomeCategoryIds = const <int?>{},
+    this.selectedExpenseCategoryIds = const <int?>{},
   });
 
   @override
@@ -28,7 +32,21 @@ class InsightsPage extends StatelessWidget {
       () => transactions,
       getCategoryById: txProvider.getCategoryById,
       isExcludedFromIncome: txProvider.isReimbursementTransaction,
-      expenseAmountForTransaction: txProvider.netExpenseAmountForTransaction,
+      incomeAmountForTransaction: (transaction) =>
+          txProvider.amountForCategorySelection(
+        transaction,
+        selectedIncomeCategoryIds,
+      ),
+      expenseAmountForTransaction: (transaction) =>
+          txProvider.amountForCategorySelection(
+        transaction,
+        selectedExpenseCategoryIds,
+      ),
+      categoryAmountsForTransaction: (transaction) =>
+          txProvider.categoryAmountsForSelection(
+        transaction,
+        selectedExpenseCategoryIds,
+      ),
     );
 
     final insights = insightsService.summarize();
@@ -865,6 +883,11 @@ class InsightsPage extends StatelessWidget {
     required bool isIncome,
   }) {
     final color = isIncome ? const Color(0xFF00C853) : const Color(0xFFFF5252);
+    final provider = context.read<TransactionProvider>();
+    final amount = provider.amountForCategorySelection(
+      t,
+      isIncome ? selectedIncomeCategoryIds : selectedExpenseCategoryIds,
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -908,7 +931,7 @@ class InsightsPage extends StatelessWidget {
             ),
           ),
           Text(
-            formatter.format(t.amount),
+            formatter.format(amount),
             style: const TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w900,

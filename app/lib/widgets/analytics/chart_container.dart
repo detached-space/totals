@@ -120,6 +120,8 @@ class _ChartContainerState extends State<ChartContainer> {
           selectedPeriod: widget.selectedPeriod,
           selectedCard: widget.selectedCard,
           transactions: widget.pnlTransactions,
+          selectedIncomeCategoryIds: widget.selectedIncomeCategoryIds,
+          selectedExpenseCategoryIds: widget.selectedExpenseCategoryIds,
           dateForTransaction: widget.dateForTransaction,
           onDateSelected: widget.onCalendarCellSelected,
         );

@@ -116,6 +116,48 @@ Color _progressColorForUsage({
   return AppColors.incomeSuccess;
 }
 
+double _amountForBudgetCategories(
+  Transaction transaction,
+  Set<int> categoryIds,
+  TransactionProvider provider,
+) {
+  if (categoryIds.isEmpty) return 0;
+  final amount = provider.budgetExpenseAmountForTransaction(transaction);
+  if (amount <= 0) return 0;
+  if (!transaction.hasCategorySplit) {
+    return transaction.selectedCategoryIds.any(categoryIds.contains)
+        ? amount
+        : 0;
+  }
+  return transaction
+      .categoryAmounts(totalAmount: amount)
+      .entries
+      .where((allocation) =>
+          allocation.key != null && categoryIds.contains(allocation.key))
+      .fold<double>(0, (sum, allocation) => sum + allocation.value);
+}
+
+double _unbudgetedAmountForTransaction(
+  Transaction transaction,
+  Set<int> budgetedCategoryIds,
+  TransactionProvider provider,
+) {
+  final amount = provider.budgetExpenseAmountForTransaction(transaction);
+  if (amount <= 0) return 0;
+  if (!transaction.hasCategorySplit) {
+    return transaction.selectedCategoryIds.any(budgetedCategoryIds.contains)
+        ? 0
+        : amount;
+  }
+  return transaction
+      .categoryAmounts(totalAmount: amount)
+      .entries
+      .where((allocation) =>
+          allocation.key == null ||
+          !budgetedCategoryIds.contains(allocation.key))
+      .fold<double>(0, (sum, allocation) => sum + allocation.value);
+}
+
 String? _extractLegacyBudgetColorKey(String? iconKey) {
   if (iconKey == null || iconKey.isEmpty) return null;
   const prefix = 'color:';
@@ -486,18 +528,31 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     List<Transaction> debits,
     TransactionProvider transactionProvider,
   ) {
-    return debits.where((t) => _transactionMatchesBudget(t, b)).fold(
-          0.0,
-          (sum, transaction) =>
-              sum +
-              transactionProvider
-                  .budgetExpenseAmountForTransaction(transaction),
-        );
+    final categoryIds = b.selectedCategoryIds.toSet();
+    return debits.fold<double>(0, (sum, transaction) {
+      final amount = b.appliesToAllExpenses
+          ? transactionProvider.budgetExpenseAmountForTransaction(transaction)
+          : _amountForBudgetCategories(
+              transaction,
+              categoryIds,
+              transactionProvider,
+            );
+      return sum + amount;
+    });
   }
 
-  bool _transactionMatchesBudget(Transaction transaction, Budget budget) {
+  bool _transactionMatchesBudget(
+    Transaction transaction,
+    Budget budget,
+    TransactionProvider provider,
+  ) {
     if (budget.appliesToAllExpenses) return true;
-    return transaction.selectedCategoryIds.any(budget.includesCategory);
+    return _amountForBudgetCategories(
+          transaction,
+          budget.selectedCategoryIds.toSet(),
+          provider,
+        ) >
+        0;
   }
 
   bool _isWantsBudget(Budget budget, TransactionProvider tp) {
@@ -627,12 +682,17 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
         ? <Transaction>[]
         : debits.where((t) {
             if (tp.isSelfTransfer(t)) return false;
-            return !t.selectedCategoryIds.any(budgetedCatIds.contains);
+            return _unbudgetedAmountForTransaction(t, budgetedCatIds, tp) > 0;
           }).toList();
     final unbudgetedAmount = unbudgetedTxns.fold(
       0.0,
       (sum, transaction) =>
-          sum + tp.budgetExpenseAmountForTransaction(transaction),
+          sum +
+          _unbudgetedAmountForTransaction(
+            transaction,
+            budgetedCatIds,
+            tp,
+          ),
     );
 
     return RefreshIndicator(
@@ -764,8 +824,9 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
     final categorySummary = _categorySummaryForBudget(budget, tp);
 
     // Transactions for this budget
-    final txns =
-        debits.where((t) => _transactionMatchesBudget(t, budget)).toList();
+    final txns = debits
+        .where((t) => _transactionMatchesBudget(t, budget, tp))
+        .toList();
     // Sort newest first
     txns.sort((a, b) {
       final ta = a.time != null ? DateTime.tryParse(a.time!) : null;
@@ -852,6 +913,13 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                     child: Builder(builder: (context) {
                       final transactionCategory =
                           tp.getCategoryById(t.categoryId);
+                      final budgetedAmount = budget.appliesToAllExpenses
+                          ? tp.budgetExpenseAmountForTransaction(t)
+                          : _amountForBudgetCategories(
+                              t,
+                              budget.selectedCategoryIds.toSet(),
+                              tp,
+                            );
                       return TransactionTile(
                         key: ValueKey(
                             'budget_txn_${t.reference}_${t.categoryId}'),
@@ -873,7 +941,7 @@ class RedesignBudgetPageState extends State<RedesignBudgetPage> {
                         isReimbursed: tp.isReimbursedExpense(t),
                         isSharing: tp.isSharingSharedExpenseTransaction(t),
                         isShared: tp.isSharedExpenseTransaction(t),
-                        amount: _formatBudgetEtbFull(context, t.amount),
+                        amount: _formatBudgetEtbFull(context, budgetedAmount),
                         amountColor: t.type?.toUpperCase() == 'DEBIT'
                             ? AppColors.red
                             : AppColors.incomeSuccess,
@@ -1557,7 +1625,12 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
             if (dt == null) return false;
             if (dt.isBefore(monthStart) || !dt.isBefore(monthEnd)) return false;
             if (provider.isSelfTransfer(t)) return false;
-            return !t.selectedCategoryIds.any(budgetedCategoryIds.contains);
+            return _unbudgetedAmountForTransaction(
+                  t,
+                  budgetedCategoryIds,
+                  provider,
+                ) >
+                0;
           }).toList()
             ..sort((a, b) {
               final ta = a.time != null ? DateTime.tryParse(a.time!) : null;
@@ -1603,6 +1676,11 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
               else
                 ...transactions.map((t) {
                   final cat = provider.getCategoryById(t.categoryId);
+                  final unbudgetedAmount = _unbudgetedAmountForTransaction(
+                    t,
+                    budgetedCategoryIds,
+                    provider,
+                  );
                   final isSelfTransfer = provider.isSelfTransfer(t);
                   final isMisc = cat?.uncategorized == true;
                   final categoryLabel = isSelfTransfer
@@ -1631,7 +1709,7 @@ class _UnbudgetedTransactionsPage extends StatelessWidget {
                     isReimbursed: provider.isReimbursedExpense(t),
                     isSharing: provider.isSharingSharedExpenseTransaction(t),
                     isShared: provider.isSharedExpenseTransaction(t),
-                    amount: _formatBudgetEtbFull(context, t.amount),
+                    amount: _formatBudgetEtbFull(context, unbudgetedAmount),
                     amountColor:
                         isCredit ? AppColors.incomeSuccess : AppColors.red,
                     name: _transactionDisplayName(

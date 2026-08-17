@@ -46,6 +46,7 @@ class BudgetService {
     return _sumNetSpending(
       filtered,
       reimbursedByReference,
+      categoryIds: ids,
     );
   }
 
@@ -145,6 +146,7 @@ class BudgetService {
         final spent = _sumNetSpending(
           applicableTransactions,
           reimbursedByReference,
+          categoryIds: categoryIds,
         );
         statuses[request.index] = _buildStatus(
           request: request,
@@ -160,21 +162,32 @@ class BudgetService {
     );
   }
 
-  double _sumNetSpending(
-    Iterable<Transaction> transactions,
-    Map<String, double> reimbursedByReference,
-  ) {
+  double _sumNetSpending(Iterable<Transaction> transactions,
+      Map<String, double> reimbursedByReference,
+      {Set<int> categoryIds = const <int>{}}) {
     return transactions.fold<double>(
       0.0,
       (sum, transaction) {
         final gross = transactionDebitOutflow(transaction);
         final reimbursed =
             reimbursedByReference[transaction.reference.trim()] ?? 0.0;
-        return sum +
-            expenseAmountAfterReimbursement(
-              grossExpense: gross,
-              reimbursedAmount: reimbursed,
-            );
+        final net = expenseAmountAfterReimbursement(
+          grossExpense: gross,
+          reimbursedAmount: reimbursed,
+        );
+        if (categoryIds.isEmpty) return sum + net;
+        if (!transaction.hasCategorySplit) {
+          return transaction.selectedCategoryIds.any(categoryIds.contains)
+              ? sum + net
+              : sum;
+        }
+        final splitAmount = transaction
+            .categoryAmounts(totalAmount: net)
+            .entries
+            .where(
+                (entry) => entry.key != null && categoryIds.contains(entry.key))
+            .fold<double>(0.0, (total, entry) => total + entry.value);
+        return sum + splitAmount;
       },
     );
   }

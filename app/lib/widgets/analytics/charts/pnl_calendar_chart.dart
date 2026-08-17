@@ -12,6 +12,8 @@ class PnLCalendarChart extends StatelessWidget {
   final String selectedPeriod;
   final String? selectedCard;
   final List<Transaction> transactions;
+  final Set<int?> selectedIncomeCategoryIds;
+  final Set<int?> selectedExpenseCategoryIds;
   final DateTime? Function(Transaction)? dateForTransaction;
   final ValueChanged<DateTime>? onDateSelected;
 
@@ -23,6 +25,8 @@ class PnLCalendarChart extends StatelessWidget {
     required this.selectedPeriod,
     required this.selectedCard,
     required this.transactions,
+    this.selectedIncomeCategoryIds = const <int?>{},
+    this.selectedExpenseCategoryIds = const <int?>{},
     this.dateForTransaction,
     this.onDateSelected,
   });
@@ -92,15 +96,22 @@ class PnLCalendarChart extends StatelessWidget {
       if (selectedCard == 'Expense' && transaction.type != 'DEBIT') return;
 
       double delta = 0.0;
+      final selectedCategoryIds = transaction.type == 'CREDIT'
+          ? selectedIncomeCategoryIds
+          : selectedExpenseCategoryIds;
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        selectedCategoryIds,
+      );
       if (selectedCard == 'Income') {
-        delta = provider.incomeAmountForTransaction(transaction);
+        delta = amount;
       } else if (selectedCard == 'Expense') {
-        delta = -provider.netExpenseAmountForTransaction(transaction);
+        delta = -amount;
       } else {
         if (transaction.type == 'CREDIT') {
-          delta = provider.incomeAmountForTransaction(transaction);
+          delta = amount;
         } else if (transaction.type == 'DEBIT') {
-          delta = -provider.netExpenseAmountForTransaction(transaction);
+          delta = -amount;
         } else {
           return;
         }
