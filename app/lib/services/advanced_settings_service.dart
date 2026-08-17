@@ -29,7 +29,7 @@ class AdvancedSettingsService {
   static const String _telegramBackupConsentVersionKey =
       'advanced_telegram_backup_consent_version';
   static const String _spendingMapEnabledKey = 'advanced_spending_map_enabled';
-  static const int currentTelegramBackupConsentVersion = 1;
+  static const int currentTelegramBackupConsentVersion = 2;
   static const Set<ToolsFabItem> defaultToolsFabItems = {
     ToolsFabItem.quickAccounts,
     ToolsFabItem.verifyPayments,
@@ -63,10 +63,17 @@ class AdvancedSettingsService {
       prefs.getStringList(_toolsFabItemsKey),
       spendingMapEnabled: spendingMapEnabled.value,
     );
-    telegramBackupEnabled.value =
-        prefs.getBool(_telegramBackupEnabledKey) ?? false;
     telegramBackupConsentVersion.value =
         prefs.getInt(_telegramBackupConsentVersionKey) ?? 0;
+    final storedTelegramBackupEnabled =
+        prefs.getBool(_telegramBackupEnabledKey) ?? false;
+    final consentIsCurrent = telegramBackupConsentVersion.value >=
+        currentTelegramBackupConsentVersion;
+    telegramBackupEnabled.value =
+        storedTelegramBackupEnabled && consentIsCurrent;
+    if (storedTelegramBackupEnabled && !consentIsCurrent) {
+      await prefs.setBool(_telegramBackupEnabledKey, false);
+    }
     _loaded = true;
   }
 

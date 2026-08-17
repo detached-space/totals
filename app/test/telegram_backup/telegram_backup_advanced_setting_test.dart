@@ -30,4 +30,19 @@ void main() {
     expect(service.telegramBackupEnabled.value, isTrue);
     expect(prefs.getBool('advanced_telegram_backup_enabled'), isTrue);
   });
+
+  test('outdated Telegram Backup consent disables automatic backups', () async {
+    SharedPreferences.setMockInitialValues({
+      'advanced_telegram_backup_enabled': true,
+      'advanced_telegram_backup_consent_version': 1,
+    });
+    final service = AdvancedSettingsService.instance;
+
+    await service.reload();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(service.hasTelegramBackupConsent, isFalse);
+    expect(service.telegramBackupEnabled.value, isFalse);
+    expect(prefs.getBool('advanced_telegram_backup_enabled'), isFalse);
+  });
 }

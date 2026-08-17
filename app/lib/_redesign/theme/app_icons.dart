@@ -38,6 +38,7 @@ class AppIcons {
   static const IconData dashboard_outlined = PhosphorIconsRegular.squaresFour;
   static const IconData delete_outline_rounded = PhosphorIconsRegular.trash;
   static const IconData download_rounded = PhosphorIconsRegular.downloadSimple;
+  static const IconData editOutlined = PhosphorIconsRegular.pencilSimple;
   static const IconData expand_more = PhosphorIconsRegular.caretDown;
   static const IconData favorite_rounded = PhosphorIconsRegular.heart;
   static const IconData filter_alt_outlined = PhosphorIconsRegular.funnelSimple;

@@ -12,8 +12,8 @@ Totals is a personal finance application published by Detached. This Privacy Pol
   - Payment verification can send the image, payment reference, selected account number, and selected bank identifier you submit to our verification service to process your request.
   - Shared expenses lets you split expenses with friends in end-to-end encrypted groups. The Totals Engine relays encrypted payloads it cannot read, and push notifications are doorbell pings that do not include expense content.
   - Data Sync (optional, off by default) lets you push selected local records to a third-party server you configure. Only the fields and records your rules select are sent, to the destination you specify; Totals does not control or secure that destination.
-  - Telegram Backup is an optional advanced feature that encrypts a full backup, including retained original source SMS messages, on-device and sends the encrypted file and encrypted backup index to a private Telegram bot chat you connect. The recovery key is not sent to Telegram.
-  - Spending Map is an optional, off-by-default advanced feature that captures precise location when a new debit or credit transaction is recorded and stores the coordinates locally to render a personal transaction map.
+  - Telegram Backup is an optional advanced feature that encrypts a full backup, including retained original source SMS messages, saved Spending Map coordinates, and custom place names, on-device and sends the encrypted file and encrypted backup index to a private Telegram bot chat you connect. The recovery key is not sent to Telegram.
+  - Spending Map is an optional, off-by-default advanced feature that captures precise location when a new debit or credit transaction is recorded and stores the coordinates and any custom place names you create locally to render a personal transaction map. Saved location data for included transactions is also included when you create a manual export or an encrypted full backup. When Totals requests map content, location-related request data is sent directly to Google Maps Platform; custom place names are not sent to Google.
   - An optional identity backup vault lets you restore your shared-expense identity and group keys on a new device using a recovery code shown to you in the app plus a PIN you choose. Vault contents are encrypted on-device before being uploaded.
   - The app may download updated SMS parsing patterns and bank configuration files from our servers during setup, refresh, or manual update actions. This does not upload your SMS contents.
 - Totals does not require account registration.
@@ -38,6 +38,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - Data Sync configuration you enter, such as destination names, server URLs, authentication type, and credentials, when you use the optional Data Sync feature.
 - Telegram Backup configuration you enter or pair, including the bot token, Telegram bot and private-chat identifiers, backup schedule, and recovery key. The bot token and recovery key are stored using secure device storage.
 - Precise latitude, longitude, accuracy, and capture time for new debit and credit transactions when you enable Spending Map.
+- Custom place names you assign to mapped transaction locations.
 
 ## How We Use Data
 
@@ -53,7 +54,7 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - To store and retrieve an optional encrypted identity vault so that you can restore your shared-expense identity and group keys on a new device.
 - To send the records and fields you select to the external server you configure when you enable the optional Data Sync feature.
 - To encrypt, upload, list, download, and restore backups in the private Telegram bot chat you connect when you enable Telegram Backup.
-- To display an on-device map of where new debit and credit transactions occurred when you enable Spending Map.
+- To display an on-device map of where new debit and credit transactions occurred and let you assign private custom names to mapped locations when you enable Spending Map.
 
 ## When Data Leaves Your Device
 
@@ -66,13 +67,14 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 - Support and external links: If you open external links from the app, such as support pages, Telegram, or bank links, those services receive information according to their own privacy policies.
 - Local network dashboard: If you manually start the optional local web dashboard or server, your financial data may be available to devices on the same local network using the URL shown in the app until you stop the server.
 - Data Sync (optional, off by default): If you enable Data Sync and create one or more rules, Totals sends the records and fields you select to the destination URL you configure, using the authentication you provide. Depending on your rules this may include transaction amounts, references, dates, counterparties, balances, account numbers, bank identifiers, budgets, and any other fields you map. This is a one-way export controlled by you; Totals never pulls data back, and Totals cannot see, verify, or secure the destination, which is operated by you or a third party of your choosing.
-- Telegram Backup (optional, off by default): If you enable and connect this advanced feature, Totals creates a full export that includes available original source SMS messages linked to transactions and retained failed-message diagnostics, then compresses and encrypts it on-device with AES-256-GCM. Totals sends only the encrypted file to the private Telegram bot chat you paired. An encrypted pinned index lets Totals list and retrieve those files. Telegram receives the ciphertext and service metadata such as bot and chat identifiers, file size, filename, and upload time under Telegram's own privacy terms. The recovery key is generated and kept on-device unless you choose to copy or save it, and is never included in the Telegram upload.
-- Spending Map (optional, off by default): Transaction coordinates remain in the local app database and the map visualization is constructed on-device rather than uploaded to a Totals server. Opening the map uses the Google Maps SDK to supply base-map content. Google may process information such as your IP address, app and device information, visible map area, and map interactions under the [Google Privacy Policy](https://policies.google.com/privacy) and [Google Maps Platform Terms](https://cloud.google.com/maps-platform/terms). Totals does not include transaction amounts in Google Maps requests and does not use Places or geocoding APIs for this feature.
+- Telegram Backup (optional, off by default): If you enable and connect this advanced feature, Totals creates a full export that includes available original source SMS messages linked to transactions, retained failed-message diagnostics, and saved Spending Map coordinates and custom place names, then compresses and encrypts it on-device with AES-256-GCM. Totals sends only the encrypted file to the private Telegram bot chat you paired. An encrypted pinned index lets Totals list and retrieve those files. Telegram receives the ciphertext and service metadata such as bot and chat identifiers, file size, filename, and upload time under Telegram's own privacy terms. The recovery key is generated and kept on-device unless you choose to copy or save it, and is never included in the Telegram upload.
+- Spending Map (optional, off by default): Saved transaction records, coordinates, and custom place names remain on your device unless you create a manual export or enable Telegram Backup; they are not uploaded to a Totals server. Manual exports include the saved location data for the transactions included in the export, and encrypted Telegram backups include all saved location data. Opening the map uses the Google Maps SDK to supply base-map content. Google may process your IP address, app and device information, the visible map area, and map interactions under the [Google Privacy Policy](https://policies.google.com/privacy) and [Google Maps Platform Terms](https://cloud.google.com/maps-platform/terms). Google may therefore be able to infer the area being viewed. Totals does not send Google custom place names, transaction amounts, balances, account numbers, payment references, SMS contents, notes, or transaction categories.
 
 ## Sharing
 
 - We do not sell your personal or financial data.
 - We do not share SMS contents or SMS-derived transaction data with advertisers.
+- Google Maps Platform receives the map request data described above as a service provider for Spending Map functionality. Totals does not send Google the associated financial transaction details or custom place names.
 - We may use hosting, content delivery, networking, security, or infrastructure providers to deliver the optional online features described above.
 - We may disclose information if required by law, to protect users, or to prevent fraud, abuse, or security issues.
 
@@ -80,8 +82,8 @@ Totals is a personal finance application published by Detached. This Privacy Pol
 
 - Most Totals data, including retained copies of original source SMS messages linked to transactions, is stored locally on your device until you delete the related transaction, clear app data, or uninstall the app.
 - Data Sync settings (destinations and rules) are stored locally in the app database, and any credentials you enter are stored using secure device storage. A local outbox queue records which selected records are pending, sent, or failed. Disabling Data Sync and choosing to wipe its data deletes these settings, credentials, and the queue from your device.
-- Spending Map coordinates are stored locally until you delete the related transaction, use the map's Delete saved locations action, clear app data, or uninstall the app. Turning the feature off stops new captures but does not automatically delete existing coordinates.
-- Exported backup files, including any original source SMS messages they contain, remain wherever you save or share them.
+- Spending Map coordinates and custom place names are stored locally until you delete the related transaction, use the map's Delete saved locations action, clear app data, or uninstall the app. Turning the feature off stops new captures but does not automatically delete existing location data.
+- Exported backup files, including any original source SMS messages, precise transaction location coordinates, and custom place names they contain, remain wherever you save or share them.
 - Telegram backup files and their encrypted index remain in the connected Telegram chat until you delete them there. Disconnecting the feature removes the local bot token, recovery key, and configuration but does not delete files already stored by Telegram.
 - QR scan results are processed locally in the app.
 - Payment verification submissions may be processed by the verification service and retained only for the period reasonably necessary to operate, secure, debug, and protect the service, or as required by law.

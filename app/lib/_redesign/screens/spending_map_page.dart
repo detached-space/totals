@@ -210,6 +210,7 @@ class _SpendingZone {
     required this.center,
     required this.transactionCount,
     required this.transactionReferences,
+    required this.customPlaceName,
   });
 
   final String id;
@@ -217,6 +218,7 @@ class _SpendingZone {
   final LatLng center;
   final int transactionCount;
   final List<String> transactionReferences;
+  final String? customPlaceName;
 }
 
 class _ZoneAccumulator {
@@ -224,12 +226,28 @@ class _ZoneAccumulator {
   double longitudeTotal = 0;
   int count = 0;
   final Set<String> transactionReferences = <String>{};
+  final List<TransactionLocation> locations = <TransactionLocation>[];
 
   void add(TransactionLocation location) {
     latitudeTotal += location.latitude;
     longitudeTotal += location.longitude;
     count += 1;
     transactionReferences.add(location.transactionReference);
+    locations.add(location);
+  }
+
+  String? get customPlaceName {
+    String? selectedName;
+    String? selectedKey;
+    for (final location in locations) {
+      final name = location.placeName;
+      if (name == null) continue;
+      final key = name.toLowerCase();
+      if (selectedKey != null && selectedKey != key) return null;
+      selectedName ??= name;
+      selectedKey ??= key;
+    }
+    return selectedName;
   }
 }
 
@@ -255,6 +273,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   bool _loading = true;
   bool _mapReady = false;
   bool _locatingUser = false;
+  String? _openingZoneId;
   _MapDisplayMode _mapDisplayMode = _MapDisplayMode.roadmap;
   Object? _loadError;
 
@@ -373,14 +392,16 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
         bucket.latitudeTotal / bucket.count,
         bucket.longitudeTotal / bucket.count,
       );
+      final customPlaceName = bucket.customPlaceName;
       return _SpendingZone(
         id: entry.key,
-        name: _approximatePlaceName(center),
+        name: customPlaceName ?? _approximatePlaceName(center),
         center: center,
         transactionCount: bucket.count,
         transactionReferences: List<String>.unmodifiable(
           bucket.transactionReferences,
         ),
+        customPlaceName: customPlaceName,
       );
     }).toList(growable: true);
 
@@ -551,23 +572,58 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
     return BitmapDescriptor.bytes(data, width: 54, height: 54);
   }
 
+  Future<String> _savePlaceName(
+    _SpendingZone zone,
+    String? placeName,
+  ) async {
+    final normalizedName = normalizeTransactionPlaceName(placeName);
+    final references = zone.transactionReferences.toSet();
+    await _repository.setPlaceNameForTransactionReferences(
+      references,
+      normalizedName,
+    );
+    if (!mounted) {
+      return normalizedName ?? _approximatePlaceName(zone.center);
+    }
+
+    setState(() {
+      _locations = _locations.map((location) {
+        if (!references.contains(location.transactionReference)) {
+          return location;
+        }
+        return location.copyWith(
+          placeName: normalizedName,
+          clearPlaceName: normalizedName == null,
+        );
+      }).toList(growable: false);
+    });
+    return normalizedName ?? _approximatePlaceName(zone.center);
+  }
+
   Future<void> _openZone(_SpendingZone zone) async {
-    final subtitle = context.l10nTextRead(
-      '${zone.transactionCount} '
-      '${zone.transactionCount == 1 ? 'transaction' : 'transactions'} • '
-      'approximate area',
-    );
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TodaysTransactionsPage(
-          transactionReferences: Set<String>.unmodifiable(
-            zone.transactionReferences,
+    if (_openingZoneId != null) return;
+    _openingZoneId = zone.id;
+    try {
+      if (!mounted) return;
+      final transactionLabel = context.l10nTextRead(
+        zone.transactionCount == 1 ? 'transaction' : 'transactions',
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => TodaysTransactionsPage(
+            transactionReferences: Set<String>.unmodifiable(
+              zone.transactionReferences,
+            ),
+            title: zone.name,
+            subtitle: '${zone.transactionCount} $transactionLabel',
+            editableTitleValue: zone.customPlaceName,
+            onTitleChanged: (placeName) => _savePlaceName(zone, placeName),
           ),
-          title: zone.name,
-          subtitle: subtitle,
         ),
-      ),
-    );
+      );
+    } finally {
+      _openingZoneId = null;
+    }
   }
 
   void _showLocationMessage(

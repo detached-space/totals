@@ -9,6 +9,7 @@ import 'package:totals/models/budget.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/transaction_category_split.dart';
+import 'package:totals/models/transaction_location.dart';
 import 'package:totals/models/failed_parse.dart';
 import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/reimbursement_allocation.dart';
@@ -18,6 +19,7 @@ import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/budget_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
+import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/repositories/transaction_source_sms_repository.dart';
 import 'package:totals/repositories/failed_parse_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
@@ -189,13 +191,15 @@ class BackupImportSummary {
 }
 
 class DataExportImportService {
-  static const int currentSchemaVersion = 12;
+  static const int currentSchemaVersion = 13;
   static const int minimumSchemaVersion = 1;
 
   final AccountRepository _accountRepo = AccountRepository();
   final BudgetRepository _budgetRepo = BudgetRepository();
   final CategoryRepository _categoryRepo = CategoryRepository();
   final TransactionRepository _transactionRepo = TransactionRepository();
+  TransactionLocationRepository get _transactionLocationRepo =>
+      TransactionLocationRepository();
   final TransactionSourceSmsRepository _transactionSourceSmsRepo =
       TransactionSourceSmsRepository();
   final FailedParseRepository _failedParseRepo = FailedParseRepository();
@@ -313,6 +317,10 @@ class DataExportImportService {
       final scopedTransactionReferences = scopedTransactions
           .map((transaction) => transaction.reference)
           .toSet();
+      final scopedTransactionLocations =
+          await _transactionLocationRepo.getForTransactionReferences(
+        scopedTransactionReferences,
+      );
       await _transactionSmsSourceService.captureAvailableSources(
         scopedTransactions,
       );
@@ -376,6 +384,9 @@ class DataExportImportService {
         'transactions': scopedTransactions
             .map(
                 (transaction) => _portableTransactionData(transaction.toJson()))
+            .toList(),
+        'transactionLocations': scopedTransactionLocations
+            .map((location) => location.toBackupJson())
             .toList(),
         'transactionSourceSms': scopedTransactionSourceSms
             .map((sourceSms) => sourceSms.toJson())
@@ -743,6 +754,23 @@ class DataExportImportService {
                   existingReferences.contains(sourceSms.transactionReference),
             );
         await _transactionSourceSmsRepo.upsertAll(sourceMessages);
+      }
+
+      // Locations are restored independently so importing a backup can fill in
+      // a missing location for a transaction that already exists locally.
+      // Existing local locations win to avoid replacing newer device data.
+      final transactionLocationsRaw = _asMapList(data['transactionLocations']);
+      if (transactionLocationsRaw.isNotEmpty) {
+        final locations = <TransactionLocation>[];
+        for (final row in transactionLocationsRaw) {
+          try {
+            locations.add(TransactionLocation.fromBackupJson(row));
+          } on FormatException {
+            // Skip malformed or legacy rows without blocking the rest of the
+            // backup from being restored.
+          }
+        }
+        await _transactionLocationRepo.restoreLocations(locations);
       }
 
       // Restore reimbursement links only after both sides of each relationship
@@ -1127,6 +1155,11 @@ class DataExportImportService {
       'transactions': _readList(raw, 'transactions')
           .map(_portableTransactionEntry)
           .toList(growable: false),
+      'transactionLocations': _readList(
+        raw,
+        'transactionLocations',
+        aliases: const ['transaction_locations'],
+      ),
       'transactionSourceSms': _readList(
         raw,
         'transactionSourceSms',
@@ -1300,6 +1333,13 @@ class DataExportImportService {
         .where((row) => options.includesBank(_asInt(row['bankId'])))
         .toList(growable: false);
     filtered['transactions'] = transactions;
+    filtered['transactionLocations'] = _asMapList(data['transactionLocations'])
+        .where(
+          (row) => transactionReferences.contains(
+            row['transactionReference']?.toString().trim(),
+          ),
+        )
+        .toList(growable: false);
     filtered['transactionSourceSms'] = _asMapList(data['transactionSourceSms'])
         .where(
           (row) => transactionReferences.contains(
@@ -1363,6 +1403,13 @@ class DataExportImportService {
     final explicit =
         _asInt(data['schemaVersion']) ?? _asInt(data['schema_version']);
     if (explicit != null) return explicit;
+
+    if (_hasAnySection(data, const [
+      'transactionLocations',
+      'transaction_locations',
+    ])) {
+      return 13;
+    }
 
     if (_containsTransactionCategorySplits(data)) {
       return 12;

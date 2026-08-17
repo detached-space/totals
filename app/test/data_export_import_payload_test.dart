@@ -304,7 +304,7 @@ void main() {
       }),
     );
 
-    expect(DataExportImportService.currentSchemaVersion, 12);
+    expect(DataExportImportService.currentSchemaVersion, 13);
     expect(normalized['schemaVersion'], 9);
 
     final account = Map<String, dynamic>.from(
@@ -339,7 +339,7 @@ void main() {
       }),
     );
 
-    expect(normalized['schemaVersion'], 12);
+    expect(normalized['schemaVersion'], 13);
     expect(
       ((normalized['transactions'] as List).single
           as Map)['ownerAccountNumber'],
@@ -393,6 +393,50 @@ void main() {
         (normalized['transactionSourceSms'] as List<dynamic>).single as Map;
     expect(sourceSms['transactionReference'], 'source-row');
     expect(sourceSms['body'], 'Original SMS body');
+  });
+
+  test('transaction location aliases normalize and follow bank filters', () {
+    final prepared = DataExportImportService.prepareImportPayload(
+      jsonEncode({
+        'transactions': [
+          {
+            'amount': 10,
+            'reference': 'included-location',
+            'bankId': 1,
+          },
+          {
+            'amount': 20,
+            'reference': 'excluded-location',
+            'bankId': 4,
+          },
+        ],
+        'transaction_locations': [
+          {
+            'transactionReference': 'included-location',
+            'latitude': 8.9806,
+            'longitude': 38.7578,
+            'accuracy': 12.5,
+            'capturedAt': '2026-08-17T10:00:00.000Z',
+          },
+          {
+            'transactionReference': 'excluded-location',
+            'latitude': 8.5644,
+            'longitude': 39.2872,
+            'capturedAt': '2026-08-17T11:00:00.000Z',
+          },
+        ],
+      }),
+      options: const DataImportOptions(bankIds: {1}),
+    );
+
+    expect(prepared['schemaVersion'], 13);
+    expect(prepared['transactions'], hasLength(1));
+    final locations = prepared['transactionLocations'] as List<dynamic>;
+    expect(locations, hasLength(1));
+    expect(
+      (locations.single as Map)['transactionReference'],
+      'included-location',
+    );
   });
 
   test(

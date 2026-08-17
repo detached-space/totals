@@ -10,6 +10,7 @@ import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/models/transaction_location.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/app_date_format.dart';
@@ -25,6 +26,8 @@ class TodaysTransactionsPage extends StatefulWidget {
     this.transactionReferences,
     this.title,
     this.subtitle,
+    this.editableTitleValue,
+    this.onTitleChanged,
   });
 
   /// When provided, the page shows only these transactions instead of today's
@@ -33,6 +36,8 @@ class TodaysTransactionsPage extends StatefulWidget {
   final Set<String>? transactionReferences;
   final String? title;
   final String? subtitle;
+  final String? editableTitleValue;
+  final Future<String> Function(String? value)? onTitleChanged;
 
   @override
   State<TodaysTransactionsPage> createState() => _TodaysTransactionsPageState();
@@ -41,8 +46,67 @@ class TodaysTransactionsPage extends StatefulWidget {
 class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   final Set<String> _selectedRefs = {};
   _TodayTransactionsFilter _filter = const _TodayTransactionsFilter();
+  String? _pageTitle;
+  String? _editableTitleValue;
+  bool _updatingTitle = false;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageTitle = widget.title;
+    _editableTitleValue = widget.editableTitleValue;
+  }
+
+  @override
+  void didUpdateWidget(covariant TodaysTransactionsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.title != widget.title) _pageTitle = widget.title;
+    if (oldWidget.editableTitleValue != widget.editableTitleValue) {
+      _editableTitleValue = widget.editableTitleValue;
+    }
+  }
+
+  Future<void> _editPageTitle() async {
+    final onTitleChanged = widget.onTitleChanged;
+    if (onTitleChanged == null || _updatingTitle) return;
+
+    final result = await showModalBottomSheet<_PlaceNameEditResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => _PlaceNameEditorSheet(
+        initialValue: _editableTitleValue,
+      ),
+    );
+    if (!mounted || result == null) return;
+
+    setState(() => _updatingTitle = true);
+    try {
+      final updatedTitle = await onTitleChanged(result.value);
+      if (!mounted) return;
+      setState(() {
+        _pageTitle = updatedTitle;
+        _editableTitleValue = result.value;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update place name')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingTitle = false);
+    }
+  }
 
   void _toggle(Transaction tx) {
     setState(() {
@@ -271,8 +335,8 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
         String pageTitle;
         if (_isSelecting) {
           pageTitle = '${_selectedRefs.length} selected';
-        } else if (widget.title != null) {
-          pageTitle = widget.title!;
+        } else if (_pageTitle != null) {
+          pageTitle = _pageTitle!;
         } else if (isEC) {
           pageTitle =
               AppDateFormat.monthDayYear(DateTime.now(), context: context);
@@ -294,32 +358,63 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(AppIcons.arrow_back_rounded),
                   ),
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  pageTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: _isSelecting
-                        ? AppColors.primaryDark
-                        : AppColors.textPrimary(context),
+            title: Semantics(
+              button: !_isSelecting && widget.onTitleChanged != null,
+              label: !_isSelecting && widget.onTitleChanged != null
+                  ? context.l10nText('Edit place name')
+                  : null,
+              child: InkWell(
+                onTap: !_isSelecting && widget.onTitleChanged != null
+                    ? _editPageTitle
+                    : null,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              pageTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: _isSelecting
+                                    ? AppColors.primaryDark
+                                    : AppColors.textPrimary(context),
+                              ),
+                            ),
+                            if (!_isSelecting && widget.subtitle != null)
+                              Text(
+                                widget.subtitle!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: AppColors.textSecondary(context),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (!_isSelecting && widget.onTitleChanged != null) ...[
+                        const SizedBox(width: 6),
+                        Icon(
+                          AppIcons.editOutlined,
+                          size: 15,
+                          color: AppColors.textSecondary(context),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                if (!_isSelecting && widget.subtitle != null)
-                  Text(
-                    widget.subtitle!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: AppColors.textSecondary(context),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-              ],
+              ),
             ),
             actions: [
               if (!_isSelecting)
@@ -436,6 +531,124 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
       },
     );
   }
+}
+
+class _PlaceNameEditorSheet extends StatefulWidget {
+  const _PlaceNameEditorSheet({required this.initialValue});
+
+  final String? initialValue;
+
+  @override
+  State<_PlaceNameEditorSheet> createState() => _PlaceNameEditorSheetState();
+}
+
+class _PlaceNameEditorSheetState extends State<_PlaceNameEditorSheet> {
+  late final TextEditingController _controller;
+
+  bool get _hasCustomName => widget.initialValue != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue ?? '');
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _hasCustomName
+                  ? context.l10nText('Edit place name')
+                  : context.l10nText('Name this place'),
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.textPrimary(context),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              context.l10nText(
+                'Use a private name you will recognize, like Home, Office, or a favorite café.',
+              ),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary(context),
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLength: transactionPlaceNameMaxLength,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: context.l10nText('Place name'),
+                hintText: context.l10nText('Home'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (_hasCustomName)
+                  TextButton(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      const _PlaceNameEditResult(null),
+                    ),
+                    child: Text(context.l10nText('Remove name')),
+                  ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(context.l10nText('Cancel')),
+                ),
+                const SizedBox(width: 8),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _controller,
+                  builder: (context, value, _) {
+                    final name = value.text.trim();
+                    return FilledButton(
+                      onPressed: name.isEmpty
+                          ? null
+                          : () => Navigator.pop(
+                                context,
+                                _PlaceNameEditResult(name),
+                              ),
+                      child: Text(context.l10nText('Save')),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaceNameEditResult {
+  const _PlaceNameEditResult(this.value);
+
+  final String? value;
 }
 
 class _TodayTransactionsFilter {

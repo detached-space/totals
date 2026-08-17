@@ -58,11 +58,14 @@ class _RedesignAdvancedSettingsPageState
                 'Totals will capture your precise location when a new debit '
                 'or credit transaction is recorded. With background '
                 'permission, this also works for bank SMS transactions while '
-                'the app is not open. Coordinates stay in the local app '
-                'database and the map visualization is built on-device. '
-                'Google Maps supplies the base map and handles map usage '
-                'under its own privacy terms; Totals does not upload your '
-                'transaction amounts.',
+                'the app is not open. Coordinates are stored in the local app '
+                'database and are included in manual exports and encrypted '
+                'full backups. Custom place names you create are stored with '
+                'those locations and included in the same exports and '
+                'backups. Google Maps supplies the base map and receives the '
+                'visible map area and normal map interactions under Google\'s '
+                'privacy terms. Totals does not send your transaction amounts, '
+                'account details, or custom place names to Google.',
               ),
             ),
             actions: [
