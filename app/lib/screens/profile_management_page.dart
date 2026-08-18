@@ -436,7 +436,10 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                           color: theme.colorScheme.onSurface,
                         ),
                         const SizedBox(width: 12),
-                        Text(context.l10nText('Rename')),
+                        // itemBuilder runs from the tap handler, not a build,
+                        // so this must read rather than watch — watching here
+                        // throws and the menu silently never opens.
+                        Text(context.l10nTextRead('Rename')),
                       ],
                     ),
                   ),
@@ -452,7 +455,7 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                           ),
                           const SizedBox(width: 12),
                           Text(
-                            context.l10nText('Delete'),
+                            context.l10nTextRead('Delete'),
                             style: TextStyle(
                               color: theme.colorScheme.error,
                             ),
@@ -568,7 +571,8 @@ class _CreateProfileDialogState extends State<_CreateProfileDialog> {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return context.l10nText('Please enter a profile name');
+                    // validator fires outside build; watch would throw here.
+                    return context.l10nTextRead('Please enter a profile name');
                   }
                   return null;
                 },
@@ -709,7 +713,8 @@ class _RenameProfileDialogState extends State<_RenameProfileDialog> {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return context.l10nText('Please enter a profile name');
+                    // validator fires outside build; watch would throw here.
+                    return context.l10nTextRead('Please enter a profile name');
                   }
                   return null;
                 },

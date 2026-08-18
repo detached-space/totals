@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
@@ -22,6 +23,7 @@ import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/user_account_repository.dart';
 import 'package:totals/services/auto_categorization_service.dart';
 import 'package:totals/services/sms_config_service.dart';
+import 'package:totals/services/telegram_backup/telegram_restore_diagnostics.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 
@@ -68,11 +70,16 @@ class DataExportImportService {
           await _smsConfigService.getPatterns(allowRemoteFetch: false);
       final loanDebtEntries = await _getLoanDebtEntriesFromDb();
       final loanDebtRepayments = await _getLoanDebtRepaymentsFromDb();
+      // Accounts and transactions carry a profileId. Without the profile rows
+      // themselves the restore has no way to tell which profile an id meant,
+      // and every row lands under a profile that doesn't exist on the target.
+      final profiles = await _profileRepo.getProfiles();
 
       final exportData = {
         'schemaVersion': currentSchemaVersion,
         'version': '1.0',
         'exportDate': DateTime.now().toIso8601String(),
+        'profiles': profiles.map((p) => p.toJson()).toList(),
         'accounts': accounts.map((a) => a.toJson()).toList(),
         'banks': banks.map((b) => b.toJson()).toList(),
         'budgets': budgets.map((b) => b.toJson()).toList(),
@@ -99,8 +106,29 @@ class DataExportImportService {
 
   /// Import all data from JSON (appends to existing data)
   Future<void> importAllData(String jsonData) async {
+    final diag = TelegramRestoreDiagnostics.instance;
+    var stage = 'parse';
+    void mark(String next) {
+      stage = next;
+      diag.log('import', next);
+    }
+
     try {
       final data = normalizeImportPayload(jsonData);
+      diag.log(
+        'import parsed',
+        'schema=v${data['schemaVersion']} '
+            'accounts=${_asMapList(data['accounts']).length} '
+            'tx=${_asMapList(data['transactions']).length} '
+            'cats=${_asMapList(data['categories']).length} '
+            'banks=${_asMapList(data['banks']).length} '
+            'budgets=${_asMapList(data['budgets']).length} '
+            'userAccounts=${_asMapList(data['userAccounts']).length} '
+            'loanEntries=${_asMapList(data['loanDebtEntries']).length} '
+            'loanRepay=${_asMapList(data['loanDebtRepayments']).length} '
+            'smsPatterns=${_asMapList(data['smsPatterns']).length} '
+            'profiles=${_asMapList(data['profiles']).length}',
+      );
       final db = await DatabaseHelper.instance.database;
 
       final categoriesRaw = _asMapList(data['categories']);
@@ -118,6 +146,7 @@ class DataExportImportService {
       final Map<int, int> categoryIdMap = {};
 
       // Import banks (replace - configuration)
+      mark('banks');
       final banksRaw = _asMapList(data['banks']);
       if (banksRaw.isNotEmpty) {
         final banksList =
@@ -151,6 +180,7 @@ class DataExportImportService {
       }
 
       // Import categories (append, skip duplicates)
+      mark('categories');
       if (categoriesRaw.isNotEmpty) {
         final categoriesList = categoriesRaw.map(Category.fromJson).toList();
 
@@ -249,49 +279,149 @@ class DataExportImportService {
         }
       }
 
-      // iOS-migration profiles: create the exported profiles and map their
-      // index -> new profileId so accounts and transactions land in the right
-      // profile. Only present in the iOS migration payload; normal backups have
-      // no `profiles` section and keep the prior active-profile behavior.
+      // Profiles. Accounts and transactions reference a profile, and that
+      // reference is meaningless on the target device — profile 3 here is not
+      // profile 3 there. Everything below builds source -> local id maps so
+      // rows land in a profile that actually exists; without them the import
+      // succeeds, the rows are written, and every profile-filtered read hides
+      // them (data restored but the app looks empty).
+      //
+      // Two payload shapes reach this point:
+      //   • iOS migration  — `profiles[].index`, rows carry `profileNumber`
+      //   • normal backup  — `profiles[].id`,    rows carry `profileId`
+      // Older backups predate the `profiles` section entirely; for those the
+      // referenced ids are recovered from the rows themselves.
+      mark('profiles');
       final profilesRaw = _asMapList(data['profiles']);
-      Map<int, int>? profileIndexToId;
+      final accountsRawForProfiles = _asMapList(data['accounts']);
+      final transactionsRawForProfiles = _asMapList(data['transactions']);
+
+      final profileIndexToId = <int, int>{}; // iOS migration index -> local id
+      final profileIdToLocalId = <int, int>{}; // backup profileId -> local id
+
+      final now = DateTime.now();
+      // Idempotent: re-importing must reuse an existing profile with the same
+      // name (case-insensitive), not stack up duplicate "Yew"/"Synergy" rows.
+      final existingProfiles = await _profileRepo.getProfiles();
+      final existingProfileIdByName = <String, int>{
+        for (final pr in existingProfiles)
+          if (pr.id != null) pr.name.trim().toLowerCase(): pr.id!,
+      };
+      // Profile ids that existed before this import. Snapshot only — profiles
+      // created below get fresh autoincrement ids that can collide with source
+      // ids still waiting to be mapped, and treating one of those as
+      // "already present" silently merges two profiles into one.
+      final preExistingProfileIds = <int>{
+        for (final pr in existingProfiles)
+          if (pr.id != null) pr.id!,
+      };
+
+      Future<int> localProfileFor(String name) async {
+        final key = name.trim().toLowerCase();
+        final existing = existingProfileIdByName[key];
+        if (existing != null) return existing;
+        final created = await _profileRepo
+            .saveProfile(Profile(name: name.trim(), createdAt: now));
+        existingProfileIdByName[key] = created;
+        return created;
+      }
+
       if (profilesRaw.isNotEmpty) {
-        profileIndexToId = <int, int>{};
-        final now = DateTime.now();
-        // Idempotent: re-importing must reuse an existing profile with the same
-        // name (case-insensitive), not stack up duplicate "Yew"/"Synergy" rows.
-        final existing = await _profileRepo.getProfiles();
-        final existingByName = <String, int>{
-          for (final pr in existing)
-            if (pr.id != null) pr.name.trim().toLowerCase(): pr.id!,
-        };
         final sorted = [...profilesRaw]..sort((a, b) =>
             ((a['order'] as num?)?.toInt() ?? 0)
                 .compareTo((b['order'] as num?)?.toInt() ?? 0));
         for (final p in sorted) {
+          final localId =
+              await localProfileFor((p['name'] ?? 'Profile').toString());
           final index = (p['index'] as num?)?.toInt();
-          if (index == null) continue;
-          final name = (p['name'] ?? 'Profile').toString();
-          final key = name.trim().toLowerCase();
-          final id = existingByName[key] ??
-              await _profileRepo.saveProfile(Profile(name: name, createdAt: now));
-          existingByName[key] = id;
-          profileIndexToId[index] = id;
-        }
-        // Show the first imported profile so the user immediately sees data.
-        if (profileIndexToId.isNotEmpty) {
-          await _profileRepo.setActiveProfile(profileIndexToId.values.first);
+          if (index != null) profileIndexToId[index] = localId;
+          final sourceId = (p['id'] as num?)?.toInt();
+          if (sourceId != null) profileIdToLocalId[sourceId] = localId;
         }
       }
 
+      // Profile ids referenced by the rows, counted so we can surface the
+      // busiest one afterwards. Covers backups with no `profiles` section.
+      final profileRowCounts = <int, int>{};
+      for (final raw in transactionsRawForProfiles) {
+        final pid = (raw['profileId'] as num?)?.toInt();
+        if (pid != null) profileRowCounts[pid] = (profileRowCounts[pid] ?? 0) + 1;
+      }
+      final referencedProfileIds = <int>{
+        ...profileRowCounts.keys,
+        for (final raw in accountsRawForProfiles)
+          if ((raw['profileId'] as num?) != null)
+            (raw['profileId'] as num).toInt(),
+      };
+      // Anything still unmapped came from a backup with no `profiles` section,
+      // so all we have is a bare id that means nothing here.
+      final unmappedSourceIds = referencedProfileIds
+          .where((id) => !profileIdToLocalId.containsKey(id))
+          .toList()
+        ..sort();
+      if (unmappedSourceIds.length == 1) {
+        // One profile in the backup: put it where the user is already looking
+        // instead of inventing a second profile beside the one they use.
+        final activeProfileId = await _profileRepo.getActiveProfileId();
+        profileIdToLocalId[unmappedSourceIds.first] = activeProfileId ??
+            (preExistingProfileIds.isNotEmpty
+                ? preExistingProfileIds.first
+                : await localProfileFor('Personal'));
+      } else {
+        // Several profiles and nothing to name them by. Each gets its own
+        // placeholder: a rename is recoverable, a merge isn't. Never assume
+        // source id N belongs in local id N — that match is a coincidence,
+        // and acting on it drops one profile's data into another's.
+        for (var i = 0; i < unmappedSourceIds.length; i++) {
+          profileIdToLocalId[unmappedSourceIds[i]] =
+              await localProfileFor('Restored profile ${i + 1}');
+        }
+      }
+
+      // Land the user on a profile that actually received rows, otherwise a
+      // restore looks like it did nothing.
+      final mappedProfileTargets = <int>{
+        ...profileIndexToId.values,
+        ...profileIdToLocalId.values,
+      };
+      if (mappedProfileTargets.isNotEmpty) {
+        final activeProfileId = await _profileRepo.getActiveProfileId();
+        if (activeProfileId == null ||
+            !mappedProfileTargets.contains(activeProfileId)) {
+          int? busiest;
+          var busiestCount = -1;
+          profileRowCounts.forEach((sourceId, count) {
+            final localId = profileIdToLocalId[sourceId];
+            if (localId != null && count > busiestCount) {
+              busiest = localId;
+              busiestCount = count;
+            }
+          });
+          busiest ??= mappedProfileTargets.first;
+          await _profileRepo.setActiveProfile(busiest!);
+        }
+      }
+
+      diag.log(
+        'import profiles',
+        'declared=${profilesRaw.length} referenced=${referencedProfileIds.length} '
+            'map=$profileIdToLocalId indexMap=$profileIndexToId',
+      );
+
       int? mappedProfileId(Map<String, dynamic> raw) {
-        if (profileIndexToId == null) return null;
         final pn = (raw['profileNumber'] as num?)?.toInt();
-        return pn == null ? null : profileIndexToId[pn];
+        if (pn != null) {
+          final mapped = profileIndexToId[pn];
+          if (mapped != null) return mapped;
+        }
+        final pid = (raw['profileId'] as num?)?.toInt();
+        if (pid != null) return profileIdToLocalId[pid];
+        return null;
       }
 
       // Import accounts (append, skip duplicates)
       // Use repository to ensure they're associated with active profile
+      mark('accounts');
       final accountsRaw = _asMapList(data['accounts']);
       if (accountsRaw.isNotEmpty) {
         final existingAccountKeys = await _getExistingAccountKeys(db);
@@ -328,6 +458,7 @@ class DataExportImportService {
       }
 
       // Import saved user accounts (append, skip duplicates based on account+bank)
+      mark('userAccounts');
       final userAccountsRaw = _asMapList(data['userAccounts']);
       if (userAccountsRaw.isNotEmpty) {
         final userAccountsList =
@@ -350,6 +481,7 @@ class DataExportImportService {
 
       // Import transactions (append, skip duplicates based on reference)
       // Use repository to ensure they're associated with active profile
+      mark('transactions');
       final transactionsRaw = _asMapList(data['transactions']);
       if (transactionsRaw.isNotEmpty) {
         final existingReferences = await _getExistingTransactionReferences(db);
@@ -435,6 +567,7 @@ class DataExportImportService {
       }
 
       // Import budgets (append, skip duplicates)
+      mark('budgets');
       final budgetsRaw = _asMapList(data['budgets']);
       if (budgetsRaw.isNotEmpty) {
         String budgetKey(Budget budget) {
@@ -499,6 +632,7 @@ class DataExportImportService {
 
       // Import loan/debt state after transactions/categories exist. Row IDs are
       // intentionally ignored; transactionReference is the stable identity.
+      mark('loanDebtEntries');
       final loanDebtRaw = _asMapList(data['loanDebtEntries']);
       final loanDebtEntriesByReference = <String, LoanDebtEntry>{};
       if (loanDebtRaw.isNotEmpty) {
@@ -521,6 +655,7 @@ class DataExportImportService {
         await batch.commit(noResult: true);
       }
 
+      mark('loanDebtRepayments');
       final loanDebtRepaymentRaw = _asMapList(data['loanDebtRepayments']);
       if (loanDebtRepaymentRaw.isNotEmpty) {
         final repaymentAllocationsByReference =
@@ -569,6 +704,7 @@ class DataExportImportService {
       }
 
       // Import explicit auto-category rules.
+      mark('autoCategoryRules');
       final autoCategoryRulesRaw = _asMapList(data['autoCategoryRules']);
       if (autoCategoryRulesRaw.isNotEmpty) {
         final rules = autoCategoryRulesRaw
@@ -687,6 +823,7 @@ class DataExportImportService {
       }
 
       // Import failed parses (append)
+      mark('failedParses');
       final failedParsesRaw = _asMapList(data['failedParses']);
       if (failedParsesRaw.isNotEmpty) {
         final batch = db.batch();
@@ -703,13 +840,56 @@ class DataExportImportService {
       }
 
       // Import SMS patterns (replace - these are configuration)
+      mark('smsPatterns');
       final smsPatternsRaw = _asMapList(data['smsPatterns']);
       if (smsPatternsRaw.isNotEmpty) {
         final patternsList = smsPatternsRaw.map(SmsPattern.fromJson).toList();
         await _smsConfigService.savePatterns(patternsList);
       }
-    } catch (e) {
-      throw Exception('Failed to import data: $e');
+
+      // Post-import profile audit. Import inserts rows fine, but the UI reads
+      // are profile-filtered (getTransactions/getAccounts WHERE profileId =
+      // activeProfileId). A normal backup carries no `profiles` section, so
+      // rows keep the SOURCE device's profileId — if that doesn't match the
+      // restore device's active profile, 2600+ rows import yet render empty.
+      // This breakdown makes the mismatch (and whether it spans one or many
+      // profiles) obvious in the shared trace.
+      try {
+        final activeProfileId = await _profileRepo.getActiveProfileId();
+        final profileRows =
+            await db.rawQuery('SELECT id, name FROM profiles ORDER BY id');
+        final txByProfile = await db.rawQuery(
+          'SELECT profileId, COUNT(*) c FROM transactions '
+          'GROUP BY profileId ORDER BY profileId',
+        );
+        final acctByProfile = await db.rawQuery(
+          'SELECT profileId, COUNT(*) c FROM accounts '
+          'GROUP BY profileId ORDER BY profileId',
+        );
+        diag.log('audit activeProfileId', activeProfileId);
+        diag.log(
+          'audit profiles',
+          profileRows.map((r) => '${r['id']}:${r['name']}').join(', '),
+        );
+        diag.log(
+          'audit tx byProfileId',
+          txByProfile.map((r) => '${r['profileId']}=${r['c']}').join(', '),
+        );
+        diag.log(
+          'audit acct byProfileId',
+          acctByProfile.map((r) => '${r['profileId']}=${r['c']}').join(', '),
+        );
+      } catch (auditError) {
+        diag.log('audit failed', auditError);
+      }
+
+      diag.log('import done', 'all sections OK');
+    } catch (e, stackTrace) {
+      diag.log('import FAILED at [$stage]', e);
+      if (kDebugMode) {
+        debugPrint('debug: TGRESTORE import stack\n$stackTrace');
+      }
+      throw Exception('Failed to import data at [$stage]: $e');
     }
   }
 
