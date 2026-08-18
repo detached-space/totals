@@ -118,6 +118,7 @@ flutter:
     - assets/banks.json
     - assets/sms_patterns.json
     - assets/fallback_sms_patterns.json
+    - assets/maps/ethiopia_city_places.json
     - assets/webapp/
     - assets/webapp/assets/
     - assets/icon/totals_icon.png

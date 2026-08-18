@@ -62,10 +62,16 @@ class _RedesignAdvancedSettingsPageState
                 'database and are included in manual exports and encrypted '
                 'full backups. Custom place names you create are stored with '
                 'those locations and included in the same exports and '
-                'backups. Google Maps supplies the base map and receives the '
+                'backups. Approximate Addis Ababa subcity and supported '
+                'Ethiopian city names are matched on-device from bundled '
+                'offline data. Google Maps supplies the '
+                'base map and receives the '
                 'visible map area and normal map interactions under Google\'s '
                 'privacy terms. Totals does not send your transaction amounts, '
-                'account details, or custom place names to Google.',
+                'balances, account details, payment references, categories, '
+                'notes, SMS contents, or any other financial data to Google '
+                'or any other service to make Spending Map work. Custom place '
+                'names also stay local.',
               ),
             ),
             actions: [

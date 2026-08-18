@@ -67,6 +67,7 @@ class TransactionLocationRepository {
         tl.capturedAt,
         tl.placeName,
         t.amount,
+        t.type AS transactionType,
         t.time AS transactionTime
       FROM transaction_locations tl
       INNER JOIN transactions t

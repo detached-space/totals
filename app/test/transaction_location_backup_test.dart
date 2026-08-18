@@ -93,6 +93,8 @@ void main() {
     expect(restored.latitude, 8.980603);
     expect(restored.longitude, 38.757761);
     expect(restored.accuracy, 7.25);
+    expect(restored.amount, 250);
+    expect(restored.transactionType, 'CREDIT');
     expect(restored.placeName, 'Favorite café');
     expect(
       restored.capturedAt.toUtc(),

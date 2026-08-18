@@ -22,6 +22,7 @@ class TransactionLocation {
     this.profileId,
     this.accuracy,
     this.amount,
+    this.transactionType,
     this.transactionTime,
     this.placeName,
   });
@@ -33,6 +34,7 @@ class TransactionLocation {
   final double? accuracy;
   final DateTime capturedAt;
   final double? amount;
+  final String? transactionType;
   final DateTime? transactionTime;
   final String? placeName;
 
@@ -46,6 +48,7 @@ class TransactionLocation {
       accuracy: (map['accuracy'] as num?)?.toDouble(),
       capturedAt: DateTime.parse(map['capturedAt'] as String),
       amount: (map['amount'] as num?)?.toDouble(),
+      transactionType: map['transactionType']?.toString(),
       transactionTime:
           transactionTime == null ? null : DateTime.tryParse(transactionTime),
       placeName: normalizeTransactionPlaceName(map['placeName'] as String?),
@@ -115,6 +118,7 @@ class TransactionLocation {
       accuracy: accuracy,
       capturedAt: capturedAt,
       amount: amount,
+      transactionType: transactionType,
       transactionTime: transactionTime,
       placeName: clearPlaceName ? null : placeName ?? this.placeName,
     );

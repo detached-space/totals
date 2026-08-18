@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/foundation.dart' show debugPrint, setEquals;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -20,8 +20,11 @@ import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction_location.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/transaction_location_repository.dart';
+import 'package:totals/services/offline_place_gazetteer.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/category_filter_utils.dart';
+import 'package:totals/utils/spending_map_metrics.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const _ethiopiaCenter = LatLng(9.145, 40.4897);
 final _ethiopiaMapBounds = LatLngBounds(
@@ -53,10 +56,17 @@ const _mapDisplayModePreferenceKey = 'spending_map_display_mode';
 
 enum _MapDisplayMode { roadmap, satellite }
 
-enum _MapOptionsAction { roadmap, satellite, deleteLocations }
+enum _MapOptionsAction {
+  roadmap,
+  satellite,
+  openOvertureAttribution,
+  openAddisCadastreSource,
+  deleteLocations,
+}
 
 class _SpendingMapFilters {
   const _SpendingMapFilters({
+    this.puckMetric = SpendingMapPuckMetric.transactionCount,
     this.type,
     this.bankId,
     this.accountKey,
@@ -67,6 +77,7 @@ class _SpendingMapFilters {
     this.endDate,
   });
 
+  final SpendingMapPuckMetric puckMetric;
   final String? type;
   final int? bankId;
   final String? accountKey;
@@ -122,6 +133,7 @@ class _SpendingMapFilters {
   @override
   bool operator ==(Object other) =>
       other is _SpendingMapFilters &&
+      other.puckMetric == puckMetric &&
       other.type == type &&
       other.bankId == bankId &&
       other.accountKey == accountKey &&
@@ -133,6 +145,7 @@ class _SpendingMapFilters {
 
   @override
   int get hashCode => Object.hash(
+        puckMetric,
         type,
         bankId,
         accountKey,
@@ -155,60 +168,13 @@ int? _mapOtherAccountBankId(String key) {
   return int.tryParse(key.substring('other:'.length));
 }
 
-class _KnownPlace {
-  const _KnownPlace(this.name, this.position, {required this.detailRadiusKm});
-
-  final String name;
-  final LatLng position;
-  final double detailRadiusKm;
-}
-
-const _knownEthiopianPlaces = <_KnownPlace>[
-  // Addis Ababa landmarks and commonly used neighborhood anchors.
-  _KnownPlace('Bole', LatLng(8.997, 38.787), detailRadiusKm: 4.5),
-  _KnownPlace('Meskel Square', LatLng(9.01, 38.763), detailRadiusKm: 3),
-  _KnownPlace('Megenagna', LatLng(9.02, 38.802), detailRadiusKm: 3.5),
-  _KnownPlace('Piazza', LatLng(9.035, 38.752), detailRadiusKm: 3),
-  _KnownPlace('Merkato', LatLng(9.03, 38.735), detailRadiusKm: 3.5),
-  _KnownPlace('Kazanchis', LatLng(9.019, 38.77), detailRadiusKm: 3),
-  _KnownPlace('Mexico Square', LatLng(9.01, 38.746), detailRadiusKm: 3),
-  _KnownPlace('Sar Bet', LatLng(8.986, 38.735), detailRadiusKm: 3.5),
-  _KnownPlace('CMC', LatLng(9.033, 38.842), detailRadiusKm: 4),
-  _KnownPlace('Ayat', LatLng(9.035, 38.88), detailRadiusKm: 4.5),
-  _KnownPlace('Entoto', LatLng(9.087, 38.76), detailRadiusKm: 5),
-  _KnownPlace('Addis Ababa', LatLng(9.03, 38.74), detailRadiusKm: 28),
-
-  // Major cities and well-known destinations across Ethiopia.
-  _KnownPlace('Adama', LatLng(8.54, 39.27), detailRadiusKm: 25),
-  _KnownPlace('Bahir Dar', LatLng(11.574, 37.361), detailRadiusKm: 24),
-  _KnownPlace('Bishoftu', LatLng(8.75, 38.99), detailRadiusKm: 18),
-  _KnownPlace('Dire Dawa', LatLng(9.6, 41.85), detailRadiusKm: 25),
-  _KnownPlace('Hawassa', LatLng(7.05, 38.47), detailRadiusKm: 24),
-  _KnownPlace('Gondar', LatLng(12.603, 37.452), detailRadiusKm: 24),
-  _KnownPlace('Mekelle', LatLng(13.496, 39.476), detailRadiusKm: 25),
-  _KnownPlace('Jimma', LatLng(7.67, 36.83), detailRadiusKm: 22),
-  _KnownPlace('Dessie', LatLng(11.13, 39.63), detailRadiusKm: 20),
-  _KnownPlace('Harar', LatLng(9.31, 42.12), detailRadiusKm: 18),
-  _KnownPlace('Jigjiga', LatLng(9.35, 42.8), detailRadiusKm: 24),
-  _KnownPlace('Arba Minch', LatLng(6.04, 37.55), detailRadiusKm: 20),
-  _KnownPlace('Shashamane', LatLng(7.2, 38.59), detailRadiusKm: 18),
-  _KnownPlace('Debre Birhan', LatLng(9.68, 39.53), detailRadiusKm: 18),
-  _KnownPlace('Kombolcha', LatLng(11.08, 39.74), detailRadiusKm: 18),
-  _KnownPlace('Nekemte', LatLng(9.09, 36.55), detailRadiusKm: 20),
-  _KnownPlace('Asella', LatLng(7.95, 39.13), detailRadiusKm: 18),
-  _KnownPlace('Axum', LatLng(14.12, 38.72), detailRadiusKm: 18),
-  _KnownPlace('Lalibela', LatLng(12.03, 39.04), detailRadiusKm: 18),
-  _KnownPlace('Semera', LatLng(11.79, 41), detailRadiusKm: 24),
-  _KnownPlace('Gambela', LatLng(8.25, 34.59), detailRadiusKm: 22),
-  _KnownPlace('Assosa', LatLng(10.07, 34.53), detailRadiusKm: 20),
-];
-
 class _SpendingZone {
   const _SpendingZone({
     required this.id,
     required this.name,
     required this.center,
     required this.transactionCount,
+    required this.netAmount,
     required this.transactionReferences,
     required this.customPlaceName,
   });
@@ -217,6 +183,7 @@ class _SpendingZone {
   final String name;
   final LatLng center;
   final int transactionCount;
+  final double netAmount;
   final List<String> transactionReferences;
   final String? customPlaceName;
 }
@@ -224,6 +191,7 @@ class _SpendingZone {
 class _ZoneAccumulator {
   double latitudeTotal = 0;
   double longitudeTotal = 0;
+  double netAmount = 0;
   int count = 0;
   final Set<String> transactionReferences = <String>{};
   final List<TransactionLocation> locations = <TransactionLocation>[];
@@ -231,6 +199,10 @@ class _ZoneAccumulator {
   void add(TransactionLocation location) {
     latitudeTotal += location.latitude;
     longitudeTotal += location.longitude;
+    netAmount += spendingMapNetContribution(
+      transactionType: location.transactionType,
+      amount: location.amount,
+    );
     count += 1;
     transactionReferences.add(location.transactionReference);
     locations.add(location);
@@ -263,6 +235,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
       TransactionLocationRepository();
 
   TransactionProvider? _transactionProvider;
+  OfflinePlaceGazetteer? _offlineGazetteer;
   List<TransactionLocation> _locations = const [];
   _SpendingMapFilters _filters = const _SpendingMapFilters();
   Map<String, BitmapDescriptor> _puckIcons = const {};
@@ -274,6 +247,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   bool _mapReady = false;
   bool _locatingUser = false;
   String? _openingZoneId;
+  String _languageCode = 'en';
   _MapDisplayMode _mapDisplayMode = _MapDisplayMode.roadmap;
   Object? _loadError;
 
@@ -337,6 +311,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _languageCode = Localizations.localeOf(context).languageCode;
     _transactionProvider =
         Provider.of<TransactionProvider>(context, listen: false);
   }
@@ -357,9 +332,18 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
       } catch (_) {
         // A display preference should never prevent the map from loading.
       }
+      OfflinePlaceGazetteer? offlineGazetteer = _offlineGazetteer;
+      if (offlineGazetteer == null) {
+        try {
+          offlineGazetteer = await OfflinePlaceGazetteer.loadEthiopianCities();
+        } catch (error) {
+          debugPrint('Could not load the offline city gazetteer: $error');
+        }
+      }
       final locations = await _repository.getTransactionLocations();
       if (!mounted) return;
       setState(() {
+        _offlineGazetteer = offlineGazetteer;
         _locations = locations;
         _mapDisplayMode = displayMode;
         _loading = false;
@@ -398,6 +382,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
         name: customPlaceName ?? _approximatePlaceName(center),
         center: center,
         transactionCount: bucket.count,
+        netAmount: bucket.netAmount,
         transactionReferences: List<String>.unmodifiable(
           bucket.transactionReferences,
         ),
@@ -436,44 +421,19 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   }
 
   String _approximatePlaceName(LatLng point) {
-    var nearest = _knownEthiopianPlaces.first;
-    var nearestDistance = _distanceKm(point, nearest.position);
-    for (final place in _knownEthiopianPlaces.skip(1)) {
-      final distance = _distanceKm(point, place.position);
-      if (distance < nearestDistance) {
-        nearest = place;
-        nearestDistance = distance;
-      }
+    final offlineMatch = _offlineGazetteer?.nearestPlace(
+      latitude: point.latitude,
+      longitude: point.longitude,
+    );
+    if (offlineMatch != null) {
+      return offlineMatch.place.displayName(_languageCode);
     }
-    if (nearestDistance <= nearest.detailRadiusKm) {
-      return '${nearest.name} area';
-    }
-    if (nearestDistance <= 70) return 'Near ${nearest.name}';
     if (point.latitude >= 12) return 'Northern Ethiopia';
     if (point.longitude >= 41) return 'Eastern Ethiopia';
     if (point.longitude <= 36) return 'Western Ethiopia';
     if (point.latitude <= 7.5) return 'Southern Ethiopia';
     return 'Central Ethiopia';
   }
-
-  double _distanceKm(LatLng first, LatLng second) {
-    const earthRadiusKm = 6371.0;
-    final latitudeDelta = _toRadians(second.latitude - first.latitude);
-    final longitudeDelta = _toRadians(second.longitude - first.longitude);
-    final firstLatitude = _toRadians(first.latitude);
-    final secondLatitude = _toRadians(second.latitude);
-    final haversine =
-        math.sin(latitudeDelta / 2) * math.sin(latitudeDelta / 2) +
-            math.cos(firstLatitude) *
-                math.cos(secondLatitude) *
-                math.sin(longitudeDelta / 2) *
-                math.sin(longitudeDelta / 2);
-    return earthRadiusKm *
-        2 *
-        math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine));
-  }
-
-  double _toRadians(double degrees) => degrees * math.pi / 180;
 
   Set<Marker> _buildZoneMarkers(List<_SpendingZone> zones) {
     return zones
@@ -496,7 +456,12 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   }
 
   String _puckLabel(_SpendingZone zone) {
-    return NumberFormat.compact(locale: 'en').format(zone.transactionCount);
+    return switch (_filters.puckMetric) {
+      SpendingMapPuckMetric.transactionCount =>
+        NumberFormat.compact(locale: 'en').format(zone.transactionCount),
+      SpendingMapPuckMetric.netAmount =>
+        formatSpendingMapNetPuckLabel(zone.netAmount),
+    };
   }
 
   Future<void> _refreshPuckIcons() async {
@@ -887,6 +852,14 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
           sheetContext,
           _MapOptionsAction.satellite,
         ),
+        onOpenOvertureAttribution: () => Navigator.pop(
+          sheetContext,
+          _MapOptionsAction.openOvertureAttribution,
+        ),
+        onOpenAddisCadastreSource: () => Navigator.pop(
+          sheetContext,
+          _MapOptionsAction.openAddisCadastreSource,
+        ),
         onDelete: () => Navigator.pop(
           sheetContext,
           _MapOptionsAction.deleteLocations,
@@ -899,8 +872,43 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
         await _setMapDisplayMode(_MapDisplayMode.roadmap);
       case _MapOptionsAction.satellite:
         await _setMapDisplayMode(_MapDisplayMode.satellite);
+      case _MapOptionsAction.openOvertureAttribution:
+        await _openGazetteerSource(
+          'overture_divisions',
+          Uri.parse('https://docs.overturemaps.org/attribution/'),
+        );
+      case _MapOptionsAction.openAddisCadastreSource:
+        await _openGazetteerSource(
+          'addis_cadastre',
+          Uri.parse('https://eland.addiscadaster.gov.et/maps'),
+        );
       case _MapOptionsAction.deleteLocations:
         await _clearLocations();
+    }
+  }
+
+  Future<void> _openGazetteerSource(
+    String sourceId,
+    Uri fallbackUri,
+  ) async {
+    final uri =
+        _offlineGazetteer?.sourceById(sourceId)?.licenseUrl ?? fallbackUri;
+    try {
+      final opened = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) {
+        _showLocationMessage(
+          'Could not open the map data source information.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        _showLocationMessage(
+          'Could not open the map data source information.',
+        );
+      }
     }
   }
 
@@ -1364,6 +1372,7 @@ class _SpendingMapFilterSheet extends StatefulWidget {
 }
 
 class _SpendingMapFilterSheetState extends State<_SpendingMapFilterSheet> {
+  late SpendingMapPuckMetric _selectedPuckMetric;
   late String? _selectedType;
   late int? _selectedBankId;
   late String? _selectedAccountKey;
@@ -1378,6 +1387,7 @@ class _SpendingMapFilterSheetState extends State<_SpendingMapFilterSheet> {
   void initState() {
     super.initState();
     final filters = widget.initialFilters;
+    _selectedPuckMetric = filters.puckMetric;
     _selectedType = filters.type;
     _selectedBankId = filters.bankId;
     _selectedAccountKey = filters.accountKey;
@@ -1471,6 +1481,7 @@ class _SpendingMapFilterSheetState extends State<_SpendingMapFilterSheet> {
 
     Navigator.of(context).pop(
       _SpendingMapFilters(
+        puckMetric: _selectedPuckMetric,
         type: _selectedType,
         bankId: _selectedBankId,
         accountKey: _selectedAccountKey,
@@ -1691,6 +1702,44 @@ class _SpendingMapFilterSheetState extends State<_SpendingMapFilterSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _sectionLabel('PUCK LABELS'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _chip(
+                        label: 'Transaction count',
+                        selected: _selectedPuckMetric ==
+                            SpendingMapPuckMetric.transactionCount,
+                        onTap: () => setState(
+                          () => _selectedPuckMetric =
+                              SpendingMapPuckMetric.transactionCount,
+                        ),
+                      ),
+                      _chip(
+                        label: 'Net amount',
+                        selected: _selectedPuckMetric ==
+                            SpendingMapPuckMetric.netAmount,
+                        onTap: () => setState(
+                          () => _selectedPuckMetric =
+                              SpendingMapPuckMetric.netAmount,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    context.l10nText(
+                      'Net amount shows credits minus debits for each puck.',
+                    ),
+                    style: TextStyle(
+                      color: AppColors.textTertiary(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   _sectionLabel('TYPE'),
                   const SizedBox(height: 8),
                   Wrap(
@@ -2123,6 +2172,8 @@ class _MapOptionsSheet extends StatelessWidget {
     required this.canDelete,
     required this.onRoadmap,
     required this.onSatellite,
+    required this.onOpenOvertureAttribution,
+    required this.onOpenAddisCadastreSource,
     required this.onDelete,
   });
 
@@ -2130,6 +2181,8 @@ class _MapOptionsSheet extends StatelessWidget {
   final bool canDelete;
   final VoidCallback onRoadmap;
   final VoidCallback onSatellite;
+  final VoidCallback onOpenOvertureAttribution;
+  final VoidCallback onOpenAddisCadastreSource;
   final VoidCallback onDelete;
 
   @override
@@ -2151,9 +2204,10 @@ class _MapOptionsSheet extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             context.l10nText(
-              'Numbered transaction pucks are built on your device. Totals '
-              'does not upload your transaction amounts or saved transaction '
-              'coordinates.',
+              'Transaction pucks are built on your device. Totals does not '
+              'send your financial data anywhere to make Spending Map work, '
+              'and it does not attach transaction details to Google map '
+              'requests.',
             ),
             style: TextStyle(
               color: AppColors.textSecondary(context),
@@ -2195,8 +2249,13 @@ class _MapOptionsSheet extends StatelessWidget {
             icon: AppIcons.shield_check,
             title: context.l10nText('Stored locally'),
             subtitle: context.l10nText(
-              'Saved transaction coordinates stay in the Totals database.',
+              'Saved coordinates stay in Totals. Addis subcity and supported '
+              'Ethiopian city names come from a bundled offline asset.',
             ),
+          ),
+          _MapDataAttribution(
+            onOpenOverture: onOpenOvertureAttribution,
+            onOpenAddisCadastre: onOpenAddisCadastreSource,
           ),
           if (canDelete)
             _MapOptionRow(
@@ -2209,6 +2268,85 @@ class _MapOptionsSheet extends StatelessWidget {
               onTap: onDelete,
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _MapDataAttribution extends StatelessWidget {
+  const _MapDataAttribution({
+    required this.onOpenOverture,
+    required this.onOpenAddisCadastre,
+  });
+
+  final VoidCallback onOpenOverture;
+  final VoidCallback onOpenAddisCadastre;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.l10nText('OFFLINE PLACE DATA'),
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Wrap(
+            spacing: 8,
+            runSpacing: 2,
+            children: [
+              _MapAttributionLink(
+                label: '© OpenStreetMap contributors · Overture Maps · '
+                    'ODbL/CDLA',
+                onTap: onOpenOverture,
+              ),
+              _MapAttributionLink(
+                label: 'Addis Ababa Cadaster · public WFS',
+                onTap: onOpenAddisCadastre,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapAttributionLink extends StatelessWidget {
+  const _MapAttributionLink({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: AppColors.textSecondary(context),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              decoration: TextDecoration.underline,
+              decorationColor: AppColors.textSecondary(context),
+            ),
+          ),
+        ),
       ),
     );
   }
