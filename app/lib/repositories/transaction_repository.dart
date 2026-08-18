@@ -384,6 +384,7 @@ class TransactionRepository {
     required String ownerAssignmentSource,
     int? sourceSubscriptionId,
     String? sourceMessageId,
+    int? targetProfileId,
   }) async {
     final db = await DatabaseHelper.instance.database;
     // `reference` is globally UNIQUE, so match on it alone. Filtering by
@@ -409,6 +410,10 @@ class TransactionRepository {
     final values = <String, Object?>{
       'ownerAccountNumber': ownerAccountNumber,
       'ownerAssignmentSource': ownerAssignmentSource,
+      // Relocate the transaction to the target account's profile when moving
+      // across profiles, so it leaves the source profile and renders under the
+      // target (resolveTransactionOwnership scopes owners to the profile).
+      if (targetProfileId != null) 'profileId': targetProfileId,
       if (sourceSubscriptionId != null && sourceSubscriptionId >= 0)
         'sourceSubscriptionId': sourceSubscriptionId,
       if (sourceMessageId != null && sourceMessageId.trim().isNotEmpty)
@@ -444,6 +449,28 @@ class TransactionRepository {
       row: syncRow,
     );
     return true;
+  }
+
+  /// Moves many transactions to [ownerAccountNumber] as manual assignments and,
+  /// when [targetProfileId] is given, relocates them to that account's profile.
+  /// Reuses [updateTransactionOwnership] per reference so the manual-assignment
+  /// rule and per-row sync are preserved. Returns how many rows actually moved.
+  Future<int> moveTransactionsToAccount({
+    required Iterable<String> references,
+    required String ownerAccountNumber,
+    int? targetProfileId,
+  }) async {
+    var moved = 0;
+    for (final reference in references) {
+      final ok = await updateTransactionOwnership(
+        reference: reference,
+        ownerAccountNumber: ownerAccountNumber,
+        ownerAssignmentSource: Transaction.manualOwnerAssignment,
+        targetProfileId: targetProfileId,
+      );
+      if (ok) moved++;
+    }
+    return moved;
   }
 
   /// Removes one reimbursement link. Returns null; the provider reloads

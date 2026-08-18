@@ -9,6 +9,7 @@ import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/shared_expense_repository.dart';
@@ -169,6 +170,7 @@ class _AutoCategorizationRuleImportGroup {
 class TransactionProvider with ChangeNotifier {
   final TransactionRepository _transactionRepo = TransactionRepository();
   final AccountRepository _accountRepo = AccountRepository();
+  final ProfileRepository _profileRepo = ProfileRepository();
   final CategoryRepository _categoryRepo = CategoryRepository();
   final BankConfigService _bankConfigService = BankConfigService();
   final SharedExpenseRepository _sharedExpenseRepo = SharedExpenseRepository();
@@ -184,6 +186,29 @@ class TransactionProvider with ChangeNotifier {
 
   /// Accounts in the active profile (read-only view).
   List<Account> get accounts => List.unmodifiable(_accounts);
+
+  /// All accounts across every profile, plus profile names — the source for
+  /// cross-profile account customization (move + set-default). Populated
+  /// alongside [accounts] on every load.
+  List<Account> _allAccounts = [];
+  Map<int, String> _profileNamesById = {};
+  List<Account> get allAccounts => List.unmodifiable(_allAccounts);
+  Map<int, String> get profileNamesById => Map.unmodifiable(_profileNamesById);
+
+  /// Same-bank accounts across every profile (excludes the synthetic cash
+  /// bank, which has no cross-profile identity). Backs the move picker and the
+  /// "set as default" visibility gate.
+  List<Account> sameBankAccountsAcrossProfiles(int bankId) {
+    if (bankId == CashConstants.bankId) return const <Account>[];
+    return _allAccounts.where((a) => a.bank == bankId).toList(growable: false);
+  }
+
+  /// Human-readable profile name for [profileId] (empty when unknown/null).
+  String profileLabelFor(int? profileId) {
+    if (profileId == null) return '';
+    return _profileNamesById[profileId] ?? '';
+  }
+
   List<Category> _categories = [];
   Map<int, Category> _categoryById = {};
   List<AutoCategorizationRule> _autoCategorizationRules = [];
@@ -667,6 +692,14 @@ class TransactionProvider with ChangeNotifier {
 
     try {
       _accounts = await _accountRepo.getAccounts();
+      // Cross-profile account source for the customization surfaces (move +
+      // set-default), refreshed on every load alongside the active-profile set.
+      _allAccounts = await _accountRepo.getAllAccounts();
+      final profiles = await _profileRepo.getProfiles();
+      _profileNamesById = {
+        for (final p in profiles)
+          if (p.id != null) p.id!: p.name,
+      };
       // print all the accounts
       debugPrint(
         "debug: Accounts: ${_accounts.map((a) => a.balance).join(', ')}",
@@ -1859,25 +1892,65 @@ class TransactionProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Resolves the profile that owns [accountNumber] within [bankId], searching
+  /// across all profiles. Null when the account isn't found or carries no
+  /// profile (legacy NULL-profile rows are left where they are).
+  int? _profileIdForAccount(int? bankId, String accountNumber) {
+    if (bankId == null) return null;
+    for (final a in _allAccounts) {
+      if (a.bank == bankId && a.accountNumber == accountNumber) {
+        return a.profileId;
+      }
+    }
+    return null;
+  }
+
   /// Manually pins a transaction to a specific account. Recorded as a manual
-  /// assignment so automatic reconciliation won't override it. Reloads so the
-  /// ownership partition and account summaries reflect the move.
+  /// assignment so automatic reconciliation won't override it. When the target
+  /// account lives in another profile the transaction is relocated to that
+  /// profile (owner + profile move together). Reloads so the ownership
+  /// partition and account summaries reflect the move.
   Future<bool> assignTransactionToAccount(
     Transaction transaction,
     String ownerAccountNumber,
   ) async {
     final normalizedOwner = ownerAccountNumber.trim();
     if (normalizedOwner.isEmpty) return false;
+    final targetProfileId =
+        _profileIdForAccount(transaction.bankId, normalizedOwner);
     final changed = await _transactionRepo.updateTransactionOwnership(
       reference: transaction.reference,
       ownerAccountNumber: normalizedOwner,
       ownerAssignmentSource: Transaction.manualOwnerAssignment,
       sourceMessageId: transaction.sourceMessageId,
+      targetProfileId: targetProfileId,
     );
     if (changed) {
       await loadData();
     }
     return changed;
+  }
+
+  /// Moves several transactions to [ownerAccountNumber] at once, relocating
+  /// them to that account's profile. Callers must ensure all transactions share
+  /// the target account's bank. Returns how many moved; reloads once.
+  Future<int> moveTransactionsToAccount(
+    List<Transaction> transactions,
+    String ownerAccountNumber,
+  ) async {
+    final normalizedOwner = ownerAccountNumber.trim();
+    if (normalizedOwner.isEmpty || transactions.isEmpty) return 0;
+    final targetProfileId =
+        _profileIdForAccount(transactions.first.bankId, normalizedOwner);
+    final moved = await _transactionRepo.moveTransactionsToAccount(
+      references: transactions.map((t) => t.reference),
+      ownerAccountNumber: normalizedOwner,
+      targetProfileId: targetProfileId,
+    );
+    if (moved > 0) {
+      await loadData();
+    }
+    return moved;
   }
 
   /// Toggles an account's include-in-totals / dormant preferences and reloads

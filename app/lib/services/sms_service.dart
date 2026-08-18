@@ -897,6 +897,10 @@ class SmsService {
     Account account,
     double newBalance,
   ) async {
+    // Preserve every user-managed flag — saveAccount does a full-row replace,
+    // so omitting these would reset the account's default/dormant/include and
+    // SIM routing on every balance-bearing SMS (and silently drop the global
+    // default the ingest fallback relies on).
     final updated = Account(
       accountNumber: account.accountNumber,
       bank: account.bank,
@@ -905,6 +909,10 @@ class SmsService {
       settledBalance: account.settledBalance,
       pendingCredit: account.pendingCredit,
       profileId: account.profileId,
+      smsSubscriptionId: account.smsSubscriptionId,
+      includeInTotals: account.includeInTotals,
+      isDormant: account.isDormant,
+      isDefault: account.isDefault,
     );
     await accRepo.saveAccount(updated);
     print("debug: Account balance updated for ${account.accountHolderName}");

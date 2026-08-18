@@ -17,6 +17,7 @@ import 'package:totals/_redesign/screens/money/money_page.dart';
 import 'package:totals/_redesign/screens/budget_page.dart';
 import 'package:totals/_redesign/screens/settings_page.dart';
 import 'package:totals/_redesign/screens/shared_expenses_page.dart';
+import 'package:totals/_redesign/screens/ios_setup_guide_page.dart';
 import 'package:totals/_redesign/widgets/redesign_bottom_nav.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/constants/cash_constants.dart';
@@ -391,9 +392,25 @@ class RedesignShellState extends State<RedesignShell>
 
       if (mounted) {
         unawaited(_checkBatteryOptimization());
+        unawaited(_maybeShowIosSetupGuide());
         unawaited(AppUpdateService.instance.checkOnLaunch(context));
       }
     });
+  }
+
+  /// First-launch (iOS only) walkthrough for wiring up automatic bank-SMS
+  /// tracking via the Shortcuts automation. Shown once; always reachable
+  /// afterward from Settings. No-op on Android/web.
+  Future<void> _maybeShowIosSetupGuide() async {
+    if (!PlatformSupport.usesFileInbox) return;
+    // Don't interrupt a notification/deep-link that's opening a sheet first.
+    if (_pendingNotificationReference != null ||
+        _pendingSharedExpensesIntent != null ||
+        _pendingReparseResultIntent != null) {
+      return;
+    }
+    if (!mounted) return;
+    await maybeShowIosSetupGuideOnFirstLaunch(context);
   }
 
   Future<void> _handleNotificationCategorize(String reference) async {

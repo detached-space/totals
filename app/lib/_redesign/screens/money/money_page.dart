@@ -21,6 +21,7 @@ import 'package:totals/models/category.dart' show Category;
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/_redesign/widgets/account_assignment_sheet.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:totals/services/account_registration_service.dart';
@@ -1790,6 +1791,58 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
   }
 
+  /// Moves the selected transactions to one account (across profiles). Gated to
+  /// a single bank; relocates each transaction to the target account's profile.
+  Future<void> _moveSelected(TransactionProvider provider) async {
+    if (_selectedRefs.isEmpty) return;
+    final selected = _selectedRefs
+        .map((ref) => provider.transactionByReference(ref))
+        .whereType<Transaction>()
+        .toList();
+    if (selected.isEmpty) return;
+
+    // Moving to one account only makes sense within a single bank.
+    final bankId = selected.first.bankId;
+    if (bankId == null || selected.any((t) => t.bankId != bankId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select transactions from one bank to move.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (provider.sameBankAccountsAcrossProfiles(bankId).length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This bank has only one account to move between.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final chosen = await showAccountAssignmentSheet(
+      context: context,
+      provider: provider,
+      bankId: bankId,
+      title: 'Move ${selected.length} to account',
+    );
+    if (chosen == null || !mounted) return;
+
+    _clearSelection();
+    final moved = await provider.moveTransactionsToAccount(selected, chosen);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Moved $moved ${moved == 1 ? 'transaction' : 'transactions'}',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _subTabFadeController.dispose();
@@ -1869,6 +1922,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
               child: _SelectionBar(
                 count: _selectedRefs.length,
+                onMove: () => _moveSelected(provider),
                 onDelete: () => _deleteSelected(provider),
                 onClear: _clearSelection,
               ),
@@ -3677,10 +3731,29 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     TransactionProvider provider,
     AccountSummary account,
   ) async {
-    // How many accounts this bank has — "set default" only matters with 2+.
-    final bankAccountCount = provider.accountSummaries
-        .where((a) => a.bankId == account.bankId)
-        .length;
+    // Accounts for this bank across ALL profiles — the default is global per
+    // bank, so "set default" only matters (and only shows) once the bank has
+    // 2+ accounts anywhere, including a one-account-per-profile split.
+    final crossProfileAccounts =
+        provider.sameBankAccountsAcrossProfiles(account.bankId);
+    final bankAccountCount = crossProfileAccounts.length;
+    // Tag the sheet title with this account's profile when the bank spans
+    // profiles, so it's clear which account is being customized.
+    int? accountProfileId;
+    for (final a in crossProfileAccounts) {
+      if (a.accountNumber == account.accountNumber) {
+        accountProfileId = a.profileId;
+        break;
+      }
+    }
+    final accountProfileLabel =
+        bankAccountCount >= 2 ? provider.profileLabelFor(accountProfileId) : '';
+    final baseAccountTitle = account.accountHolderName.trim().isNotEmpty
+        ? account.accountHolderName
+        : account.accountNumber;
+    final sheetTitle = accountProfileLabel.isEmpty
+        ? baseAccountTitle
+        : '$baseAccountTitle · $accountProfileLabel';
 
     await showModalBottomSheet<void>(
       context: context,
@@ -3701,9 +3774,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                       children: [
                         Expanded(
                           child: Text(
-                            account.accountHolderName.trim().isNotEmpty
-                                ? account.accountHolderName
-                                : account.accountNumber,
+                            sheetTitle,
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -11168,11 +11239,13 @@ class _SelectionBar extends StatelessWidget {
   final int count;
   final VoidCallback onDelete;
   final VoidCallback onClear;
+  final VoidCallback? onMove;
 
   const _SelectionBar({
     required this.count,
     required this.onDelete,
     required this.onClear,
+    this.onMove,
   });
 
   @override
@@ -11196,6 +11269,14 @@ class _SelectionBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          if (onMove != null) ...[
+            GestureDetector(
+              onTap: onMove,
+              child: Icon(AppIcons.swap,
+                  size: 20, color: AppColors.primaryDark),
+            ),
+            const SizedBox(width: 16),
+          ],
           GestureDetector(
             onTap: onDelete,
             child: Icon(AppIcons.delete_outline_rounded,
@@ -11700,6 +11781,58 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     return flatItems;
   }
 
+  /// Moves the selected transactions to one account (across profiles). Gated to
+  /// a single bank; relocates each transaction to the target account's profile.
+  Future<void> _moveSelected(TransactionProvider provider) async {
+    if (_selectedRefs.isEmpty) return;
+    final selected = _selectedRefs
+        .map((ref) => provider.transactionByReference(ref))
+        .whereType<Transaction>()
+        .toList();
+    if (selected.isEmpty) return;
+
+    // Moving to one account only makes sense within a single bank.
+    final bankId = selected.first.bankId;
+    if (bankId == null || selected.any((t) => t.bankId != bankId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select transactions from one bank to move.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    if (provider.sameBankAccountsAcrossProfiles(bankId).length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This bank has only one account to move between.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final chosen = await showAccountAssignmentSheet(
+      context: context,
+      provider: provider,
+      bankId: bankId,
+      title: 'Move ${selected.length} to account',
+    );
+    if (chosen == null || !mounted) return;
+
+    _clearSelection();
+    final moved = await provider.moveTransactionsToAccount(selected, chosen);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Moved $moved ${moved == 1 ? 'transaction' : 'transactions'}',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _deleteSelected(TransactionProvider provider) async {
     if (_selectedRefs.isEmpty) return;
     final count = _selectedRefs.length;
@@ -11944,6 +12077,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
                               const SizedBox(height: 12),
                               _SelectionBar(
                                 count: _selectedRefs.length,
+                                onMove: () => _moveSelected(provider),
                                 onDelete: () => _deleteSelected(provider),
                                 onClear: _clearSelection,
                               ),

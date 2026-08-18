@@ -18,6 +18,8 @@ import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_service.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_settings_service.dart';
+import 'package:totals/services/telegram_backup/telegram_restore_diagnostics.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class TelegramBackupPage extends StatefulWidget {
@@ -269,12 +271,20 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
   Future<void> _restore(TelegramBackupEntry entry) async {
     if (_restoringId != null) return;
     setState(() => _restoringId = entry.id);
+    final diag = TelegramRestoreDiagnostics.instance;
+    diag.begin('Totals Telegram restore diagnostics · app v1.4.4');
+    diag.log(
+      'context',
+      'schemaSupported=v${DataExportImportService.currentSchemaVersion} '
+          'backupsListed=${_backups.length} '
+          'catalogError=${_catalogError ?? "none"}',
+    );
+    var failed = false;
+    var cancelled = false;
     try {
-      debugPrint('debug: TelegramRestore: downloading ${entry.id} '
-          '(${entry.fileSize} bytes)…');
+      diag.log('ui', 'restore tapped, entry=${entry.id}');
       final jsonData = await _service.downloadBackup(entry);
-      debugPrint('debug: TelegramRestore: downloaded+decrypted '
-          '${jsonData.length} chars; awaiting confirmation…');
+      diag.log('ui', 'download+decrypt returned ${jsonData.length} chars');
       if (!mounted) return;
       // iOS restore is a full import (the per-item import options sheet is
       // deferred). Confirm before overwriting local data.
@@ -298,28 +308,107 @@ class _TelegramBackupPageState extends State<TelegramBackupPage> {
           ],
         ),
       );
-      if (confirmed != true || !mounted) return;
-      debugPrint('debug: TelegramRestore: importing…');
+      if (confirmed != true || !mounted) {
+        cancelled = true;
+        diag.log('ui', 'user cancelled at confirmation');
+        return;
+      }
+      diag.log('ui', 'importing…');
       await _exportImportService.importAllData(jsonData);
-      debugPrint('debug: TelegramRestore: import OK, reloading…');
+      diag.log('ui', 'import OK, reloading provider…');
       if (!mounted) return;
       try {
         await Provider.of<TransactionProvider>(
           context,
           listen: false,
         ).loadData();
-      } catch (_) {}
+        diag.log('ui', 'provider reload OK');
+      } catch (error) {
+        diag.log('ui', 'provider reload failed: $error');
+      }
+      diag.log('ui', 'RESTORE SUCCESS');
       if (mounted) {
         _showSnack(context.l10nTextRead('Data imported successfully'));
       }
     } catch (error, stackTrace) {
-      debugPrint('debug: TelegramRestore FAILED: $error\n$stackTrace');
+      failed = true;
+      diag.log('ui', 'RESTORE FAILED: $error');
+      debugPrint('debug: TGRESTORE ui stack\n$stackTrace');
       if (mounted) {
         _showError('Restore failed: $error');
       }
     } finally {
       if (mounted) setState(() => _restoringId = null);
     }
+    // Surface the full trace so it can be copied/shared without Xcode. Skipped
+    // when the user backed out at the confirmation prompt (nothing happened).
+    if (mounted && !cancelled) {
+      await _showRestoreDiagnostics(failed: failed);
+    }
+  }
+
+  Future<void> _showRestoreDiagnostics({required bool failed}) async {
+    final diag = TelegramRestoreDiagnostics.instance;
+    if (diag.isEmpty) return;
+    final trace = diag.render();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          failed ? 'Restore failed — diagnostics' : 'Restore diagnostics',
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              trace,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: trace));
+              if (dialogContext.mounted) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text('Diagnostics copied')),
+                );
+              }
+            },
+            icon: const Icon(AppIcons.copy, size: 18),
+            label: const Text('Copy'),
+          ),
+          TextButton.icon(
+            onPressed: () async {
+              try {
+                final path = await diag.writeToFile();
+                await Share.shareXFiles(
+                  [XFile(path)],
+                  text: 'Totals restore diagnostics',
+                );
+              } catch (error) {
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(content: Text('Could not share: $error')),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.ios_share_rounded, size: 18),
+            label: const Text('Share'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _openAllBackups() async {

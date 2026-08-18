@@ -12,6 +12,7 @@ import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_schedule.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_settings_service.dart';
 import 'package:totals/services/telegram_backup/telegram_bot_api.dart';
+import 'package:totals/services/telegram_backup/telegram_restore_diagnostics.dart';
 import 'package:uuid/uuid.dart';
 
 typedef TelegramBotApiFactory = TelegramBotApi Function(String token);
@@ -337,8 +338,24 @@ class TelegramBackupService {
 
   Future<String> downloadBackup(TelegramBackupEntry entry) {
     return _serialized(() async {
+      final diag = TelegramRestoreDiagnostics.instance;
       final connection = await _connection();
+      diag.log(
+        'connection',
+        'config=ok token=${connection.token.isNotEmpty} '
+            'keyLen=${connection.recoveryKey.length} '
+            'keyFormatValid='
+            '${TelegramBackupCrypto.isRecoveryKeyFormatValid(connection.recoveryKey)}',
+      );
+      diag.log(
+        'entry',
+        'id=${entry.id} size=${entry.fileSize} '
+            'schema=v${entry.exportSchemaVersion} '
+            'sha=${TelegramRestoreDiagnostics.short(entry.sha256)}',
+      );
       if (entry.fileSize > maximumInAppBackupBytes) {
+        diag.log('entry ABORT',
+            'catalog size ${entry.fileSize} > $maximumInAppBackupBytes (getFile 20MB cap)');
         throw const TelegramBackupException(
           'This backup is too large for an in-app Telegram restore.',
         );
@@ -350,7 +367,13 @@ class TelegramBackupService {
           maximumBytes: maximumInAppBackupBytes,
         );
         final actualHash = await _crypto.sha256Hex(encrypted);
-        if (actualHash.toLowerCase() != entry.sha256.toLowerCase()) {
+        final matches = actualHash.toLowerCase() == entry.sha256.toLowerCase();
+        diag.log(
+          'integrity',
+          'match=$matches expected=${TelegramRestoreDiagnostics.short(entry.sha256)} '
+              'actual=${TelegramRestoreDiagnostics.short(actualHash)}',
+        );
+        if (!matches) {
           throw const TelegramBackupException(
             'This Telegram backup no longer matches its encrypted catalog.',
           );
@@ -360,12 +383,19 @@ class TelegramBackupService {
           recoveryKey: connection.recoveryKey,
           expectedContentType: TelegramBackupCrypto.backupContentType,
         );
-        return utf8.decode(plain);
-      } on TelegramBackupException {
+        diag.log('decrypt', 'ok, plaintext ${plain.length} bytes');
+        final decoded = utf8.decode(plain);
+        diag.log('utf8', 'decoded ${decoded.length} chars');
+        return decoded;
+      } on TelegramBackupException catch (error) {
+        diag.log('download/decrypt FAILED (backup)', error.message);
         rethrow;
       } on TelegramBackupCryptoException catch (error) {
+        diag.log('decrypt FAILED (crypto)', error.message);
         throw TelegramBackupException(error.message);
       } on TelegramBotApiException catch (error) {
+        diag.log('download FAILED (botApi)',
+            'code=${error.errorCode} ${error.message}');
         throw TelegramBackupException(_friendlyApiError(error));
       } finally {
         api.close();

@@ -5,9 +5,10 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/account_assignment_sheet.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
+import 'package:totals/models/account.dart';
 import 'package:totals/models/category.dart';
-import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
@@ -1106,25 +1107,27 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     }
   }
 
-  /// The registered accounts for this transaction's bank.
-  List<AccountSummary> _bankAccountsForTransaction() {
+  /// The registered accounts for this transaction's bank, across ALL profiles,
+  /// so a same-bank account in another profile is a valid move target.
+  List<Account> _bankAccountsForTransaction() {
     final bankId = _tx.bankId;
-    if (bankId == null) return const <AccountSummary>[];
-    return _provider.accountSummaries
-        .where((a) => a.bankId == bankId)
-        .toList(growable: false);
+    if (bankId == null) return const <Account>[];
+    return _provider.sameBankAccountsAcrossProfiles(bankId);
   }
 
-  /// Display label for the account this transaction currently belongs to.
+  /// Display label for the account this transaction currently belongs to,
+  /// suffixed with its profile when known (e.g. "Me (Business)").
   String _currentOwnerLabel() {
     final accounts = _bankAccountsForTransaction();
     final owner = _tx.ownerAccountNumber?.trim();
     if (owner != null && owner.isNotEmpty) {
       for (final a in accounts) {
         if (a.accountNumber == owner) {
-          return a.accountHolderName.trim().isNotEmpty
+          final base = a.accountHolderName.trim().isNotEmpty
               ? a.accountHolderName
               : a.accountNumber;
+          final profile = _provider.profileLabelFor(a.profileId);
+          return profile.isEmpty ? base : '$base ($profile)';
         }
       }
       return owner;
@@ -1132,50 +1135,34 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     return 'Auto';
   }
 
-  /// Presents the bank's accounts so the user can pin this transaction to one.
-  /// Only meaningful when the bank has more than one account.
+  /// Presents the bank's accounts (across all profiles) so the user can pin
+  /// this transaction to one. Only meaningful when the bank has more than one
+  /// account. A cross-profile pick relocates the transaction to that account's
+  /// profile, so the sheet closes — the row no longer belongs to this profile.
   Future<void> _openAccountAssignmentSheet() async {
+    final bankId = _tx.bankId;
+    if (bankId == null) return;
     final accounts = _bankAccountsForTransaction();
     if (accounts.length < 2) return;
     final currentOwner = _tx.ownerAccountNumber?.trim();
+    final originalProfileId = _tx.profileId;
 
-    final chosen = await showModalBottomSheet<String>(
+    final chosen = await showAccountAssignmentSheet(
       context: context,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Assign to account',
-                  style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-              for (final account in accounts)
-                ListTile(
-                  title: Text(
-                    account.accountHolderName.trim().isNotEmpty
-                        ? account.accountHolderName
-                        : account.accountNumber,
-                  ),
-                  subtitle: Text(account.accountNumber),
-                  trailing: account.accountNumber == currentOwner
-                      ? const Icon(Icons.check)
-                      : null,
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(account.accountNumber),
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
+      provider: _provider,
+      bankId: bankId,
+      currentOwner: currentOwner,
     );
-
     if (chosen == null || chosen == currentOwner) return;
+
+    Account? target;
+    for (final a in accounts) {
+      if (a.accountNumber == chosen) {
+        target = a;
+        break;
+      }
+    }
+
     final ok = await _provider.assignTransactionToAccount(_tx, chosen);
     if (!mounted) return;
     if (ok) {
@@ -1186,6 +1173,11 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(content: Text('Transaction reassigned')),
       );
+      final movedToOtherProfile =
+          target?.profileId != null && target!.profileId != originalProfileId;
+      if (movedToOtherProfile && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
     }
   }
 

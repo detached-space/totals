@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:totals/services/telegram_backup/telegram_backup_models.dart';
+import 'package:totals/services/telegram_backup/telegram_restore_diagnostics.dart';
 
 class TelegramBotApiException implements Exception {
   final String message;
@@ -168,15 +170,20 @@ class TelegramBotApi {
     String fileId, {
     int maximumBytes = maxDownloadBytes,
   }) async {
+    final diag = TelegramRestoreDiagnostics.instance;
     final file = await _postMap('getFile', fields: {'file_id': fileId});
     final filePath = (file['file_path'] as String?)?.trim();
+    final declaredSize = (file['file_size'] as num?)?.toInt();
+    diag.log('getFile',
+        'declaredSize=$declaredSize hasPath=${filePath != null && filePath.isNotEmpty} limit=$maximumBytes');
     if (filePath == null || filePath.isEmpty) {
       throw const TelegramBotApiException(
         'Telegram did not return a download path for this backup.',
       );
     }
-    final declaredSize = (file['file_size'] as num?)?.toInt();
     if (declaredSize != null && declaredSize > maximumBytes) {
+      diag.log('getFile ABORT',
+          'declaredSize $declaredSize > $maximumBytes — over Bot API getFile 20MB cap');
       throw const TelegramBotApiException(
         'This backup is too large for an in-app Telegram restore.',
       );
@@ -187,6 +194,7 @@ class TelegramBotApi {
       final response =
           await _client.send(request).timeout(const Duration(seconds: 45));
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        diag.log('download HTTP', response.statusCode);
         throw TelegramBotApiException(
           'Telegram could not download this backup '
           '(HTTP ${response.statusCode}).',
@@ -198,20 +206,29 @@ class TelegramBotApi {
           in response.stream.timeout(const Duration(seconds: 30))) {
         length += chunk.length;
         if (length > maximumBytes) {
+          diag.log('download ABORT', 'stream exceeded $maximumBytes bytes');
           throw const TelegramBotApiException(
             'This backup is too large for an in-app Telegram restore.',
           );
         }
         builder.add(chunk);
       }
+      diag.log('download', 'streamed $length bytes');
       return builder.takeBytes();
     } on TelegramBotApiException {
       rethrow;
     } on TimeoutException {
+      diag.log('download timeout');
       throw const TelegramBotApiException(
         'Telegram took too long to download the backup.',
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
+      // The generic message below hides the real cause (TLS/socket/etc). Keep
+      // the user-facing wrapper but surface the true error into the trace.
+      diag.log('download error (unwrapped)', '${error.runtimeType}: $error');
+      if (kDebugMode) {
+        debugPrint('debug: TGRESTORE download stack\n$stackTrace');
+      }
       throw const TelegramBotApiException(
         'Could not download the backup from Telegram.',
       );
