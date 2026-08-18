@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/screens/tools_page.dart';
 import 'package:totals/_redesign/screens/advanced_settings_page.dart';
+import 'package:totals/_redesign/screens/ios_setup_guide_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/categories_page.dart';
@@ -30,15 +31,6 @@ import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/theme/app_language_option.dart';
 
 // ── Support links ───────────────────────────────────────────────────────────
-Future<void> _openSupportLink() async {
-  final uri = Uri.parse('https://www.gurshaplus.com/detached');
-  try {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } catch (e) {
-    await launchUrl(uri);
-  }
-}
-
 Future<void> _openSupportChat() async {
   final uri = Uri.parse('https://t.me/totals_chat');
   try {
@@ -854,43 +846,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
   Future<void> _exportData() async {
     if (!mounted) return;
 
-    final action = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.cardColor(ctx),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text(
-          ctx.l10nText('Export Data'),
-          style: TextStyle(color: AppColors.textPrimary(ctx)),
-        ),
-        content: Text(
-          ctx.l10nText('Choose how you want to export your data:'),
-          style: TextStyle(color: AppColors.textSecondary(ctx)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'save'),
-            child: Text(ctx.l10nText('Save to File')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'share'),
-            child: Text(ctx.l10nText('Share')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              ctx.l10nText('Cancel'),
-              style: TextStyle(color: AppColors.textSecondary(ctx)),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (action == null || !mounted) return;
-
     setState(() => _isExporting = true);
     try {
       final jsonData = await _exportImportService.exportAllData();
@@ -898,127 +853,18 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
           DateTime.now().toIso8601String().replaceAll(':', '-').split('.')[0];
       final fileName = 'totals_export_$timestamp.json';
 
-      if (action == 'save') {
-        if (Platform.isAndroid) {
-          try {
-            final directory = Directory('/storage/emulated/0/Download');
-            if (await directory.exists()) {
-              final file = File('${directory.path}/$fileName');
-              await file.writeAsString(jsonData);
-              if (mounted) {
-                _showSnack(
-                  context.l10nTextRead('Data saved to Downloads folder'),
-                );
-              }
-            } else {
-              final appDir = await getApplicationDocumentsDirectory();
-              final file = File('${appDir.path}/$fileName');
-              await file.writeAsString(jsonData);
-              if (mounted) {
-                _showSnack(
-                  '${context.l10nTextRead('Data saved to')}: ${appDir.path}/$fileName',
-                );
-              }
-            }
-          } catch (_) {
-            final tempDir = await getTemporaryDirectory();
-            final tempFile = File('${tempDir.path}/$fileName');
-            await tempFile.writeAsString(jsonData);
-            if (mounted) {
-              await Share.shareXFiles(
-                [XFile(tempFile.path)],
-                text: context.l10nTextRead('Totals Data Export'),
-                subject: context.l10nTextRead('Totals Backup'),
-                sharePositionOrigin: sharePositionOriginFor(context),
-              );
-              if (mounted) {
-                _showSnack(context.l10nTextRead('Use Share to save the file'));
-              }
-            }
-          }
-        } else {
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File('${tempDir.path}/$fileName');
-          await tempFile.writeAsString(jsonData);
-          if (!mounted) return;
-
-          String? result;
-          try {
-            result = await FilePicker.platform.saveFile(
-              dialogTitle: context.l10nTextRead('Save Export File'),
-              fileName: fileName,
-              type: FileType.custom,
-              allowedExtensions: ['json'],
-            );
-            await Future.delayed(const Duration(milliseconds: 100));
-          } catch (e) {
-            try {
-              if (await tempFile.exists()) await tempFile.delete();
-            } catch (_) {}
-            if (mounted) {
-              _showErrorSnack(
-                '${context.l10nTextRead('Failed to open file picker')}: $e',
-              );
-            }
-            return;
-          }
-
-          if (!mounted) {
-            try {
-              if (await tempFile.exists()) await tempFile.delete();
-            } catch (_) {}
-            return;
-          }
-
-          if (result != null && result.isNotEmpty) {
-            try {
-              await tempFile.copy(result);
-              try {
-                if (await tempFile.exists()) await tempFile.delete();
-              } catch (_) {}
-              if (mounted) {
-                _showSnack(context.l10nTextRead('Data saved successfully'));
-              }
-            } catch (_) {
-              try {
-                await File(result).writeAsString(jsonData);
-                try {
-                  if (await tempFile.exists()) await tempFile.delete();
-                } catch (_) {}
-                if (mounted) {
-                  _showSnack(context.l10nTextRead('Data saved successfully'));
-                }
-              } catch (writeErr) {
-                try {
-                  if (await tempFile.exists()) await tempFile.delete();
-                } catch (_) {}
-                if (mounted) {
-                  _showErrorSnack(
-                    '${context.l10nTextRead('Failed to save file')}: $writeErr',
-                  );
-                }
-              }
-            }
-          } else {
-            try {
-              if (await tempFile.exists()) await tempFile.delete();
-            } catch (_) {}
-          }
-        }
-      } else {
-        // Share
-        final tempDir = await getTemporaryDirectory();
-        final file = File('${tempDir.path}/$fileName');
-        await file.writeAsString(jsonData);
-        if (!mounted) return;
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text: context.l10nTextRead('Totals Data Export'),
-          subject: context.l10nTextRead('Totals Backup'),
-          sharePositionOrigin: sharePositionOriginFor(context),
-        );
-        if (mounted)
-          _showSnack(context.l10nTextRead('Data exported successfully'));
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/$fileName');
+      await file.writeAsString(jsonData);
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: context.l10nTextRead('Totals Data Export'),
+        subject: context.l10nTextRead('Totals Backup'),
+        sharePositionOrigin: sharePositionOriginFor(context),
+      );
+      if (mounted) {
+        _showSnack(context.l10nTextRead('Data exported successfully'));
       }
     } catch (e) {
       if (mounted) {
@@ -1309,6 +1155,22 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
               const SizedBox(height: 10),
 
+              // iOS: reach the automatic-tracking setup guide any time.
+              if (PlatformSupport.usesFileInbox)
+                _SettingTile(
+                  icon: AppIcons.bolt_rounded,
+                  iconColor: AppColors.amber,
+                  title: context.l10n(
+                    'settings.automaticTracking',
+                    'Automatic tracking',
+                  ),
+                  subtitle: context.l10n(
+                    'settings.automaticTrackingSubtitle',
+                    'Set up the Shortcut and Messages automation',
+                  ),
+                  onTap: () => openIosSetupGuide(context),
+                ),
+
               _SettingTile(
                 icon: AppIcons.palette_outlined,
                 iconColor: AppColors.primaryLight,
@@ -1587,7 +1449,7 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                 title: context.l10n('settings.exportData', 'Export Data'),
                 subtitle: context.l10n(
                   'settings.exportDataSubtitle',
-                  'Save or share a backup',
+                  'Share a backup file',
                 ),
                 showChevron: false,
                 trailing: _isExporting
@@ -1734,11 +1596,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                   ),
                 ),
               ),
-
-              const SizedBox(height: 24),
-
-              // ── Support Developers ──────────────────────────────────────
-              _SupportDevelopersCard(),
             ],
           ),
         ),
@@ -1937,57 +1794,6 @@ class _SettingTile extends StatelessWidget {
                   ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SupportDevelopersCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: _openSupportLink,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              colors: [
-                AppColors.primaryDark.withValues(alpha: 0.12),
-                AppColors.primaryLight.withValues(alpha: 0.08),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            border: Border.all(
-              color: AppColors.primaryLight.withValues(alpha: 0.2),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                AppIcons.favorite_rounded,
-                color: AppColors.primaryLight,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                context.l10n('settings.supportProject', 'Support the Project'),
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: AppColors.primaryLight,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
           ),
         ),
       ),
