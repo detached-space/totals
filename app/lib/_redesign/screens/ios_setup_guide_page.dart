@@ -50,9 +50,19 @@ Future<void> maybeShowIosSetupGuideOnFirstLaunch(BuildContext context) async {
   await showIosSetupSheet(context, firstRun: true);
 }
 
-/// Open the setup flow on demand (from Settings). Dismissible.
-Future<void> openIosSetupGuide(BuildContext context) =>
-    showIosSetupSheet(context, firstRun: false);
+/// The SMS automation walkthrough, opened on demand from Discover Totals.
+/// Dismissible, and no branch question: importing old data has its own entry.
+Future<void> openIosSetupGuide(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => const _IosSetupSheet(
+      firstRun: false,
+      fixedSteps: _smsAutomationSteps,
+    ),
+  );
+}
 
 /// The migration step on its own: same clip-and-action sheet, one page, so
 /// importing from the Scriptable version is guided rather than dumping the user
@@ -159,18 +169,29 @@ const _SetupStep _importStep = _SetupStep(
   action: _StepActionKind.importBackup,
 );
 
+const _SetupStep _removeOldAutomationStep = _SetupStep(
+  id: 'remove-automation',
+  title: 'Remove your old Totals automation',
+  body: 'In Shortcuts → Automation, delete any automation pointing at the old '
+      'Totals or Scriptable. If it stays, every bank SMS gets captured twice.',
+  icon: AppIcons.delete_outline_rounded,
+  actionLabel: 'Open Shortcuts app',
+  action: _StepActionKind.openShortcuts,
+);
+
 const List<_SetupStep> _returningUserSteps = [
   _importStep,
-  _SetupStep(
-    id: 'remove-automation',
-    title: 'Remove your old Totals automation',
-    body:
-        'In Shortcuts → Automation, delete any automation pointing at the old '
-        'Totals or Scriptable. If it stays, every bank SMS gets captured twice.',
-    icon: AppIcons.delete_outline_rounded,
-    actionLabel: 'Open Shortcuts app',
-    action: _StepActionKind.openShortcuts,
-  ),
+  _removeOldAutomationStep,
+  ..._commonSteps,
+];
+
+/// The automation walkthrough on its own, for Discover Totals. Starts by
+/// clearing out any stale automation: someone opening this later is precisely
+/// who still has one pointing at Scriptable, and a leftover captures every bank
+/// SMS twice. Migrating users get the import from its own entry, so there is no
+/// branch question to ask here.
+const List<_SetupStep> _smsAutomationSteps = [
+  _removeOldAutomationStep,
   ..._commonSteps,
 ];
 

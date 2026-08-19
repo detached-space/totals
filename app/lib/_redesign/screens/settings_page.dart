@@ -1025,31 +1025,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
               const SizedBox(height: 24),
 
-              // ── Discover Totals ─────────────────────────────────────────
-              // iOS-only: both walkthroughs exist because iOS cannot read SMS
-              // directly and the old build lived in Scriptable.
-              if (PlatformSupport.usesFileInbox) ...[
-                _SettingTile(
-                  icon: AppIcons.bolt_rounded,
-                  iconColor: AppColors.amber,
-                  title: context.l10n(
-                    'settings.discoverTotals',
-                    'Discover Totals',
-                  ),
-                  subtitle: context.l10n(
-                    'settings.discoverTotalsSubtitle',
-                    'SMS automation and importing your old data',
-                  ),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const DiscoverTotalsPage(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-              ],
-
               // ── Preferences ─────────────────────────────────────────────
               _SectionHeader(
                 label: context.l10n('settings.preferences', 'Preferences'),
@@ -1392,6 +1367,36 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
               const SizedBox(height: 10),
 
+              if (PlatformSupport.usesFileInbox) ...[
+                _SettingTile(
+                  // The Totals mark rather than a generic glyph: this row is
+                  // the app introducing itself.
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/icon/totals_icon.png',
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  title: context.l10n(
+                    'settings.discoverTotals',
+                    'Discover Totals',
+                  ),
+                  subtitle: context.l10n(
+                    'settings.discoverTotalsSubtitle',
+                    'SMS automation and importing your old data',
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiscoverTotalsPage(),
+                    ),
+                  ),
+                ),
+              ],
+
               _SettingTile(
                 icon: Icons.system_update_alt_rounded,
                 iconColor: AppColors.blue,
@@ -1578,8 +1583,11 @@ class _ProfileCard extends StatelessWidget {
 }
 
 class _SettingTile extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
+  final IconData? icon;
+  final Color? iconColor;
+
+  /// Replaces the tinted icon square. Must size itself to 40x40.
+  final Widget? leading;
   final String title;
   final String subtitle;
   final Widget? trailing;
@@ -1587,8 +1595,9 @@ class _SettingTile extends StatelessWidget {
   final bool showChevron;
 
   const _SettingTile({
-    required this.icon,
-    required this.iconColor,
+    this.icon,
+    this.leading,
+    this.iconColor,
     required this.title,
     required this.subtitle,
     this.trailing,
@@ -1616,15 +1625,17 @@ class _SettingTile extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: iconColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(icon, color: iconColor, size: 20),
-                ),
+                leading ??
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: (iconColor ?? AppColors.primaryLight)
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(icon, color: iconColor, size: 20),
+                    ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
