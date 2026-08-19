@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:totals/_redesign/screens/ios_backup_import_flow.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
@@ -16,15 +16,18 @@ const String kTotalsShortcutUrl =
 /// URL scheme that opens the Shortcuts app (for the manual automation step).
 const String _kShortcutsAppUrl = 'shortcuts://';
 
-/// SharedPreferences flag: the one-time iOS setup guide has been shown/dismissed.
+/// SharedPreferences flag: the one-time iOS setup flow has been completed.
 const String _kIosSetupGuideCompletedKey = 'ios_setup_guide_completed';
 
-/// Per-task completion, so a half-finished setup resumes where it left off.
-const String _kTaskDonePrefix = 'ios_setup_task_';
-const String _kAutomationStepsKey = 'ios_setup_automation_steps';
+/// Remembers the returning-vs-new answer so reopening resumes the same track.
+const String _kIosSetupReturningKey = 'ios_setup_is_returning_user';
 
-/// Checklist tasks, in the order they unlock. Each one gates the next.
-const List<String> _kTaskIds = ['shortcut', 'automation'];
+/// Base URL for the step clips. Each step appends `<id>.mp4` / `<id>.jpg`.
+///
+/// PLACEHOLDER — swap for the real Cloudflare origin once the Figma clips are
+/// exported. Nothing here blocks a step: the poster lazy-loads, and when it
+/// fails the step falls back to its icon. The instructions live in the text.
+const String kSetupMediaBaseUrl = 'https://media.example.invalid/totals/setup';
 
 bool get _shortcutLinkConfigured => !kTotalsShortcutUrl.contains('REPLACE_WITH');
 
@@ -38,149 +41,198 @@ Future<void> markIosSetupGuideCompleted() async {
   await prefs.setBool(_kIosSetupGuideCompletedKey, true);
 }
 
-/// Show the guide once on first launch (iOS only). No-op elsewhere or if the
-/// user has already seen it.
+/// Show the setup flow once on first launch (iOS only). No-op elsewhere or if
+/// the user has already been through it.
 Future<void> maybeShowIosSetupGuideOnFirstLaunch(BuildContext context) async {
   if (!PlatformSupport.usesFileInbox) return;
   if (await hasCompletedIosSetupGuide()) return;
   if (!context.mounted) return;
-  await Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => const IosSetupGuidePage(firstRun: true),
-      fullscreenDialog: true,
-    ),
-  );
+  await showIosSetupSheet(context, firstRun: true);
 }
 
-/// Open the guide on demand (from Settings). Available any time.
-Future<void> openIosSetupGuide(BuildContext context) {
-  return Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const IosSetupGuidePage()),
+/// Open the setup flow on demand (from Settings). Dismissible.
+Future<void> openIosSetupGuide(BuildContext context) =>
+    showIosSetupSheet(context, firstRun: false);
+
+/// The setup flow itself: a tall bottom sheet, one step per page.
+///
+/// On [firstRun] it cannot be dismissed by drag, scrim tap or back gesture —
+/// a half-configured setup leaves the app looking broken, which is the failure
+/// this flow exists to prevent. It still always exits from the last step, so a
+/// reviewer is never trapped.
+Future<void> showIosSetupSheet(
+  BuildContext context, {
+  required bool firstRun,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    isDismissible: !firstRun,
+    enableDrag: !firstRun,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _IosSetupSheet(firstRun: firstRun),
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Guide page
+// Steps
 // ═════════════════════════════════════════════════════════════════════════════
 
-class IosSetupGuidePage extends StatefulWidget {
-  /// When true the page is shown as a one-time first-launch guide: no back
-  /// button, and it only closes once every task has been checked off.
+/// What a step's button does when tapped. Never gated on media loading.
+enum _StepActionKind { none, installShortcut, openShortcuts, importBackup }
+
+class _SetupStep {
+  /// Also the media file stem: `<id>.mp4` / `<id>.jpg`.
+  final String id;
+  final String title;
+  final String body;
+  final IconData icon;
+  final String? actionLabel;
+  final _StepActionKind action;
+
+  const _SetupStep({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.icon,
+    this.actionLabel,
+    this.action = _StepActionKind.none,
+  });
+}
+
+/// Shared tail: both tracks end by installing the shortcut and wiring the
+/// automation. Returning users reach it after their data is safely across.
+const List<_SetupStep> _commonSteps = [
+  _SetupStep(
+    id: 'install-shortcut',
+    title: 'Install the Totals Sync shortcut',
+    body:
+        'This is the shortcut that reads a bank SMS and hands it to Totals. The '
+        'button opens Shortcuts. Scroll down and tap "Add Shortcut".',
+    icon: AppIcons.download_rounded,
+    actionLabel: 'Add Totals Shortcut',
+    action: _StepActionKind.installShortcut,
+  ),
+  _SetupStep(
+    id: 'automation',
+    title: 'Create the Messages automation',
+    body:
+        'In Shortcuts, open Automation → New Automation → Message. Set Sender to '
+        'Any, turn on Message Contains and type ETB, choose Run Immediately, then '
+        'pick the Totals Sync shortcut.',
+    icon: AppIcons.sms_outlined,
+    actionLabel: 'Open Shortcuts app',
+    action: _StepActionKind.openShortcuts,
+  ),
+];
+
+/// Fresh install: nothing to migrate, nothing to clean up.
+const List<_SetupStep> _newUserSteps = _commonSteps;
+
+/// Coming from the Scriptable version. Data first — moving their history across
+/// before the fiddly Shortcuts work buys patience for the rest — then remove the
+/// old automation so incoming SMS aren't captured twice.
+const List<_SetupStep> _returningUserSteps = [
+  _SetupStep(
+    id: 'import-backup',
+    title: 'Bring your data across',
+    body:
+        'Your old data is already on your phone, in iCloud Drive → Scriptable. '
+        'Select ALL the files in that folder, not just transactions.txt. '
+        'Leaving out profiles.txt or account_overrides.txt imports silently '
+        'wrong: no profiles, and your accounts split incorrectly.',
+    icon: AppIcons.download_rounded,
+    actionLabel: 'Choose your Scriptable files',
+    action: _StepActionKind.importBackup,
+  ),
+  _SetupStep(
+    id: 'remove-automation',
+    title: 'Remove your old Totals automation',
+    body:
+        'In Shortcuts → Automation, delete any automation pointing at the old '
+        'Totals or Scriptable. If it stays, every bank SMS gets captured twice.',
+    icon: AppIcons.delete_outline_rounded,
+    actionLabel: 'Open Shortcuts app',
+    action: _StepActionKind.openShortcuts,
+  ),
+  ..._commonSteps,
+];
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Sheet
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _IosSetupSheet extends StatefulWidget {
   final bool firstRun;
 
-  const IosSetupGuidePage({super.key, this.firstRun = false});
+  const _IosSetupSheet({required this.firstRun});
 
   @override
-  State<IosSetupGuidePage> createState() => _IosSetupGuidePageState();
+  State<_IosSetupSheet> createState() => _IosSetupSheetState();
 }
 
-class _IosSetupGuidePageState extends State<IosSetupGuidePage> {
-  final Map<String, bool> _taskDone = {for (final id in _kTaskIds) id: false};
-  final List<bool> _automationChecks =
-      List<bool>.filled(_automationSteps.length, false);
+class _IosSetupSheetState extends State<_IosSetupSheet> {
+  final PageController _pager = PageController();
 
-  /// Task currently open in the accordion. Null means everything is collapsed.
-  String? _expandedTask = _kTaskIds.first;
+  /// null until the branch question is answered.
+  bool? _isReturningUser;
+  int _index = 0;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    _restoreProgress();
+    _restore();
   }
 
-  Future<void> _restoreProgress() async {
+  @override
+  void dispose() {
+    _pager.dispose();
+    super.dispose();
+  }
+
+  Future<void> _restore() async {
     final prefs = await SharedPreferences.getInstance();
-    for (final id in _kTaskIds) {
-      _taskDone[id] = prefs.getBool('$_kTaskDonePrefix$id') ?? false;
-    }
-    final saved = prefs.getStringList(_kAutomationStepsKey);
-    if (saved != null) {
-      for (var i = 0; i < _automationChecks.length && i < saved.length; i++) {
-        _automationChecks[i] = saved[i] == '1';
-      }
-    }
-    if (!mounted) return;
-    setState(() => _expandedTask = _firstOpenTask());
+    final saved = prefs.getBool(_kIosSetupReturningKey);
+    if (!mounted || saved == null) return;
+    setState(() => _isReturningUser = saved);
   }
 
-  // ── Checklist state ───────────────────────────────────────────────────────
+  List<_SetupStep> get _steps =>
+      (_isReturningUser ?? false) ? _returningUserSteps : _newUserSteps;
 
-  bool _isDone(String id) => _taskDone[id] ?? false;
+  bool get _onLastStep => _index >= _steps.length - 1;
 
-  /// A task unlocks once the one before it is checked off.
-  bool _isUnlocked(int index) => index == 0 || _isDone(_kTaskIds[index - 1]);
-
-  /// First unlocked task that still needs doing — the one we auto-expand.
-  String? _firstOpenTask() {
-    for (var i = 0; i < _kTaskIds.length; i++) {
-      if (_isUnlocked(i) && !_isDone(_kTaskIds[i])) return _kTaskIds[i];
-    }
-    return null;
-  }
-
-  int get _completedCount => _kTaskIds.where(_isDone).length;
-  bool get _allDone => _completedCount == _kTaskIds.length;
-  bool get _automationReady => !_automationChecks.contains(false);
-
-  Future<void> _completeTask(String id) async {
+  Future<void> _chooseTrack(bool returning) async {
     setState(() {
-      _taskDone[id] = true;
-      _expandedTask = _firstOpenTask();
+      _isReturningUser = returning;
+      _index = 0;
     });
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('$_kTaskDonePrefix$id', true);
+    await prefs.setBool(_kIosSetupReturningKey, returning);
   }
 
-  void _toggleTask(int index) {
-    if (!_isUnlocked(index)) return;
-    final id = _kTaskIds[index];
-    setState(() => _expandedTask = _expandedTask == id ? null : id);
-  }
-
-  Future<void> _toggleAutomationStep(int index) async {
-    setState(() => _automationChecks[index] = !_automationChecks[index]);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      _kAutomationStepsKey,
-      _automationChecks.map((checked) => checked ? '1' : '0').toList(),
+  void _next() {
+    if (_onLastStep) {
+      _finish();
+      return;
+    }
+    _pager.nextPage(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
     );
   }
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-
-  Future<void> _launch(String url) async {
-    final uri = Uri.parse(url);
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (ok) return;
-    } catch (_) {/* fall through */}
-    try {
-      await launchUrl(uri);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content:
-                Text(context.l10nTextRead('Could not open the Shortcuts app.')),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _installShortcut() async {
-    if (!_shortcutLinkConfigured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context
-              .l10nTextRead('The Totals shortcut link is not set up yet.')),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+  void _back() {
+    if (_index == 0) {
+      // Back out of the track choice rather than closing the sheet.
+      setState(() => _isReturningUser = null);
       return;
     }
-    await _launch(kTotalsShortcutUrl);
+    _pager.previousPage(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _finish() async {
@@ -188,332 +240,206 @@ class _IosSetupGuidePageState extends State<IosSetupGuidePage> {
     if (mounted) Navigator.of(context).maybePop();
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  Future<void> _launch(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {/* fall through */}
+    try {
+      await launchUrl(uri);
+    } catch (_) {
+      if (mounted) _snack(context.l10nTextRead('Could not open Shortcuts.'));
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Future<void> _runAction(_SetupStep step) async {
+    switch (step.action) {
+      case _StepActionKind.none:
+        return;
+      case _StepActionKind.openShortcuts:
+        await _launch(_kShortcutsAppUrl);
+      case _StepActionKind.installShortcut:
+        if (!_shortcutLinkConfigured) {
+          _snack(context
+              .l10nTextRead('The Totals shortcut link is not set up yet.'));
+          return;
+        }
+        await _launch(kTotalsShortcutUrl);
+      case _StepActionKind.importBackup:
+        setState(() => _busy = true);
+        try {
+          await runIosBackupImport(context);
+        } catch (error) {
+          if (mounted) {
+            _snack('${context.l10nTextRead('Migration failed')}: $error');
+          }
+        } finally {
+          if (mounted) setState(() => _busy = false);
+        }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final firstRun = widget.firstRun;
+    final media = MediaQuery.of(context);
+
+    // The branch question is two buttons and a sentence — at step height it
+    // reads as an empty screen. Grow into the tall sheet only once there's a
+    // clip to show.
+    final heightFactor = _isReturningUser == null ? 0.52 : 0.82;
 
     return PopScope(
-      canPop: !firstRun || _allDone,
-      child: Scaffold(
-        backgroundColor: AppColors.background(context),
-        appBar: AppBar(
-          backgroundColor: AppColors.background(context),
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          automaticallyImplyLeading: !firstRun,
-          leading: firstRun
-              ? null
-              : IconButton(
-                  icon: Icon(AppIcons.arrow_back_rounded,
-                      color: AppColors.textPrimary(context)),
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
-          title: Text(
-            context.l10nText('Automatic tracking'),
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
+      // A half-configured setup leaves the app looking empty and broken, so the
+      // first run only exits from the last step.
+      canPop: !widget.firstRun,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+        height: media.size.height * heightFactor,
+        // Clipped rather than decorated: the clip runs edge to edge and has to
+        // be cut by the sheet's own top corners.
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: AppColors.background(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: _isReturningUser == null
+            ? SafeArea(top: false, child: _buildTrackQuestion(context))
+            : _buildSteps(context),
+      ),
+    );
+  }
+
+  // ── Branch question ───────────────────────────────────────────────────────
+
+  Widget _buildTrackQuestion(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+      child: Column(
+        children: [
+          _Grabber(visible: !widget.firstRun),
+          const Spacer(),
+          // The app icon, not assets/images/logo.svg: that SVG is an Illustrator
+          // export whose styles are DTD entities (style="&st2;"), which
+          // flutter_svg does not resolve, so it renders blank.
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Image.asset(
+              'assets/icon/totals_icon.png',
+              width: 72,
+              height: 72,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            context.l10nText('Set up automatic tracking'),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
               color: AppColors.textPrimary(context),
             ),
           ),
-          centerTitle: true,
-        ),
-        body: SafeArea(
-          top: false,
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // ── Hero ──
-                      Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: SvgPicture.asset(
-                            'assets/images/logo.svg',
-                            width: 68,
-                            height: 68,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        context.l10nText('Track transactions automatically'),
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textPrimary(context),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        context.l10nText(
-                          'iPhone can\'t read bank SMS directly, so Totals connects them with a Shortcut and a Messages automation. It takes about a minute, and you only set it up once.',
-                        ),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textSecondary(context),
-                          height: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      _SetupProgress(
-                        completed: _completedCount,
-                        total: _kTaskIds.length,
-                      ),
-                      const SizedBox(height: 16),
-
-                      // ── Task 1: install the shortcut ──
-                      _TaskCard(
-                        step: 1,
-                        title: context.l10nText('Install the Totals shortcut'),
-                        subtitle: context
-                            .l10nText('Adds the ready-made capture shortcut'),
-                        done: _isDone('shortcut'),
-                        locked: !_isUnlocked(0),
-                        expanded: _expandedTask == 'shortcut',
-                        onToggle: () => _toggleTask(0),
-                        child: _buildShortcutBody(theme),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // ── Task 2: create the automation ──
-                      _TaskCard(
-                        step: 2,
-                        title:
-                            context.l10nText('Create the Messages automation'),
-                        subtitle: context
-                            .l10nText('Hands new bank SMS to Totals for you'),
-                        done: _isDone('automation'),
-                        locked: !_isUnlocked(1),
-                        expanded: _expandedTask == 'automation',
-                        onToggle: () => _toggleTask(1),
-                        child: _buildAutomationBody(theme),
-                      ),
-                      const SizedBox(height: 16),
-
-                      _NoteCallout(
-                        icon: AppIcons.info_outline_rounded,
-                        color: AppColors.primaryLight,
-                        text: context.l10nText(
-                          'New transactions appear when you open Totals. Add your bank account in Totals first so it can recognize the messages.',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Footer ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: (firstRun && !_allDone) ? null : _finish,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primaryDark,
-                          foregroundColor: AppColors.white,
-                          disabledBackgroundColor: AppColors.textTertiary(context)
-                              .withValues(alpha: 0.15),
-                          disabledForegroundColor:
-                              AppColors.textTertiary(context),
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: Text(
-                          firstRun
-                              ? context.l10nText('Finish setup')
-                              : context.l10nText('Got it'),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (firstRun) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _allDone
-                            ? context.l10nText('You\'re all set.')
-                            : context.l10nText(
-                                'Check off both steps to continue.'),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: _allDone
-                              ? AppColors.primaryLight
-                              : AppColors.textTertiary(context),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
+          const SizedBox(height: 12),
+          Text(
+            context.l10nText(
+              'iPhone can\'t read bank SMS directly, so Totals connects them with '
+              'a Shortcut. First, have you used Totals before, including the '
+              'Scriptable version?',
+            ),
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: AppColors.textSecondary(context),
+              height: 1.5,
+            ),
           ),
-        ),
+          const Spacer(),
+          _PrimaryButton(
+            label: context.l10nText('Yes, I\'m moving my data over'),
+            onTap: () => _chooseTrack(true),
+          ),
+          const SizedBox(height: 10),
+          _SecondaryButton(
+            label: context.l10nText('No, this is my first time'),
+            onTap: () => _chooseTrack(false),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildShortcutBody(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          context.l10nText(
-            'Add the ready-made shortcut. The button opens the Shortcuts app. Scroll down and tap "Add Shortcut" to install it.',
-          ),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: AppColors.textSecondary(context),
-            height: 1.5,
-          ),
-        ),
-        const SizedBox(height: 12),
-        for (int i = 0; i < _shortcutSteps.length; i++)
-          _SubStep(
-            index: i + 1,
-            text: context.l10nText(_shortcutSteps[i]),
-            isLast: i == _shortcutSteps.length - 1,
-          ),
-        const SizedBox(height: 14),
-        _ActionButton(
-          icon: AppIcons.download_rounded,
-          label: context.l10nText('Add Totals Shortcut'),
-          onTap: _installShortcut,
-        ),
-        const SizedBox(height: 8),
-        _DoneButton(
-          label: context.l10nText('I installed the shortcut'),
-          onTap: () => _completeTask('shortcut'),
-        ),
-      ],
-    );
-  }
+  // ── Steps ─────────────────────────────────────────────────────────────────
 
-  Widget _buildAutomationBody(ThemeData theme) {
-    final remaining = _automationChecks.where((checked) => !checked).length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          context.l10nText(
-            'iOS won\'t let Totals set this up for you, so create it once by hand. Tap each step as you finish it:',
-          ),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: AppColors.textSecondary(context),
-            height: 1.5,
-          ),
-        ),
-        const SizedBox(height: 8),
-        for (int i = 0; i < _automationSteps.length; i++)
-          _CheckableStep(
-            index: i + 1,
-            text: context.l10nText(_automationSteps[i]),
-            checked: _automationChecks[i],
-            onTap: () => _toggleAutomationStep(i),
-          ),
-        const SizedBox(height: 12),
-        _NoteCallout(
-          icon: AppIcons.info_outline_rounded,
-          color: AppColors.amber,
-          text: context.l10nText(
-            'Already tried setting up Totals? Delete any old Totals automation first, or messages may be counted twice.',
-          ),
-        ),
-        const SizedBox(height: 14),
-        _ActionButton(
-          icon: AppIcons.sms_outlined,
-          label: context.l10nText('Open Shortcuts app'),
-          filled: false,
-          onTap: () => _launch(_kShortcutsAppUrl),
-        ),
-        const SizedBox(height: 8),
-        _DoneButton(
-          label: _automationReady
-              ? context.l10nText('The automation is ready')
-              : '${context.l10nText('Tick every step first')} ($remaining)',
-          onTap:
-              _automationReady ? () => _completeTask('automation') : null,
-        ),
-      ],
-    );
-  }
-}
-
-/// Shortcut-install walkthrough (kept as fallbacks so l10n can override).
-const List<String> _shortcutSteps = [
-  'Tap "Add Totals Shortcut" below.',
-  'The Shortcuts app opens on the ready-made shortcut.',
-  'Scroll down and tap Add Shortcut.',
-  'Come back here and mark this step done.',
-];
-
-/// Automation walkthrough sub-steps (kept as fallbacks so l10n can override).
-const List<String> _automationSteps = [
-  'In the Shortcuts app, open the Automation tab, then tap ＋ → New Automation.',
-  'Choose Message.',
-  'Set Sender to Any, turn on Message Contains, and type ETB.',
-  'Select Run Immediately, then tap Next.',
-  'Choose the Totals shortcut you installed in Step 1.',
-  'Tap Done. You\'re set.',
-];
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Building blocks
-// ═════════════════════════════════════════════════════════════════════════════
-
-/// Thin "N of M done" bar above the checklist.
-class _SetupProgress extends StatelessWidget {
-  final int completed;
-  final int total;
-
-  const _SetupProgress({required this.completed, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildSteps(BuildContext context) {
     final theme = Theme.of(context);
-    final allDone = completed == total;
+    final steps = _steps;
+    final step = steps[_index.clamp(0, steps.length - 1)];
 
-    return Row(
+    return Column(
       children: [
         Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: total == 0 ? 0 : completed / total),
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeOutCubic,
-              builder: (context, value, _) => LinearProgressIndicator(
-                value: value,
-                minHeight: 6,
-                backgroundColor:
-                    AppColors.primaryLight.withValues(alpha: 0.12),
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  allDone ? AppColors.primaryDark : AppColors.primaryLight,
-                ),
-              ),
+          child: PageView.builder(
+            controller: _pager,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: steps.length,
+            onPageChanged: (i) => setState(() => _index = i),
+            itemBuilder: (context, i) => _StepView(
+              step: steps[i],
+              onBack: _busy ? null : _back,
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        _PageDots(count: steps.length, index: _index),
+        const SizedBox(height: 6),
         Text(
-          '$completed/$total',
-          style: theme.textTheme.labelMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: allDone ? AppColors.primaryDark : AppColors.primaryLight,
+          '${context.l10nText('Step')} ${_index + 1} ${context.l10nText('of')} ${steps.length}',
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: AppColors.textTertiary(context),
+          ),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            12,
+            24,
+            12 + MediaQuery.of(context).padding.bottom,
+          ),
+          child: Column(
+            children: [
+              if (step.actionLabel != null) ...[
+                _PrimaryButton(
+                  label: context.l10nText(step.actionLabel!),
+                  busy: _busy,
+                  onTap: _busy ? null : () => _runAction(step),
+                ),
+                const SizedBox(height: 10),
+                _SecondaryButton(
+                  label: _onLastStep
+                      ? context.l10nText('Done')
+                      : context.l10nText('Next'),
+                  onTap: _busy ? null : _next,
+                ),
+              ] else
+                _PrimaryButton(
+                  label: _onLastStep
+                      ? context.l10nText('Done')
+                      : context.l10nText('Next'),
+                  onTap: _busy ? null : _next,
+                ),
+            ],
           ),
         ),
       ],
@@ -521,291 +447,67 @@ class _SetupProgress extends StatelessWidget {
   }
 }
 
-/// One expandable checklist task. Locked until the task before it is done.
-class _TaskCard extends StatelessWidget {
-  final int step;
-  final String title;
-  final String subtitle;
-  final bool done;
-  final bool locked;
-  final bool expanded;
-  final VoidCallback onToggle;
-  final Widget child;
+// ═════════════════════════════════════════════════════════════════════════════
+// Pieces
+// ═════════════════════════════════════════════════════════════════════════════
 
-  const _TaskCard({
-    required this.step,
-    required this.title,
-    required this.subtitle,
-    required this.done,
-    required this.locked,
-    required this.expanded,
-    required this.onToggle,
-    required this.child,
-  });
+class _StepView extends StatelessWidget {
+  final _SetupStep step;
+  final VoidCallback? onBack;
 
-  Widget _statusDot(BuildContext context) {
-    if (done) {
-      return Container(
-        width: 30,
-        height: 30,
-        decoration: const BoxDecoration(
-          color: AppColors.primaryDark,
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(AppIcons.check_rounded,
-            size: 17, color: AppColors.white),
-      );
-    }
-    if (locked) {
-      return Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          color: AppColors.textTertiary(context).withValues(alpha: 0.12),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(AppIcons.lock_outline_rounded,
-            size: 15, color: AppColors.textTertiary(context)),
-      );
-    }
-    return Container(
-      width: 30,
-      height: 30,
-      decoration: const BoxDecoration(
-        color: AppColors.primaryDark,
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: Text(
-          '$step',
-          style: const TextStyle(
-            color: AppColors.white,
-            fontWeight: FontWeight.w800,
-            fontSize: 14,
-          ),
-        ),
-      ),
-    );
-  }
+  const _StepView({required this.step, this.onBack});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return AnimatedOpacity(
-      opacity: locked ? 0.5 : 1,
-      duration: const Duration(milliseconds: 200),
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: AppColors.cardColor(context),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: done
-                ? AppColors.primaryLight.withValues(alpha: 0.3)
-                : expanded
-                    ? AppColors.primaryLight.withValues(alpha: 0.5)
-                    : AppColors.borderColor(context),
+    // The clip runs edge to edge with no padding of its own — the sheet's top
+    // corners do the clipping.
+    //
+    // The copy is a non-flex child so it takes only the height it needs and the
+    // clip absorbs everything left over; splitting fixed shares left a dead band
+    // under short steps. Capped and scrollable so a long step can't push the
+    // clip out on a small screen.
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(child: _StepMedia(step: step)),
+                if (onBack != null)
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: _MediaBackButton(onTap: onBack!),
+                  ),
+              ],
+            ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: locked ? null : onToggle,
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      _statusDot(context),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.textPrimary(context),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              locked
-                                  ? context.l10nText('Finish the step above first')
-                                  : subtitle,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: AppColors.textTertiary(context),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (!locked)
-                        AnimatedRotation(
-                          turns: expanded ? 0.5 : 0,
-                          duration: const Duration(milliseconds: 200),
-                          child: Icon(
-                            AppIcons.expand_more,
-                            size: 18,
-                            color: AppColors.textTertiary(context),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            AnimatedCrossFade(
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: child,
-              ),
-              crossFadeState: expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 220),
-              sizeCurve: Curves.easeInOutCubic,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A sub-step the user ticks off one at a time.
-class _CheckableStep extends StatelessWidget {
-  final int index;
-  final String text;
-  final bool checked;
-  final VoidCallback onTap;
-
-  const _CheckableStep({
-    required this.index,
-    required this.text,
-    required this.checked,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: checked ? AppColors.primaryLight : Colors.transparent,
-                  border: Border.all(
-                    color: checked
-                        ? AppColors.primaryLight
-                        : AppColors.textTertiary(context)
-                            .withValues(alpha: 0.45),
-                    width: 1.5,
-                  ),
-                ),
-                child: checked
-                    ? const Icon(AppIcons.check_rounded,
-                        size: 13, color: AppColors.white)
-                    : Center(
-                        child: Text(
-                          '$index',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textTertiary(context),
-                          ),
-                        ),
-                      ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    text,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: checked
-                          ? AppColors.textTertiary(context)
-                          : AppColors.textPrimary(context),
-                      height: 1.45,
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: constraints.maxHeight * 0.5),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
+              child: Column(
+                children: [
+                  Text(
+                    context.l10nText(step.title),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary(context),
                     ),
                   ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SubStep extends StatelessWidget {
-  final int index;
-  final String text;
-  final bool isLast;
-
-  const _SubStep({
-    required this.index,
-    required this.text,
-    required this.isLast,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: AppColors.primaryLight.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                '$index',
-                style: const TextStyle(
-                  color: AppColors.primaryLight,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                text,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.textPrimary(context),
-                  height: 1.45,
-                ),
+                  const SizedBox(height: 10),
+                  Text(
+                    context.l10nText(step.body),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary(context),
+                      height: 1.55,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -815,146 +517,198 @@ class _SubStep extends StatelessWidget {
   }
 }
 
-class _NoteCallout extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String text;
-
-  const _NoteCallout({
-    required this.icon,
-    required this.color,
-    required this.text,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: AppColors.textSecondary(context),
-                height: 1.45,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
+/// Sits on the clip rather than in a header row, so the sheet keeps its height
+/// for content.
+class _MediaBackButton extends StatelessWidget {
   final VoidCallback onTap;
-  final bool filled;
 
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.filled = true,
-  });
+  const _MediaBackButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    if (filled) {
-      return SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: onTap,
-          icon: Icon(icon, size: 18),
-          label:
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primaryLight,
-            foregroundColor: AppColors.white,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+    return Material(
+      color: AppColors.background(context).withValues(alpha: 0.85),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(
+            AppIcons.chevron_left,
+            size: 20,
+            color: AppColors.textPrimary(context),
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
+}
+
+/// The clip area. Today it renders the placeholder; when the real poster URL is
+/// live this lazy-loads it and still degrades to the icon on any failure, so a
+/// dead CDN can never block a non-dismissible step.
+class _StepMedia extends StatelessWidget {
+  final _SetupStep step;
+
+  const _StepMedia({required this.step});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.primaryLight.withValues(alpha: 0.07),
+      child: Image.network(
+        '$kSetupMediaBaseUrl/${step.id}.jpg',
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : _placeholder(context),
+        errorBuilder: (context, _, __) => _placeholder(context),
+      ),
+    );
+  }
+
+  Widget _placeholder(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(step.icon, size: 44, color: AppColors.primaryLight),
+          const SizedBox(height: 12),
+          Text(
+            context.l10nText('Walkthrough clip'),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: AppColors.primaryLight,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PageDots extends StatelessWidget {
+  final int count;
+  final int index;
+
+  const _PageDots({required this.count, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (int i = 0; i < count; i++)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            width: i == index ? 20 : 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: i == index
+                  ? AppColors.primaryLight
+                  : AppColors.primaryLight.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Only drawn when the sheet can actually be dragged — a grabber on a
+/// non-dismissible sheet invites a swipe that does nothing.
+class _Grabber extends StatelessWidget {
+  final bool visible;
+
+  const _Grabber({this.visible = true});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!visible) return const SizedBox(height: 14);
+    return Container(
+      width: 40,
+      height: 4,
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.textTertiary(context).withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(999),
+      ),
+    );
+  }
+}
+
+class _PrimaryButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onTap;
+  final bool busy;
+
+  const _PrimaryButton({required this.label, this.onTap, this.busy = false});
+
+  @override
+  Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: OutlinedButton.icon(
+      child: ElevatedButton(
         onPressed: onTap,
-        icon: Icon(icon, size: 18, color: AppColors.primaryLight),
-        label: Text(
-          label,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            color: AppColors.primaryLight,
-          ),
-        ),
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 13),
-          side: BorderSide(color: AppColors.primaryLight.withValues(alpha: 0.5)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primaryDark,
+          foregroundColor: AppColors.white,
+          disabledBackgroundColor:
+              AppColors.textTertiary(context).withValues(alpha: 0.15),
+          disabledForegroundColor: AppColors.textTertiary(context),
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
+        child: busy
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.white,
+                ),
+              )
+            : Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
       ),
     );
   }
 }
 
-/// Low-weight "check this task off" control — a tonal indigo pill, deliberately
-/// quieter than the task's own action button. A null [onTap] disables it.
-class _DoneButton extends StatelessWidget {
+class _SecondaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
 
-  const _DoneButton({required this.label, this.onTap});
+  const _SecondaryButton({required this.label, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final enabled = onTap != null;
-
-    return Align(
-      alignment: Alignment.centerRight,
-      child: TextButton.icon(
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton(
         onPressed: onTap,
-        icon: Icon(AppIcons.check_rounded,
-            size: 15,
-            color: enabled
-                ? AppColors.primaryLight
-                : AppColors.textTertiary(context)),
-        label: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: enabled
-                ? AppColors.primaryLight
-                : AppColors.textTertiary(context),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
-        style: TextButton.styleFrom(
-          backgroundColor: enabled
-              ? AppColors.primaryLight.withValues(alpha: 0.1)
-              : AppColors.textTertiary(context).withValues(alpha: 0.08),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: AppColors.primaryLight,
           ),
         ),
       ),
