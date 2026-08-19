@@ -8,8 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/screens/tools_page.dart';
 import 'package:totals/_redesign/screens/advanced_settings_page.dart';
-import 'package:totals/_redesign/screens/ios_backup_import_flow.dart';
-import 'package:totals/_redesign/screens/ios_setup_guide_page.dart';
+import 'package:totals/_redesign/screens/discover_totals_page.dart';
 import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/screens/categories_page.dart';
@@ -58,7 +57,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
 
   bool _isExporting = false;
   bool _isImporting = false;
-  bool _isMigratingIos = false;
   bool _isFetchingSmsPatterns = false;
   bool _isCheckingForUpdates = false;
 
@@ -946,23 +944,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
 
   /// Migrate data from the old iOS (Scriptable) Totals: the user points at their
   /// old export folder and the app converts + imports it.
-  Future<void> _importFromIosWorkaround() async {
-    try {
-      await runIosBackupImport(
-        context,
-        onImportStarted: () {
-          if (mounted) setState(() => _isMigratingIos = true);
-        },
-      );
-    } catch (e) {
-      if (mounted) {
-        _showErrorSnack('${context.l10nTextRead('Migration failed')}: $e');
-      }
-    } finally {
-      if (mounted) setState(() => _isMigratingIos = false);
-    }
-  }
-
   void _showSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1044,27 +1025,36 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
               ),
               const SizedBox(height: 24),
 
+              // ── Discover Totals ─────────────────────────────────────────
+              // iOS-only: both walkthroughs exist because iOS cannot read SMS
+              // directly and the old build lived in Scriptable.
+              if (PlatformSupport.usesFileInbox) ...[
+                _SettingTile(
+                  icon: AppIcons.bolt_rounded,
+                  iconColor: AppColors.amber,
+                  title: context.l10n(
+                    'settings.discoverTotals',
+                    'Discover Totals',
+                  ),
+                  subtitle: context.l10n(
+                    'settings.discoverTotalsSubtitle',
+                    'SMS automation and importing your old data',
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DiscoverTotalsPage(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+
               // ── Preferences ─────────────────────────────────────────────
               _SectionHeader(
                 label: context.l10n('settings.preferences', 'Preferences'),
               ),
               const SizedBox(height: 10),
-
-              // iOS: reach the automatic-tracking setup guide any time.
-              if (PlatformSupport.usesFileInbox)
-                _SettingTile(
-                  icon: AppIcons.bolt_rounded,
-                  iconColor: AppColors.amber,
-                  title: context.l10n(
-                    'settings.automaticTracking',
-                    'Automatic tracking',
-                  ),
-                  subtitle: context.l10n(
-                    'settings.automaticTrackingSubtitle',
-                    'Set up the Shortcut and Messages automation',
-                  ),
-                  onTap: () => openIosSetupGuide(context),
-                ),
 
               _SettingTile(
                 icon: AppIcons.palette_outlined,
@@ -1381,27 +1371,6 @@ class _RedesignSettingsPageState extends State<RedesignSettingsPage> {
                     : null,
                 onTap: _isImporting ? null : _importData,
               ),
-
-              if (PlatformSupport.usesFileInbox)
-                _SettingTile(
-                  icon: AppIcons.download_rounded,
-                  iconColor: AppColors.blue,
-                  title: context.l10n('settings.importFromIos', 'Import from iOS backup'),
-                  subtitle: context.l10n('settings.importFromIosSubtitle',
-                      'Select your old export files (incl. transactions.txt)'),
-                  showChevron: false,
-                  trailing: _isMigratingIos
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.primaryLight,
-                          ),
-                        )
-                      : null,
-                  onTap: _isMigratingIos ? null : _importFromIosWorkaround,
-                ),
 
               _SettingTile(
                 icon: AppIcons.delete_outline_rounded,

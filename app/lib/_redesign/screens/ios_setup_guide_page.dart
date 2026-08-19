@@ -54,6 +54,21 @@ Future<void> maybeShowIosSetupGuideOnFirstLaunch(BuildContext context) async {
 Future<void> openIosSetupGuide(BuildContext context) =>
     showIosSetupSheet(context, firstRun: false);
 
+/// The migration step on its own: same clip-and-action sheet, one page, so
+/// importing from the Scriptable version is guided rather than dumping the user
+/// straight into a file picker.
+Future<void> openIosImportGuide(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => const _IosSetupSheet(
+      firstRun: false,
+      fixedSteps: [_importStep],
+    ),
+  );
+}
+
 /// The setup flow itself: a tall bottom sheet, one step per page.
 ///
 /// On [firstRun] it cannot be dismissed by drag, scrim tap or back gesture —
@@ -132,19 +147,20 @@ const List<_SetupStep> _newUserSteps = _commonSteps;
 /// Coming from the Scriptable version. Data first — moving their history across
 /// before the fiddly Shortcuts work buys patience for the rest — then remove the
 /// old automation so incoming SMS aren't captured twice.
-const List<_SetupStep> _returningUserSteps = [
-  _SetupStep(
-    id: 'import-backup',
+const _SetupStep _importStep = _SetupStep(
+  id: 'import-backup',
     title: 'Bring your data across',
-    body:
-        'Your old data is already on your phone, in iCloud Drive → Scriptable. '
-        'Select ALL the files in that folder, not just transactions.txt. '
-        'Leaving out profiles.txt or account_overrides.txt imports silently '
-        'wrong: no profiles, and your accounts split incorrectly.',
-    icon: AppIcons.download_rounded,
-    actionLabel: 'Choose your Scriptable files',
-    action: _StepActionKind.importBackup,
-  ),
+  body: 'Your old data is already on your phone, in iCloud Drive → Scriptable. '
+      'Select ALL the files in that folder, not just transactions.txt. '
+      'Leaving out profiles.txt or account_overrides.txt imports silently '
+      'wrong: no profiles, and your accounts split incorrectly.',
+  icon: AppIcons.download_rounded,
+  actionLabel: 'Choose your Scriptable files',
+  action: _StepActionKind.importBackup,
+);
+
+const List<_SetupStep> _returningUserSteps = [
+  _importStep,
   _SetupStep(
     id: 'remove-automation',
     title: 'Remove your old Totals automation',
@@ -165,7 +181,11 @@ const List<_SetupStep> _returningUserSteps = [
 class _IosSetupSheet extends StatefulWidget {
   final bool firstRun;
 
-  const _IosSetupSheet({required this.firstRun});
+  /// When set, the branch question is skipped and these steps are shown as-is.
+  /// Used for single-topic sheets opened from Discover Totals.
+  final List<_SetupStep>? fixedSteps;
+
+  const _IosSetupSheet({required this.firstRun, this.fixedSteps});
 
   @override
   State<_IosSetupSheet> createState() => _IosSetupSheetState();
@@ -199,7 +219,8 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
   }
 
   List<_SetupStep> get _steps =>
-      (_isReturningUser ?? false) ? _returningUserSteps : _newUserSteps;
+      widget.fixedSteps ??
+      ((_isReturningUser ?? false) ? _returningUserSteps : _newUserSteps);
 
   bool get _onLastStep => _index >= _steps.length - 1;
 
@@ -224,6 +245,10 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
   }
 
   void _back() {
+    if (_index == 0 && widget.fixedSteps != null) {
+      Navigator.of(context).pop();
+      return;
+    }
     if (_index == 0) {
       // Back out of the track choice rather than closing the sheet.
       setState(() => _isReturningUser = null);
@@ -236,8 +261,12 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
   }
 
   Future<void> _finish() async {
-    await markIosSetupGuideCompleted();
-    if (mounted) Navigator.of(context).maybePop();
+    // A single-topic sheet is not the setup flow; finishing it must not mark
+    // first-run setup as done.
+    if (widget.fixedSteps == null) await markIosSetupGuideCompleted();
+    // pop, not maybePop: on first run PopScope sets canPop false to block the
+    // back gesture, and maybePop honours that, so Done would do nothing.
+    if (mounted) Navigator.of(context).pop();
   }
 
   Future<void> _launch(String url) async {
@@ -296,7 +325,8 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
     // The branch question is two buttons and a sentence — at step height it
     // reads as an empty screen. Grow into the tall sheet only once there's a
     // clip to show.
-    final heightFactor = _isReturningUser == null ? 0.52 : 0.82;
+    final heightFactor =
+        (_isReturningUser == null && widget.fixedSteps == null) ? 0.52 : 0.82;
 
     return PopScope(
       // A half-configured setup leaves the app looking empty and broken, so the
@@ -313,7 +343,7 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
           color: AppColors.background(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        child: _isReturningUser == null
+        child: (_isReturningUser == null && widget.fixedSteps == null)
             ? SafeArea(top: false, child: _buildTrackQuestion(context))
             : _buildSteps(context),
       ),
