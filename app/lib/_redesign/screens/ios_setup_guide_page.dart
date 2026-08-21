@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 import 'package:totals/_redesign/screens/ios_backup_import_flow.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
@@ -29,7 +32,23 @@ const String _kIosSetupReturningKey = 'ios_setup_is_returning_user';
 /// fails the step falls back to its icon. The instructions live in the text.
 const String kSetupMediaBaseUrl = 'https://media.example.invalid/totals/setup';
 
-bool get _shortcutLinkConfigured => !kTotalsShortcutUrl.contains('REPLACE_WITH');
+/// Covers installing the shortcut and wiring the Messages automation, so both
+/// steps point at it.
+const String kShortcutSetupPoster = 'assets/images/shortcut_sync_blurred.webp';
+
+const String _kTutorialBase =
+    'https://pub-b07d3686d8754a7984bb961e5ae9f286.r2.dev/tutorials/v1';
+
+const String kShortcutInstallVideoUrl =
+    '$_kTutorialBase/shortcut-installation.mp4';
+const String kAutomationSetupVideoUrl = '$_kTutorialBase/automation-setup.mp4';
+const String kImportFromScriptableVideoUrl =
+    '$_kTutorialBase/import-from-scriptable.mp4';
+const String kRemoveOldAutomationVideoUrl =
+    '$_kTutorialBase/remove-old-automation.mp4';
+
+bool get _shortcutLinkConfigured =>
+    !kTotalsShortcutUrl.contains('REPLACE_WITH');
 
 Future<bool> hasCompletedIosSetupGuide() async {
   final prefs = await SharedPreferences.getInstance();
@@ -115,6 +134,17 @@ class _SetupStep {
   final String? actionLabel;
   final _StepActionKind action;
 
+  /// Walkthrough clip. Null falls back to the poster, then to the icon.
+  final String? videoUrl;
+
+  /// Bundled blurred still shown while the clip loads, and kept if it never
+  /// does. Bundled rather than fetched so it survives an unreachable CDN.
+  final String? posterAsset;
+
+  /// Shape of the clip, so the box is exactly its size: no crop, no bands.
+  /// The current walkthrough exports are 876x876.
+  final double mediaAspectRatio;
+
   const _SetupStep({
     required this.id,
     required this.title,
@@ -122,6 +152,9 @@ class _SetupStep {
     required this.icon,
     this.actionLabel,
     this.action = _StepActionKind.none,
+    this.videoUrl,
+    this.posterAsset,
+    this.mediaAspectRatio = 1,
   });
 }
 
@@ -137,6 +170,9 @@ const List<_SetupStep> _commonSteps = [
     icon: AppIcons.download_rounded,
     actionLabel: 'Add Totals Shortcut',
     action: _StepActionKind.installShortcut,
+    videoUrl: kShortcutInstallVideoUrl,
+    posterAsset: kShortcutSetupPoster,
+    mediaAspectRatio: 1,
   ),
   _SetupStep(
     id: 'automation',
@@ -148,6 +184,9 @@ const List<_SetupStep> _commonSteps = [
     icon: AppIcons.sms_outlined,
     actionLabel: 'Open Shortcuts app',
     action: _StepActionKind.openShortcuts,
+    videoUrl: kAutomationSetupVideoUrl,
+    posterAsset: kShortcutSetupPoster,
+    mediaAspectRatio: 1,
   ),
 ];
 
@@ -159,7 +198,7 @@ const List<_SetupStep> _newUserSteps = _commonSteps;
 /// old automation so incoming SMS aren't captured twice.
 const _SetupStep _importStep = _SetupStep(
   id: 'import-backup',
-    title: 'Bring your data across',
+  title: 'Bring your data across',
   body: 'Your old data is already on your phone, in iCloud Drive → Scriptable. '
       'Select ALL the files in that folder, not just transactions.txt. '
       'Leaving out profiles.txt or account_overrides.txt imports silently '
@@ -167,6 +206,9 @@ const _SetupStep _importStep = _SetupStep(
   icon: AppIcons.download_rounded,
   actionLabel: 'Choose your Scriptable files',
   action: _StepActionKind.importBackup,
+  videoUrl: kImportFromScriptableVideoUrl,
+  posterAsset: kShortcutSetupPoster,
+  mediaAspectRatio: 1,
 );
 
 const _SetupStep _removeOldAutomationStep = _SetupStep(
@@ -177,6 +219,9 @@ const _SetupStep _removeOldAutomationStep = _SetupStep(
   icon: AppIcons.delete_outline_rounded,
   actionLabel: 'Open Shortcuts app',
   action: _StepActionKind.openShortcuts,
+  videoUrl: kRemoveOldAutomationVideoUrl,
+  posterAsset: kShortcutSetupPoster,
+  mediaAspectRatio: 1,
 );
 
 const List<_SetupStep> _returningUserSteps = [
@@ -347,7 +392,7 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
     // reads as an empty screen. Grow into the tall sheet only once there's a
     // clip to show.
     final heightFactor =
-        (_isReturningUser == null && widget.fixedSteps == null) ? 0.52 : 0.82;
+        (_isReturningUser == null && widget.fixedSteps == null) ? 0.52 : 0.88;
 
     return PopScope(
       // A half-configured setup leaves the app looking empty and broken, so the
@@ -453,7 +498,7 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
           ),
         ),
         _PageDots(count: steps.length, index: _index),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Text(
           '${context.l10nText('Step')} ${_index + 1} ${context.l10nText('of')} ${steps.length}',
           style: theme.textTheme.labelSmall?.copyWith(
@@ -464,9 +509,9 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
         Padding(
           padding: EdgeInsets.fromLTRB(
             24,
-            12,
+            8,
             24,
-            12 + MediaQuery.of(context).padding.bottom,
+            8 + MediaQuery.of(context).padding.bottom,
           ),
           child: Column(
             children: [
@@ -476,7 +521,7 @@ class _IosSetupSheetState extends State<_IosSetupSheet> {
                   busy: _busy,
                   onTap: _busy ? null : () => _runAction(step),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 4),
                 _SecondaryButton(
                   label: _onLastStep
                       ? context.l10nText('Done')
@@ -520,50 +565,59 @@ class _StepView extends StatelessWidget {
     // under short steps. Capped and scrollable so a long step can't push the
     // clip out on a small screen.
     return LayoutBuilder(
-      builder: (context, constraints) => Column(
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(child: _StepMedia(step: step)),
-                if (onBack != null)
-                  Positioned(
-                    top: 12,
-                    left: 12,
-                    child: _MediaBackButton(onTap: onBack!),
-                  ),
-              ],
-            ),
-          ),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: constraints.maxHeight * 0.5),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
-              child: Column(
+      builder: (context, constraints) {
+        // Sized explicitly rather than left to AspectRatio: a non-flex child of
+        // a Column gets unbounded height, so it would claim its full square and
+        // overflow the page on shorter screens.
+        final mediaHeight = math.min(
+          constraints.maxWidth / step.mediaAspectRatio,
+          constraints.maxHeight * 0.72,
+        );
+        return Column(
+          children: [
+            SizedBox(
+              height: mediaHeight,
+              child: Stack(
                 children: [
-                  Text(
-                    context.l10nText(step.title),
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary(context),
+                  Positioned.fill(child: _StepMedia(step: step)),
+                  if (onBack != null)
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: _MediaBackButton(onTap: onBack!),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    context.l10nText(step.body),
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary(context),
-                      height: 1.55,
-                    ),
-                  ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 14, 24, 12),
+                child: Column(
+                  children: [
+                    Text(
+                      context.l10nText(step.title),
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary(context),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      context.l10nText(step.body),
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary(context),
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -599,32 +653,106 @@ class _MediaBackButton extends StatelessWidget {
 /// The clip area. Today it renders the placeholder; when the real poster URL is
 /// live this lazy-loads it and still degrades to the icon on any failure, so a
 /// dead CDN can never block a non-dismissible step.
-class _StepMedia extends StatelessWidget {
+class _StepMedia extends StatefulWidget {
   final _SetupStep step;
 
   const _StepMedia({required this.step});
 
   @override
+  State<_StepMedia> createState() => _StepMediaState();
+}
+
+class _StepMediaState extends State<_StepMedia> {
+  VideoPlayerController? _controller;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final url = widget.step.videoUrl;
+    if (url == null) return;
+    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    try {
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      // Muted and looping: it is a walkthrough, not something to sit through.
+      await controller.setLooping(true);
+      await controller.setVolume(0);
+      await controller.play();
+      setState(() => _controller = controller);
+    } catch (_) {
+      await controller.dispose();
+      // Never blocks the step. The instructions are in the copy and the action
+      // button stays enabled, so an unreachable clip is cosmetic.
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = _controller;
+
     return Container(
       color: AppColors.primaryLight.withValues(alpha: 0.07),
-      child: Image.network(
-        '$kSetupMediaBaseUrl/${step.id}.jpg',
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : _placeholder(context),
-        errorBuilder: (context, _, __) => _placeholder(context),
-      ),
+      child: controller != null && controller.value.isInitialized
+          // contain, not cover: the clip is a phone mockup and cropping it
+          // cuts the device off mid-screen.
+          ? Center(
+              child: AspectRatio(
+                aspectRatio: controller.value.aspectRatio,
+                child: VideoPlayer(controller),
+              ),
+            )
+          : widget.step.posterAsset != null
+              ? _poster(context)
+              : (widget.step.videoUrl != null && !_failed)
+                  ? _placeholder(context, loading: true)
+                  : Image.network(
+                      '$kSetupMediaBaseUrl/${widget.step.id}.jpg',
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) =>
+                          progress == null ? child : _placeholder(context),
+                      errorBuilder: (context, _, __) => _placeholder(context),
+                    ),
     );
   }
 
-  Widget _placeholder(BuildContext context) {
+  /// Blurred still, shown bare. No spinner: the still already reads as the
+  /// clip about to start, and a spinner on top just draws the eye to the wait.
+  Widget _poster(BuildContext context) {
+    return Image.asset(widget.step.posterAsset!, fit: BoxFit.cover);
+  }
+
+  Widget _placeholder(BuildContext context, {bool loading = false}) {
     final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(step.icon, size: 44, color: AppColors.primaryLight),
+          if (loading)
+            const SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.primaryLight,
+              ),
+            )
+          else
+            Icon(widget.step.icon, size: 44, color: AppColors.primaryLight),
           const SizedBox(height: 12),
           Text(
             context.l10nText('Walkthrough clip'),
@@ -710,7 +838,7 @@ class _PrimaryButton extends StatelessWidget {
               AppColors.textTertiary(context).withValues(alpha: 0.15),
           disabledForegroundColor: AppColors.textTertiary(context),
           elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
@@ -749,7 +877,7 @@ class _SecondaryButton extends StatelessWidget {
       child: TextButton(
         onPressed: onTap,
         style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
