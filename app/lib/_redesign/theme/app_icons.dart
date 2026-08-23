@@ -82,6 +82,7 @@ class AppIcons {
       PhosphorIconsRegular.minusCircle;
   static const IconData savings = PhosphorIconsFill.piggyBank;
   static const IconData savings_outlined = PhosphorIconsRegular.piggyBank;
+  static const IconData scales = PhosphorIconsRegular.scales;
   static const IconData satelliteView =
       PhosphorIconsRegular.globeHemisphereEast;
   static const IconData schedule_rounded = PhosphorIconsRegular.clock;

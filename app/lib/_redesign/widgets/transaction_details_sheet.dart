@@ -806,16 +806,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       final nextPrimary = _tx.categoryId == categoryId
           ? (nextIds.isEmpty ? null : nextIds.first)
           : _tx.categoryId;
-      final updated = await _applyCategorySelection(
+      await _applyCategorySelection(
         categoryIds: nextIds,
         primaryCategoryId: nextPrimary,
       );
-      if (updated != null &&
-          mounted &&
-          hasSplittableCategorySelection(updated, _provider) &&
-          !updated.hasCategorySplit) {
-        await _openAmountSplit();
-      }
       return;
     }
 
@@ -856,9 +850,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
-    } else if (hasSplittableCategorySelection(updated, _provider) &&
-        !updated.hasCategorySplit) {
-      await _openAmountSplit();
     }
   }
 
@@ -1718,16 +1709,6 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       if (_categoryExpanded && !isLockedSelfTransfer)
                         _buildCategoryPicker(),
 
-                      if (!isLockedSelfTransfer && _canSplitByCategory)
-                        _DetailRow(
-                          label: 'Amount split',
-                          value: _tx.hasCategorySplit
-                              ? transactionSplitAmountSummary(_tx)
-                              : context.l10nText('Set amounts'),
-                          onTap: _isApplyingCategory ? null : _openAmountSplit,
-                          trailingIcon: AppIcons.chevron_right,
-                        ),
-
                       _buildNoteSection(),
 
                       ReimbursementRelationshipsSection(
@@ -2075,6 +2056,17 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                   isRemove: true,
                   showColorDot: false,
                   onTap: _isApplyingCategory ? null : _clearCategory,
+                ),
+              if (_canSplitByCategory)
+                _CategoryPickerChip(
+                  key: const ValueKey<String>(
+                    'transaction-details-split-action',
+                  ),
+                  label: 'Split',
+                  color: AppColors.primaryLight,
+                  isSelected: _tx.hasCategorySplit,
+                  showColorDot: false,
+                  onTap: _isApplyingCategory ? null : _openAmountSplit,
                 ),
             ],
           ),
@@ -2656,6 +2648,7 @@ class _CategoryPickerChip extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _CategoryPickerChip({
+    super.key,
     required this.label,
     required this.color,
     required this.isSelected,

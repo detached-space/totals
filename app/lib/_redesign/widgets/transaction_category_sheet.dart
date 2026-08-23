@@ -1276,16 +1276,10 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       final nextPrimary = _tx.categoryId == categoryId
           ? (nextIds.isEmpty ? null : nextIds.first)
           : _tx.categoryId;
-      final updated = await _applyCategorySelection(
+      await _applyCategorySelection(
         categoryIds: nextIds,
         primaryCategoryId: nextPrimary,
       );
-      if (updated != null &&
-          mounted &&
-          hasSplittableCategorySelection(updated, _provider) &&
-          !updated.hasCategorySplit) {
-        await _openAmountSplit();
-      }
       return;
     }
 
@@ -1326,9 +1320,6 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
       await _openRepaymentLinkPrompt(updated);
     } else if (isLoanDebtCategory(category)) {
       await _openLoanDebtPersonPrompt(updated);
-    } else if (hasSplittableCategorySelection(updated, _provider) &&
-        !updated.hasCategorySplit) {
-      await _openAmountSplit();
     }
   }
 
@@ -1688,12 +1679,43 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
                         _selectedCategoryIds.isEmpty
                             ? categoriesTitle
                             : '$categoriesTitle · $currentCategoryLabel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary(context),
                         ),
                       ),
                     ),
+                    if (!isLockedSelfTransfer && _canSplitAmount) ...[
+                      TextButton.icon(
+                        key: const ValueKey<String>(
+                          'standalone-category-split-action',
+                        ),
+                        onPressed:
+                            _isApplyingCategory ? null : _openAmountSplit,
+                        icon: const Icon(AppIcons.scales, size: 17),
+                        label: Text(
+                          context.l10nText('Split'),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primaryLight,
+                          disabledForegroundColor:
+                              AppColors.textTertiary(context),
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                    ],
                     IconButton(
                       icon: const Icon(AppIcons.close, size: 20),
                       color: AppColors.textSecondary(context),

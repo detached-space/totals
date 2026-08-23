@@ -686,6 +686,7 @@ class AppLocalizations {
     "Could not create category": "ምድብ መፍጠር አልተቻለም",
     "Could not update category. Changes were reverted.":
         "ምድብ ማዘመን አልተቻለም። ለውጦች ተመልሰዋል።",
+    "Split": "ክፈል",
     "Split transaction": "ትራንዛክሽንን ክፈል",
     "Divide one payment across categories": "አንድ ክፍያን በብዙ ምድቦች ይክፈሉ",
     "Split amount": "መጠኑን ክፈል",

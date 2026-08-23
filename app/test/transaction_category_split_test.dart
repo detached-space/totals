@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
+import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_split_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
@@ -269,7 +271,7 @@ void main() {
     );
   });
 
-  testWidgets('a second category opens the standalone amount sheet',
+  testWidgets('standalone picker waits for Split and supports three categories',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -308,21 +310,54 @@ void main() {
 
     await tester.tap(find.text('Choose categories'));
     await tester.pumpAndSettle();
+
+    final splitAction = find.byKey(
+      const ValueKey<String>('standalone-category-split-action'),
+    );
+    expect(splitAction, findsNothing);
+
     await tester.tap(find.text('Household'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('transaction-split-sheet')),
+      findsNothing,
+    );
+    expect(transactionProvider.lastUpdated?.selectedCategoryIds, <int>[2, 1]);
+    expect(splitAction, findsOneWidget);
+    expect(
+        find.descendant(
+            of: splitAction, matching: find.byIcon(AppIcons.scales)),
+        findsOneWidget);
+    expect(tester.widget<TextButton>(splitAction).onPressed, isNotNull);
+
+    await tester.tap(find.text('Transport'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('transaction-split-sheet')),
+      findsNothing,
+    );
+    expect(
+      transactionProvider.lastUpdated?.selectedCategoryIds,
+      <int>[3, 2, 1],
+    );
+
+    await tester.tap(splitAction);
     await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey<String>('transaction-split-sheet')),
       findsOneWidget,
     );
-    expect(transactionProvider.lastUpdated?.selectedCategoryIds, <int>[2, 1]);
     expect(find.text('Food'), findsOneWidget);
     expect(find.text('Household'), findsOneWidget);
-    expect(find.text('ETB 50.00'), findsOneWidget);
+    expect(find.text('Transport'), findsOneWidget);
+    expect(find.text('ETB 33.34'), findsOneWidget);
     final firstAmountField = tester.widget<TextField>(
       find.byKey(const ValueKey<String>('split-part-0-amount')),
     );
-    expect(firstAmountField.controller?.text, '50.00');
+    expect(firstAmountField.controller?.text, '33.33');
 
     expect(
       find.text(
@@ -342,7 +377,10 @@ void main() {
       findsNothing,
     );
     expect(transactionProvider.lastUpdated?.hasCategorySplit, isFalse);
-    expect(transactionProvider.lastUpdated?.selectedCategoryIds, <int>[2, 1]);
+    expect(
+      transactionProvider.lastUpdated?.selectedCategoryIds,
+      <int>[3, 2, 1],
+    );
   });
 
   testWidgets('closing the editor keeps an existing split unchanged',
@@ -402,8 +440,7 @@ void main() {
     expect(transaction.selectedCategoryIds, <int>[1, 2]);
   });
 
-  testWidgets('the category picker does not show an amount split action',
-      (tester) async {
+  testWidgets('transaction details puts Split next to Clear', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final transactionProvider = _CategorySplitTestProvider();
@@ -414,10 +451,8 @@ void main() {
       amount: 100,
       reference: 'split-category-picker',
       type: 'DEBIT',
-      categorySplits: const <TransactionCategorySplit>[
-        TransactionCategorySplit(categoryId: 1, amountMinor: 4000),
-        TransactionCategorySplit(categoryId: 2, amountMinor: 6000),
-      ],
+      categoryId: 1,
+      categoryIds: const <int>[1],
     );
 
     await tester.pumpWidget(
@@ -427,13 +462,14 @@ void main() {
           home: Builder(
             builder: (context) => Scaffold(
               body: TextButton(
-                onPressed: () => showTransactionCategorySheet(
+                onPressed: () => showTransactionDetailsSheet(
                   context: context,
                   transaction: transaction,
                   provider: transactionProvider,
+                  initiallyExpandCategory: true,
                   allowAutoCategorizationRuleUpdates: false,
                 ),
-                child: const Text('Open category picker'),
+                child: const Text('Open transaction details'),
               ),
             ),
           ),
@@ -441,16 +477,43 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Open category picker'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open transaction details'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('Amount split'), findsNothing);
+    expect(find.text('Clear'), findsOneWidget);
+    final splitAction = find.byKey(
+      const ValueKey<String>('transaction-details-split-action'),
+    );
+    expect(splitAction, findsNothing);
     expect(
       find.byKey(const ValueKey<String>('transaction-split-sheet')),
       findsNothing,
     );
-    expect(find.text('Food'), findsOneWidget);
+    expect(find.text('Food'), findsWidgets);
     expect(find.text('Household'), findsOneWidget);
+
+    await tester.tap(find.text('Household'));
+    await tester.pump();
+
+    expect(splitAction, findsOneWidget);
+    expect(find.descendant(of: splitAction, matching: find.byType(Icon)),
+        findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('transaction-split-sheet')),
+      findsNothing,
+    );
+
+    await tester.ensureVisible(splitAction);
+    await tester.tap(splitAction);
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(
+      find.byKey(const ValueKey<String>('transaction-split-sheet')),
+      findsOneWidget,
+    );
   });
 }
 
@@ -469,6 +532,13 @@ class _CategorySplitTestProvider extends TransactionProvider {
       essential: false,
       flow: 'expense',
       iconKey: 'home',
+    ),
+    Category(
+      id: 3,
+      name: 'Transport',
+      essential: false,
+      flow: 'expense',
+      iconKey: 'car',
     ),
   ];
 
