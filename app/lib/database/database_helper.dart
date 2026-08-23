@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/category.dart' as models;
 
 class DatabaseMigrationException implements Exception {
@@ -49,7 +50,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 36,
+        version: 37,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +60,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV36Schema(db);
+      await _validateV37Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -377,6 +378,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -403,6 +407,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -426,6 +433,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -446,6 +456,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -463,6 +476,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -477,6 +493,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -488,6 +507,9 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
@@ -496,11 +518,22 @@ class DatabaseHelper {
       if (newVersion >= 36) {
         await _migrateV35ToV36(db);
       }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
       return;
     }
 
     if (oldVersion < 36) {
       await _migrateV35ToV36(db);
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 37) {
+      await _migrateV36ToV37(db);
       return;
     }
 
@@ -1152,6 +1185,18 @@ class DatabaseHelper {
       });
     });
     await _runV28Stage('v36 final validation', () => _validateV36Schema(db));
+  }
+
+  Future<void> _migrateV36ToV37(Database db) async {
+    await _runV28Stage('v37 cash total balance preference', () async {
+      await db.update(
+        'accounts',
+        const <String, Object?>{'includeInTotals': 0},
+        where: 'bank = ?',
+        whereArgs: const <Object?>[CashConstants.bankId],
+      );
+    });
+    await _runV28Stage('v37 final validation', () => _validateV37Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -2204,6 +2249,10 @@ class DatabaseHelper {
         'v36 invariant transaction_locations missing placeName',
       );
     }
+  }
+
+  Future<void> _validateV37Schema(Database db) async {
+    await _validateV36Schema(db);
   }
 
   Future<void> _ensureTransactionLocationSchema(Database db) async {

@@ -48,6 +48,7 @@ class AccountRepository {
         'accountHolderName': CashConstants.defaultAccountHolderName,
         'settledBalance': 0.0,
         'pendingCredit': 0.0,
+        'includeInTotals': 0,
         'isDefault': 1,
         if (profileId != null) 'profileId': profileId,
       },

@@ -220,6 +220,7 @@ class _AddCashTransactionContentState
       bank: CashConstants.bankId,
       balance: 0.0,
       accountHolderName: CashConstants.defaultAccountHolderName,
+      includeInTotals: false,
     );
     await _accountRepo.saveAccount(cashAccount);
   }

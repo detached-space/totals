@@ -84,6 +84,29 @@ class SummaryHandler {
     }).toList();
   }
 
+  double _displayedAccountBalance({
+    required Account account,
+    required Iterable<Account> bankAccounts,
+    required Iterable<Transaction> transactions,
+  }) {
+    if (account.bank != CashConstants.bankId) return account.balance;
+
+    final cashAccounts = bankAccounts.toList(growable: false);
+    final cashDelta = transactions.where((transaction) {
+      if (transaction.bankId != CashConstants.bankId) return false;
+      final transactionAccount = transaction.accountNumber?.trim() ?? '';
+      if (transactionAccount.isNotEmpty) {
+        return transactionAccount == account.accountNumber;
+      }
+      return cashAccounts.length == 1 ||
+          account.accountNumber == CashConstants.defaultAccountNumber;
+    }).fold<double>(
+      0.0,
+      (sum, transaction) => sum + transactionBalanceDelta(transaction),
+    );
+    return account.balance + cashDelta;
+  }
+
   /// GET /api/summary
   /// Returns aggregated summary across all accounts
   Future<Response> _getSummary(Request request) async {
@@ -104,10 +127,13 @@ class SummaryHandler {
       double totalPendingCredit = 0;
 
       for (var account in accounts) {
-        if (account.bank != CashConstants.bankId &&
-            account.includeInTotals &&
-            !account.isDormant) {
-          totalBalance += account.balance;
+        if (account.includeInTotals && !account.isDormant) {
+          totalBalance += _displayedAccountBalance(
+            account: account,
+            bankAccounts:
+                accounts.where((candidate) => candidate.bank == account.bank),
+            transactions: transactions,
+          );
         }
         totalSettledBalance += account.settledBalance ?? 0;
         totalPendingCredit += account.pendingCredit ?? 0;
@@ -195,7 +221,11 @@ class SummaryHandler {
 
           for (var account in bankAccounts) {
             if (account.includeInTotals && !account.isDormant) {
-              totalBalance += account.balance;
+              totalBalance += _displayedAccountBalance(
+                account: account,
+                bankAccounts: bankAccounts,
+                transactions: bankTransactions,
+              );
             }
             settledBalance += account.settledBalance ?? 0;
             pendingCredit += account.pendingCredit ?? 0;
@@ -298,7 +328,12 @@ class SummaryHandler {
             'bankName': bank?.name ?? 'Unknown Bank',
             'bankShortName': bank?.shortName ?? 'N/A',
             'bankImage': bank?.image ?? '',
-            'balance': account.balance,
+            'balance': _displayedAccountBalance(
+              account: account,
+              bankAccounts:
+                  accounts.where((candidate) => candidate.bank == account.bank),
+              transactions: accountTransactions,
+            ),
             'settledBalance': account.settledBalance,
             'pendingCredit': account.pendingCredit,
             'includeInTotals': account.includeInTotals,

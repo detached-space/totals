@@ -1,0 +1,45 @@
+GOOGLE PLAY LOCATION DECLARATION
+
+APP PURPOSE
+
+Totals is a personal finance app that helps users track income, expenses, balances, budgets, and spending. With permission, it reads supported bank transaction SMS messages and processes them locally on the device into a private transaction history. Users can also add, split, and categorize transactions manually.
+
+LOCATION ACCESS
+
+Spending Map collects precise location to attach a place to new debit and credit transactions, including supported bank SMS transactions received while Totals is closed or not in use. Background access is needed because these messages can arrive at any time; foreground-only access would miss them. Coordinates are stored locally, are not used for advertising or analytics, and can be deleted by the user at any time.
+
+VIDEO INSTRUCTIONS
+
+Suggested title:
+Totals - Background Location Permission Walkthrough
+
+Upload a short unlisted YouTube video that is accessible without requesting permission. Aim for about 30 seconds and show this complete flow:
+
+1. Open Totals on an Android device.
+2. Open Advanced Settings.
+3. Enable Spending Map.
+4. Show the complete prominent disclosure.
+5. Tap Continue.
+6. Show and grant the foreground Android location permission.
+7. Show and grant "Allow all the time" location access.
+8. Close or background Totals.
+9. Receive a synthetic supported-bank transaction SMS. Do not expose real financial data.
+10. Reopen Totals and show the transaction on Spending Map.
+
+Paste the resulting public or unlisted URL into Play Console, for example:
+https://youtu.be/VIDEO_ID
+
+IN-APP PROMINENT DISCLOSURE
+
+Totals collects precise location data to enable Spending Map even when the app is closed or not in use.
+
+PLAY STORE MAIN DESCRIPTION SENTENCE
+
+Optional Spending Map can save the location of supported bank SMS transactions even while Totals is closed, so you can explore spending by place. Location capture is off by default.
+
+BEFORE SUBMITTING
+
+- Add the background-location explanation to the public privacy policy.
+- Update the Data safety form to declare approximate and precise location accurately.
+- Make sure the disclosure appears before Android's location permission prompts.
+- Make sure the video, disclosure, privacy policy, store listing, and declaration all describe the same behavior.

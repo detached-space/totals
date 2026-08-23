@@ -739,6 +739,7 @@ class SmsService {
       bank: CashConstants.bankId,
       balance: 0.0,
       accountHolderName: CashConstants.defaultAccountHolderName,
+      includeInTotals: false,
     );
     await accountRepo.saveAccount(cashAccount);
   }

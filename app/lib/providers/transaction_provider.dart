@@ -1231,9 +1231,10 @@ class TransactionProvider with ChangeNotifier {
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalCredit);
     double grandTotalDebit =
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalDebit);
-    double grandTotalBalance = _bankSummaries
-        .where((bank) => bank.bankId != CashConstants.bankId)
-        .fold(0.0, (sum, bank) => sum + bank.totalBalance);
+    double grandTotalBalance = _bankSummaries.fold<double>(
+      0.0,
+      (sum, bank) => sum + bank.totalBalance,
+    );
     final grandTransferIn =
         _bankSummaries.fold<double>(0.0, (sum, bank) => sum + bank.transferIn);
     final grandTransferOut = _bankSummaries.fold<double>(
@@ -1611,7 +1612,9 @@ class TransactionProvider with ChangeNotifier {
       monthlyExpenseByOffset: healthMonthExpenseByOffset,
       totalBalance: _summary?.totalBalance ??
           _accountSummaries
-              .where((summary) => summary.bankId != CashConstants.bankId)
+              .where(
+                (summary) => summary.includeInTotals && !summary.isDormant,
+              )
               .fold<double>(
                 0.0,
                 (sum, summary) => sum + summary.balance,
@@ -1921,6 +1924,7 @@ class TransactionProvider with ChangeNotifier {
           bank: CashConstants.bankId,
           balance: targetBalance,
           accountHolderName: CashConstants.defaultAccountHolderName,
+          includeInTotals: false,
         ),
       );
       await loadData();

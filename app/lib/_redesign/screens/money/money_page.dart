@@ -4138,9 +4138,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           provider,
           account,
           includeInTotals: include,
-          successMessage: include
-              ? 'Account included in total balance.'
-              : 'Account excluded from total balance.',
+          successMessage: isCash
+              ? include
+                  ? 'Cash wallet included in total balance.'
+                  : 'Cash wallet excluded from total balance.'
+              : include
+                  ? 'Account included in total balance.'
+                  : 'Account excluded from total balance.',
         ),
         onDormantChanged: (dormant) => _updateAccountPreferences(
           provider,
@@ -15990,6 +15994,21 @@ class _AccountActionsSheetState extends State<_AccountActionsSheet> {
               _AccountMenuAction.viewTransactions,
             ),
           ),
+          if (widget.isCash)
+            _AccountActionTile(
+              key: const ValueKey<String>('cash-total-balance-action'),
+              icon: _includeInTotals
+                  ? AppIcons.visibility_outlined
+                  : AppIcons.visibility_off_outlined,
+              label: 'Show in total balance',
+              trailing: Switch.adaptive(
+                key: const ValueKey<String>('cash-total-balance-switch'),
+                value: _includeInTotals,
+                activeThumbColor: AppColors.primaryLight,
+                onChanged: _isUpdating ? null : (_) => _toggleTotals(),
+              ),
+              onTap: _isUpdating ? null : _toggleTotals,
+            ),
           if (!widget.isCash) ...[
             _AccountActionTile(
               icon: AppIcons.refresh,
@@ -16062,12 +16081,15 @@ class _AccountActionTile extends StatelessWidget {
   final String label;
   final Color? color;
   final VoidCallback? onTap;
+  final Widget? trailing;
 
   const _AccountActionTile({
+    super.key,
     required this.icon,
     required this.label,
     required this.onTap,
     this.color,
+    this.trailing,
   });
 
   @override
@@ -16087,6 +16109,7 @@ class _AccountActionTile extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
+      trailing: trailing,
       onTap: onTap,
     );
   }

@@ -583,6 +583,11 @@ class AppLocalizations {
         "እርግጠኛ ነዎት ይህን አካውንት መሰረዝ ይፈልጋሉ?",
     "Cash Wallet": "የጥሬ ገንዘብ ቦርሳ",
     "On-hand cash": "በእጅ ያለ ጥሬ ገንዘብ",
+    "Show in total balance": "በጠቅላላ ቀሪ ሂሳብ ውስጥ አሳይ",
+    "Cash wallet included in total balance.":
+        "የጥሬ ገንዘብ ቦርሳ በጠቅላላ ቀሪ ሂሳብ ውስጥ ተካቷል።",
+    "Cash wallet excluded from total balance.":
+        "የጥሬ ገንዘብ ቦርሳ ከጠቅላላ ቀሪ ሂሳብ ተወግዷል።",
     "Set cash wallet amount": "ጥሬ ገንዘብ መጠን ያስተካክሉ",
     "Clear Cash Wallet": "ጥሬ ገንዘብ አጽዳ",
     "Cash wallet is already at that amount": "ጥሬ ገንዘብ አስቀድሞ በዚያ መጠን ላይ ነው",
