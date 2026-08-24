@@ -248,6 +248,7 @@ class Transaction {
     bool clearCategoryIds = false,
     bool clearNote = false,
     bool clearOwnerAccountNumber = false,
+    bool clearCurrentBalance = false,
   }) {
     int? nextCategoryId;
     List<int>? nextCategoryIds;
@@ -289,7 +290,8 @@ class Transaction {
       note: clearNote ? null : (note ?? this.note),
       time: time ?? this.time,
       status: status ?? this.status,
-      currentBalance: currentBalance ?? this.currentBalance,
+      currentBalance:
+          clearCurrentBalance ? null : (currentBalance ?? this.currentBalance),
       bankId: bankId ?? this.bankId,
       type: type ?? this.type,
       transactionLink: transactionLink ?? this.transactionLink,
