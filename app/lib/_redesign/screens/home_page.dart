@@ -289,6 +289,10 @@ class _RedesignHomePageState extends State<RedesignHomePage>
             (_isBootstrapping || provider.isLoading);
         final summary = provider.summary;
         final totalBalance = summary?.totalBalance ?? 0.0;
+        final pendingCredit = provider.bankSummaries.fold<double>(
+          0.0,
+          (sum, bank) => sum + bank.pendingCredit,
+        );
         final todaySorted = provider.todayTransactions;
         final todayCount = todaySorted.length;
         final monthTransactionsCount = provider.monthTransactions.length;
@@ -323,6 +327,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                             children: [
                               _TotalBalanceCard(
                                 totalBalance: totalBalance,
+                                pendingCredit: pendingCredit,
                                 todayIncome: todayCashFlowTotals.income,
                                 todayExpense: todayCashFlowTotals.expense,
                                 weekIncome: weekCashFlowTotals.income,
