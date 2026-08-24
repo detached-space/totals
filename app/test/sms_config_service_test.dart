@@ -66,4 +66,32 @@ is ETB 51,509.06.''';
       isTrue,
     );
   });
+
+  test('bundled Endekise fix does not treat outstanding as wallet balance',
+      () async {
+    await db.delete('sms_patterns');
+    await db.insert('sms_patterns', <String, Object?>{
+      'bankId': 6,
+      'senderId': 'telebirr',
+      'regex':
+          r'endekise[\s\S]*?ETB\s*(?<amount>-?[\d,.]+)\s+credit\s+amount[\s\S]*?outstanding\s+amount\s+is\s+ETB\s*(?<balance>-?[\d,.]+)',
+      'type': 'CREDIT',
+      'description': 'Fallback Telebirr endekise',
+      'refRequired': 0,
+      'hasAccount': 0,
+    });
+
+    final patterns = await SmsConfigService().getPatterns(
+      allowRemoteFetch: false,
+    );
+    final endekise = patterns.singleWhere(
+      (pattern) =>
+          pattern.bankId == 6 &&
+          pattern.description == 'Fallback Telebirr endekise',
+    );
+
+    expect(endekise.type, 'DEBIT');
+    expect(endekise.regex.contains('?<outstanding>'), isTrue);
+    expect(endekise.regex.contains('?<balance>'), isFalse);
+  });
 }
