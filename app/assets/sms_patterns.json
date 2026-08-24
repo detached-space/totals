@@ -1203,14 +1203,14 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
-      "regex": "endekise[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)\\s+credit\\s+amount[\\s\\S]*?outstanding\\s+amount\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "regex": "endekise[\\s\\S]*?ETB\\s*(?<amount>-?[\\d,.]+)\\s+credit\\s+amount[\\s\\S]*?outstanding\\s+amount\\s+is\\s+ETB\\s*(?<outstanding>-?[\\d,.]+)",
       "type": "DEBIT",
       "description": "Fallback Telebirr endekise",
       "refRequired": false,
       "hasAccount": false,
       "mapping": {
         "amount": 1,
-        "balance": 2
+        "outstanding": 2
       }
     },
     {
@@ -1258,27 +1258,27 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
-      "regex": "repaid\\s+(?<amount>-?[\\d,.]+)\\s+ETB[\\s\\S]*?unpaid\\s+credit\\s+amount\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+ETB",
+      "regex": "repaid\\s+(?<amount>-?[\\d,.]+)\\s+ETB[\\s\\S]*?unpaid\\s+credit\\s+amount\\s+is\\s+(?<outstanding>-?[\\d,.]+)\\s+ETB",
       "type": "DEBIT",
       "description": "Fallback Telebirr credit repayment",
       "refRequired": false,
       "hasAccount": false,
       "mapping": {
         "amount": 1,
-        "balance": 2
+        "outstanding": 2
       }
     },
     {
       "bankId": 6,
       "senderId": "telebirr",
-      "regex": "paid\\s+amount\\s+is\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?total\\s+outstanding\\s+amount\\s+is\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "regex": "paid\\s+amount\\s+is\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?total\\s+outstanding\\s+amount\\s+is\\s+ETB\\s*(?<outstanding>-?[\\d,.]+)",
       "type": "DEBIT",
       "description": "Fallback Telebirr paid outstanding credit",
       "refRequired": false,
       "hasAccount": false,
       "mapping": {
         "amount": 1,
-        "balance": 2
+        "outstanding": 2
       }
     },
     {
@@ -1309,26 +1309,26 @@
     {
       "bankId": 6,
       "senderId": "telebirr",
-      "regex": "paid\\s+a\\s+credit\\s+amount\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?outstanding\\s+credit\\s+amount\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "regex": "paid\\s+a\\s+credit\\s+amount\\s+of\\s+ETB\\s*(?<amount>-?[\\d,.]+)[\\s\\S]*?outstanding\\s+credit\\s+amount\\s+ETB\\s*(?<outstanding>-?[\\d,.]+)",
       "type": "DEBIT",
       "description": "Fallback Telebirr credit amount paid",
       "refRequired": false,
       "hasAccount": false,
       "mapping": {
         "amount": 1,
-        "balance": 2
+        "outstanding": 2
       }
     },
     {
       "bankId": 6,
       "senderId": "telebirr",
-      "regex": "outstanding\\s+credit\\s+balance\\s+of\\s+ETB\\s*(?<balance>-?[\\d,.]+)",
+      "regex": "outstanding\\s+credit\\s+balance\\s+of\\s+ETB\\s*(?<outstanding>-?[\\d,.]+)",
       "type": "DEBIT",
       "description": "Fallback Telebirr overdue credit balance",
       "refRequired": false,
       "hasAccount": false,
       "mapping": {
-        "balance": 1
+        "outstanding": 1
       }
     },
     {
@@ -2112,14 +2112,14 @@
     {
       "bankId": 8,
       "senderId": "MPESA",
-      "regex": "Overdraft\\s+amount\\s+used\\s+is\\s+(?<amount>-?[\\d,.]+)Birr[\\s\\S]*?outstanding\\s+amount\\s+is\\s+(?<balance>-?[\\d,.]+)\\s+Birr",
+      "regex": "Overdraft\\s+amount\\s+used\\s+is\\s+(?<amount>-?[\\d,.]+)Birr[\\s\\S]*?outstanding\\s+amount\\s+is\\s+(?<outstanding>-?[\\d,.]+)\\s+Birr",
       "type": "DEBIT",
       "description": "Fallback MPESA overdraft used",
       "refRequired": false,
       "hasAccount": false,
       "mapping": {
         "amount": 1,
-        "balance": 2
+        "outstanding": 2
       }
     },
     {
