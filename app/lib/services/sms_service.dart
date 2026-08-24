@@ -709,6 +709,82 @@ class SmsService {
     print("debug: Account balance updated for ${account.accountHolderName}");
   }
 
+  static Future<void> _saveUpdatedPendingCredit(
+    AccountRepository accRepo,
+    Account account,
+    double pendingCredit,
+  ) async {
+    final updated = Account(
+      accountNumber: account.accountNumber,
+      bank: account.bank,
+      balance: account.balance,
+      accountHolderName: account.accountHolderName,
+      settledBalance: account.settledBalance,
+      pendingCredit: pendingCredit,
+      profileId: account.profileId,
+      smsSubscriptionId: account.smsSubscriptionId,
+    );
+    await accRepo.saveAccount(updated);
+    print(
+      "debug: Account Endekise outstanding updated for "
+      "${account.accountHolderName}: $pendingCredit",
+    );
+  }
+
+  /// Public entry used by reparse / registration to refresh Endekise outstanding.
+  static Future<void> updateTelebirrEndekiseOutstanding({
+    required String messageBody,
+    Account? preferredOwner,
+  }) async {
+    final accounts = await AccountRepository().getAccounts();
+    await _updateTelebirrPendingCreditFromMessage(
+      messageBody: messageBody,
+      registeredAccounts: accounts,
+      preferredOwner: preferredOwner,
+    );
+  }
+
+  /// Stores Endekise outstanding on Telebirr accounts without touching wallet.
+  static Future<void> _updateTelebirrPendingCreditFromMessage({
+    required String messageBody,
+    required List<Account> registeredAccounts,
+    Account? preferredOwner,
+  }) async {
+    final outstanding =
+        SmsMessageClassifier.extractCreditLineOutstanding(messageBody);
+    if (outstanding == null) return;
+
+    final telebirrAccounts = registeredAccounts
+        .where((account) => account.bank == 6)
+        .toList(growable: false);
+    if (telebirrAccounts.isEmpty) return;
+
+    final targets = <Account>[];
+    if (preferredOwner != null && preferredOwner.bank == 6) {
+      targets.add(preferredOwner);
+    } else if (telebirrAccounts.length == 1) {
+      targets.add(telebirrAccounts.single);
+    } else {
+      final defaults =
+          telebirrAccounts.where((account) => account.isDefault).toList();
+      if (defaults.length == 1) {
+        targets.add(defaults.single);
+      } else {
+        targets.addAll(
+          telebirrAccounts.where((account) => !account.isDormant),
+        );
+        if (targets.isEmpty) targets.addAll(telebirrAccounts);
+      }
+    }
+
+    final accRepo = AccountRepository();
+    for (final account in targets) {
+      final current = account.pendingCredit ?? 0.0;
+      if ((current - outstanding).abs() < 0.0001) continue;
+      await _saveUpdatedPendingCredit(accRepo, account, outstanding);
+    }
+  }
+
   static bool _isAtmWithdrawal(
     Map<String, dynamic> details,
     String messageBody,
@@ -1170,6 +1246,10 @@ class SmsService {
     }
     if (bank.id == 6 &&
         SmsMessageClassifier.isTelebirrCreditLineNotice(messageBody)) {
+      await _updateTelebirrPendingCreditFromMessage(
+        messageBody: messageBody,
+        registeredAccounts: await AccountRepository().getAccounts(),
+      );
       return const ParseResult(
         status: ParseStatus.duplicate,
         reason: 'Ignored Telebirr Endekise credit-line notice',
@@ -1481,6 +1561,16 @@ class SmsService {
     );
 
     print("debug: New transaction saved: ${savedTx.reference}");
+
+    if (bank.id == 6 &&
+        SmsMessageClassifier.isTelebirrCreditLineActivity(messageBody)) {
+      final accounts = await AccountRepository().getAccounts();
+      await _updateTelebirrPendingCreditFromMessage(
+        messageBody: messageBody,
+        registeredAccounts: accounts,
+        preferredOwner: resolvedOwner,
+      );
+    }
 
     if (_isAtmWithdrawal(details, messageBody)) {
       try {

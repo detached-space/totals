@@ -74,6 +74,41 @@ class SmsMessageClassifier {
     caseSensitive: false,
   );
 
+  static final List<RegExp> _outstandingAmountPatterns = <RegExp>[
+    RegExp(
+      r'outstanding\s+amount\s+is\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'current\s+outstanding\s+credit\s+amount\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'outstanding\s+credit\s+amount\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'unpaid\s+credit\s+amount\s+is\s+([\d,.]+)\s+ETB',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'total\s+outstanding\s+amount\s+is\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+  ];
+
+  /// Outstanding Endekise / credit-line amount from an SMS body, if present.
+  static double? extractCreditLineOutstanding(String messageBody) {
+    for (final pattern in _outstandingAmountPatterns) {
+      final match = pattern.firstMatch(messageBody);
+      final raw = match?.group(1)?.replaceAll(',', '').trim();
+      if (raw == null || raw.isEmpty) continue;
+      final value = double.tryParse(raw);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
   /// Telebirr Endekise notices describe a loan draw, not E-Money.
   ///
   /// The actual merchant/wallet SMS already records the spend and the real
