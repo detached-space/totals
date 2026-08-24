@@ -57,6 +57,35 @@ void main() {
     expect(balance, 125.50);
   });
 
+  test('does not use Endekise outstanding as Telebirr wallet evidence', () {
+    final balance = resolveRefreshedAccountBalance(
+      account: telebirrAccount,
+      bank: telebirr,
+      accounts: <Account>[telebirrAccount, cbeBirrAccount],
+      banksById: banksById,
+      transactions: <Transaction>[
+        _transaction(
+          bankId: 6,
+          balance: '0.00',
+          time: '2026-08-24T13:59:00',
+        ),
+        Transaction(
+          amount: 16.16,
+          reference: 'endekise-1',
+          bankId: 6,
+          type: 'DEBIT',
+          time: '2026-08-24T14:00:00',
+          currentBalance: '3168.62',
+          creditor: 'Endekise',
+          ownerAccountNumber: '0920945085',
+          profileId: 1,
+        ),
+      ],
+    );
+
+    expect(balance, 0.00);
+  });
+
   test('preserves an unproven imported balance when no evidence exists', () {
     final balance = resolveRefreshedAccountBalance(
       account: _account(37, balance: 600),
