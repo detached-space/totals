@@ -5,6 +5,12 @@ import 'package:totals/models/transaction_source_sms.dart';
 class TransactionSourceSmsRepository {
   static const int _queryChunkSize = 500;
 
+  Future<List<TransactionSourceSms>> getAll() async {
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query('transaction_source_sms');
+    return rows.map(TransactionSourceSms.fromJson).toList(growable: false);
+  }
+
   Future<TransactionSourceSms?> getForTransaction(
     String transactionReference,
   ) async {

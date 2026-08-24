@@ -2,7 +2,18 @@ plugins {
     id "com.android.application"
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
-    id "com.google.gms.google-services"
+}
+
+def googleServicesFile = file('google-services.json')
+def hasGoogleServices = googleServicesFile.exists()
+if (hasGoogleServices) {
+    apply plugin: 'com.google.gms.google-services'
+} else {
+    logger.warn(
+        "google-services.json not found at ${googleServicesFile.path}. " +
+        "Firebase/FCM will be disabled for this build. Place the file at " +
+        "android/app/google-services.json to enable it."
+    )
 }
 
 def localProperties = new Properties()

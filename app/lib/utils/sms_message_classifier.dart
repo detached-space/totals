@@ -44,4 +44,103 @@ class SmsMessageClassifier {
     }
     return null;
   }
+
+  static final RegExp _telebirrEndekise = RegExp(
+    r'\bendekise\b',
+    caseSensitive: false,
+  );
+
+  static final RegExp _usedCreditAmount = RegExp(
+    r'used\s+ETB\s+[\d,.]+\s+credit\s+amount',
+    caseSensitive: false,
+  );
+
+  static final RegExp _creditLineOutstanding = RegExp(
+    r'unpaid\s+credit\s+amount|'
+    r'outstanding\s+credit\s+(?:amount|balance)|'
+    r'paid\s+a\s+credit\s+amount\s+of',
+    caseSensitive: false,
+  );
+
+  static final RegExp _creditLineRepayment = RegExp(
+    r'paid\s+a\s+credit\s+amount|'
+    r'successfully\s+paid\s+a\s+credit|'
+    r'repaid\s+[\d,.]+\s+ETB',
+    caseSensitive: false,
+  );
+
+  static final RegExp _overdraftOutstanding = RegExp(
+    r'overdraft[\s\S]{0,120}outstanding\s+amount',
+    caseSensitive: false,
+  );
+
+  static final List<RegExp> _outstandingAmountPatterns = <RegExp>[
+    RegExp(
+      r'outstanding\s+amount\s+is\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'current\s+outstanding\s+credit\s+amount\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'outstanding\s+credit\s+amount\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'unpaid\s+credit\s+amount\s+is\s+([\d,.]+)\s+ETB',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'total\s+outstanding\s+amount\s+is\s+ETB\s*([\d,.]+)',
+      caseSensitive: false,
+    ),
+  ];
+
+  /// Outstanding Endekise / credit-line amount from an SMS body, if present.
+  static double? extractCreditLineOutstanding(String messageBody) {
+    for (final pattern in _outstandingAmountPatterns) {
+      final match = pattern.firstMatch(messageBody);
+      final raw = match?.group(1)?.replaceAll(',', '').trim();
+      if (raw == null || raw.isEmpty) continue;
+      final value = double.tryParse(raw);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  /// Telebirr Endekise notices describe a loan draw, not E-Money.
+  ///
+  /// The actual merchant/wallet SMS already records the spend and the real
+  /// wallet balance. Parsing this companion SMS treats outstanding debt as
+  /// cash and can count "credit amount" as income.
+  static bool isTelebirrCreditLineNotice(String messageBody) {
+    if (_telebirrEndekise.hasMatch(messageBody)) return true;
+    return _usedCreditAmount.hasMatch(messageBody);
+  }
+
+  /// Paying down Endekise / outstanding credit is money leaving the wallet,
+  /// not income, even though the SMS says "credit amount".
+  static bool isTelebirrCreditLineRepayment(String messageBody) {
+    return _creditLineRepayment.hasMatch(messageBody);
+  }
+
+  static bool isTelebirrCreditLineActivity(String messageBody) {
+    return isTelebirrCreditLineNotice(messageBody) ||
+        isTelebirrCreditLineRepayment(messageBody);
+  }
+
+  /// True when an SMS reports loan/overdraft outstanding rather than wallet
+  /// cash. That figure must not overwrite `Account.balance`.
+  static bool reportsLiabilityOutstanding(String messageBody) {
+    if (isTelebirrCreditLineActivity(messageBody)) return true;
+    if (_creditLineOutstanding.hasMatch(messageBody)) return true;
+    return _overdraftOutstanding.hasMatch(messageBody);
+  }
+
+  static bool isTelebirrNonLedgerNotice(String messageBody) {
+    return isTelebirrAtmAuthorization(messageBody) ||
+        isTelebirrAirtimeReceipt(messageBody) ||
+        isTelebirrCreditLineNotice(messageBody);
+  }
 }

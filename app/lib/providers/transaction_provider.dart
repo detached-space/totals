@@ -20,6 +20,7 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/services/budget_alert_service.dart';
 import 'package:totals/services/auto_categorization_service.dart';
+import 'package:totals/services/credit_line_ledger_repair.dart';
 import 'package:totals/services/notification_service.dart';
 import 'package:totals/services/notification_settings_service.dart';
 import 'package:totals/services/owned_account_transfer_service.dart';
@@ -731,6 +732,7 @@ class TransactionProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      await CreditLineLedgerRepair.repairOnce();
       _accounts = await _accountRepo.getAccounts();
       // print all the accounts
       debugPrint(

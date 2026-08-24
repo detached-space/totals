@@ -3531,6 +3531,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final selectedBankAccountCount = bankSummary?.accountCount ?? 0;
     final selectedBankCredit = bankSummary?.totalCredit ?? 0.0;
     final selectedBankDebit = bankSummary?.totalDebit ?? 0.0;
+    final totalPendingCredit = bankSummaries.fold<double>(
+      0.0,
+      (sum, bank) => sum + bank.pendingCredit,
+    );
+    final selectedPendingCredit = bankSummary?.pendingCredit ?? 0.0;
     final selectedBankName =
         isOverview ? null : _localizedBankName(context, _selectedBankId!);
     final balanceTitle = isOverview
@@ -3579,6 +3584,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   ? summary?.reconciliationMismatchPeriods ??
                       const <ReconciliationMismatchPeriod>[]
                   : bankSummary!.reconciliationMismatchPeriods,
+              pendingCredit:
+                  isOverview ? totalPendingCredit : selectedPendingCredit,
               showBalance: _showAccountBalances,
               onToggleBalance: () =>
                   setState(() => _showAccountBalances = !_showAccountBalances),
@@ -14684,6 +14691,7 @@ class _AccountsBalanceCard extends StatelessWidget {
   final double unreconciledAdjustment;
   final int reconciliationMismatchCount;
   final List<ReconciliationMismatchPeriod> reconciliationMismatchPeriods;
+  final double pendingCredit;
   final bool showBalance;
   final VoidCallback onToggleBalance;
 
@@ -14700,6 +14708,7 @@ class _AccountsBalanceCard extends StatelessWidget {
     required this.unreconciledAdjustment,
     required this.reconciliationMismatchCount,
     required this.reconciliationMismatchPeriods,
+    this.pendingCredit = 0,
     required this.showBalance,
     required this.onToggleBalance,
   });
@@ -14766,6 +14775,17 @@ class _AccountsBalanceCard extends StatelessWidget {
               ),
             ],
           ),
+          if (showBalance && pendingCredit > 0.0001) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Credit -$currencyLabel ${_formatEtbFull(pendingCredit)}',
+              style: const TextStyle(
+                color: Color(0xFFFCA5A5),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           Text(
             '$subtitle | ${_formatLocalizedCount(context, transactionCount, 'Transaction', 'Transactions')}',
@@ -14934,6 +14954,7 @@ class _BankGridState extends State<_BankGrid> with WidgetsBindingObserver {
           isCash: isCash,
           accountCount: bank.accountCount,
           balance: bank.totalBalance,
+          pendingCredit: bank.pendingCredit,
           isIncludedInTotalBalance: bank.hasAccountsIncludedInTotalBalance,
           showBalance: widget.showBalance,
           syncProgress: isCash
@@ -14980,6 +15001,7 @@ class _BankGridCard extends StatelessWidget {
   final bool isCash;
   final int accountCount;
   final double balance;
+  final double pendingCredit;
   final bool isIncludedInTotalBalance;
   final bool showBalance;
   final double? syncProgress;
@@ -14990,6 +15012,7 @@ class _BankGridCard extends StatelessWidget {
     required this.isCash,
     required this.accountCount,
     required this.balance,
+    this.pendingCredit = 0,
     required this.isIncludedInTotalBalance,
     required this.showBalance,
     this.syncProgress,
@@ -15080,6 +15103,20 @@ class _BankGridCard extends StatelessWidget {
                           : 2,
                     ),
                   ),
+                  if (!isSyncing &&
+                      showBalance &&
+                      isIncludedInTotalBalance &&
+                      pendingCredit > 0.0001) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Credit -$currencyLabel ${_formatEtbFull(pendingCredit)}',
+                      style: const TextStyle(
+                        color: AppColors.red,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -16219,6 +16256,24 @@ class _AccountCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (syncStatus == null &&
+                        showBalance &&
+                        account.pendingCredit > 0.0001) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const SizedBox(width: 56),
+                          Text(
+                            'Credit -$currencyLabel ${_formatEtbFull(account.pendingCredit)}',
+                            style: const TextStyle(
+                              color: AppColors.red,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 14),
                   Container(height: 1, color: AppColors.borderColor(context)),

@@ -48,6 +48,7 @@ double? latestParsedBalanceAfter(Iterable<Transaction> transactions) {
   DateTime? latestTime;
 
   for (final transaction in transactions) {
+    if (transactionHasCreditLineWalletBalance(transaction)) continue;
     final parsedBalance = _parseBalance(transaction.currentBalance);
     if (parsedBalance == null) continue;
 
@@ -75,6 +76,14 @@ double? latestParsedBalanceAfter(Iterable<Transaction> transactions) {
   }
 
   return latestBalance;
+}
+
+/// Endekise / credit-line usage is labeled on the transaction so a leftover
+/// outstanding figure is never treated as wallet cash.
+bool transactionHasCreditLineWalletBalance(Transaction transaction) {
+  final creditor = transaction.creditor?.trim().toLowerCase() ?? '';
+  final receiver = transaction.receiver?.trim().toLowerCase() ?? '';
+  return creditor.contains('endekise') || receiver.contains('endekise');
 }
 
 double? _parseBalance(String? raw) {

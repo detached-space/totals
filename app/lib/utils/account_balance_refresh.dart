@@ -1,6 +1,7 @@
 import 'package:totals/models/account.dart';
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/utils/account_balance_resolver.dart';
 import 'package:totals/utils/account_identity.dart';
 
 /// Finds the balance that may safely be persisted for a SIM-backed account.
@@ -29,6 +30,7 @@ double? resolveRefreshedAccountBalance({
           transaction.ownerAccountNumber,
           account.accountNumber,
         ) ||
+        transactionHasCreditLineWalletBalance(transaction) ||
         _parseBalance(transaction.currentBalance) == null) {
       continue;
     }

@@ -9,6 +9,12 @@ class SmsConfigService {
   static const String _patternsAssetPath = 'assets/sms_patterns.json';
   static const Set<String> _bundledPatternOverrides = <String>{
     '4|dashen telebirr credit',
+    '6|fallback telebirr endekise',
+    '6|fallback telebirr credit repayment',
+    '6|fallback telebirr paid outstanding credit',
+    '6|fallback telebirr credit amount paid',
+    '6|fallback telebirr overdue credit balance',
+    '8|fallback mpesa overdraft used',
   };
   static Future<void>? _remoteConfigSyncInFlight;
   List<SmsPattern>? _assetPatternsCache;

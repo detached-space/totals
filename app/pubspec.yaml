@@ -64,7 +64,12 @@ dependencies:
   google_fonts: ^8.1.0
   in_app_update: ^4.2.5
   pretty_qr_code: ^3.6.0
-  phosphor_flutter: ^2.1.0
+  # pub.dev 2.1.0 breaks on Flutter 3.44+ (IconData is final). Use the fix from
+  # https://github.com/phosphor-icons/flutter/pull/62 until it is published.
+  phosphor_flutter:
+    git:
+      url: https://github.com/phosphor-icons/flutter.git
+      ref: e2bcfb33fa11cac2c95b1addd1af495f4112c231
   kenat: ^1.0.1
   timezone: ^0.9.4
   cryptography: ^2.7.0

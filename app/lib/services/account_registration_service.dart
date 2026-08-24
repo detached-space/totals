@@ -15,6 +15,7 @@ import 'package:totals/utils/sms_transaction_source.dart';
 import 'package:totals/utils/sms_message_classifier.dart';
 import 'package:totals/utils/transaction_duplicate_detector.dart';
 import 'package:totals/services/account_ownership_service.dart';
+import 'package:totals/services/sms_service.dart';
 import 'package:totals/utils/account_identity.dart';
 
 const int _dashenBankId = 4;
@@ -257,12 +258,12 @@ class AccountRegistrationService {
             return const _ParsedSmsImportResult();
           }
           if (bank.id == 6 &&
-              (SmsMessageClassifier.isTelebirrAtmAuthorization(
-                    message.body!,
-                  ) ||
-                  SmsMessageClassifier.isTelebirrAirtimeReceipt(
-                    message.body!,
-                  ))) {
+              SmsMessageClassifier.isTelebirrNonLedgerNotice(message.body!)) {
+            if (SmsMessageClassifier.isTelebirrCreditLineNotice(message.body!)) {
+              await SmsService.updateTelebirrEndekiseOutstanding(
+                messageBody: message.body!,
+              );
+            }
             return const _ParsedSmsImportResult();
           }
 

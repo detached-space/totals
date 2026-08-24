@@ -736,6 +736,9 @@ class AccountTransactionReparseService {
     final parsedMessagesByTarget = <String, List<_ParsedBankSmsMessage>>{};
     final obsoleteTelebirrCreditReferences = <String>{};
     final obsoleteTelebirrDebitReferences = <String>{};
+    double? latestEndekiseOutstanding;
+    DateTime? latestEndekiseTime;
+    String? latestEndekiseBody;
     final totalMessages = messages.length;
     await onProgress?.call(
       'Scanning 0/$totalMessages bank messages...',
@@ -773,6 +776,26 @@ class AccountTransactionReparseService {
                 storedReference: obsoleteReference,
               ),
             );
+            continue;
+          }
+        }
+        if (bank.id == 6 &&
+            SmsMessageClassifier.isTelebirrCreditLineActivity(body)) {
+          final outstanding =
+              SmsMessageClassifier.extractCreditLineOutstanding(body);
+          final messageDate = message.date == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(message.date!);
+          if (outstanding != null &&
+              (latestEndekiseOutstanding == null ||
+                  (messageDate != null &&
+                      (latestEndekiseTime == null ||
+                          messageDate.isAfter(latestEndekiseTime))))) {
+            latestEndekiseOutstanding = outstanding;
+            latestEndekiseTime = messageDate;
+            latestEndekiseBody = body;
+          }
+          if (SmsMessageClassifier.isTelebirrCreditLineNotice(body)) {
             continue;
           }
         }
@@ -861,6 +884,12 @@ class AccountTransactionReparseService {
           );
         }
       }
+    }
+
+    if (latestEndekiseBody != null) {
+      await SmsService.updateTelebirrEndekiseOutstanding(
+        messageBody: latestEndekiseBody!,
+      );
     }
 
     return _PreparedBankSmsScan(
