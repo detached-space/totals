@@ -70,4 +70,27 @@ Thank you for using telebirr Ethio telecom in partnership with Dashen Bank''';
     expect(SmsMessageClassifier.reportsLiabilityOutstanding(body), isFalse);
     expect(SmsMessageClassifier.isTelebirrNonLedgerNotice(body), isFalse);
   });
+
+  test('classifies Endekise repayment SMS as a debit, not income', () {
+    const body =
+        'You have successfully paid a credit amount of ETB 3260.71 on '
+        '2026-08-20 09:54:23. Your current outstanding credit amount ETB 0.00 '
+        'Thank you for using telebirr Ethio telecom';
+
+    expect(SmsMessageClassifier.isTelebirrCreditLineRepayment(body), isTrue);
+    expect(SmsMessageClassifier.isTelebirrCreditLineActivity(body), isTrue);
+    expect(SmsMessageClassifier.reportsLiabilityOutstanding(body), isTrue);
+    expect(SmsMessageClassifier.isTelebirrCreditLineNotice(body), isFalse);
+    expect(SmsMessageClassifier.isTelebirrNonLedgerNotice(body), isFalse);
+  });
+
+  test('does not treat a received transfer as a credit-line repayment', () {
+    const body =
+        'Dear Yeabsira, You have received ETB 5,000.00 by transaction number '
+        'DHK00F419G on 2026-08-20 09:54:22 from Commercial Bank of Ethiopia '
+        'to your telebirr Account 251942405303. Your current balance is ETB 5,000.00.';
+
+    expect(SmsMessageClassifier.isTelebirrCreditLineRepayment(body), isFalse);
+    expect(SmsMessageClassifier.isTelebirrCreditLineActivity(body), isFalse);
+  });
 }
