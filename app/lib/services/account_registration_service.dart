@@ -257,12 +257,7 @@ class AccountRegistrationService {
             return const _ParsedSmsImportResult();
           }
           if (bank.id == 6 &&
-              (SmsMessageClassifier.isTelebirrAtmAuthorization(
-                    message.body!,
-                  ) ||
-                  SmsMessageClassifier.isTelebirrAirtimeReceipt(
-                    message.body!,
-                  ))) {
+              SmsMessageClassifier.isTelebirrNonLedgerNotice(message.body!)) {
             return const _ParsedSmsImportResult();
           }
 

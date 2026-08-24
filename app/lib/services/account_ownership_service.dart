@@ -372,6 +372,12 @@ class AccountOwnershipService {
             ..add(CashConstants.buildAtmReference(transaction.reference));
           continue;
         }
+        if (bank.id == 6 &&
+            messageBody != null &&
+            SmsMessageClassifier.isTelebirrCreditLineNotice(messageBody)) {
+          obsoleteReferences.add(transaction.reference);
+          continue;
+        }
         bankTransactions.add(transaction);
       }
       final strongOwners = <String, Account>{};

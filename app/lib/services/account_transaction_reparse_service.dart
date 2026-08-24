@@ -776,6 +776,10 @@ class AccountTransactionReparseService {
             continue;
           }
         }
+        if (bank.id == 6 &&
+            SmsMessageClassifier.isTelebirrCreditLineNotice(body)) {
+          continue;
+        }
 
         final messageDate = message.date == null
             ? null

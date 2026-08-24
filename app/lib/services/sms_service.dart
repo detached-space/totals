@@ -1168,6 +1168,13 @@ class SmsService {
         reason: 'Ignored Telebirr airtime receipt acknowledgement',
       );
     }
+    if (bank.id == 6 &&
+        SmsMessageClassifier.isTelebirrCreditLineNotice(messageBody)) {
+      return const ParseResult(
+        status: ParseStatus.duplicate,
+        reason: 'Ignored Telebirr Endekise credit-line notice',
+      );
+    }
 
     // Check if the user has a registered account for this bank
     final registeredAccounts = await AccountRepository().getAccounts();
@@ -1444,7 +1451,9 @@ class SmsService {
       );
     }
 
-    if (resolvedOwner != null && details['currentBalance'] != null) {
+    if (resolvedOwner != null &&
+        details['currentBalance'] != null &&
+        !SmsMessageClassifier.reportsLiabilityOutstanding(messageBody)) {
       final newBalance = sanitizeAmount(details['currentBalance']);
       await _saveUpdatedAccountBalance(
         AccountRepository(),
