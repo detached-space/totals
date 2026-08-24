@@ -16,7 +16,7 @@ class CreditLineLedgerRepair {
   CreditLineLedgerRepair._();
 
   /// Bump when repair logic changes so existing installs re-run cleanup.
-  static const int repairVersion = 2;
+  static const int repairVersion = 3;
   static const String _prefsKey = 'credit_line_ledger_repair_version';
 
   static bool _ranThisProcess = false;
@@ -128,7 +128,56 @@ class CreditLineLedgerRepair {
     }
 
     await _refreshSimAccountBalances(transactionRepo: transactionRepo);
+    await _backfillTelebirrPendingCredit(sourceRepo: sourceRepo);
     return repairedCount;
+  }
+
+  /// Latest Endekise / credit-line outstanding from stored SMS → pendingCredit.
+  static Future<void> _backfillTelebirrPendingCredit({
+    required TransactionSourceSmsRepository sourceRepo,
+  }) async {
+    final sourceMessages = await sourceRepo.getAll();
+    double? latestOutstanding;
+    DateTime? latestTime;
+    for (final source in sourceMessages) {
+      if (!SmsMessageClassifier.isTelebirrCreditLineActivity(source.body)) {
+        continue;
+      }
+      final outstanding =
+          SmsMessageClassifier.extractCreditLineOutstanding(source.body);
+      if (outstanding == null) continue;
+      final receivedAt = source.receivedAt;
+      if (latestOutstanding == null ||
+          (receivedAt != null &&
+              (latestTime == null || receivedAt.isAfter(latestTime)))) {
+        latestOutstanding = outstanding;
+        latestTime = receivedAt;
+      } else if (receivedAt == null && latestTime == null) {
+        latestOutstanding = outstanding;
+      }
+    }
+    if (latestOutstanding == null) return;
+
+    final accountRepo = AccountRepository();
+    final accounts = await accountRepo.getAccounts();
+    final telebirrAccounts =
+        accounts.where((account) => account.bank == 6).toList(growable: false);
+    for (final account in telebirrAccounts) {
+      final current = account.pendingCredit ?? 0.0;
+      if ((current - latestOutstanding).abs() < 0.0001) continue;
+      await accountRepo.saveAccount(
+        Account(
+          accountNumber: account.accountNumber,
+          bank: account.bank,
+          balance: account.balance,
+          accountHolderName: account.accountHolderName,
+          settledBalance: account.settledBalance,
+          pendingCredit: latestOutstanding,
+          profileId: account.profileId,
+          smsSubscriptionId: account.smsSubscriptionId,
+        ),
+      );
+    }
   }
 
   static Future<void> _refreshSimAccountBalances({
