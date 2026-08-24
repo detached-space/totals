@@ -304,13 +304,17 @@ class PatternParser {
     if (SmsMessageClassifier.reportsLiabilityOutstanding(messageBody)) {
       extracted.remove('currentBalance');
     }
-    if (!SmsMessageClassifier.isTelebirrCreditLineNotice(messageBody)) {
+    if (!SmsMessageClassifier.isTelebirrCreditLineActivity(messageBody)) {
       return;
     }
     extracted['type'] = 'DEBIT';
     final creditor = extracted['creditor']?.toString().trim();
     if (creditor == null || creditor.isEmpty) {
       extracted['creditor'] = 'Endekise';
+    }
+    final receiver = extracted['receiver']?.toString().trim();
+    if (receiver == null || receiver.isEmpty) {
+      extracted['receiver'] = 'Endekise';
     }
   }
 }
