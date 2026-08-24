@@ -1,6 +1,7 @@
 import 'package:totals/models/bank.dart';
 import 'package:totals/models/sms_pattern.dart';
 import 'package:totals/services/bank_config_service.dart';
+import 'package:totals/utils/sms_message_classifier.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 
 class PatternParser {
@@ -200,6 +201,8 @@ class PatternParser {
             continue;
           }
 
+          _applyCreditLineLedgerRules(extracted, cleanBody);
+
           print(
               "dubg: ✓ All required fields present. Returning extracted data.");
           return extracted;
@@ -290,5 +293,24 @@ class PatternParser {
     if (lower.contains('debit')) return 'DEBIT';
     if (lower.contains('credit')) return 'CREDIT';
     return null;
+  }
+
+  /// Endekise / overdraft outstanding is debt, not wallet cash. Using credit
+  /// is also not income even when the SMS says "credit amount".
+  static void _applyCreditLineLedgerRules(
+    Map<String, dynamic> extracted,
+    String messageBody,
+  ) {
+    if (SmsMessageClassifier.reportsLiabilityOutstanding(messageBody)) {
+      extracted.remove('currentBalance');
+    }
+    if (!SmsMessageClassifier.isTelebirrCreditLineNotice(messageBody)) {
+      return;
+    }
+    extracted['type'] = 'DEBIT';
+    final creditor = extracted['creditor']?.toString().trim();
+    if (creditor == null || creditor.isEmpty) {
+      extracted['creditor'] = 'Endekise';
+    }
   }
 }
