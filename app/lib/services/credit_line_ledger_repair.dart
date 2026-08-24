@@ -30,20 +30,52 @@ class CreditLineLedgerRepair {
     if (sourceMessages.isEmpty) return 0;
 
     final obsoleteReferences = <String>{};
+    final repaymentReferences = <String>{};
     for (final source in sourceMessages) {
-      if (!SmsMessageClassifier.isTelebirrCreditLineNotice(source.body)) {
-        continue;
-      }
       final reference = source.transactionReference.trim();
-      if (reference.isNotEmpty) obsoleteReferences.add(reference);
+      if (reference.isEmpty) continue;
+      if (SmsMessageClassifier.isTelebirrCreditLineNotice(source.body)) {
+        obsoleteReferences.add(reference);
+      } else if (SmsMessageClassifier.isTelebirrCreditLineRepayment(
+        source.body,
+      )) {
+        repaymentReferences.add(reference);
+      }
     }
-    if (obsoleteReferences.isEmpty) return 0;
+    repaymentReferences.removeAll(obsoleteReferences);
 
-    await transactionRepo.deleteTransactionsByReferences(obsoleteReferences);
+    if (obsoleteReferences.isNotEmpty) {
+      await transactionRepo.deleteTransactionsByReferences(obsoleteReferences);
+    }
+    for (final reference in repaymentReferences) {
+      final existing = await transactionRepo.getTransactionByReference(
+        reference,
+      );
+      if (existing == null) continue;
+      final type = existing.type?.trim().toUpperCase();
+      final alreadyDebit = type == 'DEBIT';
+      final hasWalletBalance = (existing.currentBalance ?? '').trim().isNotEmpty;
+      if (alreadyDebit && !hasWalletBalance) continue;
+      await transactionRepo.saveTransaction(
+        existing.copyWith(
+          type: 'DEBIT',
+          creditor: (existing.creditor?.trim().isNotEmpty ?? false)
+              ? existing.creditor
+              : 'Endekise',
+          receiver: (existing.receiver?.trim().isNotEmpty ?? false)
+              ? existing.receiver
+              : 'Endekise',
+          clearCurrentBalance: true,
+        ),
+        skipAutoCategorization: true,
+      );
+    }
+    if (obsoleteReferences.isEmpty && repaymentReferences.isEmpty) return 0;
+
     await _refreshSimAccountBalances(
       transactionRepo: transactionRepo,
     );
-    return obsoleteReferences.length;
+    return obsoleteReferences.length + repaymentReferences.length;
   }
 
   static Future<void> _refreshSimAccountBalances({
