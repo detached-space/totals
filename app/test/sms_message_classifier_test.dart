@@ -45,4 +45,29 @@ Your transaction number is DDE1UM6GVL. Your current balance is ETB 1,742.84.''';
 
     expect(SmsMessageClassifier.isTelebirrAirtimeReceipt(body), isFalse);
   });
+
+  test('classifies a Telebirr Endekise notice as a non-ledger credit line', () {
+    const body = '''Dear Yeabsira
+Your transaction is successfully completed using Endekise.
+You have used ETB 16.16 credit amount on this transaction.
+The service fee is ETB 0.40 and the daily fee will be 22.95 depending on your credit limit.
+Your outstanding amount is ETB 3168.62 with due date of 2026-09-22 00:00:00.
+Your Contract number is 27825413.
+Thank you for using telebirr Ethio telecom in partnership with Dashen Bank''';
+
+    expect(SmsMessageClassifier.isTelebirrCreditLineNotice(body), isTrue);
+    expect(SmsMessageClassifier.reportsLiabilityOutstanding(body), isTrue);
+    expect(SmsMessageClassifier.isTelebirrNonLedgerNotice(body), isTrue);
+  });
+
+  test('does not treat an E-Money wallet SMS as Endekise credit', () {
+    const body =
+        'Dear Yeabsira Your current E-Money Account balance is ETB 0.00. '
+        'To download your payment information please click this link: '
+        'https://transactioninfo.ethiotelecom.et/receipt/DHO84EG3D8';
+
+    expect(SmsMessageClassifier.isTelebirrCreditLineNotice(body), isFalse);
+    expect(SmsMessageClassifier.reportsLiabilityOutstanding(body), isFalse);
+    expect(SmsMessageClassifier.isTelebirrNonLedgerNotice(body), isFalse);
+  });
 }
