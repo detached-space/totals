@@ -44,4 +44,50 @@ class SmsMessageClassifier {
     }
     return null;
   }
+
+  static final RegExp _telebirrEndekise = RegExp(
+    r'\bendekise\b',
+    caseSensitive: false,
+  );
+
+  static final RegExp _usedCreditAmount = RegExp(
+    r'used\s+ETB\s+[\d,.]+\s+credit\s+amount',
+    caseSensitive: false,
+  );
+
+  static final RegExp _creditLineOutstanding = RegExp(
+    r'unpaid\s+credit\s+amount|'
+    r'outstanding\s+credit\s+(?:amount|balance)|'
+    r'paid\s+a\s+credit\s+amount\s+of',
+    caseSensitive: false,
+  );
+
+  static final RegExp _overdraftOutstanding = RegExp(
+    r'overdraft[\s\S]{0,120}outstanding\s+amount',
+    caseSensitive: false,
+  );
+
+  /// Telebirr Endekise notices describe a loan draw, not E-Money.
+  ///
+  /// The actual merchant/wallet SMS already records the spend and the real
+  /// wallet balance. Parsing this companion SMS treats outstanding debt as
+  /// cash and can count "credit amount" as income.
+  static bool isTelebirrCreditLineNotice(String messageBody) {
+    if (_telebirrEndekise.hasMatch(messageBody)) return true;
+    return _usedCreditAmount.hasMatch(messageBody);
+  }
+
+  /// True when an SMS reports loan/overdraft outstanding rather than wallet
+  /// cash. That figure must not overwrite `Account.balance`.
+  static bool reportsLiabilityOutstanding(String messageBody) {
+    if (isTelebirrCreditLineNotice(messageBody)) return true;
+    if (_creditLineOutstanding.hasMatch(messageBody)) return true;
+    return _overdraftOutstanding.hasMatch(messageBody);
+  }
+
+  static bool isTelebirrNonLedgerNotice(String messageBody) {
+    return isTelebirrAtmAuthorization(messageBody) ||
+        isTelebirrAirtimeReceipt(messageBody) ||
+        isTelebirrCreditLineNotice(messageBody);
+  }
 }
