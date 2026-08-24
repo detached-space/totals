@@ -878,6 +878,7 @@ String _transactionTimeLabel(Transaction transaction, BuildContext context) {
 
 class _TotalBalanceCard extends StatelessWidget {
   final double totalBalance;
+  final double pendingCredit;
   final double todayIncome;
   final double todayExpense;
   final double weekIncome;
@@ -890,6 +891,7 @@ class _TotalBalanceCard extends StatelessWidget {
 
   const _TotalBalanceCard({
     required this.totalBalance,
+    this.pendingCredit = 0,
     required this.todayIncome,
     required this.todayExpense,
     required this.weekIncome,
@@ -971,6 +973,17 @@ class _TotalBalanceCard extends StatelessWidget {
                   ),
                 ],
               ),
+              if (showBalance && pendingCredit > 0.0001) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Credit -$currencyLabel ${formatNumberWithComma(pendingCredit)}',
+                  style: const TextStyle(
+                    color: Color(0xFFFCA5A5),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               InkWell(
                 onTap: onBreakdownTap,
