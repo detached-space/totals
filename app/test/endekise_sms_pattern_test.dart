@@ -70,6 +70,59 @@ void main() {
     expect(details['currentBalance'], isNull);
   });
 
+  test('treats Endekise repayment as a debit and ignores outstanding 0.00',
+      () async {
+    const body =
+        'You have successfully paid a credit amount of ETB 3260.71 on '
+        '2026-08-20 09:54:23. Your current outstanding credit amount ETB 0.00 '
+        'Thank you for using telebirr Ethio telecom';
+
+    final details = await PatternParser.extractTransactionDetails(
+      body,
+      '127',
+      DateTime(2026, 8, 20, 9, 54, 23),
+      _bundledTelebirrPatterns(),
+      banks: [telebirr],
+    );
+
+    expect(details, isNotNull);
+    expect(details!['type'], 'DEBIT');
+    expect(details['amount'], 3260.71);
+    expect(details['currentBalance'], isNull);
+    expect(details['receiver'], 'Endekise');
+  });
+
+  test('forces repayment SMS to debit even if a credit pattern matches',
+      () async {
+    const body =
+        'You have successfully paid a credit amount of ETB 89.75 on '
+        '2026-08-20 09:54:23. Your current outstanding credit amount ETB 0.00 '
+        'Thank you for using telebirr Ethio telecom';
+    final creditPattern = SmsPattern(
+      bankId: 6,
+      senderId: 'telebirr',
+      regex: r'paid\s+a\s+credit\s+amount\s+of\s+ETB\s*(?<amount>-?[\d,.]+)'
+          r'[\s\S]*?outstanding\s+credit\s+amount\s+ETB\s*(?<balance>-?[\d,.]+)',
+      type: 'CREDIT',
+      description: 'Legacy credit amount paid',
+      refRequired: false,
+      hasAccount: false,
+    );
+
+    final details = await PatternParser.extractTransactionDetails(
+      body,
+      '127',
+      DateTime(2026, 8, 20, 9, 54, 23),
+      [creditPattern],
+      banks: [telebirr],
+    );
+
+    expect(details, isNotNull);
+    expect(details!['type'], 'DEBIT');
+    expect(details['amount'], 89.75);
+    expect(details['currentBalance'], isNull);
+  });
+
   test('keeps a normal Telebirr incoming transfer as wallet credit', () async {
     const body = '''Dear Customer
 You have received ETB 200.00 from Abebe on 24/08/2026 14:00:00.
