@@ -62,6 +62,13 @@ class SmsMessageClassifier {
     caseSensitive: false,
   );
 
+  static final RegExp _creditLineRepayment = RegExp(
+    r'paid\s+a\s+credit\s+amount|'
+    r'successfully\s+paid\s+a\s+credit|'
+    r'repaid\s+[\d,.]+\s+ETB',
+    caseSensitive: false,
+  );
+
   static final RegExp _overdraftOutstanding = RegExp(
     r'overdraft[\s\S]{0,120}outstanding\s+amount',
     caseSensitive: false,
@@ -77,10 +84,21 @@ class SmsMessageClassifier {
     return _usedCreditAmount.hasMatch(messageBody);
   }
 
+  /// Paying down Endekise / outstanding credit is money leaving the wallet,
+  /// not income, even though the SMS says "credit amount".
+  static bool isTelebirrCreditLineRepayment(String messageBody) {
+    return _creditLineRepayment.hasMatch(messageBody);
+  }
+
+  static bool isTelebirrCreditLineActivity(String messageBody) {
+    return isTelebirrCreditLineNotice(messageBody) ||
+        isTelebirrCreditLineRepayment(messageBody);
+  }
+
   /// True when an SMS reports loan/overdraft outstanding rather than wallet
   /// cash. That figure must not overwrite `Account.balance`.
   static bool reportsLiabilityOutstanding(String messageBody) {
-    if (isTelebirrCreditLineNotice(messageBody)) return true;
+    if (isTelebirrCreditLineActivity(messageBody)) return true;
     if (_creditLineOutstanding.hasMatch(messageBody)) return true;
     return _overdraftOutstanding.hasMatch(messageBody);
   }
