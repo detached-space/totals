@@ -82,6 +82,16 @@ Thank you for using telebirr Ethio telecom in partnership with Dashen Bank''';
     expect(SmsMessageClassifier.reportsLiabilityOutstanding(body), isTrue);
     expect(SmsMessageClassifier.isTelebirrCreditLineNotice(body), isFalse);
     expect(SmsMessageClassifier.isTelebirrNonLedgerNotice(body), isFalse);
+    expect(SmsMessageClassifier.extractCreditLineOutstanding(body), 0.00);
+  });
+
+  test('extracts Endekise outstanding from a draw notice', () {
+    const body = '''Dear Yeabsira
+Your transaction is successfully completed using Endekise.
+You have used ETB 16.16 credit amount on this transaction.
+Your outstanding amount is ETB 3168.62 with due date of 2026-09-22 00:00:00.''';
+
+    expect(SmsMessageClassifier.extractCreditLineOutstanding(body), 3168.62);
   });
 
   test('does not treat a received transfer as a credit-line repayment', () {
