@@ -5,12 +5,12 @@ import 'package:totals/providers/theme_provider.dart';
 import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/widgets/category_filter_chip.dart';
+import 'package:totals/_redesign/widgets/place_name_editor_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_category_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_details_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
-import 'package:totals/models/transaction_location.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/app_date_format.dart';
@@ -72,16 +72,9 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     final onTitleChanged = widget.onTitleChanged;
     if (onTitleChanged == null || _updatingTitle) return;
 
-    final result = await showModalBottomSheet<_PlaceNameEditResult>(
+    final result = await showPlaceNameEditorSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.background(context),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (_) => _PlaceNameEditorSheet(
-        initialValue: _editableTitleValue,
-      ),
+      initialValue: _editableTitleValue,
     );
     if (!mounted || result == null) return;
 
@@ -531,124 +524,6 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
       },
     );
   }
-}
-
-class _PlaceNameEditorSheet extends StatefulWidget {
-  const _PlaceNameEditorSheet({required this.initialValue});
-
-  final String? initialValue;
-
-  @override
-  State<_PlaceNameEditorSheet> createState() => _PlaceNameEditorSheetState();
-}
-
-class _PlaceNameEditorSheetState extends State<_PlaceNameEditorSheet> {
-  late final TextEditingController _controller;
-
-  bool get _hasCustomName => widget.initialValue != null;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue ?? '');
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SafeArea(
-      top: false,
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          20,
-          20,
-          20 + MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _hasCustomName
-                  ? context.l10nText('Edit place name')
-                  : context.l10nText('Name this place'),
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: AppColors.textPrimary(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              context.l10nText(
-                'Use a private name you will recognize, like Home, Office, or a favorite café.',
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: AppColors.textSecondary(context),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              maxLength: transactionPlaceNameMaxLength,
-              textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(
-                labelText: context.l10nText('Place name'),
-                hintText: context.l10nText('Home'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                if (_hasCustomName)
-                  TextButton(
-                    onPressed: () => Navigator.pop(
-                      context,
-                      const _PlaceNameEditResult(null),
-                    ),
-                    child: Text(context.l10nText('Remove name')),
-                  ),
-                const Spacer(),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(context.l10nText('Cancel')),
-                ),
-                const SizedBox(width: 8),
-                ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _controller,
-                  builder: (context, value, _) {
-                    final name = value.text.trim();
-                    return FilledButton(
-                      onPressed: name.isEmpty
-                          ? null
-                          : () => Navigator.pop(
-                                context,
-                                _PlaceNameEditResult(name),
-                              ),
-                      child: Text(context.l10nText('Save')),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PlaceNameEditResult {
-  const _PlaceNameEditResult(this.value);
-
-  final String? value;
 }
 
 class _TodayTransactionsFilter {

@@ -5,15 +5,19 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/place_name_editor_sheet.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
 import 'package:totals/_redesign/widgets/transaction_split_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/models/transaction_location.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/reimbursement_repository.dart';
+import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/offline_place_gazetteer.dart';
 import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/account_sort.dart';
@@ -38,6 +42,8 @@ Future<void> showTransactionDetailsSheet({
   bool initiallyExpandCategory = false,
   bool showQuickAccessCategories = false,
   bool allowAutoCategorizationRuleUpdates = true,
+  TransactionLocationRepository? transactionLocationRepository,
+  Future<OfflinePlaceGazetteer> Function()? loadOfflinePlaceGazetteer,
 }) async {
   FocusManager.instance.primaryFocus?.unfocus();
   final hostContext = context;
@@ -52,6 +58,9 @@ Future<void> showTransactionDetailsSheet({
       initiallyExpandCategory: initiallyExpandCategory,
       showQuickAccessCategories: showQuickAccessCategories,
       allowAutoCategorizationRuleUpdates: allowAutoCategorizationRuleUpdates,
+      transactionLocationRepository: transactionLocationRepository,
+      loadOfflinePlaceGazetteer: loadOfflinePlaceGazetteer ??
+          () => OfflinePlaceGazetteer.loadEthiopianCities(),
     ),
   );
 }
@@ -63,6 +72,8 @@ class _TransactionDetailsSheet extends StatefulWidget {
   final bool initiallyExpandCategory;
   final bool showQuickAccessCategories;
   final bool allowAutoCategorizationRuleUpdates;
+  final TransactionLocationRepository? transactionLocationRepository;
+  final Future<OfflinePlaceGazetteer> Function() loadOfflinePlaceGazetteer;
 
   const _TransactionDetailsSheet({
     required this.hostContext,
@@ -71,6 +82,8 @@ class _TransactionDetailsSheet extends StatefulWidget {
     this.initiallyExpandCategory = false,
     this.showQuickAccessCategories = false,
     this.allowAutoCategorizationRuleUpdates = true,
+    required this.transactionLocationRepository,
+    required this.loadOfflinePlaceGazetteer,
   });
 
   @override
@@ -86,6 +99,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _isSavingCounterparty = false;
   bool _isSavingNote = false;
   bool _isApplyingCategory = false;
+  bool _isLoadingLocation = true;
+  bool _locationLoadFailed = false;
+  bool _isSavingLocationName = false;
   bool _showNewCategoryForm = false;
   bool _showColorChoices = false;
   bool _autoCategorizeFutureTransactions = false;
@@ -93,6 +109,9 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   List<int> _quickCategoryIds = const [];
   List<int> _autoCategorizationDraftCategoryIds = const [];
   Future<TransactionSourceSms?>? _sourceSmsFuture;
+  TransactionLocation? _transactionLocation;
+  OfflinePlaceGazetteer? _offlinePlaceGazetteer;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
   late Transaction _transaction;
   final TextEditingController _counterpartyController = TextEditingController();
   final FocusNode _counterpartyFocus = FocusNode();
@@ -105,6 +124,10 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Transaction get _tx => _transaction;
   TransactionProvider get _provider => widget.provider;
+  TransactionLocationRepository get _locationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          widget.transactionLocationRepository ??
+              TransactionLocationRepository();
 
   bool get _isCredit => _tx.type == 'CREDIT';
   bool get _canShowSplitWithGroup =>
@@ -147,6 +170,116 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     if (widget.showQuickAccessCategories) {
       _loadQuickCategoryIds();
     }
+    unawaited(_loadTransactionLocation());
+  }
+
+  Future<void> _loadTransactionLocation() async {
+    try {
+      final locations = await _locationRepository
+          .getForTransactionReferences(<String>{_tx.reference});
+      TransactionLocation? location;
+      for (final candidate in locations) {
+        if (candidate.transactionReference == _tx.reference) {
+          location = candidate;
+          break;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _transactionLocation = location;
+        _isLoadingLocation = false;
+        _locationLoadFailed = false;
+      });
+      if (location != null && location.placeName == null) {
+        unawaited(_ensureOfflinePlaceGazetteerLoaded());
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingLocation = false;
+        _locationLoadFailed = true;
+      });
+    }
+  }
+
+  Future<void> _ensureOfflinePlaceGazetteerLoaded() async {
+    if (_offlinePlaceGazetteer != null) return;
+    try {
+      final gazetteer = await widget.loadOfflinePlaceGazetteer();
+      if (!mounted) return;
+      setState(() => _offlinePlaceGazetteer = gazetteer);
+    } catch (_) {
+      // Regional fallbacks still provide a useful approximate location name.
+    }
+  }
+
+  String get _locationValue {
+    if (_isLoadingLocation) return context.l10nText('Loading…');
+    if (_locationLoadFailed) return context.l10nText('Unavailable');
+    final location = _transactionLocation;
+    if (location == null) return context.l10nText('Not captured');
+    final customName = location.placeName;
+    if (customName != null) return customName;
+    return ethiopiaPlaceNameForCoordinates(
+      latitude: location.latitude,
+      longitude: location.longitude,
+      languageCode: Localizations.localeOf(context).languageCode,
+      gazetteer: _offlinePlaceGazetteer,
+    );
+  }
+
+  Future<void> _editLocationName() async {
+    final location = _transactionLocation;
+    if (location == null || _isSavingLocationName) return;
+    final result = await showPlaceNameEditorSheet(
+      context: context,
+      initialValue: location.placeName,
+    );
+    if (!mounted || result == null) return;
+
+    setState(() => _isSavingLocationName = true);
+    try {
+      await _locationRepository.setPlaceNameForTransactionReferences(
+        <String>[location.transactionReference],
+        result.value,
+      );
+      if (!mounted) return;
+      setState(() {
+        _transactionLocation = location.copyWith(
+          placeName: result.value,
+          clearPlaceName: result.value == null,
+        );
+      });
+      if (result.value == null) {
+        unawaited(_ensureOfflinePlaceGazetteerLoaded());
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update place name')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingLocationName = false);
+    }
+  }
+
+  Widget _buildLocationRow() {
+    final canEdit = _transactionLocation != null &&
+        !_isLoadingLocation &&
+        !_locationLoadFailed &&
+        !_isSavingLocationName;
+    return _DetailRow(
+      key: const ValueKey<String>('transaction-details-location-row'),
+      label: 'Location',
+      value: _locationValue,
+      onTap: canEdit ? _editLocationName : null,
+      trailingIcon: canEdit ? AppIcons.editOutlined : null,
+    );
   }
 
   String get _counterparty {
@@ -1681,6 +1814,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                       ),
                       if (_accountExpanded && _canEditAccount)
                         _buildAccountPicker(),
+                      _buildLocationRow(),
                       if (_formattedDate != null)
                         _DetailRow(
                             label: 'Date & Time', value: _formattedDate!),
@@ -2424,6 +2558,7 @@ class _DetailRow extends StatelessWidget {
   final IconData? trailingIcon;
 
   const _DetailRow({
+    super.key,
     required this.label,
     required this.value,
     this.onTap,

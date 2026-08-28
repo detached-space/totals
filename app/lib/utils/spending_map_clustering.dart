@@ -5,6 +5,52 @@ const double _spendingMapClusterRadiusPixels = 70;
 const double _earthRadiusMeters = 6371008.8;
 const double _metersPerDegree = 111320;
 
+class SpendingMapPlaceSummary {
+  const SpendingMapPlaceSummary({
+    required this.mainName,
+    required this.otherNameCount,
+  });
+
+  final String mainName;
+  final int otherNameCount;
+
+  String get label =>
+      otherNameCount == 0 ? mainName : '$mainName +$otherNameCount';
+}
+
+SpendingMapPlaceSummary? summarizeSpendingMapPlaceNames(
+  Iterable<String> names,
+) {
+  final frequenciesByName = <String, _PlaceNameFrequency>{};
+  for (final rawName in names) {
+    final displayName = rawName.trim();
+    if (displayName.isEmpty) continue;
+    final normalizedName = displayName.toLowerCase();
+    final frequency = frequenciesByName[normalizedName];
+    if (frequency == null) {
+      frequenciesByName[normalizedName] = _PlaceNameFrequency(
+        displayName: displayName,
+        normalizedName: normalizedName,
+      );
+    } else {
+      frequency.count += 1;
+    }
+  }
+  if (frequenciesByName.isEmpty) return null;
+
+  final frequencies = frequenciesByName.values.toList(growable: false)
+    ..sort((first, second) {
+      final countComparison = second.count.compareTo(first.count);
+      return countComparison != 0
+          ? countComparison
+          : first.normalizedName.compareTo(second.normalizedName);
+    });
+  return SpendingMapPlaceSummary(
+    mainName: frequencies.first.displayName,
+    otherNameCount: frequencies.length - 1,
+  );
+}
+
 class SpendingMapCluster<T> {
   const SpendingMapCluster({
     required this.members,
@@ -152,6 +198,17 @@ List<SpendingMapCluster<T>> clusterSpendingMapLocations<T>({
         ),
       )
       .toList(growable: false);
+}
+
+class _PlaceNameFrequency {
+  _PlaceNameFrequency({
+    required this.displayName,
+    required this.normalizedName,
+  });
+
+  final String displayName;
+  final String normalizedName;
+  int count = 1;
 }
 
 class _SpendingMapClusterBuilder<T> {

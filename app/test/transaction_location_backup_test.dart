@@ -70,6 +70,10 @@ void main() {
     expect(payload['schemaVersion'], 13);
     final exportedLocation =
         (payload['transactionLocations'] as List<dynamic>).single as Map;
+    final exportedTransaction =
+        (payload['transactions'] as List<dynamic>).single as Map;
+    expect(exportedTransaction['reference'], reference);
+    expect(exportedTransaction['locationName'], 'Favorite café');
     expect(exportedLocation['transactionReference'], reference);
     expect(exportedLocation['latitude'], 8.980603);
     expect(exportedLocation['longitude'], 38.757761);
@@ -81,7 +85,12 @@ void main() {
     await transactionRepository.clearAll();
     expect(await locationRepository.hasLocation(reference), isFalse);
 
-    await service.importAllData(exported);
+    final transactionEnrichedPayload =
+        jsonDecode(exported) as Map<String, dynamic>;
+    ((transactionEnrichedPayload['transactionLocations'] as List<dynamic>)
+            .single as Map<String, dynamic>)
+        .remove('placeName');
+    await service.importAllData(jsonEncode(transactionEnrichedPayload));
 
     expect(
       await transactionRepository.getTransactionByReference(reference),

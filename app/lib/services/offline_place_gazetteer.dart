@@ -5,6 +5,26 @@ import 'package:flutter/services.dart';
 
 const ethiopiaCityPlacesAsset = 'assets/maps/ethiopia_city_places.json';
 
+String ethiopiaPlaceNameForCoordinates({
+  required double latitude,
+  required double longitude,
+  required String languageCode,
+  OfflinePlaceGazetteer? gazetteer,
+}) {
+  final offlineMatch = gazetteer?.nearestPlace(
+    latitude: latitude,
+    longitude: longitude,
+  );
+  if (offlineMatch != null) {
+    return offlineMatch.place.displayName(languageCode);
+  }
+  if (latitude >= 12) return 'Northern Ethiopia';
+  if (longitude >= 41) return 'Eastern Ethiopia';
+  if (longitude <= 36) return 'Western Ethiopia';
+  if (latitude <= 7.5) return 'Southern Ethiopia';
+  return 'Central Ethiopia';
+}
+
 class OfflinePlaceGazetteer {
   const OfflinePlaceGazetteer({
     required this.schemaVersion,

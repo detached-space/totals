@@ -47,6 +47,7 @@ extension SyncEntityX on SyncEntity {
           'creditor',
           'receiver',
           'note',
+          'locationName',
           'time',
           'status',
           'currentBalance',
@@ -569,6 +570,24 @@ class SyncTransactionCategoryPayload {
   static String? _nameOf(Map<String, dynamic>? category) {
     final name = category?['name']?.toString().trim();
     return name == null || name.isEmpty ? null : name;
+  }
+}
+
+class SyncTransactionLocationPayload {
+  static const locationNameKey = 'locationName';
+
+  /// Add the human-readable place name without embedding coordinates in the
+  /// transaction payload. A null value explicitly represents an unnamed or
+  /// uncaptured location.
+  static Map<String, dynamic> enrich(
+    Map<String, dynamic> transaction,
+    Map<String, dynamic>? location,
+  ) {
+    final payload = Map<String, dynamic>.from(transaction);
+    final rawName = location?['placeName'];
+    final name = rawName is String ? rawName.trim() : null;
+    payload[locationNameKey] = name == null || name.isEmpty ? null : name;
+    return payload;
   }
 }
 

@@ -3,6 +3,8 @@ import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/transaction_location.dart';
 import 'package:totals/repositories/profile_repository.dart';
+import 'package:totals/services/data_sync/sync_enqueuer.dart';
+import 'package:totals/services/data_sync/sync_models.dart';
 
 class TransactionLocationRepository {
   TransactionLocationRepository({
@@ -180,6 +182,24 @@ class TransactionLocationRepository {
       );
     }
     await batch.commit(noResult: true);
+
+    final transactionRows = await db.query('transactions');
+    final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
+    for (final row in transactionRows) {
+      final reference = row['reference']?.toString().trim() ?? '';
+      if (!references.contains(reference)) continue;
+      final payload = Map<String, dynamic>.from(row)
+        ..remove('sourceSubscriptionId')
+        ..['locationName'] = normalizedName;
+      syncRecords.add(MapEntry<String, Map<String, dynamic>>(
+        reference,
+        payload,
+      ));
+    }
+    await SyncEnqueuer.instance.onManyWritten(
+      entity: SyncEntity.transactions,
+      records: syncRecords,
+    );
   }
 
   Future<void> clearForActiveProfile() async {

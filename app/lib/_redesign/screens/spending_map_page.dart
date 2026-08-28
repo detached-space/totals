@@ -14,6 +14,7 @@ import 'package:totals/_redesign/screens/todays_transactions_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/category_filter_chip.dart';
+import 'package:totals/_redesign/widgets/place_name_editor_sheet.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
@@ -54,6 +55,13 @@ const _darkRoadMapStyle = '''
 ''';
 
 const _mapDisplayModePreferenceKey = 'spending_map_display_mode';
+const _puckIconSourceSize = 160.0;
+const _placeLabelIconSourceWidth = 460.0;
+const _placeLabelIconSourceHeight = 170.0;
+const _placeLabelCenterX = _placeLabelIconSourceWidth / 2;
+const _puckIconScale = 54 / 160;
+const _puckMarkerAnchor = Offset(0.5, 0.5);
+const _placeLabelMarkerAnchor = Offset(0.5, 1);
 
 enum _MapDisplayMode { roadmap, satellite }
 
@@ -173,6 +181,7 @@ class _SpendingZone {
   const _SpendingZone({
     required this.id,
     required this.name,
+    required this.puckPlaceLabel,
     required this.center,
     required this.transactionCount,
     required this.netAmount,
@@ -182,6 +191,7 @@ class _SpendingZone {
 
   final String id;
   final String name;
+  final String puckPlaceLabel;
   final LatLng center;
   final int transactionCount;
   final double netAmount;
@@ -223,7 +233,8 @@ class _ZoneAccumulator {
 class _PuckMotion {
   const _PuckMotion({
     required this.markerId,
-    required this.icon,
+    required this.puckIcon,
+    required this.placeLabelIcon,
     required this.from,
     required this.to,
     required this.fromAlpha,
@@ -232,7 +243,8 @@ class _PuckMotion {
   });
 
   final String markerId;
-  final BitmapDescriptor icon;
+  final BitmapDescriptor puckIcon;
+  final BitmapDescriptor placeLabelIcon;
   final LatLng from;
   final LatLng to;
   final double fromAlpha;
@@ -284,10 +296,13 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   _SpendingMapFilters _filters = const _SpendingMapFilters();
   List<_SpendingZone> _displayedZones = const [];
   Map<String, BitmapDescriptor> _puckIcons = const {};
+  Map<String, BitmapDescriptor> _placeLabelIcons = const {};
   final Map<String, BitmapDescriptor> _puckIconCache = {};
+  final Map<String, BitmapDescriptor> _placeLabelIconCache = {};
   List<_PuckMotion> _puckMotions = const [];
   List<_SpendingZone>? _puckTransitionTargetZones;
   Map<String, BitmapDescriptor> _puckTransitionTargetIcons = const {};
+  Map<String, BitmapDescriptor> _puckTransitionTargetPlaceLabelIcons = const {};
   late final AnimationController _puckTransitionController;
   int _puckGeneration = 0;
   double _zoomLevel = 10;
@@ -298,6 +313,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   bool _mapReady = false;
   bool _locatingUser = false;
   String? _openingZoneId;
+  String? _editingZoneId;
   String _languageCode = 'en';
   _MapDisplayMode _mapDisplayMode = _MapDisplayMode.roadmap;
   Object? _loadError;
@@ -453,9 +469,22 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       final references = bucket.transactionReferences.toList(growable: true)
         ..sort();
       final customPlaceName = bucket.customPlaceName;
+      final placeSummary = summarizeSpendingMapPlaceNames(
+            cluster.members.map((location) {
+              return location.placeName ??
+                  _approximatePlaceName(
+                    LatLng(location.latitude, location.longitude),
+                  );
+            }),
+          ) ??
+          SpendingMapPlaceSummary(
+            mainName: _approximatePlaceName(center),
+            otherNameCount: 0,
+          );
       return _SpendingZone(
         id: _spendingZoneId(references),
-        name: customPlaceName ?? _approximatePlaceName(center),
+        name: placeSummary.mainName,
+        puckPlaceLabel: placeSummary.label,
         center: center,
         transactionCount: bucket.count,
         netAmount: bucket.netAmount,
@@ -475,18 +504,12 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   }
 
   String _approximatePlaceName(LatLng point) {
-    final offlineMatch = _offlineGazetteer?.nearestPlace(
+    return ethiopiaPlaceNameForCoordinates(
       latitude: point.latitude,
       longitude: point.longitude,
+      languageCode: _languageCode,
+      gazetteer: _offlineGazetteer,
     );
-    if (offlineMatch != null) {
-      return offlineMatch.place.displayName(_languageCode);
-    }
-    if (point.latitude >= 12) return 'Northern Ethiopia';
-    if (point.longitude >= 41) return 'Eastern Ethiopia';
-    if (point.longitude <= 36) return 'Western Ethiopia';
-    if (point.latitude <= 7.5) return 'Southern Ethiopia';
-    return 'Central Ethiopia';
   }
 
   Set<Marker> _buildZoneMarkers() {
@@ -494,35 +517,63 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       final progress = Curves.easeInOutCubic.transform(
         _puckTransitionController.value,
       );
-      return _puckMotions.map((motion) {
-        return Marker(
-          markerId: MarkerId('zone-puck-${motion.markerId}'),
-          position: motion.positionAt(progress),
-          alpha: motion.alphaAt(progress).clamp(0.0, 1.0).toDouble(),
-          anchor: const Offset(0.5, 0.5),
-          icon: motion.icon,
-          consumeTapEvents: true,
-          zIndexInt: motion.zIndex,
-        );
+      return _puckMotions.expand((motion) {
+        final position = motion.positionAt(progress);
+        final alpha = motion.alphaAt(progress).clamp(0.0, 1.0).toDouble();
+        return <Marker>[
+          Marker(
+            markerId: MarkerId('zone-label-${motion.markerId}'),
+            position: position,
+            alpha: alpha,
+            anchor: _placeLabelMarkerAnchor,
+            icon: motion.placeLabelIcon,
+            consumeTapEvents: true,
+            zIndexInt: motion.zIndex,
+          ),
+          Marker(
+            markerId: MarkerId('zone-puck-${motion.markerId}'),
+            position: position,
+            alpha: alpha,
+            anchor: _puckMarkerAnchor,
+            icon: motion.puckIcon,
+            consumeTapEvents: true,
+            zIndexInt: motion.zIndex + 2,
+          ),
+        ];
       }).toSet();
     }
 
     return _displayedZones
         .take(50)
-        .where((zone) => _puckIcons[zone.id] != null)
-        .map((zone) {
-      return Marker(
-        markerId: MarkerId('zone-puck-${zone.id}'),
-        position: zone.center,
-        anchor: const Offset(0.5, 0.5),
-        icon: _puckIcons[zone.id]!,
-        consumeTapEvents: true,
-        infoWindow: InfoWindow(
-          title: zone.name,
-          snippet: '${zone.transactionCount} transactions',
+        .where(
+          (zone) =>
+              _puckIcons[zone.id] != null && _placeLabelIcons[zone.id] != null,
+        )
+        .expand((zone) {
+      return <Marker>[
+        Marker(
+          markerId: MarkerId('zone-label-${zone.id}'),
+          position: zone.center,
+          anchor: _placeLabelMarkerAnchor,
+          icon: _placeLabelIcons[zone.id]!,
+          consumeTapEvents: true,
+          zIndexInt: 1,
+          onTap: () => _editZonePlaceName(zone),
         ),
-        onTap: () => _openZone(zone),
-      );
+        Marker(
+          markerId: MarkerId('zone-puck-${zone.id}'),
+          position: zone.center,
+          anchor: _puckMarkerAnchor,
+          icon: _puckIcons[zone.id]!,
+          consumeTapEvents: true,
+          zIndexInt: 3,
+          infoWindow: InfoWindow(
+            title: zone.name,
+            snippet: '${zone.transactionCount} transactions',
+          ),
+          onTap: () => _openZone(zone),
+        ),
+      ];
     }).toSet();
   }
 
@@ -535,34 +586,70 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     };
   }
 
-  Future<Map<String, BitmapDescriptor>> _loadPuckIcons(
+  Future<
+      ({
+        Map<String, BitmapDescriptor> puckIcons,
+        Map<String, BitmapDescriptor> placeLabelIcons,
+      })> _loadPuckIcons(
     List<_SpendingZone> zones,
   ) async {
-    final labelsByZone = <String, String>{
+    final puckLabelsByZone = <String, String>{
       for (final zone in zones) zone.id: _puckLabel(zone),
     };
-    final missingLabels = labelsByZone.values
+    final missingPuckLabels = puckLabelsByZone.values
         .where((label) => !_puckIconCache.containsKey(label))
         .toSet();
-    final generatedEntries = await Future.wait(
-      missingLabels.map((label) async {
+    final generatedPuckEntries = await Future.wait(
+      missingPuckLabels.map((label) async {
         return MapEntry(label, await _createPuckIcon(label: label));
       }),
     );
-    _puckIconCache.addEntries(generatedEntries);
-    final icons = <String, BitmapDescriptor>{
-      for (final entry in labelsByZone.entries)
+    _puckIconCache.addEntries(generatedPuckEntries);
+    final puckIcons = <String, BitmapDescriptor>{
+      for (final entry in puckLabelsByZone.entries)
         entry.key: _puckIconCache[entry.value]!,
     };
+
+    final placeLabelsByZone = <String, String>{
+      for (final zone in zones) zone.id: zone.puckPlaceLabel,
+    };
+    final missingPlaceLabels = placeLabelsByZone.values
+        .where((label) => !_placeLabelIconCache.containsKey(label))
+        .toSet();
+    final generatedPlaceLabelEntries = await Future.wait(
+      missingPlaceLabels.map((label) async {
+        return MapEntry(
+          label,
+          await _createPlaceLabelIcon(placeLabel: label),
+        );
+      }),
+    );
+    _placeLabelIconCache.addEntries(generatedPlaceLabelEntries);
+    final placeLabelIcons = <String, BitmapDescriptor>{
+      for (final entry in placeLabelsByZone.entries)
+        entry.key: _placeLabelIconCache[entry.value]!,
+    };
+
     const maximumCachedIcons = 128;
-    final activeLabels = labelsByZone.values.toSet();
+    final activePuckLabels = puckLabelsByZone.values.toSet();
     while (_puckIconCache.length > maximumCachedIcons) {
       final staleLabel = _puckIconCache.keys.firstWhere(
-        (label) => !activeLabels.contains(label),
+        (label) => !activePuckLabels.contains(label),
       );
       _puckIconCache.remove(staleLabel);
     }
-    return icons;
+    final activePlaceLabels = placeLabelsByZone.values.toSet();
+    while (_placeLabelIconCache.length > maximumCachedIcons) {
+      final staleLabel = _placeLabelIconCache.keys.firstWhere(
+        (label) => !activePlaceLabels.contains(label),
+      );
+      _placeLabelIconCache.remove(staleLabel);
+    }
+
+    return (
+      puckIcons: puckIcons,
+      placeLabelIcons: placeLabelIcons,
+    );
   }
 
   Future<void> _refreshPuckIcons({
@@ -589,7 +676,11 @@ class _SpendingMapPageState extends State<SpendingMapPage>
         _zoneMembershipChanged(_displayedZones, zones);
     if (shouldAnimate) {
       setState(() => _zoomLevel = targetZoom);
-      _startPuckTransition(zones, icons);
+      _startPuckTransition(
+        zones,
+        icons.puckIcons,
+        icons.placeLabelIcons,
+      );
       return;
     }
 
@@ -597,10 +688,12 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     setState(() {
       _zoomLevel = targetZoom;
       _displayedZones = zones;
-      _puckIcons = icons;
+      _puckIcons = icons.puckIcons;
+      _placeLabelIcons = icons.placeLabelIcons;
       _puckMotions = const [];
       _puckTransitionTargetZones = null;
       _puckTransitionTargetIcons = const {};
+      _puckTransitionTargetPlaceLabelIcons = const {};
     });
   }
 
@@ -643,6 +736,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   void _startPuckTransition(
     List<_SpendingZone> targetZones,
     Map<String, BitmapDescriptor> targetIcons,
+    Map<String, BitmapDescriptor> targetPlaceLabelIcons,
   ) {
     _puckTransitionController.stop();
     final currentById = {
@@ -665,11 +759,13 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       final current = currentById[target.id];
       if (current == null) continue;
       final icon = targetIcons[target.id];
-      if (icon == null) continue;
+      final placeLabelIcon = targetPlaceLabelIcons[target.id];
+      if (icon == null || placeLabelIcon == null) continue;
       motions.add(
         _PuckMotion(
           markerId: target.id,
-          icon: icon,
+          puckIcon: icon,
+          placeLabelIcon: placeLabelIcon,
           from: current.center,
           to: target.center,
           fromAlpha: 1,
@@ -682,12 +778,14 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     for (final current in _displayedZones) {
       if (targetById.containsKey(current.id)) continue;
       final icon = _puckIcons[current.id];
-      if (icon == null) continue;
+      final placeLabelIcon = _placeLabelIcons[current.id];
+      if (icon == null || placeLabelIcon == null) continue;
       final related = _relatedZone(current, targetByReference);
       motions.add(
         _PuckMotion(
           markerId: current.id,
-          icon: icon,
+          puckIcon: icon,
+          placeLabelIcon: placeLabelIcon,
           from: current.center,
           to: related?.center ?? current.center,
           fromAlpha: 1,
@@ -700,12 +798,14 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     for (final target in targetZones) {
       if (currentById.containsKey(target.id)) continue;
       final icon = targetIcons[target.id];
-      if (icon == null) continue;
+      final placeLabelIcon = targetPlaceLabelIcons[target.id];
+      if (icon == null || placeLabelIcon == null) continue;
       final related = _relatedZone(target, currentByReference);
       motions.add(
         _PuckMotion(
           markerId: target.id,
-          icon: icon,
+          puckIcon: icon,
+          placeLabelIcon: placeLabelIcon,
           from: related?.center ?? target.center,
           to: target.center,
           fromAlpha: 0,
@@ -719,6 +819,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       setState(() {
         _displayedZones = targetZones;
         _puckIcons = targetIcons;
+        _placeLabelIcons = targetPlaceLabelIcons;
       });
       return;
     }
@@ -728,6 +829,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       _puckMotions = List<_PuckMotion>.unmodifiable(motions);
       _puckTransitionTargetZones = targetZones;
       _puckTransitionTargetIcons = targetIcons;
+      _puckTransitionTargetPlaceLabelIcons = targetPlaceLabelIcons;
     });
     _puckTransitionController.forward();
   }
@@ -744,19 +846,24 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     final targetZones = _puckTransitionTargetZones;
     if (targetZones == null) return;
     final targetIcons = _puckTransitionTargetIcons;
+    final targetPlaceLabelIcons = _puckTransitionTargetPlaceLabelIcons;
     _puckTransitionController.stop();
     setState(() {
       _displayedZones = targetZones;
       _puckIcons = targetIcons;
+      _placeLabelIcons = targetPlaceLabelIcons;
       _puckMotions = const [];
       _puckTransitionTargetZones = null;
       _puckTransitionTargetIcons = const {};
+      _puckTransitionTargetPlaceLabelIcons = const {};
     });
   }
 
   Future<BitmapDescriptor> _createPuckIcon({required String label}) async {
-    const imageSize = 160.0;
-    const center = Offset(imageSize / 2, imageSize / 2);
+    const center = Offset(
+      _puckIconSourceSize / 2,
+      _puckIconSourceSize / 2,
+    );
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
@@ -802,13 +909,89 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     );
 
     final image = await recorder.endRecording().toImage(
-          imageSize.toInt(),
-          imageSize.toInt(),
+          _puckIconSourceSize.toInt(),
+          _puckIconSourceSize.toInt(),
         );
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     image.dispose();
     final data = bytes?.buffer.asUint8List() ?? Uint8List(0);
     return BitmapDescriptor.bytes(data, width: 54, height: 54);
+  }
+
+  Future<BitmapDescriptor> _createPlaceLabelIcon({
+    required String placeLabel,
+  }) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final placeTextPainter = TextPainter(
+      text: TextSpan(
+        text: placeLabel,
+        style: const TextStyle(
+          color: AppColors.white,
+          fontSize: 40,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: 330);
+    final placePillWidth = math.max(150.0, placeTextPainter.width + 44);
+    final placePillRect = Rect.fromCenter(
+      center: const Offset(_placeLabelCenterX, 45),
+      width: placePillWidth,
+      height: 68,
+    );
+    final placePillPath = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          placePillRect,
+          const Radius.circular(26),
+        ),
+      );
+    final pointerPath = Path()
+      ..moveTo(_placeLabelCenterX - 12, placePillRect.bottom - 5)
+      ..lineTo(_placeLabelCenterX, 104)
+      ..lineTo(_placeLabelCenterX + 12, placePillRect.bottom - 5)
+      ..close();
+    final placeLabelPath = Path.combine(
+      PathOperation.union,
+      placePillPath,
+      pointerPath,
+    );
+    canvas.drawShadow(placeLabelPath, AppColors.black, 7, true);
+    canvas.drawPath(
+      placeLabelPath,
+      Paint()..color = AppColors.slate900.withValues(alpha: 0.94),
+    );
+    canvas.drawPath(
+      placeLabelPath,
+      Paint()
+        ..color = AppColors.white.withValues(alpha: 0.9)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+    placeTextPainter.paint(
+      canvas,
+      Offset(
+        _placeLabelCenterX - (placeTextPainter.width / 2),
+        placePillRect.center.dy - (placeTextPainter.height / 2),
+      ),
+    );
+
+    final image = await recorder.endRecording().toImage(
+          _placeLabelIconSourceWidth.toInt(),
+          _placeLabelIconSourceHeight.toInt(),
+        );
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    final data = bytes?.buffer.asUint8List() ?? Uint8List(0);
+    return BitmapDescriptor.bytes(
+      data,
+      width: _placeLabelIconSourceWidth * _puckIconScale,
+      height: _placeLabelIconSourceHeight * _puckIconScale,
+    );
   }
 
   Future<String> _savePlaceName(
@@ -840,6 +1023,32 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     return normalizedName ?? _approximatePlaceName(zone.center);
   }
 
+  Future<void> _editZonePlaceName(_SpendingZone zone) async {
+    if (_editingZoneId != null) return;
+    _editingZoneId = zone.id;
+    try {
+      if (!mounted) return;
+      final result = await showPlaceNameEditorSheet(
+        context: context,
+        initialValue: zone.customPlaceName,
+      );
+      if (!mounted || result == null) return;
+      await _savePlaceName(zone, result.value);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update place name')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      _editingZoneId = null;
+    }
+  }
+
   Future<void> _openZone(_SpendingZone zone) async {
     if (_openingZoneId != null) return;
     _openingZoneId = zone.id;
@@ -861,8 +1070,20 @@ class _SpendingMapPageState extends State<SpendingMapPage>
           ),
         ),
       );
+      await _reloadLocationsAfterTransactionPage();
     } finally {
       _openingZoneId = null;
+    }
+  }
+
+  Future<void> _reloadLocationsAfterTransactionPage() async {
+    try {
+      final locations = await _repository.getTransactionLocations();
+      if (!mounted) return;
+      setState(() => _locations = locations);
+      await _refreshPuckIcons();
+    } catch (error) {
+      debugPrint('Could not refresh spending map locations: $error');
     }
   }
 
@@ -1233,9 +1454,11 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       _locations = const [];
       _displayedZones = const [];
       _puckIcons = const {};
+      _placeLabelIcons = const {};
       _puckMotions = const [];
       _puckTransitionTargetZones = null;
       _puckTransitionTargetIcons = const {};
+      _puckTransitionTargetPlaceLabelIcons = const {};
       _puckGeneration += 1;
       _mapReady = false;
     });

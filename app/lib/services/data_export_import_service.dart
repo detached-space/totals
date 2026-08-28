@@ -321,6 +321,10 @@ class DataExportImportService {
           await _transactionLocationRepo.getForTransactionReferences(
         scopedTransactionReferences,
       );
+      final locationNamesByReference = <String, String?>{
+        for (final location in scopedTransactionLocations)
+          location.transactionReference: location.placeName,
+      };
       await _transactionSmsSourceService.captureAvailableSources(
         scopedTransactions,
       );
@@ -382,8 +386,9 @@ class DataExportImportService {
             ? scopedUserAccounts.map((a) => a.toJson()).toList()
             : [],
         'transactions': scopedTransactions
-            .map(
-                (transaction) => _portableTransactionData(transaction.toJson()))
+            .map((transaction) => _portableTransactionData(transaction.toJson())
+              ..['locationName'] =
+                  locationNamesByReference[transaction.reference])
             .toList(),
         'transactionLocations': scopedTransactionLocations
             .map((location) => location.toBackupJson())
@@ -761,10 +766,37 @@ class DataExportImportService {
       // Existing local locations win to avoid replacing newer device data.
       final transactionLocationsRaw = _asMapList(data['transactionLocations']);
       if (transactionLocationsRaw.isNotEmpty) {
+        final exportedLocationNamesByReference = <String, String>{};
+        for (final row in transactionsRaw) {
+          final reference = row['reference']?.toString().trim() ?? '';
+          if (reference.isEmpty) continue;
+          try {
+            final locationName = normalizeTransactionPlaceName(
+              row['locationName']?.toString(),
+            );
+            if (locationName != null) {
+              exportedLocationNamesByReference[reference] = locationName;
+            }
+          } on ArgumentError {
+            // Ignore invalid transaction-level enrichment. The canonical
+            // transactionLocations row is validated independently below.
+          }
+        }
         final locations = <TransactionLocation>[];
         for (final row in transactionLocationsRaw) {
           try {
-            locations.add(TransactionLocation.fromBackupJson(row));
+            final locationRow = Map<String, dynamic>.from(row);
+            final reference =
+                locationRow['transactionReference']?.toString().trim() ?? '';
+            final canonicalName =
+                locationRow['placeName']?.toString().trim() ?? '';
+            if (canonicalName.isEmpty) {
+              final exportedName = exportedLocationNamesByReference[reference];
+              if (exportedName != null) {
+                locationRow['placeName'] = exportedName;
+              }
+            }
+            locations.add(TransactionLocation.fromBackupJson(locationRow));
           } on FormatException {
             // Skip malformed or legacy rows without blocking the rest of the
             // backup from being restored.
