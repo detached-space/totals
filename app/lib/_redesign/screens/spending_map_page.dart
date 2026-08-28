@@ -23,6 +23,7 @@ import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/services/offline_place_gazetteer.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/category_filter_utils.dart';
+import 'package:totals/utils/spending_map_clustering.dart';
 import 'package:totals/utils/spending_map_metrics.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -189,16 +190,12 @@ class _SpendingZone {
 }
 
 class _ZoneAccumulator {
-  double latitudeTotal = 0;
-  double longitudeTotal = 0;
   double netAmount = 0;
   int count = 0;
   final Set<String> transactionReferences = <String>{};
   final List<TransactionLocation> locations = <TransactionLocation>[];
 
   void add(TransactionLocation location) {
-    latitudeTotal += location.latitude;
-    longitudeTotal += location.longitude;
     netAmount += spendingMapNetContribution(
       transactionType: location.transactionType,
       amount: location.amount,
@@ -223,6 +220,50 @@ class _ZoneAccumulator {
   }
 }
 
+class _PuckMotion {
+  const _PuckMotion({
+    required this.markerId,
+    required this.icon,
+    required this.from,
+    required this.to,
+    required this.fromAlpha,
+    required this.toAlpha,
+    required this.zIndex,
+  });
+
+  final String markerId;
+  final BitmapDescriptor icon;
+  final LatLng from;
+  final LatLng to;
+  final double fromAlpha;
+  final double toAlpha;
+  final int zIndex;
+
+  LatLng positionAt(double progress) {
+    return LatLng(
+      from.latitude + ((to.latitude - from.latitude) * progress),
+      from.longitude + ((to.longitude - from.longitude) * progress),
+    );
+  }
+
+  double alphaAt(double progress) {
+    return fromAlpha + ((toAlpha - fromAlpha) * progress);
+  }
+}
+
+String _spendingZoneId(List<String> sortedReferences) {
+  var hash = 0xcbf29ce484222325;
+  for (final reference in sortedReferences) {
+    for (final codeUnit in reference.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x100000001b3) & 0xffffffffffffffff;
+    }
+    hash ^= 0xff;
+    hash = (hash * 0x100000001b3) & 0xffffffffffffffff;
+  }
+  return '${sortedReferences.length}-${hash.toRadixString(16)}';
+}
+
 class SpendingMapPage extends StatefulWidget {
   const SpendingMapPage({super.key});
 
@@ -230,7 +271,10 @@ class SpendingMapPage extends StatefulWidget {
   State<SpendingMapPage> createState() => _SpendingMapPageState();
 }
 
-class _SpendingMapPageState extends State<SpendingMapPage> {
+class _SpendingMapPageState extends State<SpendingMapPage>
+    with SingleTickerProviderStateMixin {
+  static const _puckTransitionDuration = Duration(milliseconds: 240);
+
   final TransactionLocationRepository _repository =
       TransactionLocationRepository();
 
@@ -238,10 +282,17 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   OfflinePlaceGazetteer? _offlineGazetteer;
   List<TransactionLocation> _locations = const [];
   _SpendingMapFilters _filters = const _SpendingMapFilters();
+  List<_SpendingZone> _displayedZones = const [];
   Map<String, BitmapDescriptor> _puckIcons = const {};
+  final Map<String, BitmapDescriptor> _puckIconCache = {};
+  List<_PuckMotion> _puckMotions = const [];
+  List<_SpendingZone>? _puckTransitionTargetZones;
+  Map<String, BitmapDescriptor> _puckTransitionTargetIcons = const {};
+  late final AnimationController _puckTransitionController;
   int _puckGeneration = 0;
   double _zoomLevel = 10;
   double _pendingZoomLevel = 10;
+  bool _cameraMoving = false;
   GoogleMapController? _mapController;
   bool _loading = true;
   bool _mapReady = false;
@@ -305,7 +356,20 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
   @override
   void initState() {
     super.initState();
+    _puckTransitionController = AnimationController(
+      vsync: this,
+      duration: _puckTransitionDuration,
+    )
+      ..addListener(_handlePuckTransitionTick)
+      ..addStatusListener(_handlePuckTransitionStatus);
     _loadLocations();
+  }
+
+  @override
+  void dispose() {
+    _puckGeneration += 1;
+    _puckTransitionController.dispose();
+    super.dispose();
   }
 
   @override
@@ -359,65 +423,55 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
     }
   }
 
-  List<_SpendingZone> _buildZones(List<TransactionLocation> locations) {
-    final zoomBucket = _zoomBucketFor(_zoomLevel);
-    final cellSize = _cellSizeForZoom(_zoomLevel);
-    final buckets = <String, _ZoneAccumulator>{};
-    for (final location in locations) {
-      final latitudeCell = (location.latitude / cellSize).floor();
-      final longitudeCell = (location.longitude / cellSize).floor();
-      final id = '$zoomBucket-$latitudeCell-$longitudeCell';
-      buckets.putIfAbsent(id, _ZoneAccumulator.new).add(location);
-    }
+  List<_SpendingZone> _buildZones(
+    List<TransactionLocation> locations, {
+    required double zoom,
+  }) {
+    if (locations.isEmpty) return const [];
+    final averageLatitude = locations.fold<double>(
+          0,
+          (sum, location) => sum + location.latitude,
+        ) /
+        locations.length;
+    final clusters = clusterSpendingMapLocations<TransactionLocation>(
+      locations: locations,
+      latitudeOf: (location) => location.latitude,
+      longitudeOf: (location) => location.longitude,
+      stableKeyOf: (location) => location.transactionReference,
+      radiusMeters: spendingMapGroupingRadiusMeters(
+        zoom: zoom,
+        latitude: averageLatitude,
+      ),
+    );
 
-    final zones = buckets.entries.map((entry) {
-      final bucket = entry.value;
-      final center = LatLng(
-        bucket.latitudeTotal / bucket.count,
-        bucket.longitudeTotal / bucket.count,
-      );
+    final zones = clusters.map((cluster) {
+      final bucket = _ZoneAccumulator();
+      for (final location in cluster.members) {
+        bucket.add(location);
+      }
+      final center = LatLng(cluster.latitude, cluster.longitude);
+      final references = bucket.transactionReferences.toList(growable: true)
+        ..sort();
       final customPlaceName = bucket.customPlaceName;
       return _SpendingZone(
-        id: entry.key,
+        id: _spendingZoneId(references),
         name: customPlaceName ?? _approximatePlaceName(center),
         center: center,
         transactionCount: bucket.count,
         netAmount: bucket.netAmount,
-        transactionReferences: List<String>.unmodifiable(
-          bucket.transactionReferences,
-        ),
+        transactionReferences: List<String>.unmodifiable(references),
         customPlaceName: customPlaceName,
       );
     }).toList(growable: true);
 
     zones.sort((first, second) {
-      return second.transactionCount.compareTo(first.transactionCount);
+      final countComparison =
+          second.transactionCount.compareTo(first.transactionCount);
+      return countComparison != 0
+          ? countComparison
+          : first.id.compareTo(second.id);
     });
     return zones;
-  }
-
-  int _zoomBucketFor(double zoom) {
-    if (zoom < 6) return 0;
-    if (zoom < 7.5) return 1;
-    if (zoom < 9) return 2;
-    if (zoom < 10.5) return 3;
-    if (zoom < 12) return 4;
-    if (zoom < 13.5) return 5;
-    if (zoom < 15) return 6;
-    return 7;
-  }
-
-  double _cellSizeForZoom(double zoom) {
-    return switch (_zoomBucketFor(zoom)) {
-      0 => 3,
-      1 => 1.2,
-      2 => 0.45,
-      3 => 0.18,
-      4 => 0.07,
-      5 => 0.03,
-      6 => 0.012,
-      _ => 0.0045,
-    };
   }
 
   String _approximatePlaceName(LatLng point) {
@@ -435,8 +489,25 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
     return 'Central Ethiopia';
   }
 
-  Set<Marker> _buildZoneMarkers(List<_SpendingZone> zones) {
-    return zones
+  Set<Marker> _buildZoneMarkers() {
+    if (_puckMotions.isNotEmpty) {
+      final progress = Curves.easeInOutCubic.transform(
+        _puckTransitionController.value,
+      );
+      return _puckMotions.map((motion) {
+        return Marker(
+          markerId: MarkerId('zone-puck-${motion.markerId}'),
+          position: motion.positionAt(progress),
+          alpha: motion.alphaAt(progress).clamp(0.0, 1.0).toDouble(),
+          anchor: const Offset(0.5, 0.5),
+          icon: motion.icon,
+          consumeTapEvents: true,
+          zIndexInt: motion.zIndex,
+        );
+      }).toSet();
+    }
+
+    return _displayedZones
         .take(50)
         .where((zone) => _puckIcons[zone.id] != null)
         .map((zone) {
@@ -464,20 +535,223 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
     };
   }
 
-  Future<void> _refreshPuckIcons() async {
-    final generation = ++_puckGeneration;
-    final zones = _buildZones(_filteredLocations).take(50).toList();
-    final entries = await Future.wait(
-      zones.map((zone) async {
-        return MapEntry(
-          zone.id,
-          await _createPuckIcon(label: _puckLabel(zone)),
-        );
+  Future<Map<String, BitmapDescriptor>> _loadPuckIcons(
+    List<_SpendingZone> zones,
+  ) async {
+    final labelsByZone = <String, String>{
+      for (final zone in zones) zone.id: _puckLabel(zone),
+    };
+    final missingLabels = labelsByZone.values
+        .where((label) => !_puckIconCache.containsKey(label))
+        .toSet();
+    final generatedEntries = await Future.wait(
+      missingLabels.map((label) async {
+        return MapEntry(label, await _createPuckIcon(label: label));
       }),
     );
+    _puckIconCache.addEntries(generatedEntries);
+    final icons = <String, BitmapDescriptor>{
+      for (final entry in labelsByZone.entries)
+        entry.key: _puckIconCache[entry.value]!,
+    };
+    const maximumCachedIcons = 128;
+    final activeLabels = labelsByZone.values.toSet();
+    while (_puckIconCache.length > maximumCachedIcons) {
+      final staleLabel = _puckIconCache.keys.firstWhere(
+        (label) => !activeLabels.contains(label),
+      );
+      _puckIconCache.remove(staleLabel);
+    }
+    return icons;
+  }
+
+  Future<void> _refreshPuckIcons({
+    double? zoom,
+    bool animate = false,
+  }) async {
+    final generation = ++_puckGeneration;
+    final targetZoom = zoom ?? _zoomLevel;
+    final animatePucks =
+        animate && MediaQuery.maybeOf(context)?.disableAnimations != true;
+    final zones = _buildZones(
+      _filteredLocations,
+      zoom: targetZoom,
+    ).take(50).toList(growable: false);
+    final icons = await _loadPuckIcons(zones);
     if (!mounted || generation != _puckGeneration) return;
-    setState(
-        () => _puckIcons = Map<String, BitmapDescriptor>.fromEntries(entries));
+    if (animate &&
+        (_cameraMoving || (_pendingZoomLevel - targetZoom).abs() > 0.05)) {
+      return;
+    }
+
+    final shouldAnimate = animatePucks &&
+        _displayedZones.isNotEmpty &&
+        _zoneMembershipChanged(_displayedZones, zones);
+    if (shouldAnimate) {
+      setState(() => _zoomLevel = targetZoom);
+      _startPuckTransition(zones, icons);
+      return;
+    }
+
+    _puckTransitionController.stop();
+    setState(() {
+      _zoomLevel = targetZoom;
+      _displayedZones = zones;
+      _puckIcons = icons;
+      _puckMotions = const [];
+      _puckTransitionTargetZones = null;
+      _puckTransitionTargetIcons = const {};
+    });
+  }
+
+  bool _zoneMembershipChanged(
+    List<_SpendingZone> current,
+    List<_SpendingZone> next,
+  ) {
+    if (current.length != next.length) return true;
+    final currentIds = current.map((zone) => zone.id).toSet();
+    final nextIds = next.map((zone) => zone.id).toSet();
+    return !setEquals(currentIds, nextIds);
+  }
+
+  _SpendingZone? _relatedZone(
+    _SpendingZone zone,
+    Map<String, _SpendingZone> zonesByReference,
+  ) {
+    final overlapByZone = <String, int>{};
+    final relatedById = <String, _SpendingZone>{};
+    for (final reference in zone.transactionReferences) {
+      final related = zonesByReference[reference];
+      if (related == null) continue;
+      relatedById[related.id] = related;
+      overlapByZone.update(
+        related.id,
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    if (overlapByZone.isEmpty) return null;
+    final bestId = overlapByZone.entries.reduce((best, candidate) {
+      if (candidate.value != best.value) {
+        return candidate.value > best.value ? candidate : best;
+      }
+      return candidate.key.compareTo(best.key) < 0 ? candidate : best;
+    }).key;
+    return relatedById[bestId];
+  }
+
+  void _startPuckTransition(
+    List<_SpendingZone> targetZones,
+    Map<String, BitmapDescriptor> targetIcons,
+  ) {
+    _puckTransitionController.stop();
+    final currentById = {
+      for (final zone in _displayedZones) zone.id: zone,
+    };
+    final targetById = {
+      for (final zone in targetZones) zone.id: zone,
+    };
+    final currentByReference = <String, _SpendingZone>{
+      for (final zone in _displayedZones)
+        for (final reference in zone.transactionReferences) reference: zone,
+    };
+    final targetByReference = <String, _SpendingZone>{
+      for (final zone in targetZones)
+        for (final reference in zone.transactionReferences) reference: zone,
+    };
+    final motions = <_PuckMotion>[];
+
+    for (final target in targetZones) {
+      final current = currentById[target.id];
+      if (current == null) continue;
+      final icon = targetIcons[target.id];
+      if (icon == null) continue;
+      motions.add(
+        _PuckMotion(
+          markerId: target.id,
+          icon: icon,
+          from: current.center,
+          to: target.center,
+          fromAlpha: 1,
+          toAlpha: 1,
+          zIndex: 2,
+        ),
+      );
+    }
+
+    for (final current in _displayedZones) {
+      if (targetById.containsKey(current.id)) continue;
+      final icon = _puckIcons[current.id];
+      if (icon == null) continue;
+      final related = _relatedZone(current, targetByReference);
+      motions.add(
+        _PuckMotion(
+          markerId: current.id,
+          icon: icon,
+          from: current.center,
+          to: related?.center ?? current.center,
+          fromAlpha: 1,
+          toAlpha: 0,
+          zIndex: 1,
+        ),
+      );
+    }
+
+    for (final target in targetZones) {
+      if (currentById.containsKey(target.id)) continue;
+      final icon = targetIcons[target.id];
+      if (icon == null) continue;
+      final related = _relatedZone(target, currentByReference);
+      motions.add(
+        _PuckMotion(
+          markerId: target.id,
+          icon: icon,
+          from: related?.center ?? target.center,
+          to: target.center,
+          fromAlpha: 0,
+          toAlpha: 1,
+          zIndex: 2,
+        ),
+      );
+    }
+
+    if (motions.isEmpty) {
+      setState(() {
+        _displayedZones = targetZones;
+        _puckIcons = targetIcons;
+      });
+      return;
+    }
+
+    _puckTransitionController.value = 0;
+    setState(() {
+      _puckMotions = List<_PuckMotion>.unmodifiable(motions);
+      _puckTransitionTargetZones = targetZones;
+      _puckTransitionTargetIcons = targetIcons;
+    });
+    _puckTransitionController.forward();
+  }
+
+  void _handlePuckTransitionTick() {
+    if (mounted && _puckMotions.isNotEmpty) setState(() {});
+  }
+
+  void _handlePuckTransitionStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) _finishPuckTransition();
+  }
+
+  void _finishPuckTransition() {
+    final targetZones = _puckTransitionTargetZones;
+    if (targetZones == null) return;
+    final targetIcons = _puckTransitionTargetIcons;
+    _puckTransitionController.stop();
+    setState(() {
+      _displayedZones = targetZones;
+      _puckIcons = targetIcons;
+      _puckMotions = const [];
+      _puckTransitionTargetZones = null;
+      _puckTransitionTargetIcons = const {};
+    });
   }
 
   Future<BitmapDescriptor> _createPuckIcon({required String label}) async {
@@ -562,6 +836,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
         );
       }).toList(growable: false);
     });
+    await _refreshPuckIcons();
     return normalizedName ?? _approximatePlaceName(zone.center);
   }
 
@@ -745,17 +1020,19 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
 
   void _handleCameraMove(CameraPosition position) {
     _pendingZoomLevel = position.zoom;
+    _cameraMoving = true;
+    if (_puckTransitionTargetZones != null) _finishPuckTransition();
   }
 
   void _handleCameraIdle() {
-    if (_zoomBucketFor(_pendingZoomLevel) == _zoomBucketFor(_zoomLevel)) {
-      return;
-    }
-    setState(() {
-      _zoomLevel = _pendingZoomLevel;
-      _puckIcons = const {};
-    });
-    _refreshPuckIcons();
+    _cameraMoving = false;
+    if ((_pendingZoomLevel - _zoomLevel).abs() <= 0.01) return;
+    unawaited(
+      _refreshPuckIcons(
+        zoom: _pendingZoomLevel,
+        animate: true,
+      ),
+    );
   }
 
   Future<void> _showFilters() async {
@@ -828,10 +1105,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
       ),
     );
     if (!mounted || selected == null || selected == _filters) return;
-    setState(() {
-      _filters = selected;
-      _puckIcons = const {};
-    });
+    setState(() => _filters = selected);
     await Future.wait([_refreshPuckIcons(), _fitVisibleLocations()]);
   }
 
@@ -954,9 +1228,14 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
     await _repository.clearForActiveProfile();
     if (!mounted) return;
     _mapController = null;
+    _puckTransitionController.stop();
     setState(() {
       _locations = const [];
+      _displayedZones = const [];
       _puckIcons = const {};
+      _puckMotions = const [];
+      _puckTransitionTargetZones = null;
+      _puckTransitionTargetIcons = const {};
       _puckGeneration += 1;
       _mapReady = false;
     });
@@ -993,7 +1272,6 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
 
   Widget _buildMap(BuildContext context) {
     final filtered = _filteredLocations;
-    final zones = _buildZones(filtered);
     final ethiopiaLocations = _ethiopiaLocations;
     final initialCenter = ethiopiaLocations.isEmpty
         ? _ethiopiaCenter
@@ -1015,7 +1293,7 @@ class _SpendingMapPageState extends State<SpendingMapPage> {
                     _mapDisplayMode == _MapDisplayMode.roadmap
                 ? _darkRoadMapStyle
                 : null,
-            markers: _buildZoneMarkers(zones),
+            markers: _buildZoneMarkers(),
             cameraTargetBounds: CameraTargetBounds(_ethiopiaMapBounds),
             minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
             padding: EdgeInsets.fromLTRB(
