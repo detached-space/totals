@@ -3,11 +3,12 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/database/database_helper.dart';
 
 import 'database_fixture.dart';
 
-const _schemaVersion = 34;
+const _schemaVersion = 38;
 
 void main() {
   late Directory tempDirectory;
@@ -31,13 +32,13 @@ void main() {
     }
   });
 
-  test('fresh database creates a healthy v34 schema and reopens cleanly',
+  test('fresh database creates a healthy v38 schema and reopens cleanly',
       () async {
     int? categoryCount;
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
         final count = (await db.rawQuery(
           'SELECT COUNT(*) AS count FROM categories',
         ))
@@ -48,13 +49,56 @@ void main() {
     }
   });
 
-  test('exact v4 schema upgrades to v34 without losing sentinel data',
+  test('v37 defaults existing cash wallets off without resetting later opt-in',
+      () async {
+    await _withDatabase(databasePath, (db) async {
+      await db.insert('accounts', <String, Object?>{
+        'accountNumber': CashConstants.defaultAccountNumber,
+        'bank': CashConstants.bankId,
+        'balance': 250.0,
+        'accountHolderName': CashConstants.defaultAccountHolderName,
+        'includeInTotals': 1,
+        'isDormant': 0,
+        'isDefault': 1,
+      });
+      await db.setVersion(36);
+    });
+
+    await _withDatabase(databasePath, (db) async {
+      final cash = (await db.query(
+        'accounts',
+        where: 'bank = ?',
+        whereArgs: const <Object?>[CashConstants.bankId],
+      ))
+          .single;
+      expect(cash['includeInTotals'], 0);
+
+      await db.update(
+        'accounts',
+        const <String, Object?>{'includeInTotals': 1},
+        where: 'bank = ?',
+        whereArgs: const <Object?>[CashConstants.bankId],
+      );
+    });
+
+    await _withDatabase(databasePath, (db) async {
+      final cash = (await db.query(
+        'accounts',
+        where: 'bank = ?',
+        whereArgs: const <Object?>[CashConstants.bankId],
+      ))
+          .single;
+      expect(cash['includeInTotals'], 1);
+    });
+  });
+
+  test('exact v4 schema upgrades to v38 without losing sentinel data',
       () async {
     await DatabaseFixture.createV4(databaseFactoryFfi, databasePath);
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final transaction = (await db.query(
           'transactions',
@@ -111,7 +155,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final renamed = (await db.query(
           'categories',
@@ -153,7 +197,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final renamed = (await db.query(
           'categories',
@@ -185,7 +229,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final legacyRule = (await db.query(
           'auto_category_rules',
@@ -215,7 +259,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final entry = (await db.query(
           'loan_debt_entries',
@@ -269,7 +313,7 @@ void main() {
 
       for (var pass = 0; pass < 2; pass++) {
         await _withDatabase(databasePath, (db) async {
-          await _expectHealthyV34(db);
+          await _expectHealthyV38(db);
 
           final transaction = (await db.query(
             'transactions',
@@ -304,14 +348,14 @@ void main() {
     });
   }
 
-  test('exact v28 schema upgrades through v34 idempotently', () async {
+  test('exact v28 schema upgrades through v38 idempotently', () async {
     await _withDatabase(databasePath, (db) async {
       await DatabaseFixture.replaceV29OwnershipShapeWithV28(db);
     });
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final transaction = (await db.query(
           'transactions',
@@ -371,7 +415,7 @@ void main() {
 
     for (var pass = 0; pass < 2; pass++) {
       await _withDatabase(databasePath, (db) async {
-        await _expectHealthyV34(db);
+        await _expectHealthyV38(db);
 
         final custom = (await db.query(
           'categories',
@@ -405,7 +449,7 @@ void main() {
     });
 
     await _withDatabase(databasePath, (db) async {
-      await _expectHealthyV34(db);
+      await _expectHealthyV38(db);
       await db.insert('transactions', {
         'amount': 25,
         'reference': 'source-sms-migration',
@@ -423,6 +467,105 @@ void main() {
       );
 
       expect(await db.query('transaction_source_sms'), isEmpty);
+    });
+  });
+
+  test('v34 adds transaction locations with a transaction delete trigger',
+      () async {
+    await _withDatabase(databasePath, (db) async {
+      await db.execute(
+        'DROP TRIGGER IF EXISTS trg_transaction_locations_tx_delete',
+      );
+      await db.execute(
+        'DROP INDEX IF EXISTS idx_transaction_locations_profile_captured',
+      );
+      await db.execute('DROP TABLE transaction_locations');
+      await db.setVersion(34);
+    });
+
+    await _withDatabase(databasePath, (db) async {
+      await _expectHealthyV38(db);
+      await db.insert('transactions', {
+        'amount': 42,
+        'reference': 'location-migration',
+        'type': 'DEBIT',
+      });
+      await db.insert('transaction_locations', {
+        'transactionReference': 'location-migration',
+        'latitude': 9.03,
+        'longitude': 38.74,
+        'accuracy': 12.5,
+        'capturedAt': '2026-08-17T12:00:00.000Z',
+      });
+
+      await db.delete(
+        'transactions',
+        where: 'reference = ?',
+        whereArgs: ['location-migration'],
+      );
+
+      expect(await db.query('transaction_locations'), isEmpty);
+    });
+  });
+
+  test('v35 adds custom place names without losing saved locations', () async {
+    await _withDatabase(databasePath, (db) async {
+      await db.insert('transactions', {
+        'amount': 42,
+        'reference': 'place-name-migration',
+        'type': 'DEBIT',
+      });
+      await db.insert('transaction_locations', {
+        'transactionReference': 'place-name-migration',
+        'latitude': 9.03,
+        'longitude': 38.84,
+        'capturedAt': '2026-08-17T12:00:00.000Z',
+      });
+      await db.execute(
+        'ALTER TABLE transaction_locations DROP COLUMN placeName',
+      );
+      await db.setVersion(35);
+    });
+
+    await _withDatabase(databasePath, (db) async {
+      await _expectHealthyV38(db);
+      final locations = await db.query(
+        'transaction_locations',
+        where: 'transactionReference = ?',
+        whereArgs: ['place-name-migration'],
+      );
+      expect(locations, hasLength(1));
+      expect(locations.single['placeName'], isNull);
+    });
+  });
+
+  test('v37 adds reusable saved locations and transaction links', () async {
+    await _withDatabase(databasePath, (db) async {
+      await db.execute('DROP TRIGGER IF EXISTS trg_saved_locations_delete');
+      await db.execute(
+        'DROP INDEX IF EXISTS idx_transaction_locations_saved_location',
+      );
+      await db.execute(
+        'DROP INDEX IF EXISTS idx_saved_locations_profile_name',
+      );
+      await db.execute('DROP TABLE saved_locations');
+      await db.execute(
+        'ALTER TABLE transaction_locations DROP COLUMN savedLocationId',
+      );
+      await db.setVersion(37);
+    });
+
+    await _withDatabase(databasePath, (db) async {
+      await _expectHealthyV38(db);
+      await db.insert('saved_locations', <String, Object?>{
+        'id': 'migration-home',
+        'name': 'Home',
+        'latitude': 9.03,
+        'longitude': 38.74,
+        'createdAt': '2026-08-30T12:00:00.000Z',
+        'updatedAt': '2026-08-30T12:00:00.000Z',
+      });
+      expect(await db.query('saved_locations'), hasLength(1));
     });
   });
 }
@@ -445,7 +588,7 @@ Future<T> _withDatabase<T>(
   }
 }
 
-Future<void> _expectHealthyV34(Database db) async {
+Future<void> _expectHealthyV38(Database db) async {
   expect(await db.getVersion(), _schemaVersion);
 
   final integrity = await db.rawQuery('PRAGMA integrity_check');
@@ -475,6 +618,8 @@ Future<void> _expectHealthyV34(Database db) async {
       'loan_debt_repayments',
       'reimbursement_allocations',
       'transaction_source_sms',
+      'transaction_locations',
+      'saved_locations',
       'sync_destinations',
       'sync_rules',
       'sync_outbox',
@@ -571,6 +716,42 @@ Future<void> _expectHealthyV34(Database db) async {
       'messageId',
     }),
   );
+  expect(
+    await _columnNames(db, 'transaction_locations'),
+    containsAll(<String>{
+      'transactionReference',
+      'profileId',
+      'latitude',
+      'longitude',
+      'accuracy',
+      'capturedAt',
+      'placeName',
+      'savedLocationId',
+    }),
+  );
+  expect(
+    await _indexNames(db, 'transaction_locations'),
+    containsAll(<String>{
+      'idx_transaction_locations_profile_captured',
+      'idx_transaction_locations_saved_location',
+    }),
+  );
+  expect(
+    await _columnNames(db, 'saved_locations'),
+    containsAll(<String>{
+      'id',
+      'profileId',
+      'name',
+      'latitude',
+      'longitude',
+      'createdAt',
+      'updatedAt',
+    }),
+  );
+  expect(
+    await _indexNames(db, 'saved_locations'),
+    contains('idx_saved_locations_profile_name'),
+  );
 
   final reimbursementCategories = await db.query(
     'categories',
@@ -607,6 +788,22 @@ Future<void> _expectHealthyV34(Database db) async {
       AND name = 'trg_transaction_source_sms_tx_delete'
   ''');
   expect(sourceSmsTriggers, hasLength(1));
+
+  final transactionLocationTriggers = await db.rawQuery('''
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'trigger'
+      AND name = 'trg_transaction_locations_tx_delete'
+  ''');
+  expect(transactionLocationTriggers, hasLength(1));
+
+  final savedLocationTriggers = await db.rawQuery('''
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'trigger'
+      AND name = 'trg_saved_locations_delete'
+  ''');
+  expect(savedLocationTriggers, hasLength(1));
 
   final duplicateBuiltInKeys = await db.rawQuery('''
     SELECT builtInKey

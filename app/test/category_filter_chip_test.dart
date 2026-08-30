@@ -13,7 +13,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('only Self category chips use subtle flow colors', (
+  testWidgets('category chips use flow colors when subtle tint is requested', (
     tester,
   ) async {
     final themeProvider = ThemeProvider(initialThemeMode: ThemeMode.light);

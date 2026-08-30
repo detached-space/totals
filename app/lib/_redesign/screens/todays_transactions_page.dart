@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
@@ -12,13 +14,29 @@ import 'package:totals/models/category.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/category_filter_utils.dart';
 import 'package:totals/utils/text_utils.dart';
+import 'package:totals/utils/transaction_location_filter_utils.dart';
 import 'package:totals/_redesign/widgets/transaction_tile.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
+
+class TransactionLocationGroupEntry {
+  const TransactionLocationGroupEntry({
+    required this.transactionReference,
+    required this.fallbackName,
+    this.customName,
+  });
+
+  final String transactionReference;
+  final String fallbackName;
+  final String? customName;
+
+  String get displayName => customName ?? fallbackName;
+}
 
 class TodaysTransactionsPage extends StatefulWidget {
   const TodaysTransactionsPage({
@@ -28,6 +46,9 @@ class TodaysTransactionsPage extends StatefulWidget {
     this.subtitle,
     this.editableTitleValue,
     this.onTitleChanged,
+    this.locationGroupEntries = const <TransactionLocationGroupEntry>[],
+    this.onLocationGroupNameChanged,
+    this.transactionLocationRepository,
   });
 
   /// When provided, the page shows only these transactions instead of today's
@@ -38,6 +59,12 @@ class TodaysTransactionsPage extends StatefulWidget {
   final String? subtitle;
   final String? editableTitleValue;
   final Future<String> Function(String? value)? onTitleChanged;
+  final List<TransactionLocationGroupEntry> locationGroupEntries;
+  final Future<String?> Function(
+    Set<String> transactionReferences,
+    String? value,
+  )? onLocationGroupNameChanged;
+  final TransactionLocationRepository? transactionLocationRepository;
 
   @override
   State<TodaysTransactionsPage> createState() => _TodaysTransactionsPageState();
@@ -49,14 +76,27 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   String? _pageTitle;
   String? _editableTitleValue;
   bool _updatingTitle = false;
+  String? _updatingLocationGroupKey;
+  late List<TransactionLocationGroupEntry> _locationGroupEntries;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
+  Map<String, String> _savedLocationNameByReference = const <String, String>{};
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
+
+  TransactionLocationRepository get _transactionLocationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          widget.transactionLocationRepository ??
+              TransactionLocationRepository();
 
   @override
   void initState() {
     super.initState();
     _pageTitle = widget.title;
     _editableTitleValue = widget.editableTitleValue;
+    _locationGroupEntries = List<TransactionLocationGroupEntry>.of(
+      widget.locationGroupEntries,
+    );
+    unawaited(_refreshTransactionLocationNames());
   }
 
   @override
@@ -65,6 +105,64 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     if (oldWidget.title != widget.title) _pageTitle = widget.title;
     if (oldWidget.editableTitleValue != widget.editableTitleValue) {
       _editableTitleValue = widget.editableTitleValue;
+    }
+    if (!identical(
+      oldWidget.locationGroupEntries,
+      widget.locationGroupEntries,
+    )) {
+      _locationGroupEntries = List<TransactionLocationGroupEntry>.of(
+        widget.locationGroupEntries,
+      );
+    }
+    if (!identical(
+      oldWidget.transactionLocationRepository,
+      widget.transactionLocationRepository,
+    )) {
+      _resolvedTransactionLocationRepository =
+          widget.transactionLocationRepository;
+      unawaited(_refreshTransactionLocationNames());
+    }
+  }
+
+  Map<String, String> get _effectiveLocationNameByReference {
+    final namesByReference = <String, String>{
+      ..._savedLocationNameByReference,
+    };
+    for (final entry in _locationGroupEntries) {
+      final displayName = entry.displayName.trim();
+      if (displayName.isEmpty) continue;
+      namesByReference[entry.transactionReference] = displayName;
+    }
+    return namesByReference;
+  }
+
+  Future<void> _refreshTransactionLocationNames() async {
+    try {
+      final locations =
+          await _transactionLocationRepository.getTransactionLocations();
+      final namesByReference = <String, String>{};
+      for (final location in locations) {
+        final placeName = location.placeName?.trim();
+        if (placeName == null || placeName.isEmpty) continue;
+        namesByReference[location.transactionReference] = placeName;
+      }
+      if (!mounted) return;
+      setState(() {
+        _savedLocationNameByReference =
+            Map<String, String>.unmodifiable(namesByReference);
+        _locationGroupEntries = _locationGroupEntries
+            .map(
+              (entry) => TransactionLocationGroupEntry(
+                transactionReference: entry.transactionReference,
+                fallbackName: entry.fallbackName,
+                customName: namesByReference[entry.transactionReference],
+              ),
+            )
+            .toList(growable: false);
+      });
+    } catch (_) {
+      // Keep the last successfully loaded names so the page and its other
+      // filters remain usable if location storage is temporarily unavailable.
     }
   }
 
@@ -101,6 +199,165 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     }
   }
 
+  List<_LocationTransactionSection> _buildLocationSections(
+    List<Transaction> transactions,
+  ) {
+    final groupInfoByKey = <String, _LocationGroupInfo>{};
+    final groupKeyByReference = <String, String>{};
+
+    for (final entry in _locationGroupEntries) {
+      final title = entry.displayName.trim();
+      final key = _transactionLocationGroupKey(title);
+      final group = groupInfoByKey.putIfAbsent(
+        key,
+        () => _LocationGroupInfo(
+          key: key,
+          title: title,
+          canEdit: true,
+        ),
+      );
+      group.add(entry);
+      groupKeyByReference[entry.transactionReference] = key;
+    }
+
+    final sectionsByKey = <String, _LocationTransactionSection>{};
+    for (final transaction in transactions) {
+      var key = groupKeyByReference[transaction.reference];
+      if (key == null) {
+        key = _missingLocationGroupKey;
+        final missingGroup = groupInfoByKey.putIfAbsent(
+          _missingLocationGroupKey,
+          () => _LocationGroupInfo(
+            key: _missingLocationGroupKey,
+            title: context.l10nText('Location'),
+            canEdit: false,
+          ),
+        );
+        missingGroup.transactionReferences.add(transaction.reference);
+      }
+      final group = groupInfoByKey[key]!;
+      final section = sectionsByKey.putIfAbsent(
+        key,
+        () => _LocationTransactionSection(group: group),
+      );
+      section.transactions.add(transaction);
+    }
+
+    return sectionsByKey.values.toList(growable: false);
+  }
+
+  Future<void> _editLocationSection(
+    _LocationTransactionSection section,
+  ) async {
+    final onNameChanged = widget.onLocationGroupNameChanged;
+    if (onNameChanged == null ||
+        !section.group.canEdit ||
+        _isSelecting ||
+        _updatingLocationGroupKey != null) {
+      return;
+    }
+
+    final result = await showPlaceNameEditorSheet(
+      context: context,
+      initialValue: section.group.editableCustomName,
+    );
+    if (!mounted || result == null) return;
+
+    final references = Set<String>.unmodifiable(
+      section.group.transactionReferences,
+    );
+    setState(() => _updatingLocationGroupKey = section.group.key);
+    try {
+      final customName = await onNameChanged(references, result.value);
+      if (!mounted) return;
+      setState(() {
+        _locationGroupEntries = _locationGroupEntries.map((entry) {
+          if (!references.contains(entry.transactionReference)) return entry;
+          return TransactionLocationGroupEntry(
+            transactionReference: entry.transactionReference,
+            fallbackName: entry.fallbackName,
+            customName: customName,
+          );
+        }).toList(growable: false);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update place name')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingLocationGroupKey = null);
+    }
+  }
+
+  Widget _buildLocationSectionHeader(
+    _LocationTransactionSection section,
+  ) {
+    final isUpdating = _updatingLocationGroupKey == section.group.key;
+    final canEdit = widget.onLocationGroupNameChanged != null &&
+        section.group.canEdit &&
+        !_isSelecting &&
+        _updatingLocationGroupKey == null;
+    final headerColor =
+        AppColors.isDark(context) ? AppColors.slate400 : AppColors.slate700;
+
+    return Semantics(
+      key: ValueKey<String>(
+        'transaction-location-section-${section.group.key}',
+      ),
+      button: canEdit,
+      label:
+          canEdit ? context.l10nText('Edit place name') : section.group.title,
+      child: GestureDetector(
+        key: ValueKey<String>(
+          'transaction-location-section-edit-${section.group.key}',
+        ),
+        onTap: canEdit ? () => _editLocationSection(section) : null,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 16, bottom: 8),
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  section.group.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: headerColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (section.group.canEdit) ...[
+                const SizedBox(width: 5),
+                if (isUpdating)
+                  const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 1.8),
+                  )
+                else
+                  Icon(
+                    AppIcons.editOutlined,
+                    size: 15,
+                    color:
+                        canEdit ? headerColor : AppColors.textTertiary(context),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _toggle(Transaction tx) {
     setState(() {
       if (_selectedRefs.contains(tx.reference)) {
@@ -117,6 +374,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     TransactionProvider provider,
     List<Transaction> transactions,
   ) {
+    final locationNameByReference = _effectiveLocationNameByReference;
     return transactions.where((transaction) {
       if (_filter.type != null && transaction.type != _filter.type) {
         return false;
@@ -142,6 +400,13 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
       )) {
         return false;
       }
+      if (!matchesTransactionLocationFilters(
+        transactionReference: transaction.reference,
+        locationNames: _filter.locationNames,
+        locationNameByReference: locationNameByReference,
+      )) {
+        return false;
+      }
       if (_filter.minAmount != null &&
           transaction.amount < _filter.minAmount!) {
         return false;
@@ -158,6 +423,14 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     TransactionProvider provider,
     List<Transaction> transactions,
   ) async {
+    // A merged puck already supplies its complete location-name index through
+    // locationGroupEntries. Do not hold the filter UI behind another database
+    // query; the background refresh started in initState can finish separately.
+    if (_locationGroupEntries.isEmpty) {
+      await _refreshTransactionLocationNames();
+      if (!mounted) return;
+    }
+
     final bankIds = <int>{};
     final accountsByKey = <String, AccountSummary>{};
     final unmatchedBankIds = <int>{};
@@ -178,8 +451,8 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     final sortedBankIds = bankIds.toList(growable: true)
       ..sort(
         (left, right) => compareDisplayText(
-          context.l10nText(provider.getBankShortName(left)),
-          context.l10nText(provider.getBankShortName(right)),
+          context.l10nTextRead(provider.getBankShortName(left)),
+          context.l10nTextRead(provider.getBankShortName(right)),
         ),
       );
     final accounts = accountsByKey.values.toList(growable: true)
@@ -192,11 +465,17 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
           leftAccountNumber: left.accountNumber,
           rightAccountNumber: right.accountNumber,
           bankNameForId: (bankId) =>
-              context.l10nText(provider.getBankShortName(bankId)),
+              context.l10nTextRead(provider.getBankShortName(bankId)),
         ),
       );
     final categories = orderedCategoriesForFilter(
       categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
+    final locationNameByReference = _effectiveLocationNameByReference;
+    final locationNames = orderedTransactionLocationNamesForFilter(
+      transactions.map(
+        (transaction) => locationNameByReference[transaction.reference],
+      ),
     );
 
     final selected = await showModalBottomSheet<_TodayTransactionsFilter>(
@@ -209,8 +488,9 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
         accounts: accounts,
         unmatchedBankIds: unmatchedBankIds,
         categories: categories,
+        locationNames: locationNames,
         bankLabel: (bankId) =>
-            context.l10nText(provider.getBankShortName(bankId)),
+            context.l10nTextRead(provider.getBankShortName(bankId)),
       ),
     );
     if (!mounted || selected == null) return;
@@ -227,6 +507,7 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
       transaction: tx,
       provider: provider,
     );
+    if (mounted) await _refreshTransactionLocationNames();
   }
 
   Future<void> _openCategorySheet(
@@ -307,6 +588,65 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
     }
   }
 
+  Widget _buildTransactionTile(
+    TransactionProvider provider,
+    Transaction transaction,
+  ) {
+    final bankLabel = context.l10nText(
+      provider.getBankShortName(transaction.bankId),
+    );
+    final category = provider.getCategoryById(transaction.categoryId);
+    final isSelfTransfer = provider.isSelfTransfer(transaction);
+    final isMisc = category?.uncategorized == true;
+    final categoryLabel = isSelfTransfer
+        ? 'Self'
+        : provider.categoryLabelForTransaction(
+            transaction,
+            uncategorizedLabel: 'Categorize',
+          );
+    final isCategorized =
+        isSelfTransfer || transaction.selectedCategoryIds.isNotEmpty;
+    final isCredit = transaction.type == 'CREDIT';
+    final selected = _selectedRefs.contains(transaction.reference);
+
+    return TransactionTile(
+      key: ValueKey<String>(
+        'transaction-list-item-${transaction.reference}',
+      ),
+      bank: bankLabel,
+      category: categoryLabel,
+      categoryModel: category,
+      personLabel: provider.loanDebtPersonNameForTransaction(transaction),
+      onPersonTap: (personName) => openLoansPersonPage(
+        context: context,
+        personName: personName,
+      ),
+      isCategorized: isCategorized,
+      isDebit: !isCredit,
+      isSelfTransfer: isSelfTransfer,
+      isMisc: isMisc,
+      isReimbursed: provider.isReimbursedExpense(transaction),
+      isSharing: provider.isSharingSharedExpenseTransaction(transaction),
+      isShared: provider.isSharedExpenseTransaction(transaction),
+      amount: _amountLabel(
+        transaction.amount,
+        isCredit: isCredit,
+        currencyLabel: context.l10nText('ETB'),
+      ),
+      amountColor: isCredit ? AppColors.incomeSuccess : AppColors.red,
+      name: _counterparty(transaction, isSelfTransfer: isSelfTransfer),
+      timestamp: _timeLabel(transaction, context),
+      selected: selected,
+      onTap: _isSelecting
+          ? () => _toggle(transaction)
+          : () => _openDetails(provider, transaction),
+      onCategoryTap: _isSelecting
+          ? () => _toggle(transaction)
+          : () => _openCategorySheet(provider, transaction),
+      onLongPress: () => _toggle(transaction),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -324,6 +664,13 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                 )
                 .toList(growable: false);
         final transactions = _filteredTransactions(provider, allTransactions);
+        final locationListItems = <Object>[];
+        if (_locationGroupEntries.isNotEmpty) {
+          for (final section in _buildLocationSections(transactions)) {
+            locationListItems.add(section);
+            locationListItems.addAll(section.transactions);
+          }
+        }
 
         String pageTitle;
         if (_isSelecting) {
@@ -463,60 +810,23 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
-                  itemCount: transactions.length,
+                  itemCount: _locationGroupEntries.isEmpty
+                      ? transactions.length
+                      : locationListItems.length,
                   itemBuilder: (context, index) {
-                    final tx = transactions[index];
-                    final bankLabel = context.l10nText(
-                      provider.getBankShortName(tx.bankId),
-                    );
-                    final category = provider.getCategoryById(tx.categoryId);
-                    final isSelfTransfer = provider.isSelfTransfer(tx);
-                    final isMisc = category?.uncategorized == true;
-                    final categoryLabel = isSelfTransfer
-                        ? 'Self'
-                        : provider.categoryLabelForTransaction(
-                            tx,
-                            uncategorizedLabel: 'Categorize',
-                          );
-                    final isCategorized =
-                        isSelfTransfer || tx.selectedCategoryIds.isNotEmpty;
-                    final isCredit = tx.type == 'CREDIT';
-                    final selected = _selectedRefs.contains(tx.reference);
-
-                    return TransactionTile(
-                      bank: bankLabel,
-                      category: categoryLabel,
-                      categoryModel: category,
-                      personLabel:
-                          provider.loanDebtPersonNameForTransaction(tx),
-                      onPersonTap: (personName) => openLoansPersonPage(
-                        context: context,
-                        personName: personName,
-                      ),
-                      isCategorized: isCategorized,
-                      isDebit: !isCredit,
-                      isSelfTransfer: isSelfTransfer,
-                      isMisc: isMisc,
-                      isReimbursed: provider.isReimbursedExpense(tx),
-                      isSharing: provider.isSharingSharedExpenseTransaction(tx),
-                      isShared: provider.isSharedExpenseTransaction(tx),
-                      amount: _amountLabel(
-                        tx.amount,
-                        isCredit: isCredit,
-                        currencyLabel: context.l10nText('ETB'),
-                      ),
-                      amountColor:
-                          isCredit ? AppColors.incomeSuccess : AppColors.red,
-                      name: _counterparty(tx, isSelfTransfer: isSelfTransfer),
-                      timestamp: _timeLabel(tx, context),
-                      selected: selected,
-                      onTap: _isSelecting
-                          ? () => _toggle(tx)
-                          : () => _openDetails(provider, tx),
-                      onCategoryTap: _isSelecting
-                          ? () => _toggle(tx)
-                          : () => _openCategorySheet(provider, tx),
-                      onLongPress: () => _toggle(tx),
+                    if (_locationGroupEntries.isNotEmpty) {
+                      final item = locationListItems[index];
+                      if (item is _LocationTransactionSection) {
+                        return _buildLocationSectionHeader(item);
+                      }
+                      return _buildTransactionTile(
+                        provider,
+                        item as Transaction,
+                      );
+                    }
+                    return _buildTransactionTile(
+                      provider,
+                      transactions[index],
                     );
                   },
                 ),
@@ -526,12 +836,60 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   }
 }
 
+const String _missingLocationGroupKey = '__missing_location__';
+
+String _transactionLocationGroupKey(String name) => name.trim().toLowerCase();
+
+class _LocationGroupInfo {
+  _LocationGroupInfo({
+    required this.key,
+    required this.title,
+    required this.canEdit,
+  });
+
+  final String key;
+  final String title;
+  final bool canEdit;
+  final Set<String> transactionReferences = <String>{};
+  String? _commonCustomName;
+  bool _allEntriesHaveSameCustomName = true;
+
+  void add(TransactionLocationGroupEntry entry) {
+    transactionReferences.add(entry.transactionReference);
+    final customName = entry.customName;
+    if (customName == null) {
+      _allEntriesHaveSameCustomName = false;
+      return;
+    }
+    final existingName = _commonCustomName;
+    if (existingName == null) {
+      _commonCustomName = customName;
+      return;
+    }
+    if (existingName.toLowerCase() != customName.toLowerCase()) {
+      _allEntriesHaveSameCustomName = false;
+    }
+  }
+
+  String? get editableCustomName =>
+      _allEntriesHaveSameCustomName ? _commonCustomName : null;
+}
+
+class _LocationTransactionSection {
+  _LocationTransactionSection({required this.group});
+
+  final _LocationGroupInfo group;
+  final List<Transaction> transactions = <Transaction>[];
+}
+
 class _TodayTransactionsFilter {
   final String? type;
   final int? bankId;
   final String? accountKey;
   // Empty = all categories; uncategorizedCategoryFilterId = none assigned.
   final Set<int> categoryIds;
+  // Empty = all locations; values are normalized editable place names.
+  final Set<String> locationNames;
   final double? minAmount;
   final double? maxAmount;
 
@@ -540,6 +898,7 @@ class _TodayTransactionsFilter {
     this.bankId,
     this.accountKey,
     this.categoryIds = const <int>{},
+    this.locationNames = const <String>{},
     this.minAmount,
     this.maxAmount,
   });
@@ -550,6 +909,7 @@ class _TodayTransactionsFilter {
     if (bankId != null) count++;
     if (accountKey != null) count++;
     if (categoryIds.isNotEmpty) count++;
+    if (locationNames.isNotEmpty) count++;
     if (minAmount != null || maxAmount != null) count++;
     return count;
   }
@@ -561,6 +921,7 @@ class _TodayTransactionsFilterSheet extends StatefulWidget {
   final List<AccountSummary> accounts;
   final Set<int> unmatchedBankIds;
   final List<Category> categories;
+  final List<String> locationNames;
   final String Function(int bankId) bankLabel;
 
   const _TodayTransactionsFilterSheet({
@@ -569,6 +930,7 @@ class _TodayTransactionsFilterSheet extends StatefulWidget {
     required this.accounts,
     required this.unmatchedBankIds,
     required this.categories,
+    required this.locationNames,
     required this.bankLabel,
   });
 
@@ -583,6 +945,7 @@ class _TodayTransactionsFilterSheetState
   late int? _selectedBankId;
   late String? _selectedAccountKey;
   late Set<int> _selectedCategoryIds;
+  late Set<String> _selectedLocationNames;
   late final TextEditingController _minAmountController;
   late final TextEditingController _maxAmountController;
   String? _amountError;
@@ -594,6 +957,12 @@ class _TodayTransactionsFilterSheetState
     _selectedBankId = widget.currentFilter.bankId;
     _selectedAccountKey = widget.currentFilter.accountKey;
     _selectedCategoryIds = <int>{...widget.currentFilter.categoryIds};
+    final availableLocationNames = normalizedTransactionLocationFilterNames(
+      widget.locationNames,
+    );
+    _selectedLocationNames = widget.currentFilter.locationNames
+        .where(availableLocationNames.contains)
+        .toSet();
     _minAmountController = TextEditingController(
       text: _formatAmount(widget.currentFilter.minAmount),
     );
@@ -649,12 +1018,22 @@ class _TodayTransactionsFilterSheetState
     });
   }
 
+  void _toggleLocation(String locationName) {
+    final normalizedName = normalizeTransactionLocationFilterName(locationName);
+    setState(() {
+      if (!_selectedLocationNames.add(normalizedName)) {
+        _selectedLocationNames.remove(normalizedName);
+      }
+    });
+  }
+
   void _clearAll() {
     setState(() {
       _selectedType = null;
       _selectedBankId = null;
       _selectedAccountKey = null;
       _selectedCategoryIds.clear();
+      _selectedLocationNames.clear();
       _minAmountController.clear();
       _maxAmountController.clear();
       _amountError = null;
@@ -683,6 +1062,7 @@ class _TodayTransactionsFilterSheetState
         bankId: _selectedBankId,
         accountKey: _selectedAccountKey,
         categoryIds: Set<int>.unmodifiable(_selectedCategoryIds),
+        locationNames: Set<String>.unmodifiable(_selectedLocationNames),
         minAmount: min,
         maxAmount: max,
       ),
@@ -758,6 +1138,31 @@ class _TodayTransactionsFilterSheetState
     );
   }
 
+  Widget _horizontalOptionStrip({
+    required Key key,
+    required List<Widget> children,
+  }) {
+    return SizedBox(
+      width: MediaQuery.sizeOf(context).width,
+      child: Transform.translate(
+        offset: const Offset(-20, 0),
+        child: SingleChildScrollView(
+          key: key,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              for (var index = 0; index < children.length; index++) ...[
+                if (index > 0) const SizedBox(width: 8),
+                children[index],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _amountField(
     TextEditingController controller,
     String hint, {
@@ -795,6 +1200,8 @@ class _TodayTransactionsFilterSheetState
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.viewInsetsOf(context).bottom;
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final flowTintedCategoryIds =
+        categoryFilterIdsWithFlowTint(widget.categories);
 
     return Container(
       constraints: BoxConstraints(
@@ -874,10 +1281,11 @@ class _TodayTransactionsFilterSheetState
                     const SizedBox(height: 20),
                     _sectionLabel('BANK'),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
+                    _horizontalOptionStrip(
+                      key: const ValueKey<String>(
+                        'today-filter-bank-options',
+                      ),
+                      children: <Widget>[
                         _chip(
                           label: 'All Banks',
                           selected: _selectedBankId == null,
@@ -897,10 +1305,11 @@ class _TodayTransactionsFilterSheetState
                     const SizedBox(height: 20),
                     _sectionLabel('ACCOUNT'),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
+                    _horizontalOptionStrip(
+                      key: const ValueKey<String>(
+                        'today-filter-account-options',
+                      ),
+                      children: <Widget>[
                         _chip(
                           label: 'All account activity',
                           selected: _selectedAccountKey == null,
@@ -933,10 +1342,11 @@ class _TodayTransactionsFilterSheetState
                   const SizedBox(height: 20),
                   _sectionLabel('CATEGORY'),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
+                  _horizontalOptionStrip(
+                    key: const ValueKey<String>(
+                      'today-filter-category-options',
+                    ),
+                    children: <Widget>[
                       CategoryFilterChip(
                         label: 'All',
                         selected: _selectedCategoryIds.isEmpty,
@@ -957,7 +1367,8 @@ class _TodayTransactionsFilterSheetState
                           CategoryFilterChip(
                             label: category.name,
                             flow: category.flow,
-                            subtleFlowTint: isSelfCategoryFilter(category),
+                            subtleFlowTint:
+                                flowTintedCategoryIds.contains(category.id),
                             selected: _selectedCategoryIds.contains(
                               category.id,
                             ),
@@ -965,6 +1376,34 @@ class _TodayTransactionsFilterSheetState
                           ),
                     ],
                   ),
+                  if (widget.locationNames.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('LOCATION'),
+                    const SizedBox(height: 8),
+                    _horizontalOptionStrip(
+                      key: const ValueKey<String>(
+                        'today-filter-location-options',
+                      ),
+                      children: <Widget>[
+                        _chip(
+                          label: 'All locations',
+                          selected: _selectedLocationNames.isEmpty,
+                          onTap: () =>
+                              setState(() => _selectedLocationNames.clear()),
+                        ),
+                        for (final locationName in widget.locationNames)
+                          _chip(
+                            label: locationName,
+                            selected: _selectedLocationNames.contains(
+                              normalizeTransactionLocationFilterName(
+                                locationName,
+                              ),
+                            ),
+                            onTap: () => _toggleLocation(locationName),
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   _sectionLabel('AMOUNT RANGE'),
                   const SizedBox(height: 8),

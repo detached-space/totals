@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
+import 'package:totals/models/saved_location.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/models/transaction_location.dart';
 import 'package:totals/repositories/profile_repository.dart';
@@ -68,6 +69,7 @@ class TransactionLocationRepository {
         tl.accuracy,
         tl.capturedAt,
         tl.placeName,
+        tl.savedLocationId,
         t.amount,
         t.type AS transactionType,
         t.time AS transactionTime
@@ -81,6 +83,23 @@ class TransactionLocationRepository {
       activeProfileId == null ? const [] : [activeProfileId],
     );
     return rows.map(TransactionLocation.fromMap).toList(growable: false);
+  }
+
+  Future<List<String>> getSavedPlaceNames() async {
+    final locations = await getTransactionLocations();
+    final namesByNormalizedValue = <String, String>{};
+    for (final location in locations) {
+      final placeName = location.placeName;
+      if (placeName == null) continue;
+      namesByNormalizedValue.putIfAbsent(
+        placeName.toLowerCase(),
+        () => placeName,
+      );
+    }
+    final names = namesByNormalizedValue.values.toList(growable: false)
+      ..sort((first, second) =>
+          first.toLowerCase().compareTo(second.toLowerCase()));
+    return names;
   }
 
   Future<List<TransactionLocation>> getForTransactionReferences(
@@ -99,6 +118,7 @@ class TransactionLocationRepository {
         'accuracy',
         'capturedAt',
         'placeName',
+        'savedLocationId',
       ],
     );
     return rows
@@ -153,6 +173,7 @@ class TransactionLocationRepository {
           'accuracy': location.accuracy,
           'capturedAt': location.capturedAt.toUtc().toIso8601String(),
           'placeName': location.placeName,
+          'savedLocationId': location.savedLocationId,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
@@ -199,6 +220,89 @@ class TransactionLocationRepository {
     await SyncEnqueuer.instance.onManyWritten(
       entity: SyncEntity.transactions,
       records: syncRecords,
+    );
+  }
+
+  Future<TransactionLocation> assignSavedLocation({
+    required Transaction transaction,
+    required SavedLocation savedLocation,
+  }) async {
+    return assignLocation(
+      transaction: transaction,
+      latitude: savedLocation.latitude,
+      longitude: savedLocation.longitude,
+      placeName: savedLocation.name,
+      savedLocationId: savedLocation.id,
+    );
+  }
+
+  Future<TransactionLocation> assignLocation({
+    required Transaction transaction,
+    required double latitude,
+    required double longitude,
+    required String placeName,
+    String? savedLocationId,
+  }) async {
+    final reference = transaction.reference.trim();
+    if (reference.isEmpty) {
+      throw ArgumentError.value(
+        transaction.reference,
+        'transaction',
+        'A transaction reference is required.',
+      );
+    }
+    if (!latitude.isFinite || latitude < -90 || latitude > 90) {
+      throw ArgumentError.value(latitude, 'latitude', 'Invalid latitude.');
+    }
+    if (!longitude.isFinite || longitude < -180 || longitude > 180) {
+      throw ArgumentError.value(longitude, 'longitude', 'Invalid longitude.');
+    }
+    final normalizedName = normalizeTransactionPlaceName(placeName);
+    if (normalizedName == null) {
+      throw ArgumentError.value(
+          placeName, 'placeName', 'A place name is required.');
+    }
+
+    final db = await _databaseHelper.database;
+    final profileId =
+        transaction.profileId ?? await _profileRepository.getActiveProfileId();
+    final capturedAt = DateTime.now().toUtc();
+    await db.insert(
+      'transaction_locations',
+      <String, Object?>{
+        'transactionReference': reference,
+        'profileId': profileId,
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': null,
+        'capturedAt': capturedAt.toIso8601String(),
+        'placeName': normalizedName,
+        'savedLocationId': savedLocationId,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    final row = Map<String, dynamic>.from(transaction.toJson())
+      ..remove('sourceSubscriptionId')
+      ..['locationName'] = normalizedName;
+    await SyncEnqueuer.instance.onEntityWritten(
+      entity: SyncEntity.transactions,
+      entityRef: reference,
+      op: SyncOp.upsert,
+      row: row,
+    );
+
+    return TransactionLocation(
+      transactionReference: reference,
+      profileId: profileId,
+      latitude: latitude,
+      longitude: longitude,
+      capturedAt: capturedAt,
+      amount: transaction.amount,
+      transactionType: transaction.type,
+      transactionTime: DateTime.tryParse(transaction.time?.trim() ?? ''),
+      placeName: normalizedName,
+      savedLocationId: savedLocationId,
     );
   }
 

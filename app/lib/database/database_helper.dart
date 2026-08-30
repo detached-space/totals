@@ -50,7 +50,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 37,
+        version: 38,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -60,7 +60,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV37Schema(db);
+      await _validateV38Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -342,6 +342,7 @@ class DatabaseHelper {
     await _ensureReimbursementSchema(db);
     await _ensureTransactionSourceSmsSchema(db);
     await _ensureTransactionLocationSchema(db);
+    await _ensureSavedLocationSchema(db);
 
     await _seedBuiltInCategories(db);
     await _ensureSyncSchema(db);
@@ -381,6 +382,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -410,6 +414,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -436,6 +443,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -459,6 +469,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -479,6 +492,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -496,6 +512,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -510,6 +529,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -521,6 +543,9 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -529,11 +554,22 @@ class DatabaseHelper {
       if (newVersion >= 37) {
         await _migrateV36ToV37(db);
       }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
     if (oldVersion < 37) {
       await _migrateV36ToV37(db);
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 38) {
+      await _migrateV37ToV38(db);
       return;
     }
 
@@ -1197,6 +1233,14 @@ class DatabaseHelper {
       );
     });
     await _runV28Stage('v37 final validation', () => _validateV37Schema(db));
+  }
+
+  Future<void> _migrateV37ToV38(Database db) async {
+    await _runV28Stage(
+      'v38 reusable saved locations',
+      () => _ensureSavedLocationSchema(db),
+    );
+    await _runV28Stage('v38 final validation', () => _validateV38Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -2255,6 +2299,64 @@ class DatabaseHelper {
     await _validateV36Schema(db);
   }
 
+  Future<void> _validateV38Schema(Database db) async {
+    await _validateV37Schema(db);
+    if (!await _v28TableExists(db, 'saved_locations')) {
+      throw StateError('v38 invariant missing table saved_locations');
+    }
+    final savedLocationColumns = await _v28Columns(db, 'saved_locations');
+    const requiredSavedLocationColumns = <String>{
+      'id',
+      'profileId',
+      'name',
+      'latitude',
+      'longitude',
+      'createdAt',
+      'updatedAt',
+    };
+    final missingSavedLocationColumns =
+        requiredSavedLocationColumns.difference(savedLocationColumns);
+    if (missingSavedLocationColumns.isNotEmpty) {
+      throw StateError(
+        'v38 invariant saved_locations missing '
+        '${missingSavedLocationColumns.join(', ')}',
+      );
+    }
+    final transactionLocationColumns =
+        await _v28Columns(db, 'transaction_locations');
+    if (!transactionLocationColumns.contains('savedLocationId')) {
+      throw StateError(
+        'v38 invariant transaction_locations missing savedLocationId',
+      );
+    }
+    final savedLocationIndexes = (await db.rawQuery(
+      "PRAGMA index_list('saved_locations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    if (!savedLocationIndexes.contains('idx_saved_locations_profile_name')) {
+      throw StateError('v38 saved location profile/name index is missing');
+    }
+    final transactionLocationIndexes = (await db.rawQuery(
+      "PRAGMA index_list('transaction_locations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    if (!transactionLocationIndexes
+        .contains('idx_transaction_locations_saved_location')) {
+      throw StateError('v38 transaction saved-location index is missing');
+    }
+    final triggers = await db.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'trg_saved_locations_delete'
+    ''');
+    if (triggers.isEmpty) {
+      throw StateError('v38 saved location delete trigger is missing');
+    }
+  }
+
   Future<void> _ensureTransactionLocationSchema(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS transaction_locations (
@@ -2264,7 +2366,8 @@ class DatabaseHelper {
         longitude REAL NOT NULL CHECK(longitude >= -180 AND longitude <= 180),
         accuracy REAL,
         capturedAt TEXT NOT NULL,
-        placeName TEXT
+        placeName TEXT,
+        savedLocationId TEXT
       )
     ''');
     await db.execute('''
@@ -2277,6 +2380,41 @@ class DatabaseHelper {
       BEGIN
         DELETE FROM transaction_locations
         WHERE transactionReference = OLD.reference;
+      END
+    ''');
+  }
+
+  Future<void> _ensureSavedLocationSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS saved_locations (
+        id TEXT PRIMARY KEY NOT NULL,
+        profileId INTEGER,
+        name TEXT NOT NULL,
+        latitude REAL NOT NULL CHECK(latitude >= -90 AND latitude <= 90),
+        longitude REAL NOT NULL CHECK(longitude >= -180 AND longitude <= 180),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await _v28EnsureColumns(db, 'transaction_locations', {
+      'savedLocationId':
+          'ALTER TABLE transaction_locations ADD COLUMN savedLocationId TEXT',
+    });
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_saved_locations_profile_name
+      ON saved_locations(profileId, name COLLATE NOCASE)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_transaction_locations_saved_location
+      ON transaction_locations(savedLocationId)
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_saved_locations_delete
+      AFTER DELETE ON saved_locations
+      BEGIN
+        UPDATE transaction_locations
+        SET savedLocationId = NULL
+        WHERE savedLocationId = OLD.id;
       END
     ''');
   }

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' hide Transaction;
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/repositories/saved_location_repository.dart';
 import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/services/data_export_import_service.dart';
@@ -16,6 +17,7 @@ void main() {
   late String databasePath;
   late TransactionRepository transactionRepository;
   late TransactionLocationRepository locationRepository;
+  late SavedLocationRepository savedLocationRepository;
 
   setUpAll(() {
     sqfliteFfiInit();
@@ -31,6 +33,7 @@ void main() {
     await DatabaseHelper.instance.database;
     transactionRepository = TransactionRepository();
     locationRepository = TransactionLocationRepository();
+    savedLocationRepository = SavedLocationRepository();
   });
 
   tearDown(() async {
@@ -67,7 +70,7 @@ void main() {
     final exported = await service.exportAllData();
     final payload = jsonDecode(exported) as Map<String, dynamic>;
 
-    expect(payload['schemaVersion'], 13);
+    expect(payload['schemaVersion'], 14);
     final exportedLocation =
         (payload['transactionLocations'] as List<dynamic>).single as Map;
     final exportedTransaction =
@@ -125,6 +128,59 @@ void main() {
     expect(preserved.placeName, 'Favorite café');
   });
 
+  test('saved map locations and assignments survive export and restore',
+      () async {
+    final transaction = Transaction(
+      amount: 75,
+      reference: 'manual-saved-location-round-trip',
+      bankId: 1,
+      type: 'DEBIT',
+    );
+    await transactionRepository.saveTransaction(
+      transaction,
+      skipAutoCategorization: true,
+    );
+    final savedLocation = await savedLocationRepository.createLocation(
+      name: 'Home',
+      latitude: 9.0123,
+      longitude: 38.7654,
+    );
+    await locationRepository.assignSavedLocation(
+      transaction: transaction,
+      savedLocation: savedLocation,
+    );
+
+    final service = DataExportImportService();
+    final exported = await service.exportAllData();
+    final payload = jsonDecode(exported) as Map<String, dynamic>;
+    final exportedSavedLocation =
+        (payload['savedLocations'] as List<dynamic>).single as Map;
+    final exportedTransactionLocation =
+        (payload['transactionLocations'] as List<dynamic>).single as Map;
+    expect(exportedSavedLocation['id'], savedLocation.id);
+    expect(exportedSavedLocation['name'], 'Home');
+    expect(exportedSavedLocation['latitude'], 9.0123);
+    expect(exportedTransactionLocation['savedLocationId'], savedLocation.id);
+
+    await transactionRepository.clearAll();
+    await savedLocationRepository.clearForActiveProfile();
+    await service.importAllData(exported);
+
+    final restoredSavedLocations =
+        await savedLocationRepository.getSavedLocations();
+    final restoredTransactionLocations =
+        await locationRepository.getTransactionLocations();
+    expect(restoredSavedLocations, hasLength(1));
+    expect(restoredSavedLocations.single.id, savedLocation.id);
+    expect(restoredSavedLocations.single.name, 'Home');
+    expect(restoredTransactionLocations, hasLength(1));
+    expect(
+      restoredTransactionLocations.single.savedLocationId,
+      savedLocation.id,
+    );
+    expect(restoredTransactionLocations.single.placeName, 'Home');
+  });
+
   test('custom place names can be changed and removed for a puck', () async {
     final transactions = <Transaction>[
       Transaction(
@@ -161,6 +217,7 @@ void main() {
     var locations = await locationRepository.getTransactionLocations();
     expect(
         locations.map((location) => location.placeName), everyElement('Home'));
+    expect(await locationRepository.getSavedPlaceNames(), <String>['Home']);
 
     await locationRepository.setPlaceNameForTransactionReferences(
       references,
@@ -169,6 +226,7 @@ void main() {
     locations = await locationRepository.getTransactionLocations();
     expect(
         locations.map((location) => location.placeName), everyElement(isNull));
+    expect(await locationRepository.getSavedPlaceNames(), isEmpty);
   });
 
   test('filtered exports include locations only for selected transactions',

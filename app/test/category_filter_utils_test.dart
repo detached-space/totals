@@ -101,4 +101,20 @@ void main() {
 
     expect(ordered.map((category) => category.id), <int>[4, 2, 3, 1]);
   });
+
+  test('same-named income and expense categories use flow tinting', () {
+    const categories = <Category>[
+      Category(id: 1, name: 'Self', essential: false, flow: 'expense'),
+      Category(id: 2, name: 'Testing', essential: true, flow: 'expense'),
+      Category(id: 3, name: ' testing ', essential: true, flow: 'income'),
+      Category(id: 4, name: 'Salary', essential: true, flow: 'income'),
+      Category(id: 5, name: 'Salary', essential: true, flow: 'income'),
+      Category(id: 6, name: 'Groceries', essential: true, flow: 'expense'),
+    ];
+
+    expect(
+      categoryFilterIdsWithFlowTint(categories),
+      <int>{1, 2, 3},
+    );
+  });
 }

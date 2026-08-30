@@ -78,6 +78,13 @@ double spendingMapGroupingRadiusMeters({
   );
 }
 
+bool spendingMapClusterUsesPuck({
+  required int transactionCount,
+  required int savedLocationCount,
+}) {
+  return transactionCount > 0 || savedLocationCount > 1;
+}
+
 double spendingMapDistanceMeters({
   required double firstLatitude,
   required double firstLongitude,

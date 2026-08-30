@@ -88,6 +88,111 @@ void main() {
         hasLength(2),
       );
     });
+
+    test(
+        'an empty manual place joins a transaction puck only inside the zoom radius',
+        () {
+      const transaction = _MapPoint(
+        'transaction:coffee',
+        baseLatitude,
+        baseLongitude,
+      );
+      final emptyManualPlace = _MapPoint(
+        'saved:home',
+        baseLatitude + _latitudeDegreesForMetres(200),
+        baseLongitude,
+      );
+      final overviewClusters = clustersFor(
+        <_MapPoint>[transaction, emptyManualPlace],
+        radiusMeters: spendingMapGroupingRadiusMeters(
+          zoom: 15,
+          latitude: baseLatitude,
+        ),
+      );
+      final detailedClusters = clustersFor(
+        <_MapPoint>[transaction, emptyManualPlace],
+        radiusMeters: spendingMapGroupingRadiusMeters(
+          zoom: 18,
+          latitude: baseLatitude,
+        ),
+      );
+
+      expect(overviewClusters, hasLength(1));
+      expect(
+        overviewClusters.single.members
+            .where((point) => point.id.startsWith('transaction:')),
+        hasLength(1),
+      );
+      expect(detailedClusters, hasLength(2));
+    });
+
+    test('multiple empty manual places form a puck but one stays a pin', () {
+      expect(
+        spendingMapClusterUsesPuck(
+          transactionCount: 0,
+          savedLocationCount: 1,
+        ),
+        isFalse,
+      );
+      expect(
+        spendingMapClusterUsesPuck(
+          transactionCount: 0,
+          savedLocationCount: 2,
+        ),
+        isTrue,
+      );
+      expect(
+        spendingMapClusterUsesPuck(
+          transactionCount: 1,
+          savedLocationCount: 0,
+        ),
+        isTrue,
+      );
+    });
+
+    test('manual-only places merge and separate with the zoom radius', () {
+      final manualPlaces = <_MapPoint>[
+        const _MapPoint('saved:home', baseLatitude, baseLongitude),
+        _MapPoint(
+          'saved:office',
+          baseLatitude + _latitudeDegreesForMetres(200),
+          baseLongitude,
+        ),
+      ];
+      final overviewClusters = clustersFor(
+        manualPlaces,
+        radiusMeters: spendingMapGroupingRadiusMeters(
+          zoom: 15,
+          latitude: baseLatitude,
+        ),
+      );
+      final detailedClusters = clustersFor(
+        manualPlaces,
+        radiusMeters: spendingMapGroupingRadiusMeters(
+          zoom: 18,
+          latitude: baseLatitude,
+        ),
+      );
+
+      expect(overviewClusters, hasLength(1));
+      expect(
+        spendingMapClusterUsesPuck(
+          transactionCount: 0,
+          savedLocationCount: overviewClusters.single.members.length,
+        ),
+        isTrue,
+      );
+      expect(detailedClusters, hasLength(2));
+      expect(
+        detailedClusters.every(
+          (cluster) => !spendingMapClusterUsesPuck(
+            transactionCount: 0,
+            savedLocationCount: cluster.members.length,
+          ),
+        ),
+        isTrue,
+      );
+    });
   });
 
   group('Spending Map place labels', () {

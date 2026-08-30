@@ -25,6 +25,7 @@ class TransactionLocation {
     this.transactionType,
     this.transactionTime,
     this.placeName,
+    this.savedLocationId,
   });
 
   final String transactionReference;
@@ -37,6 +38,7 @@ class TransactionLocation {
   final String? transactionType;
   final DateTime? transactionTime;
   final String? placeName;
+  final String? savedLocationId;
 
   factory TransactionLocation.fromMap(Map<String, Object?> map) {
     final transactionTime = map['transactionTime'] as String?;
@@ -52,6 +54,7 @@ class TransactionLocation {
       transactionTime:
           transactionTime == null ? null : DateTime.tryParse(transactionTime),
       placeName: normalizeTransactionPlaceName(map['placeName'] as String?),
+      savedLocationId: _normalizedSavedLocationId(map['savedLocationId']),
     );
   }
 
@@ -65,8 +68,10 @@ class TransactionLocation {
     final capturedAt =
         DateTime.tryParse(json['capturedAt']?.toString().trim() ?? '');
     String? placeName;
+    String? savedLocationId;
     try {
       placeName = normalizeTransactionPlaceName(json['placeName']?.toString());
+      savedLocationId = _normalizedSavedLocationId(json['savedLocationId']);
     } on ArgumentError {
       throw const FormatException('Invalid transaction location place name.');
     }
@@ -92,6 +97,7 @@ class TransactionLocation {
       accuracy: accuracy,
       capturedAt: capturedAt.toUtc(),
       placeName: placeName,
+      savedLocationId: savedLocationId,
     );
   }
 
@@ -103,6 +109,7 @@ class TransactionLocation {
       'accuracy': accuracy,
       'capturedAt': capturedAt.toUtc().toIso8601String(),
       'placeName': placeName,
+      'savedLocationId': savedLocationId,
     };
   }
 
@@ -121,7 +128,21 @@ class TransactionLocation {
       transactionType: transactionType,
       transactionTime: transactionTime,
       placeName: clearPlaceName ? null : placeName ?? this.placeName,
+      savedLocationId: savedLocationId,
     );
+  }
+
+  static String? _normalizedSavedLocationId(Object? value) {
+    final normalized = value?.toString().trim();
+    if (normalized == null || normalized.isEmpty) return null;
+    if (normalized.length > 128) {
+      throw ArgumentError.value(
+        value,
+        'savedLocationId',
+        'Invalid saved location ID.',
+      );
+    }
+    return normalized;
   }
 
   static double? _backupDouble(Object? value) {

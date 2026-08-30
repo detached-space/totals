@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show debugPrint, setEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
@@ -15,11 +15,14 @@ import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/category_filter_chip.dart';
 import 'package:totals/_redesign/widgets/place_name_editor_sheet.dart';
+import 'package:totals/_redesign/widgets/saved_location_editor_sheet.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/saved_location.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction_location.dart';
 import 'package:totals/providers/transaction_provider.dart';
+import 'package:totals/repositories/saved_location_repository.dart';
 import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/services/offline_place_gazetteer.dart';
 import 'package:totals/utils/account_sort.dart';
@@ -62,6 +65,7 @@ const _placeLabelCenterX = _placeLabelIconSourceWidth / 2;
 const _puckIconScale = 54 / 160;
 const _puckMarkerAnchor = Offset(0.5, 0.5);
 const _placeLabelMarkerAnchor = Offset(0.5, 1);
+const _savedLocationMarkerAnchor = Offset(0.5, 104 / 170);
 
 enum _MapDisplayMode { roadmap, satellite }
 
@@ -186,6 +190,7 @@ class _SpendingZone {
     required this.transactionCount,
     required this.netAmount,
     required this.transactionReferences,
+    required this.savedLocationIds,
     required this.customPlaceName,
   });
 
@@ -196,7 +201,39 @@ class _SpendingZone {
   final int transactionCount;
   final double netAmount;
   final List<String> transactionReferences;
+  final List<String> savedLocationIds;
   final String? customPlaceName;
+
+  bool get isSavedLocationCluster =>
+      transactionCount == 0 && savedLocationIds.length > 1;
+
+  List<String> get membershipKeys => <String>[
+        ...transactionReferences.map(
+          (reference) => 'transaction:$reference',
+        ),
+        ...savedLocationIds.map((id) => 'saved:$id'),
+      ];
+}
+
+class _SpendingMapClusterMember {
+  const _SpendingMapClusterMember.transaction(
+    TransactionLocation this.transactionLocation,
+  ) : savedLocation = null;
+
+  const _SpendingMapClusterMember.saved(
+    SavedLocation this.savedLocation,
+  ) : transactionLocation = null;
+
+  final TransactionLocation? transactionLocation;
+  final SavedLocation? savedLocation;
+
+  double get latitude =>
+      transactionLocation?.latitude ?? savedLocation!.latitude;
+  double get longitude =>
+      transactionLocation?.longitude ?? savedLocation!.longitude;
+  String get stableKey => transactionLocation != null
+      ? 'transaction:${transactionLocation!.transactionReference}'
+      : 'saved:${savedLocation!.id}';
 }
 
 class _ZoneAccumulator {
@@ -277,7 +314,14 @@ String _spendingZoneId(List<String> sortedReferences) {
 }
 
 class SpendingMapPage extends StatefulWidget {
-  const SpendingMapPage({super.key});
+  const SpendingMapPage({
+    super.key,
+    this.transactionLocationRepository,
+    this.savedLocationRepository,
+  });
+
+  final TransactionLocationRepository? transactionLocationRepository;
+  final SavedLocationRepository? savedLocationRepository;
 
   @override
   State<SpendingMapPage> createState() => _SpendingMapPageState();
@@ -287,16 +331,18 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     with SingleTickerProviderStateMixin {
   static const _puckTransitionDuration = Duration(milliseconds: 240);
 
-  final TransactionLocationRepository _repository =
-      TransactionLocationRepository();
+  late final TransactionLocationRepository _repository;
+  late final SavedLocationRepository _savedLocationRepository;
 
   TransactionProvider? _transactionProvider;
   OfflinePlaceGazetteer? _offlineGazetteer;
   List<TransactionLocation> _locations = const [];
+  List<SavedLocation> _savedLocations = const [];
   _SpendingMapFilters _filters = const _SpendingMapFilters();
   List<_SpendingZone> _displayedZones = const [];
   Map<String, BitmapDescriptor> _puckIcons = const {};
   Map<String, BitmapDescriptor> _placeLabelIcons = const {};
+  Map<String, BitmapDescriptor> _savedLocationIcons = const {};
   final Map<String, BitmapDescriptor> _puckIconCache = {};
   final Map<String, BitmapDescriptor> _placeLabelIconCache = {};
   List<_PuckMotion> _puckMotions = const [];
@@ -314,6 +360,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   bool _locatingUser = false;
   String? _openingZoneId;
   String? _editingZoneId;
+  String? _editingSavedLocationId;
   String _languageCode = 'en';
   _MapDisplayMode _mapDisplayMode = _MapDisplayMode.roadmap;
   Object? _loadError;
@@ -325,6 +372,26 @@ class _SpendingMapPageState extends State<SpendingMapPage>
         ),
       )
       .toList(growable: false);
+
+  List<SavedLocation> get _ethiopiaSavedLocations => _savedLocations
+      .where(
+        (location) => _ethiopiaMapBounds.contains(
+          LatLng(location.latitude, location.longitude),
+        ),
+      )
+      .toList(growable: false);
+
+  Set<String> get _assignedSavedLocationIds => _locations
+      .map((location) => location.savedLocationId)
+      .whereType<String>()
+      .toSet();
+
+  List<SavedLocation> get _unassignedSavedLocations {
+    final assignedIds = _assignedSavedLocationIds;
+    return _ethiopiaSavedLocations
+        .where((location) => !assignedIds.contains(location.id))
+        .toList(growable: false);
+  }
 
   List<TransactionLocation> get _filteredLocations {
     final locationFiltered = _ethiopiaLocations
@@ -372,6 +439,10 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   @override
   void initState() {
     super.initState();
+    _repository =
+        widget.transactionLocationRepository ?? TransactionLocationRepository();
+    _savedLocationRepository =
+        widget.savedLocationRepository ?? SavedLocationRepository();
     _puckTransitionController = AnimationController(
       vsync: this,
       duration: _puckTransitionDuration,
@@ -421,14 +492,17 @@ class _SpendingMapPageState extends State<SpendingMapPage>
         }
       }
       final locations = await _repository.getTransactionLocations();
+      final savedLocations = await _savedLocationRepository.getSavedLocations();
       if (!mounted) return;
       setState(() {
         _offlineGazetteer = offlineGazetteer;
         _locations = locations;
+        _savedLocations = savedLocations;
         _mapDisplayMode = displayMode;
         _loading = false;
       });
       await _refreshPuckIcons();
+      await _refreshSavedLocationIcons();
       await _fitVisibleLocations();
     } catch (error) {
       if (!mounted) return;
@@ -443,37 +517,67 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     List<TransactionLocation> locations, {
     required double zoom,
   }) {
-    if (locations.isEmpty) return const [];
-    final averageLatitude = locations.fold<double>(
+    final clusterMembers = <_SpendingMapClusterMember>[
+      ...locations.map(_SpendingMapClusterMember.transaction),
+      ..._unassignedSavedLocations.map(_SpendingMapClusterMember.saved),
+    ];
+    if (clusterMembers.isEmpty) return const [];
+    final averageLatitude = clusterMembers.fold<double>(
           0,
-          (sum, location) => sum + location.latitude,
+          (sum, member) => sum + member.latitude,
         ) /
-        locations.length;
-    final clusters = clusterSpendingMapLocations<TransactionLocation>(
-      locations: locations,
-      latitudeOf: (location) => location.latitude,
-      longitudeOf: (location) => location.longitude,
-      stableKeyOf: (location) => location.transactionReference,
+        clusterMembers.length;
+    final clusters = clusterSpendingMapLocations<_SpendingMapClusterMember>(
+      locations: clusterMembers,
+      latitudeOf: (member) => member.latitude,
+      longitudeOf: (member) => member.longitude,
+      stableKeyOf: (member) => member.stableKey,
       radiusMeters: spendingMapGroupingRadiusMeters(
         zoom: zoom,
         latitude: averageLatitude,
       ),
     );
 
-    final zones = clusters.map((cluster) {
+    final zones = <_SpendingZone>[];
+    for (final cluster in clusters) {
       final bucket = _ZoneAccumulator();
-      for (final location in cluster.members) {
-        bucket.add(location);
+      for (final member in cluster.members) {
+        final transactionLocation = member.transactionLocation;
+        if (transactionLocation != null) bucket.add(transactionLocation);
       }
+      final savedLocationIds = cluster.members
+          .map((member) => member.savedLocation?.id)
+          .whereType<String>()
+          .toList(growable: true)
+        ..sort();
+      // Keep a lone empty saved place as a draggable pin. Multiple empty
+      // saved places use the same animated puck lifecycle as transactions.
+      if (!spendingMapClusterUsesPuck(
+        transactionCount: bucket.count,
+        savedLocationCount: savedLocationIds.length,
+      )) {
+        continue;
+      }
+
       final center = LatLng(cluster.latitude, cluster.longitude);
       final references = bucket.transactionReferences.toList(growable: true)
         ..sort();
+      final membershipKeys = <String>[
+        ...references.map((reference) => 'transaction:$reference'),
+        ...savedLocationIds.map((id) => 'saved:$id'),
+      ]..sort();
       final customPlaceName = bucket.customPlaceName;
       final placeSummary = summarizeSpendingMapPlaceNames(
-            cluster.members.map((location) {
-              return location.placeName ??
+            cluster.members.map((member) {
+              final savedLocation = member.savedLocation;
+              if (savedLocation != null) return savedLocation.name;
+              final transactionLocation = member.transactionLocation!;
+              return transactionLocation.placeName ??
                   _approximatePlaceName(
-                    LatLng(location.latitude, location.longitude),
+                    LatLng(
+                      transactionLocation.latitude,
+                      transactionLocation.longitude,
+                    ),
                   );
             }),
           ) ??
@@ -481,17 +585,18 @@ class _SpendingMapPageState extends State<SpendingMapPage>
             mainName: _approximatePlaceName(center),
             otherNameCount: 0,
           );
-      return _SpendingZone(
-        id: _spendingZoneId(references),
+      zones.add(_SpendingZone(
+        id: _spendingZoneId(membershipKeys),
         name: placeSummary.mainName,
         puckPlaceLabel: placeSummary.label,
         center: center,
         transactionCount: bucket.count,
         netAmount: bucket.netAmount,
         transactionReferences: List<String>.unmodifiable(references),
+        savedLocationIds: List<String>.unmodifiable(savedLocationIds),
         customPlaceName: customPlaceName,
-      );
-    }).toList(growable: true);
+      ));
+    }
 
     zones.sort((first, second) {
       final countComparison =
@@ -558,7 +663,9 @@ class _SpendingMapPageState extends State<SpendingMapPage>
           icon: _placeLabelIcons[zone.id]!,
           consumeTapEvents: true,
           zIndexInt: 1,
-          onTap: () => _editZonePlaceName(zone),
+          onTap: zone.isSavedLocationCluster
+              ? () => _zoomIntoSavedLocationCluster(zone)
+              : () => _editZonePlaceName(zone),
         ),
         Marker(
           markerId: MarkerId('zone-puck-${zone.id}'),
@@ -569,15 +676,113 @@ class _SpendingMapPageState extends State<SpendingMapPage>
           zIndexInt: 3,
           infoWindow: InfoWindow(
             title: zone.name,
-            snippet: '${zone.transactionCount} transactions',
+            snippet: zone.isSavedLocationCluster
+                ? '${zone.savedLocationIds.length} saved locations'
+                : '${zone.transactionCount} transactions',
           ),
-          onTap: () => _openZone(zone),
+          onTap: zone.isSavedLocationCluster
+              ? () => _zoomIntoSavedLocationCluster(zone)
+              : () => _openZone(zone),
         ),
       ];
     }).toSet();
   }
 
+  Set<Marker> _buildSavedLocationMarkers() {
+    final targetZones = _puckTransitionTargetZones;
+    final transitionProgress = targetZones == null
+        ? 1.0
+        : Curves.easeInOutCubic.transform(
+            _puckTransitionController.value,
+          );
+    final markers = <Marker>{};
+
+    for (final location in _unassignedSavedLocations) {
+      final icon = _savedLocationIcons[location.id];
+      if (icon == null) continue;
+      final savedPosition = LatLng(location.latitude, location.longitude);
+      final currentZone = _zoneContainingSavedLocation(
+        _displayedZones,
+        location.id,
+      );
+      final targetZone = targetZones == null
+          ? null
+          : _zoneContainingSavedLocation(targetZones, location.id);
+
+      LatLng markerPosition = savedPosition;
+      var alpha = 1.0;
+      if (targetZones == null) {
+        if (currentZone != null) continue;
+      } else if (currentZone != null && targetZone != null) {
+        continue;
+      } else if (currentZone == null && targetZone != null) {
+        markerPosition = _interpolateMapPosition(
+          savedPosition,
+          targetZone.center,
+          transitionProgress,
+        );
+        alpha = 1 - transitionProgress;
+      } else if (currentZone != null && targetZone == null) {
+        markerPosition = _interpolateMapPosition(
+          currentZone.center,
+          savedPosition,
+          transitionProgress,
+        );
+        alpha = transitionProgress;
+      }
+
+      markers.add(
+        Marker(
+          markerId: MarkerId('saved-location-${location.id}'),
+          position: markerPosition,
+          alpha: alpha.clamp(0.0, 1.0),
+          anchor: _savedLocationMarkerAnchor,
+          icon: icon,
+          consumeTapEvents: true,
+          draggable: targetZones == null,
+          zIndexInt: 2,
+          infoWindow: InfoWindow(
+            title: location.name,
+            snippet: 'Saved location • drag to move',
+          ),
+          onTap:
+              targetZones == null ? () => _editSavedLocation(location) : null,
+          onDragEnd: targetZones == null
+              ? (position) => _moveSavedLocation(location, position)
+              : null,
+        ),
+      );
+    }
+    return markers;
+  }
+
+  _SpendingZone? _zoneContainingSavedLocation(
+    Iterable<_SpendingZone> zones,
+    String savedLocationId,
+  ) {
+    for (final zone in zones) {
+      if (zone.savedLocationIds.contains(savedLocationId)) return zone;
+    }
+    return null;
+  }
+
+  LatLng _interpolateMapPosition(
+    LatLng from,
+    LatLng to,
+    double progress,
+  ) {
+    return LatLng(
+      from.latitude + ((to.latitude - from.latitude) * progress),
+      from.longitude + ((to.longitude - from.longitude) * progress),
+    );
+  }
+
   String _puckLabel(_SpendingZone zone) {
+    if (zone.isSavedLocationCluster) {
+      return NumberFormat.compact(locale: 'en').format(
+        zone.savedLocationIds.length,
+      );
+    }
     return switch (_filters.puckMetric) {
       SpendingMapPuckMetric.transactionCount =>
         NumberFormat.compact(locale: 'en').format(zone.transactionCount),
@@ -638,7 +843,10 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       );
       _puckIconCache.remove(staleLabel);
     }
-    final activePlaceLabels = placeLabelsByZone.values.toSet();
+    final activePlaceLabels = <String>{
+      ...placeLabelsByZone.values,
+      ..._savedLocations.map((location) => location.name),
+    };
     while (_placeLabelIconCache.length > maximumCachedIcons) {
       final staleLabel = _placeLabelIconCache.keys.firstWhere(
         (label) => !activePlaceLabels.contains(label),
@@ -650,6 +858,28 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       puckIcons: puckIcons,
       placeLabelIcons: placeLabelIcons,
     );
+  }
+
+  Future<void> _refreshSavedLocationIcons() async {
+    final names = _savedLocations.map((location) => location.name).toSet();
+    final missingNames =
+        names.where((name) => !_placeLabelIconCache.containsKey(name)).toSet();
+    final generatedEntries = await Future.wait(
+      missingNames.map((name) async {
+        return MapEntry(
+          name,
+          await _createPlaceLabelIcon(placeLabel: name),
+        );
+      }),
+    );
+    _placeLabelIconCache.addEntries(generatedEntries);
+    if (!mounted) return;
+    setState(() {
+      _savedLocationIcons = <String, BitmapDescriptor>{
+        for (final location in _savedLocations)
+          location.id: _placeLabelIconCache[location.name]!,
+      };
+    });
   }
 
   Future<void> _refreshPuckIcons({
@@ -671,8 +901,10 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       return;
     }
 
+    final hasVisibleClusterMembers =
+        _displayedZones.isNotEmpty || _unassignedSavedLocations.isNotEmpty;
     final shouldAnimate = animatePucks &&
-        _displayedZones.isNotEmpty &&
+        hasVisibleClusterMembers &&
         _zoneMembershipChanged(_displayedZones, zones);
     if (shouldAnimate) {
       setState(() => _zoomLevel = targetZoom);
@@ -709,12 +941,12 @@ class _SpendingMapPageState extends State<SpendingMapPage>
 
   _SpendingZone? _relatedZone(
     _SpendingZone zone,
-    Map<String, _SpendingZone> zonesByReference,
+    Map<String, _SpendingZone> zonesByMember,
   ) {
     final overlapByZone = <String, int>{};
     final relatedById = <String, _SpendingZone>{};
-    for (final reference in zone.transactionReferences) {
-      final related = zonesByReference[reference];
+    for (final memberKey in zone.membershipKeys) {
+      final related = zonesByMember[memberKey];
       if (related == null) continue;
       relatedById[related.id] = related;
       overlapByZone.update(
@@ -745,13 +977,13 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     final targetById = {
       for (final zone in targetZones) zone.id: zone,
     };
-    final currentByReference = <String, _SpendingZone>{
+    final currentByMember = <String, _SpendingZone>{
       for (final zone in _displayedZones)
-        for (final reference in zone.transactionReferences) reference: zone,
+        for (final memberKey in zone.membershipKeys) memberKey: zone,
     };
-    final targetByReference = <String, _SpendingZone>{
+    final targetByMember = <String, _SpendingZone>{
       for (final zone in targetZones)
-        for (final reference in zone.transactionReferences) reference: zone,
+        for (final memberKey in zone.membershipKeys) memberKey: zone,
     };
     final motions = <_PuckMotion>[];
 
@@ -780,7 +1012,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       final icon = _puckIcons[current.id];
       final placeLabelIcon = _placeLabelIcons[current.id];
       if (icon == null || placeLabelIcon == null) continue;
-      final related = _relatedZone(current, targetByReference);
+      final related = _relatedZone(current, targetByMember);
       motions.add(
         _PuckMotion(
           markerId: current.id,
@@ -800,7 +1032,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       final icon = targetIcons[target.id];
       final placeLabelIcon = targetPlaceLabelIcons[target.id];
       if (icon == null || placeLabelIcon == null) continue;
-      final related = _relatedZone(target, currentByReference);
+      final related = _relatedZone(target, currentByMember);
       motions.add(
         _PuckMotion(
           markerId: target.id,
@@ -998,15 +1230,23 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     _SpendingZone zone,
     String? placeName,
   ) async {
+    final normalizedName = await _savePlaceNameForTransactionReferences(
+      zone.transactionReferences.toSet(),
+      placeName,
+    );
+    return normalizedName ?? _approximatePlaceName(zone.center);
+  }
+
+  Future<String?> _savePlaceNameForTransactionReferences(
+    Set<String> references,
+    String? placeName,
+  ) async {
     final normalizedName = normalizeTransactionPlaceName(placeName);
-    final references = zone.transactionReferences.toSet();
     await _repository.setPlaceNameForTransactionReferences(
       references,
       normalizedName,
     );
-    if (!mounted) {
-      return normalizedName ?? _approximatePlaceName(zone.center);
-    }
+    if (!mounted) return normalizedName;
 
     setState(() {
       _locations = _locations.map((location) {
@@ -1020,7 +1260,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       }).toList(growable: false);
     });
     await _refreshPuckIcons();
-    return normalizedName ?? _approximatePlaceName(zone.center);
+    return normalizedName;
   }
 
   Future<void> _editZonePlaceName(_SpendingZone zone) async {
@@ -1049,6 +1289,188 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     }
   }
 
+  SavedLocation? _savedLocationNear(LatLng point) {
+    SavedLocation? nearest;
+    var nearestDistance = double.infinity;
+    for (final location in _savedLocations) {
+      final distance = spendingMapDistanceMeters(
+        firstLatitude: point.latitude,
+        firstLongitude: point.longitude,
+        secondLatitude: location.latitude,
+        secondLongitude: location.longitude,
+      );
+      if (distance <= spendingMapSameLocationRadiusMeters &&
+          distance < nearestDistance) {
+        nearest = location;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }
+
+  Future<void> _createSavedLocationAt(LatLng point) async {
+    if (_editingSavedLocationId != null) return;
+    await HapticFeedback.mediumImpact();
+    if (!mounted) return;
+    final nearbyLocation = _savedLocationNear(point);
+    if (nearbyLocation != null) {
+      if (mounted) {
+        _showLocationMessage(
+          'A saved location already exists within 50 metres.',
+        );
+      }
+      await _editSavedLocation(nearbyLocation);
+      return;
+    }
+
+    _editingSavedLocationId = 'new';
+    try {
+      final result = await showSavedLocationEditorSheet(
+        context: context,
+        approximateName: _approximatePlaceName(point),
+      );
+      if (!mounted ||
+          result == null ||
+          result.action != SavedLocationEditorAction.save) {
+        return;
+      }
+      final created = await _savedLocationRepository.createLocation(
+        name: result.name!,
+        latitude: point.latitude,
+        longitude: point.longitude,
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedLocations = <SavedLocation>[..._savedLocations, created]..sort(
+            (first, second) => first.name.toLowerCase().compareTo(
+                  second.name.toLowerCase(),
+                ),
+          );
+      });
+      await _refreshPuckIcons();
+      await _refreshSavedLocationIcons();
+      await HapticFeedback.selectionClick();
+    } catch (error) {
+      if (!mounted) return;
+      _showLocationMessage('Could not save this location: $error');
+    } finally {
+      _editingSavedLocationId = null;
+    }
+  }
+
+  Future<void> _editSavedLocation(SavedLocation location) async {
+    if (_editingSavedLocationId != null) return;
+    _editingSavedLocationId = location.id;
+    try {
+      final result = await showSavedLocationEditorSheet(
+        context: context,
+        approximateName: _approximatePlaceName(
+          LatLng(location.latitude, location.longitude),
+        ),
+        initialName: location.name,
+        allowDelete: true,
+      );
+      if (!mounted || result == null) return;
+      if (result.action == SavedLocationEditorAction.delete) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(dialogContext.l10nText('Delete saved location?')),
+            content: Text(
+              dialogContext.l10nText(
+                'Transactions already assigned here will keep their current coordinates and name.',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(dialogContext.l10nText('Cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.red),
+                child: Text(dialogContext.l10nText('Delete')),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await _savedLocationRepository.deleteLocation(location.id);
+      } else {
+        await _savedLocationRepository.updateLocation(
+          location,
+          name: result.name,
+        );
+      }
+      await _reloadMapLocationData();
+    } catch (error) {
+      if (!mounted) return;
+      _showLocationMessage('Could not update this location: $error');
+    } finally {
+      _editingSavedLocationId = null;
+    }
+  }
+
+  Future<void> _moveSavedLocation(
+    SavedLocation location,
+    LatLng position,
+  ) async {
+    if (!_ethiopiaMapBounds.contains(position)) {
+      await _reloadMapLocationData();
+      return;
+    }
+    try {
+      await _savedLocationRepository.updateLocation(
+        location,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      await _reloadMapLocationData();
+      await HapticFeedback.selectionClick();
+    } catch (error) {
+      if (!mounted) return;
+      _showLocationMessage('Could not move this location: $error');
+      await _reloadMapLocationData();
+    }
+  }
+
+  List<TransactionLocationGroupEntry> _locationGroupEntriesForZone(
+    _SpendingZone zone,
+  ) {
+    final references = zone.transactionReferences.toSet();
+    final entriesByReference = <String, TransactionLocationGroupEntry>{};
+    for (final location in _locations) {
+      if (!references.contains(location.transactionReference)) continue;
+      entriesByReference[location.transactionReference] =
+          TransactionLocationGroupEntry(
+        transactionReference: location.transactionReference,
+        fallbackName: _approximatePlaceName(
+          LatLng(location.latitude, location.longitude),
+        ),
+        customName: location.placeName,
+      );
+    }
+    return zone.transactionReferences
+        .map((reference) => entriesByReference[reference])
+        .whereType<TransactionLocationGroupEntry>()
+        .toList(growable: false);
+  }
+
+  Future<void> _zoomIntoSavedLocationCluster(_SpendingZone zone) async {
+    final controller = _mapController;
+    if (controller == null) return;
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          zone.center,
+          math.min(_zoomLevel + 2.5, 20.0),
+        ),
+      );
+    } catch (_) {
+      // The platform view can be disposed while an animation is in flight.
+    }
+  }
+
   Future<void> _openZone(_SpendingZone zone) async {
     if (_openingZoneId != null) return;
     _openingZoneId = zone.id;
@@ -1057,31 +1479,53 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       final transactionLabel = context.l10nTextRead(
         zone.transactionCount == 1 ? 'transaction' : 'transactions',
       );
+      final locationGroupEntries = _locationGroupEntriesForZone(zone);
+      final hasMultipleLocationNames = locationGroupEntries
+              .map((entry) => entry.displayName.trim().toLowerCase())
+              .toSet()
+              .length >
+          1;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => TodaysTransactionsPage(
             transactionReferences: Set<String>.unmodifiable(
               zone.transactionReferences,
             ),
-            title: zone.name,
+            title: hasMultipleLocationNames
+                ? context.l10nTextRead('Locations')
+                : zone.name,
             subtitle: '${zone.transactionCount} $transactionLabel',
-            editableTitleValue: zone.customPlaceName,
-            onTitleChanged: (placeName) => _savePlaceName(zone, placeName),
+            editableTitleValue:
+                hasMultipleLocationNames ? null : zone.customPlaceName,
+            onTitleChanged: hasMultipleLocationNames
+                ? null
+                : (placeName) => _savePlaceName(zone, placeName),
+            locationGroupEntries: hasMultipleLocationNames
+                ? locationGroupEntries
+                : const <TransactionLocationGroupEntry>[],
+            onLocationGroupNameChanged: hasMultipleLocationNames
+                ? _savePlaceNameForTransactionReferences
+                : null,
           ),
         ),
       );
-      await _reloadLocationsAfterTransactionPage();
+      await _reloadMapLocationData();
     } finally {
       _openingZoneId = null;
     }
   }
 
-  Future<void> _reloadLocationsAfterTransactionPage() async {
+  Future<void> _reloadMapLocationData() async {
     try {
       final locations = await _repository.getTransactionLocations();
+      final savedLocations = await _savedLocationRepository.getSavedLocations();
       if (!mounted) return;
-      setState(() => _locations = locations);
+      setState(() {
+        _locations = locations;
+        _savedLocations = savedLocations;
+      });
       await _refreshPuckIcons();
+      await _refreshSavedLocationIcons();
     } catch (error) {
       debugPrint('Could not refresh spending map locations: $error');
     }
@@ -1189,7 +1633,15 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     final controller = _mapController;
     final filtered = _filteredLocations;
     if (controller == null) return;
-    if (filtered.isEmpty) {
+    final points = <LatLng>[
+      ...filtered.map(
+        (location) => LatLng(location.latitude, location.longitude),
+      ),
+      ..._ethiopiaSavedLocations.map(
+        (location) => LatLng(location.latitude, location.longitude),
+      ),
+    ];
+    if (points.isEmpty) {
       try {
         await controller.animateCamera(
           CameraUpdate.newLatLngZoom(_ethiopiaCenter, 5.5),
@@ -1199,10 +1651,6 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       }
       return;
     }
-
-    final points = filtered
-        .map((location) => LatLng(location.latitude, location.longitude))
-        .toList(growable: false);
     try {
       if (points.length == 1 || points.toSet().length == 1) {
         await controller.animateCamera(
@@ -1338,7 +1786,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
       backgroundColor: AppColors.cardColor(context),
       builder: (sheetContext) => _MapOptionsSheet(
         displayMode: _mapDisplayMode,
-        canDelete: _locations.isNotEmpty,
+        canDelete: _locations.isNotEmpty || _savedLocations.isNotEmpty,
         onRoadmap: () => Navigator.pop(
           sheetContext,
           _MapOptionsAction.roadmap,
@@ -1428,8 +1876,9 @@ class _SpendingMapPageState extends State<SpendingMapPage>
         title: Text(dialogContext.l10nText('Delete saved locations?')),
         content: Text(
           dialogContext.l10nText(
-            'This permanently removes all saved transaction locations for '
-            'the active profile. Your transactions will not be deleted.',
+            'This permanently removes all saved places and transaction map '
+            'coordinates for the active profile. Your transactions will not '
+            'be deleted.',
           ),
         ),
         actions: [
@@ -1447,46 +1896,48 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     );
     if (confirmed != true) return;
     await _repository.clearForActiveProfile();
+    await _savedLocationRepository.clearForActiveProfile();
     if (!mounted) return;
-    _mapController = null;
     _puckTransitionController.stop();
     setState(() {
       _locations = const [];
+      _savedLocations = const [];
       _displayedZones = const [];
       _puckIcons = const {};
       _placeLabelIcons = const {};
+      _savedLocationIcons = const {};
       _puckMotions = const [];
       _puckTransitionTargetZones = null;
       _puckTransitionTargetIcons = const {};
       _puckTransitionTargetPlaceLabelIcons = const {};
       _puckGeneration += 1;
-      _mapReady = false;
     });
+    try {
+      await _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(_ethiopiaCenter, 5.5),
+      );
+    } catch (_) {
+      // The map can be disposed while the reset animation is in flight.
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasEthiopiaLocations = _ethiopiaLocations.isNotEmpty;
     return Scaffold(
       backgroundColor: AppColors.background(context),
-      body: switch ((_loading, _loadError, hasEthiopiaLocations)) {
-        (true, _, _) => _MapStatusShell(
+      body: switch ((_loading, _loadError)) {
+        (true, _) => _MapStatusShell(
             onBack: () => Navigator.maybePop(context),
             onOptions: _showMapOptions,
             child: const CircularProgressIndicator(),
           ),
-        (false, final Object error, _) => _MapStatusShell(
+        (false, final Object error) => _MapStatusShell(
             onBack: () => Navigator.maybePop(context),
             onOptions: _showMapOptions,
             child: _ErrorState(
               message: error.toString(),
               onRetry: _loadLocations,
             ),
-          ),
-        (false, null, false) => _MapStatusShell(
-            onBack: () => Navigator.maybePop(context),
-            onOptions: _showMapOptions,
-            child: const _EmptyMapState(),
           ),
         _ => _buildMap(context),
       },
@@ -1496,9 +1947,12 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   Widget _buildMap(BuildContext context) {
     final filtered = _filteredLocations;
     final ethiopiaLocations = _ethiopiaLocations;
-    final initialCenter = ethiopiaLocations.isEmpty
-        ? _ethiopiaCenter
-        : _averageCenter(ethiopiaLocations);
+    final ethiopiaSavedLocations = _ethiopiaSavedLocations;
+    final initialCenter = ethiopiaLocations.isNotEmpty
+        ? _averageCenter(ethiopiaLocations)
+        : ethiopiaSavedLocations.isNotEmpty
+            ? _averageSavedLocationCenter(ethiopiaSavedLocations)
+            : _ethiopiaCenter;
     final mediaPadding = MediaQuery.paddingOf(context);
 
     return Stack(
@@ -1516,7 +1970,10 @@ class _SpendingMapPageState extends State<SpendingMapPage>
                     _mapDisplayMode == _MapDisplayMode.roadmap
                 ? _darkRoadMapStyle
                 : null,
-            markers: _buildZoneMarkers(),
+            markers: <Marker>{
+              ..._buildZoneMarkers(),
+              ..._buildSavedLocationMarkers(),
+            },
             cameraTargetBounds: CameraTargetBounds(_ethiopiaMapBounds),
             minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
             padding: EdgeInsets.fromLTRB(
@@ -1539,6 +1996,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
             },
             onCameraMove: _handleCameraMove,
             onCameraIdle: _handleCameraIdle,
+            onLongPress: _createSavedLocationAt,
           ),
         ),
         if (!_mapReady)
@@ -1567,6 +2025,11 @@ class _SpendingMapPageState extends State<SpendingMapPage>
           ),
         ),
         Positioned(
+          left: 14,
+          bottom: mediaPadding.bottom + 16,
+          child: const _MapLongPressHint(),
+        ),
+        Positioned(
           right: 14,
           bottom: mediaPadding.bottom + 16,
           child: _MapActionButton(
@@ -1581,6 +2044,20 @@ class _SpendingMapPageState extends State<SpendingMapPage>
   }
 
   LatLng _averageCenter(List<TransactionLocation> locations) {
+    final longitude = locations.fold<double>(
+          0,
+          (sum, location) => sum + location.longitude,
+        ) /
+        locations.length;
+    final latitude = locations.fold<double>(
+          0,
+          (sum, location) => sum + location.latitude,
+        ) /
+        locations.length;
+    return LatLng(latitude, longitude);
+  }
+
+  LatLng _averageSavedLocationCenter(List<SavedLocation> locations) {
     final longitude = locations.fold<double>(
           0,
           (sum, location) => sum + location.longitude,
@@ -2146,6 +2623,8 @@ class _SpendingMapFilterSheetState extends State<_SpendingMapFilterSheet> {
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.viewInsetsOf(context).bottom;
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final flowTintedCategoryIds =
+        categoryFilterIdsWithFlowTint(widget.categories);
 
     return Container(
       constraints: BoxConstraints(
@@ -2351,7 +2830,8 @@ class _SpendingMapFilterSheetState extends State<_SpendingMapFilterSheet> {
                           CategoryFilterChip(
                             label: category.name,
                             flow: category.flow,
-                            subtleFlowTint: isSelfCategoryFilter(category),
+                            subtleFlowTint:
+                                flowTintedCategoryIds.contains(category.id),
                             selected:
                                 _selectedCategoryIds.contains(category.id),
                             onTap: () => _toggleCategory(category.id!),
@@ -2908,65 +3388,60 @@ class _MapOptionRow extends StatelessWidget {
   }
 }
 
-class _EmptyMapState extends StatelessWidget {
-  const _EmptyMapState();
+class _MapLongPressHint extends StatelessWidget {
+  const _MapLongPressHint();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 340),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.cardColor(context).withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.black.withValues(alpha: 0.12),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 76,
-            height: 76,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.primaryLight,
+    return IgnorePointer(
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width - 86,
+        ),
+        padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
+        decoration: BoxDecoration(
+          color: AppColors.cardColor(context).withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.borderColor(context)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.black.withValues(alpha: 0.12),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
             ),
-            child: const Icon(
-              AppIcons.map_pin_rounded,
-              color: AppColors.white,
-              size: 34,
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: AppColors.primaryLight.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                AppIcons.add_rounded,
+                color: AppColors.primaryLight,
+                size: 17,
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            context.l10nText('Your map is ready'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.textPrimary(context),
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                context.l10nText('Press and hold the map to save a location'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.textPrimary(context),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            context.l10nText(
-              'New debit and credit transactions will appear here after '
-              'Totals captures their location. Existing transactions are not '
-              'backfilled.',
-            ),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.textSecondary(context),
-              height: 1.45,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

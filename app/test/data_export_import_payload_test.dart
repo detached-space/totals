@@ -304,7 +304,7 @@ void main() {
       }),
     );
 
-    expect(DataExportImportService.currentSchemaVersion, 13);
+    expect(DataExportImportService.currentSchemaVersion, 14);
     expect(normalized['schemaVersion'], 9);
 
     final account = Map<String, dynamic>.from(
@@ -339,7 +339,7 @@ void main() {
       }),
     );
 
-    expect(normalized['schemaVersion'], 13);
+    expect(normalized['schemaVersion'], 14);
     expect(
       ((normalized['transactions'] as List).single
           as Map)['ownerAccountNumber'],
@@ -413,6 +413,7 @@ void main() {
         'transaction_locations': [
           {
             'transactionReference': 'included-location',
+            'savedLocationId': 'included-saved-location',
             'latitude': 8.9806,
             'longitude': 38.7578,
             'accuracy': 12.5,
@@ -420,22 +421,47 @@ void main() {
           },
           {
             'transactionReference': 'excluded-location',
+            'savedLocationId': 'excluded-saved-location',
             'latitude': 8.5644,
             'longitude': 39.2872,
             'capturedAt': '2026-08-17T11:00:00.000Z',
+          },
+        ],
+        'saved_locations': [
+          {
+            'id': 'included-saved-location',
+            'name': 'Home',
+            'latitude': 8.9806,
+            'longitude': 38.7578,
+            'createdAt': '2026-08-17T10:00:00.000Z',
+            'updatedAt': '2026-08-17T10:00:00.000Z',
+          },
+          {
+            'id': 'excluded-saved-location',
+            'name': 'Office',
+            'latitude': 8.5644,
+            'longitude': 39.2872,
+            'createdAt': '2026-08-17T11:00:00.000Z',
+            'updatedAt': '2026-08-17T11:00:00.000Z',
           },
         ],
       }),
       options: const DataImportOptions(bankIds: {1}),
     );
 
-    expect(prepared['schemaVersion'], 13);
+    expect(prepared['schemaVersion'], 14);
     expect(prepared['transactions'], hasLength(1));
     final locations = prepared['transactionLocations'] as List<dynamic>;
     expect(locations, hasLength(1));
     expect(
       (locations.single as Map)['transactionReference'],
       'included-location',
+    );
+    final savedLocations = prepared['savedLocations'] as List<dynamic>;
+    expect(savedLocations, hasLength(1));
+    expect(
+      (savedLocations.single as Map)['id'],
+      'included-saved-location',
     );
   });
 
