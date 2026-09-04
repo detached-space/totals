@@ -23,6 +23,7 @@ import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:totals/services/account_registration_service.dart';
 import 'package:totals/services/account_transaction_reparse_service.dart';
@@ -39,6 +40,7 @@ import 'package:totals/utils/reconciliation_ledger_filter.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_location_filter_utils.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
@@ -330,6 +332,8 @@ class _TransactionFilter {
   final String? accountKey;
   // Empty = all categories; uncategorizedCategoryFilterId = none assigned.
   final Set<int> categoryIds;
+  // Empty = all locations; values are normalized editable place names.
+  final Set<String> locationNames;
   final double? minAmount;
   final double? maxAmount;
   final DateTime? startDate;
@@ -340,17 +344,22 @@ class _TransactionFilter {
     this.bankId,
     this.accountKey,
     Set<int> categoryIds = const <int>{},
+    Set<String> locationNames = const <String>{},
     this.minAmount,
     this.maxAmount,
     this.startDate,
     this.endDate,
-  }) : categoryIds = Set<int>.unmodifiable(categoryIds);
+  })  : categoryIds = Set<int>.unmodifiable(categoryIds),
+        locationNames = Set<String>.unmodifiable(
+          normalizedTransactionLocationFilterNames(locationNames),
+        );
 
   bool get isActive =>
       type != null ||
       bankId != null ||
       accountKey != null ||
       categoryIds.isNotEmpty ||
+      locationNames.isNotEmpty ||
       minAmount != null ||
       maxAmount != null ||
       startDate != null ||
@@ -362,6 +371,7 @@ class _TransactionFilter {
     if (bankId != null) count++;
     if (accountKey != null) count++;
     if (categoryIds.isNotEmpty) count++;
+    if (locationNames.isNotEmpty) count++;
     if (minAmount != null || maxAmount != null) count++;
     if (startDate != null || endDate != null) count++;
     return count;
@@ -482,6 +492,11 @@ String _categoryFilterCacheKey(Set<int> categoryIds) {
   return orderedIds.join(',');
 }
 
+String _locationFilterCacheKey(Set<String> locationNames) {
+  final orderedNames = locationNames.toList(growable: true)..sort();
+  return orderedNames.join('\u0000');
+}
+
 class _ActivityTransactionsViewCacheKey {
   final int dataVersion;
   final String calendar;
@@ -491,6 +506,8 @@ class _ActivityTransactionsViewCacheKey {
   final int? bankId;
   final String? accountKey;
   final String categoryIdsKey;
+  final String locationNamesKey;
+  final int locationDataVersion;
   final double? minAmount;
   final double? maxAmount;
   final int? startDateMillis;
@@ -506,6 +523,8 @@ class _ActivityTransactionsViewCacheKey {
     required this.bankId,
     required this.accountKey,
     required this.categoryIdsKey,
+    required this.locationNamesKey,
+    required this.locationDataVersion,
     required this.minAmount,
     required this.maxAmount,
     required this.startDateMillis,
@@ -525,6 +544,8 @@ class _ActivityTransactionsViewCacheKey {
         other.bankId == bankId &&
         other.accountKey == accountKey &&
         other.categoryIdsKey == categoryIdsKey &&
+        other.locationNamesKey == locationNamesKey &&
+        other.locationDataVersion == locationDataVersion &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
         other.startDateMillis == startDateMillis &&
@@ -542,6 +563,8 @@ class _ActivityTransactionsViewCacheKey {
       bankId,
       accountKey,
       categoryIdsKey,
+      locationNamesKey,
+      locationDataVersion,
       minAmount,
       maxAmount,
       startDateMillis,
@@ -573,6 +596,8 @@ class _BankTransactionsViewCacheKey {
   final String? type;
   final String? accountKey;
   final String categoryIdsKey;
+  final String locationNamesKey;
+  final int locationDataVersion;
   final double? minAmount;
   final double? maxAmount;
   final int? startDateMillis;
@@ -588,6 +613,8 @@ class _BankTransactionsViewCacheKey {
     required this.type,
     required this.accountKey,
     required this.categoryIdsKey,
+    required this.locationNamesKey,
+    required this.locationDataVersion,
     required this.minAmount,
     required this.maxAmount,
     required this.startDateMillis,
@@ -607,6 +634,8 @@ class _BankTransactionsViewCacheKey {
         other.type == type &&
         other.accountKey == accountKey &&
         other.categoryIdsKey == categoryIdsKey &&
+        other.locationNamesKey == locationNamesKey &&
+        other.locationDataVersion == locationDataVersion &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
         other.startDateMillis == startDateMillis &&
@@ -624,6 +653,8 @@ class _BankTransactionsViewCacheKey {
         type,
         accountKey,
         categoryIdsKey,
+        locationNamesKey,
+        locationDataVersion,
         minAmount,
         maxAmount,
         startDateMillis,
@@ -758,6 +789,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       AccountTransactionReparseService();
   late final AnimationController _subTabFadeController;
   late final Animation<double> _subTabFadeAnimation;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
+  Map<String, String> _locationNameByReference = const <String, String>{};
+  int _locationDataVersion = 0;
   _ActivityTransactionsViewCacheKey? _activityTransactionsViewCacheKey;
   _ActivityTransactionsViewData? _activityTransactionsViewCache;
   _LedgerViewCacheKey? _ledgerViewCacheKey;
@@ -767,6 +801,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   bool _isGeneratingBankStatement = false;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
+
+  TransactionLocationRepository get _transactionLocationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          TransactionLocationRepository();
 
   double get _activityPinnedHeaderDividerTriggerOffset {
     final renderObject =
@@ -2391,6 +2429,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       transaction: transaction,
       provider: provider,
     );
+    if (mounted) await _refreshTransactionLocationNames();
   }
 
   Future<void> _openTransactionCategorySheet(
@@ -3409,6 +3448,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       bankId: _filter.bankId,
       accountKey: _filter.accountKey,
       categoryIdsKey: _categoryFilterCacheKey(_filter.categoryIds),
+      locationNamesKey: _locationFilterCacheKey(_filter.locationNames),
+      locationDataVersion: _locationDataVersion,
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
       startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
@@ -3750,7 +3791,32 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
+  Future<void> _refreshTransactionLocationNames() async {
+    try {
+      final locations =
+          await _transactionLocationRepository.getTransactionLocations();
+      final namesByReference = <String, String>{};
+      for (final location in locations) {
+        final placeName = location.placeName?.trim();
+        if (placeName == null || placeName.isEmpty) continue;
+        namesByReference[location.transactionReference] = placeName;
+      }
+      if (!mounted) return;
+      setState(() {
+        _locationNameByReference =
+            Map<String, String>.unmodifiable(namesByReference);
+        _locationDataVersion++;
+      });
+    } catch (_) {
+      // Keep the last successfully loaded names if location storage is
+      // temporarily unavailable; the other transaction filters still work.
+    }
+  }
+
   Future<void> _openFilterSheet(TransactionProvider provider) async {
+    await _refreshTransactionLocationNames();
+    if (!mounted) return;
+
     // Derive bank/category choices from activity; account choices come from
     // the provider's durable ownership partitions below.
     final allTxns = provider.allTransactions;
@@ -3764,6 +3830,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     // Build category list from IDs found in transactions.
     final categories = orderedCategoriesForFilter(
       categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
+    final locationNames = orderedTransactionLocationNamesForFilter(
+      allTxns.map(
+        (transaction) => _locationNameByReference[transaction.reference],
+      ),
     );
     final unmatchedBankIds = bankIds
         .where(
@@ -3789,6 +3860,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         accounts: provider.accountSummaries,
         unmatchedBankIds: unmatchedBankIds,
         categories: categories,
+        locationNames: locationNames,
       ),
     );
     if (result != null) {
@@ -3881,6 +3953,19 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             (transaction) => provider.matchesCategoryFilterSelection(
               transaction,
               _filter.categoryIds,
+            ),
+          )
+          .toList();
+    }
+
+    // Editable place-name filter.
+    if (_filter.locationNames.isNotEmpty) {
+      result = result
+          .where(
+            (transaction) => matchesTransactionLocationFilters(
+              transactionReference: transaction.reference,
+              locationNames: _filter.locationNames,
+              locationNameByReference: _locationNameByReference,
             ),
           )
           .toList();
@@ -12586,10 +12671,17 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   String _searchQuery = '';
   _TransactionFilter _filter = _TransactionFilter();
   int _currentPage = 0;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
+  Map<String, String> _locationNameByReference = const <String, String>{};
+  int _locationDataVersion = 0;
   _BankTransactionsViewCacheKey? _viewCacheKey;
   _BankTransactionsViewData? _viewCache;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
+
+  TransactionLocationRepository get _transactionLocationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          TransactionLocationRepository();
 
   @override
   void dispose() {
@@ -12777,9 +12869,39 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     );
   }
 
+  Future<void> _refreshTransactionLocationNames() async {
+    try {
+      final locations =
+          await _transactionLocationRepository.getTransactionLocations();
+      final namesByReference = <String, String>{};
+      for (final location in locations) {
+        final placeName = location.placeName?.trim();
+        if (placeName == null || placeName.isEmpty) continue;
+        namesByReference[location.transactionReference] = placeName;
+      }
+      if (!mounted) return;
+      setState(() {
+        _locationNameByReference =
+            Map<String, String>.unmodifiable(namesByReference);
+        _locationDataVersion++;
+      });
+    } catch (_) {
+      // Keep the last successfully loaded names if location storage is
+      // temporarily unavailable; the other transaction filters still work.
+    }
+  }
+
   Future<void> _openFilterSheet(TransactionProvider provider) async {
+    await _refreshTransactionLocationNames();
+    if (!mounted) return;
+
     final transactions = _bankTransactions(provider);
     final categories = _categoriesForBankTransactions(provider, transactions);
+    final locationNames = orderedTransactionLocationNamesForFilter(
+      transactions.map(
+        (transaction) => _locationNameByReference[transaction.reference],
+      ),
+    );
     final accounts = widget.account == null && !widget.unmatchedOnly
         ? provider.accountSummaries
             .where((account) => account.bankId == widget.bankId)
@@ -12801,6 +12923,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
         accounts: accounts,
         unmatchedBankIds: unmatchedBankIds,
         categories: categories,
+        locationNames: locationNames,
         showBankFilter: false,
       ),
     );
@@ -12839,6 +12962,18 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
             (transaction) => provider.matchesCategoryFilterSelection(
               transaction,
               _filter.categoryIds,
+            ),
+          )
+          .toList();
+    }
+
+    if (_filter.locationNames.isNotEmpty) {
+      result = result
+          .where(
+            (transaction) => matchesTransactionLocationFilters(
+              transactionReference: transaction.reference,
+              locationNames: _filter.locationNames,
+              locationNameByReference: _locationNameByReference,
             ),
           )
           .toList();
@@ -12937,6 +13072,8 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       type: _filter.type,
       accountKey: _filter.accountKey,
       categoryIdsKey: _categoryFilterCacheKey(_filter.categoryIds),
+      locationNamesKey: _locationFilterCacheKey(_filter.locationNames),
+      locationDataVersion: _locationDataVersion,
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
       startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
@@ -13053,6 +13190,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       transaction: transaction,
       provider: provider,
     );
+    if (mounted) await _refreshTransactionLocationNames();
   }
 
   Future<void> _openTransactionCategorySheet(
@@ -19108,6 +19246,7 @@ class _FilterTransactionsSheet extends StatefulWidget {
   final List<AccountSummary> accounts;
   final Set<int> unmatchedBankIds;
   final List<Category> categories;
+  final List<String> locationNames;
   final bool showBankFilter;
 
   const _FilterTransactionsSheet({
@@ -19116,6 +19255,7 @@ class _FilterTransactionsSheet extends StatefulWidget {
     required this.accounts,
     required this.unmatchedBankIds,
     required this.categories,
+    this.locationNames = const <String>[],
     this.showBankFilter = true,
   });
 
@@ -19129,6 +19269,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   late int? _selectedBankId;
   late String? _selectedAccountKey;
   late Set<int> _selectedCategoryIds;
+  late Set<String> _selectedLocationNames;
   late final TextEditingController _minAmountController;
   late final TextEditingController _maxAmountController;
   String? _amountErrorText;
@@ -19146,6 +19287,12 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
             ? currentAccountKey
             : null;
     _selectedCategoryIds = <int>{...widget.currentFilter.categoryIds};
+    final availableLocationNames = normalizedTransactionLocationFilterNames(
+      widget.locationNames,
+    );
+    _selectedLocationNames = widget.currentFilter.locationNames
+        .where(availableLocationNames.contains)
+        .toSet();
     _minAmountController = TextEditingController(
       text: _formatAmountInput(widget.currentFilter.minAmount),
     );
@@ -19171,12 +19318,23 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     });
   }
 
+  void _toggleLocation(String locationName) {
+    final normalizedName =
+        normalizeTransactionLocationFilterName(locationName);
+    setState(() {
+      if (!_selectedLocationNames.add(normalizedName)) {
+        _selectedLocationNames.remove(normalizedName);
+      }
+    });
+  }
+
   void _clearAll() {
     setState(() {
       _selectedType = null;
       _selectedBankId = null;
       _selectedAccountKey = null;
       _selectedCategoryIds.clear();
+      _selectedLocationNames.clear();
       _minAmountController.clear();
       _maxAmountController.clear();
       _amountErrorText = null;
@@ -19208,6 +19366,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
         bankId: _selectedBankId,
         accountKey: _selectedAccountKey,
         categoryIds: Set<int>.unmodifiable(_selectedCategoryIds),
+        locationNames: Set<String>.unmodifiable(_selectedLocationNames),
         minAmount: minAmount,
         maxAmount: maxAmount,
         startDate: _startDate,
@@ -19379,6 +19538,8 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
     final navBarPadding = MediaQuery.of(context).padding.bottom;
+    final flowTintedCategoryIds =
+        categoryFilterIdsWithFlowTint(widget.categories);
 
     return Container(
       constraints: BoxConstraints(
@@ -19581,7 +19742,9 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                                     label: category.name,
                                     flow: category.flow,
                                     subtleFlowTint:
-                                        isSelfCategoryFilter(category),
+                                        flowTintedCategoryIds.contains(
+                                      category.id,
+                                    ),
                                     selected: _selectedCategoryIds.contains(
                                       category.id,
                                     ),
@@ -19593,6 +19756,49 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                       ),
                     ),
                   ),
+
+                  if (widget.locationNames.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+
+                    // ── LOCATION ──
+                    _sectionLabel('LOCATION'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Transform.translate(
+                        offset: const Offset(-20, 0),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                label: 'All locations',
+                                selected: _selectedLocationNames.isEmpty,
+                                onTap: () => setState(
+                                  () => _selectedLocationNames.clear(),
+                                ),
+                              ),
+                              for (final locationName in widget.locationNames)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: locationName,
+                                    selected: _selectedLocationNames.contains(
+                                      normalizeTransactionLocationFilterName(
+                                        locationName,
+                                      ),
+                                    ),
+                                    onTap: () =>
+                                        _toggleLocation(locationName),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 20),
 
@@ -20275,6 +20481,8 @@ class _AnalyticsChartFilterSheetState
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
     final navBarPadding = MediaQuery.of(context).padding.bottom;
+    final flowTintedCategoryIds =
+        categoryFilterIdsWithFlowTint(widget.categories);
     final showsBankSection =
         widget.chartSection.showsBankFilter && widget.bankIds.isNotEmpty;
     final showsCategorySection = widget.chartSection.showsCategoryFilter;
@@ -20522,7 +20730,9 @@ class _AnalyticsChartFilterSheetState
                                       label: category.name,
                                       flow: category.flow,
                                       subtleFlowTint:
-                                          isSelfCategoryFilter(category),
+                                          flowTintedCategoryIds.contains(
+                                        category.id,
+                                      ),
                                       selected: _selectedCategoryIds.contains(
                                         category.id,
                                       ),
