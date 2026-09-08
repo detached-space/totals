@@ -5,9 +5,11 @@ import 'package:totals/models/bank.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/services/bank_config_service.dart';
 import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
+import 'package:totals/utils/transaction_summary_filter.dart';
 
 /// Handler for transaction-related API endpoints
 class TransactionsHandler {
@@ -110,10 +112,17 @@ class TransactionsHandler {
   Future<Response> _getTransactionStats(Request request) async {
     try {
       final transactions = await _transactionRepo.getTransactions();
+      final categories = await CategoryRepository().getCategories();
+      final categoryById = {
+        for (final category in categories) category.id: category,
+      };
 
       // Group transactions by bankId
       final Map<int, List<Transaction>> groupedByBank = {};
       for (var t in transactions) {
+        if (isMiscTransaction(t, getCategoryById: (id) => categoryById[id])) {
+          continue;
+        }
         if (t.bankId != null) {
           groupedByBank.putIfAbsent(t.bankId!, () => []);
           groupedByBank[t.bankId!]!.add(t);

@@ -669,7 +669,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget build(BuildContext context) {
     return Consumer<TransactionProvider>(
       builder: (context, provider, child) {
-        final allTransactions = provider.allTransactions;
+        final allTransactions = provider.summaryTransactions;
         final bankSummaries = provider.bankSummaries;
         final accounts = provider.accountSummaries;
         _registeredAccounts = provider.accounts;

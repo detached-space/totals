@@ -398,7 +398,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
         .where(_filters.matchesLocation)
         .toList(growable: false);
     final provider = _transactionProvider;
-    if (provider == null || !_filters.hasTransactionFilters) {
+    if (provider == null) {
       return locationFiltered;
     }
 
@@ -409,6 +409,10 @@ class _SpendingMapPageState extends State<SpendingMapPage>
     return locationFiltered.where((location) {
       final transaction =
           transactionsByReference[location.transactionReference];
+      if (transaction != null && provider.isExcludedFromTotals(transaction)) {
+        return false;
+      }
+      if (!_filters.hasTransactionFilters) return true;
       if (transaction == null) return false;
       if (_filters.type != null &&
           transaction.type?.trim().toUpperCase() != _filters.type) {

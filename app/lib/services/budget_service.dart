@@ -1,9 +1,12 @@
 import 'package:totals/models/budget.dart';
+import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/repositories/budget_repository.dart';
+import 'package:totals/repositories/category_repository.dart';
 import 'package:totals/repositories/reimbursement_repository.dart';
 import 'package:totals/repositories/transaction_repository.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_summary_filter.dart';
 
 class BudgetService {
   final BudgetRepository _budgetRepository = BudgetRepository();
@@ -46,6 +49,7 @@ class BudgetService {
     return _sumNetSpending(
       filtered,
       reimbursedByReference,
+      categories: await CategoryRepository().getCategories(),
       categoryIds: ids,
     );
   }
@@ -121,6 +125,7 @@ class BudgetService {
     }
 
     final statuses = List<BudgetStatus?>.filled(budgets.length, null);
+    final categories = await CategoryRepository().getCategories();
     for (final requests in requestsByPeriod.values) {
       final periodStart = requests.first.periodStart;
       final periodEnd = requests.first.periodEnd;
@@ -146,6 +151,7 @@ class BudgetService {
         final spent = _sumNetSpending(
           applicableTransactions,
           reimbursedByReference,
+          categories: categories,
           categoryIds: categoryIds,
         );
         statuses[request.index] = _buildStatus(
@@ -162,12 +168,24 @@ class BudgetService {
     );
   }
 
-  double _sumNetSpending(Iterable<Transaction> transactions,
-      Map<String, double> reimbursedByReference,
-      {Set<int> categoryIds = const <int>{}}) {
+  double _sumNetSpending(
+    Iterable<Transaction> transactions,
+    Map<String, double> reimbursedByReference, {
+    required List<Category> categories,
+    Set<int> categoryIds = const <int>{},
+  }) {
+    final categoryById = {
+      for (final category in categories) category.id: category,
+    };
     return transactions.fold<double>(
       0.0,
       (sum, transaction) {
+        if (isMiscTransaction(
+          transaction,
+          getCategoryById: (id) => categoryById[id],
+        )) {
+          return sum;
+        }
         final gross = transactionDebitOutflow(transaction);
         final reimbursed =
             reimbursedByReference[transaction.reference.trim()] ?? 0.0;

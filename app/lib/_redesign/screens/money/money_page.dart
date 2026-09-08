@@ -1828,7 +1828,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     TransactionProvider provider,
     _AnalyticsHeatmapFilter filter,
   ) {
-    return provider.allTransactions
+    return provider.summaryTransactions
         .where(
           (transaction) => _matchesAnalyticsHeatmapFilterValue(
             transaction,
@@ -2497,7 +2497,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   List<Widget> _buildAnalyticsSlivers(TransactionProvider provider) {
     final activeFilter =
         _analyticsFilterForSection(_analyticsSelectedChartSection);
-    final heatmapTransactions = provider.allTransactions
+    final heatmapTransactions = provider.summaryTransactions
         .where(
           (transaction) =>
               _matchesAnalyticsHeatmapFilter(transaction, provider),
@@ -2506,7 +2506,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final heatmapSnapshot = _buildAnalyticsSnapshot(
       provider,
       sourceTransactions: heatmapTransactions,
-      anchorTransactions: provider.allTransactions,
+      anchorTransactions: provider.summaryTransactions,
       categoryMode: _analyticsHeatmapFilter.mode,
       categoryIds: _analyticsHeatmapFilter.categoryIds,
     );
@@ -2819,10 +2819,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     bool constrainSeriesToAnchorMonth = true,
     DateTime? anchorDate,
   }) {
-    final transactions = sourceTransactions ?? provider.allTransactions;
+    final transactions = sourceTransactions ?? provider.summaryTransactions;
     final anchorSource = anchorTransactions ?? transactions;
     DateTime? latestTransactionTime;
     for (final transaction in anchorSource) {
+      if (provider.isExcludedFromTotals(transaction)) continue;
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
       if (latestTransactionTime == null || dt.isAfter(latestTransactionTime)) {
@@ -2855,6 +2856,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       final isDebit = transaction.type == 'DEBIT';
+      if (provider.isExcludedFromTotals(transaction)) continue;
       final dt = _parseTransactionTime(transaction.time);
       final isWithinAnchorMonth =
           dt != null && !dt.isBefore(monthStart) && dt.isBefore(nextMonthStart);
@@ -3525,7 +3527,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     }
 
     return _ActivityTransactionsSummary(
-      totalTransactions: transactions.length,
+      totalTransactions: transactions
+          .where((transaction) => !provider.isExcludedFromTotals(transaction))
+          .length,
       totalIncome: totalIncome,
       totalExpense: totalExpense,
     );
@@ -13052,7 +13056,9 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     }
 
     return _ActivityTransactionsSummary(
-      totalTransactions: transactions.length,
+      totalTransactions: transactions
+          .where((transaction) => !provider.isExcludedFromTotals(transaction))
+          .length,
       totalIncome: totalIncome,
       totalExpense: totalExpense,
     );
@@ -14557,7 +14563,7 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final transactions = _transactionsForHeatmapDayWithFilter(
       day: date,
-      allTransactions: provider.allTransactions,
+      allTransactions: provider.summaryTransactions,
       filter: filter,
       matchesCategoryFilters: provider.matchesCategoryFilterSelection,
     );

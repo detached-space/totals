@@ -7,6 +7,7 @@ import '../models/transaction.dart';
 import '../constants/cash_constants.dart';
 import '../utils/map_keys.dart';
 import '../utils/math_utils.dart';
+import '../utils/transaction_summary_filter.dart';
 
 class InsightsService {
   static const int _scoreVersion =
@@ -44,7 +45,12 @@ class InsightsService {
   Map<String, dynamic> summarize() {
     if (_cache != null) return _cache!;
 
-    final transactions = _getTransactions();
+    final transactions = _getTransactions()
+        .where((transaction) => !isMiscTransaction(
+              transaction,
+              getCategoryById: (id) => _getCategoryById?.call(id),
+            ))
+        .toList(growable: false);
 
     // use the existing type + sign approach
     // to split income/expense

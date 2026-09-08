@@ -35,6 +35,7 @@ import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_summary_filter.dart';
 
 class TransactionTotals {
   final double income;
@@ -246,6 +247,9 @@ class TransactionProvider with ChangeNotifier {
   // Getters
   List<Transaction> get transactions => _transactions;
   List<Transaction> get allTransactions => _allTransactions;
+  List<Transaction> get summaryTransactions => allTransactions
+      .where((transaction) => !isExcludedFromTotals(transaction))
+      .toList(growable: false);
   Set<String> get sharedExpenseLinkedRefs => _sharedExpenseLinkedRefs;
   Set<String> get sharedExpenseSharingRefs =>
       Set.unmodifiable(_sharedExpenseSharingRefs);
@@ -631,7 +635,12 @@ class TransactionProvider with ChangeNotifier {
         reimbursedExpenseAmount(transaction) > 0;
   }
 
+  bool isExcludedFromTotals(Transaction transaction) {
+    return isMiscTransaction(transaction, getCategoryById: getCategoryById);
+  }
+
   double incomeAmountForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return 0.0;
     if (transaction.type != 'CREDIT') return 0.0;
     return transactionIncomeAmount(
       transaction,
@@ -641,6 +650,7 @@ class TransactionProvider with ChangeNotifier {
   }
 
   double netExpenseAmountForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return 0.0;
     return transactionNetExpenseAmount(
       transaction,
       isSelfTransfer: _isSelfTransfer(transaction),
@@ -649,6 +659,7 @@ class TransactionProvider with ChangeNotifier {
   }
 
   double budgetExpenseAmountForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return 0.0;
     return transactionNetExpenseAmount(
       transaction,
       isSelfTransfer: false,
@@ -657,6 +668,7 @@ class TransactionProvider with ChangeNotifier {
   }
 
   Map<int?, double> categoryAmountsForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return const <int?, double>{};
     final total = transaction.type == 'CREDIT'
         ? incomeAmountForTransaction(transaction)
         : transaction.type == 'DEBIT'
@@ -1061,10 +1073,13 @@ class TransactionProvider with ChangeNotifier {
       double transferIn = 0.0;
       double transferOut = 0.0;
       double feesAndVat = 0.0;
+      var totalTransactions = 0;
       for (var t in accountTransactions) {
+        cashBalance += transactionBalanceDelta(t);
+        if (isExcludedFromTotals(t)) continue;
+        totalTransactions += 1;
         final isSelfTransfer = _isSelfTransfer(t);
         final feeAmount = transactionFeeAmount(t);
-        cashBalance += transactionBalanceDelta(t);
         if (t.type == 'DEBIT') {
           feesAndVat += feeAmount;
         }
@@ -1097,7 +1112,7 @@ class TransactionProvider with ChangeNotifier {
         bankId: account.bank,
         accountNumber: account.accountNumber,
         accountHolderName: account.accountHolderName,
-        totalTransactions: accountTransactions.length.toDouble(),
+        totalTransactions: totalTransactions.toDouble(),
         totalCredit: totalCredit,
         totalDebit: totalDebit,
         settledBalance: account.settledBalance ?? 0.0,
@@ -1488,6 +1503,7 @@ class TransactionProvider with ChangeNotifier {
       if (isMonth) {
         monthTransactions.add(transaction);
       }
+      if (isExcludedFromTotals(transaction)) continue;
       if (isSelfTransfer) {
         selfTransferCount += 1;
       }

@@ -94,8 +94,9 @@ class _AddCashTransactionContentState
 
   List<Category> get _filteredCategories {
     final flow = _isDebit ? 'expense' : 'income';
-    return sortCategoriesAlphabetically(widget.provider.categories
-        .where((c) => c.flow == flow && !c.uncategorized));
+    return sortCategoriesAlphabetically(
+      widget.provider.categories.where((category) => category.flow == flow),
+    );
   }
 
   @override

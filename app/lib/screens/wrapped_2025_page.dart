@@ -555,7 +555,7 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
   Widget build(BuildContext context) {
     final provider = Provider.of<TransactionProvider>(context);
     final transactions =
-        _filterTransactionsForYear(provider.allTransactions, _wrappedYear);
+        _filterTransactionsForYear(provider.summaryTransactions, _wrappedYear);
 
     if (provider.isLoading && transactions.isEmpty) {
       return Scaffold(

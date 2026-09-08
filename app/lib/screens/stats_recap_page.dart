@@ -49,7 +49,7 @@ class _StatsRecapPageState extends State<StatsRecapPage> {
     return Consumer<TransactionProvider>(
       builder: (context, provider, child) {
         final data = StatsRecapData.from(
-          transactions: provider.allTransactions,
+          transactions: provider.summaryTransactions,
           banks: _banks,
           year: _recapYear,
           expenseAmountForTransaction: provider.netExpenseAmountForTransaction,
