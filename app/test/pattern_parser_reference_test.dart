@@ -88,4 +88,85 @@ is ETB 51,509.06.''';
     expect(details['accountNumber'], '011');
     expect(details['type'], 'CREDIT');
   });
+
+  test('uses only patterns belonging to the sender bank', () async {
+    final cbe = Bank(
+      id: 1,
+      name: 'Commercial Bank of Ethiopia',
+      shortName: 'CBE',
+      codes: const ['CBE'],
+      image: '',
+    );
+    final nib = Bank(
+      id: 7,
+      name: 'Nib Bank',
+      shortName: 'NIB',
+      codes: const ['NIB'],
+      image: '',
+    );
+    final cbePattern = SmsPattern(
+      bankId: 1,
+      senderId: 'CBE',
+      regex: r'Account.*?Debited\s+with\s+ETB\s+(?<amount>[\d,.]+)',
+      type: 'CREDIT',
+      description: 'Broad CBE pattern',
+      refRequired: false,
+    );
+    final nibPattern = SmsPattern(
+      bankId: 7,
+      senderId: 'NIB',
+      regex: r'Account.*?Debited\s+with\s+ETB\s+(?<amount>[\d,.]+)',
+      type: 'DEBIT',
+      description: 'NIB debit pattern',
+      refRequired: false,
+    );
+
+    final details = await PatternParser.extractTransactionDetails(
+      'Account 1000 has been Debited with ETB 125.00',
+      'NIB',
+      DateTime(2026, 8, 17),
+      <SmsPattern>[cbePattern, nibPattern],
+      banks: <Bank>[cbe, nib],
+    );
+
+    expect(details, isNotNull);
+    expect(details!['bankId'], 7);
+    expect(details['patternDescription'], 'NIB debit pattern');
+    expect(details['type'], 'DEBIT');
+  });
+
+  test('rejects patterns from a different bank than the sender', () async {
+    final cbe = Bank(
+      id: 1,
+      name: 'Commercial Bank of Ethiopia',
+      shortName: 'CBE',
+      codes: const ['CBE'],
+      image: '',
+    );
+    final nib = Bank(
+      id: 7,
+      name: 'Nib Bank',
+      shortName: 'NIB',
+      codes: const ['NIB'],
+      image: '',
+    );
+    final cbePattern = SmsPattern(
+      bankId: 1,
+      senderId: 'CBE',
+      regex: r'Account.*?Debited\s+with\s+ETB\s+(?<amount>[\d,.]+)',
+      type: 'DEBIT',
+      description: 'Broad CBE pattern',
+      refRequired: false,
+    );
+
+    final details = await PatternParser.extractTransactionDetails(
+      'Account 1000 has been Debited with ETB 125.00',
+      'NIB',
+      DateTime(2026, 8, 17),
+      <SmsPattern>[cbePattern],
+      banks: <Bank>[cbe, nib],
+    );
+
+    expect(details, isNull);
+  });
 }
