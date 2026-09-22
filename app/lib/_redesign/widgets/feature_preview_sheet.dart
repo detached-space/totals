@@ -5,6 +5,7 @@ import 'package:better_player_plus/better_player_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
+import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 
 const String tutorialsBucketUrlEnvironmentKey = 'TUTORIALS_BUCKET_URL';
@@ -21,6 +22,16 @@ const String quickAccessAccountPreviewCacheKey =
     'tutorials/v1/quick-access-account.mp4';
 const String quickAccessAccountPreviewDescription =
     'Long-press Shared in the bottom navigation to open Account Hub. Search your saved accounts or switch to Mine, then tap an account to copy its number.';
+const String categorySplitPreviewPlaceholderAsset =
+    'assets/images/tutorials/category_split_blurred.webp';
+const String categorySplitPreviewCacheKey = 'tutorials/v1/category_split.mp4';
+const String categorySplitPreviewDescription =
+    'Select two or more categories on a transaction, then tap Split. Set the amounts or split evenly, and Totals assigns the remainder to the last category. Tap Save split to apply.';
+const String spendingMapPreviewPlaceholderAsset =
+    'assets/images/tutorials/spending_map_blurred.webp';
+const String spendingMapPreviewCacheKey = 'tutorials/v1/spending_map.mp4';
+const String spendingMapPreviewDescription =
+    'Enable Spending Map in Advanced Settings, then open Quick Tools on Home and tap Spending Map. New transactions appear at their recorded locations so you can see where you spend.';
 const String reimbursementPreviewPlaceholderAsset =
     'assets/images/tutorials/reimbursement_blurred.webp';
 const String reimbursementPreviewCacheKey = 'tutorials/v1/reimbursement.mp4';
@@ -39,6 +50,12 @@ String get autoCategorizationPreviewUrl =>
 
 String get quickAccessAccountPreviewUrl =>
     _tutorialVideoUrl(quickAccessAccountPreviewCacheKey);
+
+String get categorySplitPreviewUrl =>
+    _tutorialVideoUrl(categorySplitPreviewCacheKey);
+
+String get spendingMapPreviewUrl =>
+    _tutorialVideoUrl(spendingMapPreviewCacheKey);
 
 String get reimbursementPreviewUrl =>
     _tutorialVideoUrl(reimbursementPreviewCacheKey);
@@ -145,6 +162,28 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           accentColor: AppColors.blue,
         ),
         FeaturePreviewItem(
+          title: 'Category Split',
+          summary: 'Divide one transaction across multiple categories',
+          description: categorySplitPreviewDescription,
+          videoUrl: categorySplitPreviewUrl,
+          videoCacheKey: categorySplitPreviewCacheKey,
+          videoPlaceholderAsset: categorySplitPreviewPlaceholderAsset,
+          icon: AppIcons.scales,
+          accentColor: AppColors.primaryLight,
+          isNew: true,
+        ),
+        FeaturePreviewItem(
+          title: 'Spending Map',
+          summary: 'See where your transactions happen',
+          description: spendingMapPreviewDescription,
+          videoUrl: spendingMapPreviewUrl,
+          videoCacheKey: spendingMapPreviewCacheKey,
+          videoPlaceholderAsset: spendingMapPreviewPlaceholderAsset,
+          icon: AppIcons.map_rounded,
+          accentColor: AppColors.primaryLight,
+          isNew: true,
+        ),
+        FeaturePreviewItem(
           title: 'Link Reimbursements',
           summary: 'Track returned money against past spending',
           description: reimbursementPreviewDescription,
@@ -153,7 +192,6 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           videoPlaceholderAsset: reimbursementPreviewPlaceholderAsset,
           icon: Icons.currency_exchange_rounded,
           accentColor: AppColors.blue,
-          isNew: true,
         ),
         FeaturePreviewItem(
           title: 'Telegram Backup',
@@ -164,7 +202,6 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           videoPlaceholderAsset: telegramBackupPreviewPlaceholderAsset,
           icon: Icons.send_rounded,
           accentColor: AppColors.primaryLight,
-          isNew: true,
         ),
       ],
     );

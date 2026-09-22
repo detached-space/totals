@@ -23,10 +23,16 @@ void main() {
   });
 
   test('default previews use versioned R2 videos and cache keys', () {
-    expect(totalsFeaturePreviews, hasLength(4));
+    expect(totalsFeaturePreviews, hasLength(6));
     final autoCategorizationPreview = totalsFeaturePreviews.first;
     final quickAccessAccountPreview = totalsFeaturePreviews.firstWhere(
       (preview) => preview.title == 'Quick Account Access',
+    );
+    final categorySplitPreview = totalsFeaturePreviews.firstWhere(
+      (preview) => preview.title == 'Category Split',
+    );
+    final spendingMapPreview = totalsFeaturePreviews.firstWhere(
+      (preview) => preview.title == 'Spending Map',
     );
     final reimbursementPreview = totalsFeaturePreviews.firstWhere(
       (preview) => preview.title == 'Link Reimbursements',
@@ -83,7 +89,7 @@ void main() {
       reimbursementPreview.videoPlaceholderAsset,
       reimbursementPreviewPlaceholderAsset,
     );
-    expect(reimbursementPreview.isNew, isTrue);
+    expect(reimbursementPreview.isNew, isFalse);
 
     expect(telegramBackupPreview.videoUrl, telegramBackupPreviewUrl);
     expect(
@@ -99,10 +105,32 @@ void main() {
       telegramBackupPreview.videoPlaceholderAsset,
       telegramBackupPreviewPlaceholderAsset,
     );
-    expect(telegramBackupPreview.isNew, isTrue);
+    expect(telegramBackupPreview.isNew, isFalse);
+    expect(categorySplitPreview.videoUrl, categorySplitPreviewUrl);
     expect(
-      totalsFeaturePreviews.where((preview) => preview.isNew),
-      hasLength(2),
+      categorySplitPreview.videoUrl,
+      'https://tutorials.example.invalid/tutorials/v1/category_split.mp4',
+    );
+    expect(categorySplitPreview.videoCacheKey, categorySplitPreviewCacheKey);
+    expect(
+      categorySplitPreview.videoPlaceholderAsset,
+      categorySplitPreviewPlaceholderAsset,
+    );
+    expect(spendingMapPreview.videoUrl, spendingMapPreviewUrl);
+    expect(
+      spendingMapPreview.videoUrl,
+      'https://tutorials.example.invalid/tutorials/v1/spending_map.mp4',
+    );
+    expect(spendingMapPreview.videoCacheKey, spendingMapPreviewCacheKey);
+    expect(
+      spendingMapPreview.videoPlaceholderAsset,
+      spendingMapPreviewPlaceholderAsset,
+    );
+    expect(
+      totalsFeaturePreviews.where((preview) => preview.isNew).map(
+            (preview) => preview.videoCacheKey,
+          ),
+      <String>[categorySplitPreviewCacheKey, spendingMapPreviewCacheKey],
     );
   });
 
