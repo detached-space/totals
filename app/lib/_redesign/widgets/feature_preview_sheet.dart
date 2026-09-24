@@ -203,7 +203,10 @@ List<FeaturePreviewItem> get totalsFeaturePreviews =>
           icon: Icons.send_rounded,
           accentColor: AppColors.primaryLight,
         ),
-      ],
+      ]..sort(
+          (first, second) =>
+              first.title.toLowerCase().compareTo(second.title.toLowerCase()),
+        ),
     );
 
 Future<void> showFeaturePreviewSheet(

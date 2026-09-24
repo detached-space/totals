@@ -36,6 +36,7 @@
   - Net worth over time
   - Spending patterns by period (Day, Week, Month, Year)
   - Transaction statistics by bank and account
+- **Spending Map (optional)**: An opt-in, private map of where debit and credit transactions happen, powered by Google Maps with bundled offline names for major Ethiopian cities and areas
 - **Biometric Security**: Protect your financial data with fingerprint or face authentication
 - **Dark/Light Theme**: Beautiful Material Design 3 interface with theme support
 - **Local Web Server**: Built-in HTTP server to access your data from a web browser on the same network
@@ -76,7 +77,18 @@
    flutter pub get
    ```
 
-4. **Run the app**
+4. **Configure Google Maps (optional)**
+   To use Spending Map, enable billing and the **Maps SDK for Android** in a
+   Google Cloud project. Then add the key to the ignored
+   `android/local.properties` file:
+   ```properties
+   MAPS_API_KEY=YOUR_ANDROID_MAPS_API_KEY
+   ```
+   Restrict production keys by package name and signing certificate SHA-1.
+   The stable and QA package names are `detached.totals` and
+   `detached.totals.test`.
+
+5. **Run the app**
    ```bash
    flutter run
    ```
