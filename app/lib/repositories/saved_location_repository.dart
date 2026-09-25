@@ -81,10 +81,13 @@ class SavedLocationRepository {
       await txn.update(
         'transaction_locations',
         <String, Object?>{
-          'latitude': updated.latitude,
-          'longitude': updated.longitude,
-          'accuracy': null,
           'placeName': updated.name,
+          if (updated.latitude != location.latitude ||
+              updated.longitude != location.longitude) ...{
+            'latitude': updated.latitude,
+            'longitude': updated.longitude,
+            'accuracy': null,
+          },
         },
         where: 'savedLocationId = ?',
         whereArgs: <Object?>[updated.id],

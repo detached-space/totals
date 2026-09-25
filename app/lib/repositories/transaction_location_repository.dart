@@ -6,6 +6,8 @@ import 'package:totals/models/transaction_location.dart';
 import 'package:totals/repositories/profile_repository.dart';
 import 'package:totals/services/data_sync/sync_enqueuer.dart';
 import 'package:totals/services/data_sync/sync_models.dart';
+import 'package:totals/utils/spending_map_clustering.dart';
+import 'package:uuid/uuid.dart';
 
 class TransactionLocationRepository {
   TransactionLocationRepository({
@@ -37,20 +39,158 @@ class TransactionLocationRepository {
     double? accuracy,
   }) async {
     final db = await _databaseHelper.database;
-    final profileId =
+    final fallbackProfileId =
         transaction.profileId ?? await _profileRepository.getActiveProfileId();
-    await db.insert(
-      'transaction_locations',
-      <String, Object?>{
-        'transactionReference': transaction.reference,
-        'profileId': profileId,
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracy': accuracy,
-        'capturedAt': capturedAt.toUtc().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
+    String? matchedName;
+    await db.transaction((txn) async {
+      final existing = await txn.query(
+        'transaction_locations',
+        columns: const ['transactionReference'],
+        where: 'transactionReference = ?',
+        whereArgs: [transaction.reference],
+        limit: 1,
+      );
+      if (existing.isNotEmpty) return;
+
+      final owner = await txn.query(
+        'transactions',
+        columns: const ['profileId'],
+        where: 'reference = ?',
+        whereArgs: [transaction.reference],
+        limit: 1,
+      );
+      final profileId = owner.isEmpty
+          ? fallbackProfileId
+          : (owner.single['profileId'] as int?) ?? fallbackProfileId;
+      final match = accuracy == null ||
+              !accuracy.isFinite ||
+              accuracy < 0 ||
+              accuracy > spendingMapSameLocationRadiusMeters
+          ? null
+          : await _matchCapturedPlace(
+              txn,
+              profileId: profileId,
+              latitude: latitude,
+              longitude: longitude,
+            );
+      matchedName = match?['placeName'] as String?;
+      await txn.insert(
+        'transaction_locations',
+        <String, Object?>{
+          'transactionReference': transaction.reference,
+          'profileId': profileId,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracy': accuracy,
+          'capturedAt': capturedAt.toUtc().toIso8601String(),
+          'placeName': matchedName,
+          'savedLocationId': match?['savedLocationId'],
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    });
+    if (matchedName != null) {
+      final row = Map<String, dynamic>.from(transaction.toJson())
+        ..remove('sourceSubscriptionId')
+        ..['locationName'] = matchedName;
+      await SyncEnqueuer.instance.onEntityWritten(
+        entity: SyncEntity.transactions,
+        entityRef: transaction.reference,
+        op: SyncOp.upsert,
+        row: row,
+      );
+    }
+  }
+
+  Future<Map<String, Object?>?> _matchCapturedPlace(
+    DatabaseExecutor db, {
+    required int? profileId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    // A null profile matches only unowned places, never every profile.
+    final savedRows = await db.rawQuery(
+      'SELECT id AS savedLocationId, name AS placeName, latitude, longitude '
+      'FROM saved_locations WHERE profileId IS ? ORDER BY id',
+      [profileId],
     );
+    final nearbySaved = _nearbyNamedPlaces(savedRows, latitude, longitude);
+    if (nearbySaved.isNotEmpty) return _unambiguousPlace(nearbySaved);
+
+    final namedRows = await db.rawQuery(
+      '''
+      SELECT tl.transactionReference, tl.placeName, tl.latitude, tl.longitude,
+             tl.accuracy
+      FROM transaction_locations tl
+      INNER JOIN transactions t ON t.reference = tl.transactionReference
+      WHERE COALESCE(t.profileId, tl.profileId) IS ?
+        AND tl.savedLocationId IS NULL
+        AND TRIM(COALESCE(tl.placeName, '')) <> ''
+      ORDER BY tl.capturedAt, tl.transactionReference
+      ''',
+      [profileId],
+    );
+    final match = _unambiguousPlace(
+      _nearbyNamedPlaces(namedRows, latitude, longitude),
+    );
+    if (match == null) return null;
+
+    // Turn an existing custom name into a fixed, reusable anchor. Inherited
+    // captures link to it, so they cannot extend its matching radius over time.
+    final savedLocationId = const Uuid().v4();
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.insert('saved_locations', <String, Object?>{
+      'id': savedLocationId,
+      'profileId': profileId,
+      'name': match['placeName'],
+      'latitude': match['latitude'],
+      'longitude': match['longitude'],
+      'createdAt': now,
+      'updatedAt': now,
+    });
+    await db.update(
+      'transaction_locations',
+      <String, Object?>{'savedLocationId': savedLocationId},
+      where: 'transactionReference = ?',
+      whereArgs: [match['transactionReference']],
+    );
+    return <String, Object?>{...match, 'savedLocationId': savedLocationId};
+  }
+
+  List<Map<String, Object?>> _nearbyNamedPlaces(
+    List<Map<String, Object?>> rows,
+    double latitude,
+    double longitude,
+  ) {
+    final nearby = <({Map<String, Object?> row, double distance})>[];
+    for (final row in rows) {
+      final accuracy = (row['accuracy'] as num?)?.toDouble();
+      if (accuracy != null &&
+          (!accuracy.isFinite ||
+              accuracy < 0 ||
+              accuracy > spendingMapSameLocationRadiusMeters)) {
+        continue;
+      }
+      final distance = spendingMapDistanceMeters(
+        firstLatitude: latitude,
+        firstLongitude: longitude,
+        secondLatitude: (row['latitude'] as num).toDouble(),
+        secondLongitude: (row['longitude'] as num).toDouble(),
+      );
+      if (distance <= spendingMapSameLocationRadiusMeters) {
+        nearby.add((row: row, distance: distance));
+      }
+    }
+    nearby.sort((first, second) => first.distance.compareTo(second.distance));
+    return nearby.map((candidate) => candidate.row).toList(growable: false);
+  }
+
+  Map<String, Object?>? _unambiguousPlace(List<Map<String, Object?>> rows) {
+    if (rows.isEmpty) return null;
+    final names = rows
+        .map((row) => (row['placeName'] as String).trim().toLowerCase())
+        .toSet();
+    return names.length == 1 ? rows.first : null;
   }
 
   Future<List<TransactionLocation>> getTransactionLocations() async {
@@ -193,22 +333,64 @@ class TransactionLocationRepository {
 
     final normalizedName = normalizeTransactionPlaceName(placeName);
     final db = await _databaseHelper.database;
-    final batch = db.batch();
-    for (final reference in references) {
-      batch.update(
-        'transaction_locations',
-        <String, Object?>{'placeName': normalizedName},
-        where: 'transactionReference = ?',
-        whereArgs: <Object?>[reference],
-      );
-    }
-    await batch.commit(noResult: true);
+    final changedReferences = <String>{...references};
+    await db.transaction((txn) async {
+      final savedIds = <String>{};
+      for (final reference in references) {
+        final rows = await txn.query(
+          'transaction_locations',
+          columns: const ['savedLocationId'],
+          where: 'transactionReference = ?',
+          whereArgs: [reference],
+        );
+        for (final row in rows) {
+          final savedId = row['savedLocationId'] as String?;
+          if (savedId != null) savedIds.add(savedId);
+        }
+        await txn.update(
+          'transaction_locations',
+          <String, Object?>{
+            'placeName': normalizedName,
+            if (normalizedName == null) 'savedLocationId': null,
+          },
+          where: 'transactionReference = ?',
+          whereArgs: [reference],
+        );
+      }
+      if (normalizedName == null) return;
+      for (final savedId in savedIds) {
+        await txn.update(
+          'saved_locations',
+          <String, Object?>{
+            'name': normalizedName,
+            'updatedAt': DateTime.now().toUtc().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [savedId],
+        );
+        final linked = await txn.query(
+          'transaction_locations',
+          columns: const ['transactionReference'],
+          where: 'savedLocationId = ?',
+          whereArgs: [savedId],
+        );
+        changedReferences.addAll(
+          linked.map((row) => row['transactionReference'] as String),
+        );
+        await txn.update(
+          'transaction_locations',
+          <String, Object?>{'placeName': normalizedName},
+          where: 'savedLocationId = ?',
+          whereArgs: [savedId],
+        );
+      }
+    });
 
     final transactionRows = await db.query('transactions');
     final syncRecords = <MapEntry<String, Map<String, dynamic>>>[];
     for (final row in transactionRows) {
       final reference = row['reference']?.toString().trim() ?? '';
-      if (!references.contains(reference)) continue;
+      if (!changedReferences.contains(reference)) continue;
       final payload = Map<String, dynamic>.from(row)
         ..remove('sourceSubscriptionId')
         ..['locationName'] = normalizedName;

@@ -196,6 +196,29 @@ void main() {
   });
 
   group('Spending Map place labels', () {
+    test('custom names take priority over more frequent bundled names', () {
+      final summary = summarizeSpendingMapPlaceNames(
+        ['Bole', 'Bole', 'Bole', 'Home'],
+        customNames: ['Home'],
+      );
+      expect(summary!.mainName, 'Home');
+      expect(summary.label, 'Home +1');
+    });
+
+    test('custom names keep frequency ordering and deterministic ties', () {
+      final summary = summarizeSpendingMapPlaceNames(
+        ['Bole', 'Bole', 'Bole', 'Home', 'Office', 'Office'],
+        customNames: [' home ', 'office'],
+      );
+      expect(summary!.mainName, 'Office');
+      expect(summary.otherNameCount, 2);
+      final tied = summarizeSpendingMapPlaceNames(
+        ['Bole', 'Bole', 'Office', 'Home'],
+        customNames: ['Office', 'Home'],
+      );
+      expect(tied!.mainName, 'Home');
+    });
+
     test('uses the most frequent name and counts distinct alternatives', () {
       final summary = summarizeSpendingMapPlaceNames([
         'Bole',

@@ -19,8 +19,13 @@ class SpendingMapPlaceSummary {
 }
 
 SpendingMapPlaceSummary? summarizeSpendingMapPlaceNames(
-  Iterable<String> names,
-) {
+  Iterable<String> names, {
+  Iterable<String> customNames = const [],
+}) {
+  final normalizedCustomNames = customNames
+      .map((name) => name.trim().toLowerCase())
+      .where((name) => name.isNotEmpty)
+      .toSet();
   final frequenciesByName = <String, _PlaceNameFrequency>{};
   for (final rawName in names) {
     final displayName = rawName.trim();
@@ -40,6 +45,11 @@ SpendingMapPlaceSummary? summarizeSpendingMapPlaceNames(
 
   final frequencies = frequenciesByName.values.toList(growable: false)
     ..sort((first, second) {
+      final firstIsCustom =
+          normalizedCustomNames.contains(first.normalizedName);
+      final secondIsCustom =
+          normalizedCustomNames.contains(second.normalizedName);
+      if (firstIsCustom != secondIsCustom) return firstIsCustom ? -1 : 1;
       final countComparison = second.count.compareTo(first.count);
       return countComparison != 0
           ? countComparison

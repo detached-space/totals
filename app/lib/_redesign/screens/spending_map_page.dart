@@ -584,6 +584,11 @@ class _SpendingMapPageState extends State<SpendingMapPage>
                     ),
                   );
             }),
+            customNames: cluster.members
+                .map((member) =>
+                    member.savedLocation?.name ??
+                    member.transactionLocation?.placeName)
+                .whereType<String>(),
           ) ??
           SpendingMapPlaceSummary(
             mainName: _approximatePlaceName(center),
@@ -1263,7 +1268,7 @@ class _SpendingMapPageState extends State<SpendingMapPage>
         );
       }).toList(growable: false);
     });
-    await _refreshPuckIcons();
+    await _reloadMapLocationData();
     return normalizedName;
   }
 

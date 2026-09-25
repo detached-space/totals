@@ -72,6 +72,7 @@ class TodaysTransactionsPage extends StatefulWidget {
 
 class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
   final Set<String> _selectedRefs = {};
+  final Set<String> _collapsedLocationGroupKeys = {};
   _TodayTransactionsFilter _filter = const _TodayTransactionsFilter();
   String? _pageTitle;
   String? _editableTitleValue;
@@ -279,6 +280,15 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
             customName: customName,
           );
         }).toList(growable: false);
+        if (_collapsedLocationGroupKeys.remove(section.group.key)) {
+          _collapsedLocationGroupKeys.addAll(
+            _locationGroupEntries
+                .where(
+                    (entry) => references.contains(entry.transactionReference))
+                .map(
+                    (entry) => _transactionLocationGroupKey(entry.displayName)),
+          );
+        }
       });
     } catch (error) {
       if (!mounted) return;
@@ -305,54 +315,97 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
         _updatingLocationGroupKey == null;
     final headerColor =
         AppColors.isDark(context) ? AppColors.slate400 : AppColors.slate700;
+    final isCollapsed = _collapsedLocationGroupKeys.contains(section.group.key);
 
     return Semantics(
       key: ValueKey<String>(
         'transaction-location-section-${section.group.key}',
       ),
-      button: canEdit,
-      label:
-          canEdit ? context.l10nText('Edit place name') : section.group.title,
-      child: GestureDetector(
-        key: ValueKey<String>(
-          'transaction-location-section-edit-${section.group.key}',
-        ),
-        onTap: canEdit ? () => _editLocationSection(section) : null,
-        behavior: HitTestBehavior.opaque,
-        child: Padding(
-          padding: const EdgeInsets.only(top: 16, bottom: 8),
-          child: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  section.group.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: headerColor,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+      container: true,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                button: canEdit,
+                label: canEdit ? context.l10nText('Edit place name') : null,
+                child: GestureDetector(
+                  key: ValueKey<String>(
+                    'transaction-location-section-edit-${section.group.key}',
+                  ),
+                  onTap: canEdit ? () => _editLocationSection(section) : null,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            section.group.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: headerColor,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (section.group.canEdit) ...[
+                          const SizedBox(width: 5),
+                          if (isUpdating)
+                            const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 1.8),
+                            )
+                          else
+                            Icon(
+                              AppIcons.editOutlined,
+                              size: 15,
+                              color: canEdit
+                                  ? headerColor
+                                  : AppColors.textTertiary(context),
+                            ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-              if (section.group.canEdit) ...[
-                const SizedBox(width: 5),
-                if (isUpdating)
-                  const SizedBox(
-                    width: 15,
-                    height: 15,
-                    child: CircularProgressIndicator(strokeWidth: 1.8),
-                  )
-                else
-                  Icon(
-                    AppIcons.editOutlined,
-                    size: 15,
-                    color:
-                        canEdit ? headerColor : AppColors.textTertiary(context),
-                  ),
-              ],
-            ],
-          ),
+            ),
+            Semantics(
+              expanded: !isCollapsed,
+              child: IconButton(
+                key: ValueKey<String>(
+                  'transaction-location-section-toggle-${section.group.key}',
+                ),
+                tooltip:
+                    '${context.l10nText(isCollapsed ? 'Show transactions' : 'Hide transactions')}: ${section.group.title}',
+                onPressed: _isSelecting
+                    ? null
+                    : () => setState(() {
+                          if (isCollapsed) {
+                            _collapsedLocationGroupKeys
+                                .remove(section.group.key);
+                          } else {
+                            _collapsedLocationGroupKeys.add(section.group.key);
+                          }
+                        }),
+                icon: Icon(
+                  isCollapsed
+                      ? AppIcons.keyboard_arrow_down
+                      : AppIcons.keyboard_arrow_up,
+                  color: _isSelecting
+                      ? AppColors.textTertiary(context)
+                      : headerColor,
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -668,7 +721,9 @@ class _TodaysTransactionsPageState extends State<TodaysTransactionsPage> {
         if (_locationGroupEntries.isNotEmpty) {
           for (final section in _buildLocationSections(transactions)) {
             locationListItems.add(section);
-            locationListItems.addAll(section.transactions);
+            if (!_collapsedLocationGroupKeys.contains(section.group.key)) {
+              locationListItems.addAll(section.transactions);
+            }
           }
         }
 

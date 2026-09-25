@@ -197,6 +197,37 @@ void main() {
       lessThan(tester.getTopLeft(officeOne).dy),
     );
 
+    final homeToggle = find.byKey(
+      const ValueKey<String>('transaction-location-section-toggle-home'),
+    );
+    final officeToggle = find.byKey(
+      const ValueKey<String>('transaction-location-section-toggle-office'),
+    );
+    expect(
+      tester.getTopLeft(homeToggle).dx,
+      greaterThan(tester.getTopRight(homeHeaderText).dx),
+    );
+    await tester.tap(homeToggle);
+    await tester.pumpAndSettle();
+    expect(homeHeader, findsOneWidget);
+    expect(homeOne, findsNothing);
+    expect(homeTwo, findsNothing);
+    expect(officeOne, findsOneWidget);
+    expect(find.text('Edit place name'), findsNothing);
+
+    await tester.tap(officeToggle);
+    await tester.pumpAndSettle();
+    expect(officeOne, findsNothing);
+    await tester.tap(homeToggle);
+    await tester.pumpAndSettle();
+    expect(homeOne, findsOneWidget);
+    expect(homeTwo, findsOneWidget);
+    expect(officeOne, findsNothing);
+    await tester.tap(officeToggle);
+    await tester.pumpAndSettle();
+    await tester.tap(homeToggle);
+    await tester.pumpAndSettle();
+
     await tester.tap(
       find.byKey(
         const ValueKey<String>('transaction-location-section-edit-home'),
@@ -217,6 +248,16 @@ void main() {
       findsOneWidget,
     );
     expect(officeHeader, findsOneWidget);
+    expect(homeOne, findsNothing);
+    expect(homeTwo, findsNothing);
+    expect(officeOne, findsOneWidget);
+    await tester.tap(find.byKey(
+      const ValueKey<String>('transaction-location-section-toggle-house'),
+    ));
+    await tester.pumpAndSettle();
+    expect(homeOne, findsOneWidget);
+    expect(homeTwo, findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('merged puck transactions can be filtered by location name',

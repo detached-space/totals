@@ -1177,6 +1177,8 @@ class AppLocalizations {
     "Transaction Details": "የትራንዛክሽን ዝርዝሮች",
     "Transaction": "ትራንዛክሽን",
     "Transactions": "ትራንዛክሽኖች",
+    "Show transactions": "ትራንዛክሽኖችን አሳይ",
+    "Hide transactions": "ትራንዛክሽኖችን ደብቅ",
     "Date & Time": "ቀን እና ሰዓት",
     "at": "በ",
     "Amount": "መጠን",
