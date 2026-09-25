@@ -83,7 +83,212 @@ void main() {
     expect(harness.settings.config.value?.pendingUploadMessageId, isNull);
     expect(harness.settings.config.value?.pendingBackup, isNull);
   });
+
+  for (final fileName in <String?>[null, 'totals_backup_index (1).totals']) {
+    test('saved index can be listed and updated with filename $fileName',
+        () async {
+      final harness = await _createHarness();
+      harness.api.failCatalogWrites = false;
+      final original = await harness.service.backupNow();
+      harness.api.pinnedFileName = fileName;
+
+      final listed = await harness.service.listBackups();
+      expect(listed.map((entry) => entry.id), [original.id]);
+
+      final added = await harness.service.backupNow();
+      final updated = await harness.service.listBackups();
+      expect(
+        updated.map((entry) => entry.id),
+        unorderedEquals([original.id, added.id]),
+      );
+      expect(harness.api.pinCalls, 0);
+      expect(harness.settings.config.value?.lastBackupError, isNull);
+    });
+  }
+
+  test('re-pinning recovers a saved index without filename metadata', () async {
+    final harness = await _createHarness();
+    harness.api
+      ..hidePinnedMessage = true
+      ..revealAfterPin = true
+      ..pinnedFileName = null;
+
+    expect(await harness.service.listBackups(), isEmpty);
+    expect(harness.api.pinCalls, 1);
+    expect(harness.api.downloadCount, 1);
+  });
+
+  for (final failure in <TelegramBotApiException>[
+    const TelegramBotApiException(
+      'Too Many Requests: retry after 10',
+      errorCode: 429,
+    ),
+    const TelegramBotApiException(
+      'Could not reach Telegram. Check your connection and retry.',
+    ),
+    const TelegramBotApiException(
+      'Bad Request: message to pin not found',
+      errorCode: 400,
+    ),
+  ]) {
+    test('pin recovery preserves the API error: ${failure.message}', () async {
+      final harness = await _createHarness();
+      harness.api
+        ..hidePinnedMessage = true
+        ..pinError = failure;
+
+      await expectLater(
+        harness.service.listBackups(),
+        _throwsBackupError(failure.message),
+      );
+      await expectLater(
+        harness.service.backupNow(),
+        _throwsBackupError(failure.message),
+      );
+      expect(
+        harness.settings.config.value?.lastBackupError,
+        failure.message,
+      );
+      expect(harness.api.downloadCount, 0);
+      expect(harness.api.placeholderCount, 0);
+      expect(harness.api.backupUploadCount, 0);
+    });
+  }
+
+  test('chat refresh after re-pinning preserves the API error', () async {
+    final harness = await _createHarness();
+    const failure = TelegramBotApiException(
+      'Telegram did not respond in time. Check your connection and retry.',
+    );
+    harness.api
+      ..hidePinnedMessage = true
+      ..refreshError = failure;
+
+    await expectLater(
+      harness.service.listBackups(),
+      _throwsBackupError(failure.message),
+    );
+    expect(harness.api.pinCalls, 1);
+    expect(harness.api.downloadCount, 0);
+  });
+
+  test('absent pin reports what Telegram returned instead of a missing file',
+      () async {
+    final harness = await _createHarness();
+    harness.api.hidePinnedMessage = true;
+
+    await expectLater(
+      harness.service.listBackups(),
+      _throwsBackupError(contains('did not return a pinned message')),
+    );
+    expect(harness.api.pinCalls, 1);
+    expect(harness.api.downloadCount, 0);
+  });
+
+  test('unrelated pinned document is not accepted by its contents alone',
+      () async {
+    final harness = await _createHarness();
+    harness.api
+      ..pinnedMessageId = 20
+      ..pinnedFileName = 'other-document.totals';
+
+    await expectLater(
+      harness.service.listBackups(),
+      _throwsBackupError(contains('different pinned message')),
+    );
+    expect(harness.api.downloadCount, 0);
+    expect(harness.settings.config.value?.catalogMessageId, 7);
+  });
+
+  test('index with incomplete document metadata has a distinct error',
+      () async {
+    final harness = await _createHarness();
+    harness.api.pinnedFileId = null;
+
+    await expectLater(
+      harness.service.listBackups(),
+      _throwsBackupError(contains('without usable document details')),
+    );
+    expect(harness.api.downloadCount, 0);
+  });
+
+  test('a replacement index is still discovered by its filename', () async {
+    final harness = await _createHarness();
+    harness.api.pinnedMessageId = 20;
+
+    expect(await harness.service.listBackups(), isEmpty);
+    expect(harness.settings.config.value?.catalogMessageId, 20);
+    expect(harness.api.pinCalls, 0);
+  });
+
+  test('saved message ID cannot bypass encrypted catalog authentication',
+      () async {
+    final harness = await _createHarness();
+    harness.api
+      ..pinnedFileName = null
+      ..catalogBytes = await harness.crypto.encrypt(
+        utf8.encode(jsonEncode(TelegramBackupCatalog.empty('456').toJson())),
+        recoveryKey:
+            'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        contentType: TelegramBackupCrypto.catalogContentType,
+      );
+
+    await expectLater(
+      harness.service.backupNow(),
+      _throwsBackupError(contains('recovery key is incorrect')),
+    );
+    expect(harness.api.downloadCount, 1);
+    expect(harness.api.placeholderCount, 0);
+    expect(harness.api.backupUploadCount, 0);
+  });
+
+  test('saved message ID cannot bypass the catalog chat identity check',
+      () async {
+    final harness = await _createHarness();
+    harness.api
+      ..pinnedFileName = null
+      ..catalogBytes = await harness.crypto.encrypt(
+        utf8.encode(
+            jsonEncode(TelegramBackupCatalog.empty('another-chat').toJson())),
+        recoveryKey: _recoveryKey,
+        contentType: TelegramBackupCrypto.catalogContentType,
+      );
+
+    await expectLater(
+      harness.service.backupNow(),
+      _throwsBackupError(contains('belongs to a different Telegram chat')),
+    );
+    expect(harness.api.placeholderCount, 0);
+    expect(harness.api.backupUploadCount, 0);
+  });
+
+  test('saved message ID cannot make a backup document into a catalog',
+      () async {
+    final harness = await _createHarness();
+    harness.api
+      ..pinnedFileName = null
+      ..catalogBytes = await harness.crypto.encrypt(
+        utf8.encode('{"schemaVersion":11}'),
+        recoveryKey: _recoveryKey,
+        contentType: TelegramBackupCrypto.backupContentType,
+      );
+
+    await expectLater(
+      harness.service.backupNow(),
+      _throwsBackupError(contains('unsupported format')),
+    );
+    expect(harness.api.placeholderCount, 0);
+    expect(harness.api.backupUploadCount, 0);
+  });
 }
+
+Matcher _throwsBackupError(Object message) => throwsA(
+      isA<TelegramBackupException>().having(
+        (error) => error.message,
+        'message',
+        message,
+      ),
+    );
 
 const _recoveryKey =
     'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -178,6 +383,15 @@ class _RetryingCatalogApi extends TelegramBotApi {
         );
 
   List<int> catalogBytes;
+  String? pinnedFileName = TelegramBackupService.catalogFileName;
+  String? pinnedFileId = 'catalog-file-id';
+  int pinnedMessageId = 7;
+  bool hidePinnedMessage = false;
+  bool revealAfterPin = false;
+  TelegramBotApiException? pinError;
+  TelegramBotApiException? refreshError;
+  int pinCalls = 0;
+  int downloadCount = 0;
   bool failCatalogWrites = true;
   bool failNextBackupUploadAfterApplying = false;
   int placeholderCount = 0;
@@ -195,12 +409,14 @@ class _RetryingCatalogApi extends TelegramBotApi {
 
   @override
   Future<Map<String, dynamic>> getChat(String chatId) async {
+    if (pinCalls > 0 && refreshError != null) throw refreshError!;
+    if (hidePinnedMessage) return <String, dynamic>{};
     return <String, dynamic>{
       'pinned_message': <String, dynamic>{
-        'message_id': 7,
+        'message_id': pinnedMessageId,
         'document': <String, dynamic>{
-          'file_id': 'catalog-file-id',
-          'file_name': TelegramBackupService.catalogFileName,
+          if (pinnedFileId != null) 'file_id': pinnedFileId,
+          if (pinnedFileName != null) 'file_name': pinnedFileName,
           'file_size': catalogBytes.length,
         },
       },
@@ -208,10 +424,21 @@ class _RetryingCatalogApi extends TelegramBotApi {
   }
 
   @override
+  Future<void> pinMessage({
+    required String chatId,
+    required int messageId,
+  }) async {
+    pinCalls += 1;
+    if (pinError != null) throw pinError!;
+    if (revealAfterPin) hidePinnedMessage = false;
+  }
+
+  @override
   Future<List<int>> downloadFile(
     String fileId, {
     int maximumBytes = TelegramBotApi.maxDownloadBytes,
   }) async {
+    downloadCount += 1;
     return catalogBytes;
   }
 
