@@ -43,6 +43,42 @@ bool matchesTransactionCategoryFilter(
 bool isSelfCategoryFilter(Category category) =>
     category.name.trim().toLowerCase() == 'self';
 
+/// Category chips that need an income/expense color cue.
+///
+/// The two built-in Self categories always use flow colors. Custom categories
+/// also use them when the same display name exists for both income and expense,
+/// since the name alone would otherwise make those filter choices ambiguous.
+Set<int> categoryFilterIdsWithFlowTint(Iterable<Category> categories) {
+  final categoriesWithIds = categories
+      .where((category) => category.id != null)
+      .toList(growable: false);
+  final flowsByName = <String, Set<String>>{};
+
+  for (final category in categoriesWithIds) {
+    final name = category.name.trim().toLowerCase();
+    final flow = category.flow.trim().toLowerCase();
+    if (name.isEmpty || (flow != 'income' && flow != 'expense')) continue;
+    flowsByName.putIfAbsent(name, () => <String>{}).add(flow);
+  }
+
+  final duplicatedAcrossFlows = flowsByName.entries
+      .where(
+        (entry) =>
+            entry.value.contains('income') && entry.value.contains('expense'),
+      )
+      .map((entry) => entry.key)
+      .toSet();
+
+  return categoriesWithIds
+      .where(
+        (category) =>
+            isSelfCategoryFilter(category) ||
+            duplicatedAcrossFlows.contains(category.name.trim().toLowerCase()),
+      )
+      .map((category) => category.id!)
+      .toSet();
+}
+
 List<Category> orderedCategoriesForFilter(
   Iterable<Category> categories,
 ) {

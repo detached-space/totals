@@ -2,6 +2,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/database/database_helper.dart';
 import 'package:totals/models/account.dart';
 import 'package:totals/models/transaction.dart' as models;
@@ -59,6 +60,50 @@ void main() {
       await DatabaseHelper.instance.close();
     }
     await databaseFactoryFfi.deleteDatabase(databasePath);
+  });
+
+  test('cash wallet defaults out of totals and can be opted in', () async {
+    final repository = AccountRepository();
+    final cashAccount = (await repository.getAccounts())
+        .singleWhere((account) => account.bank == CashConstants.bankId);
+    expect(cashAccount.includeInTotals, isFalse);
+
+    await repository.saveAccount(Account(
+      accountNumber: cashAccount.accountNumber,
+      bank: cashAccount.bank,
+      balance: 250,
+      accountHolderName: cashAccount.accountHolderName,
+      includeInTotals: false,
+    ));
+    await repository.saveAccount(_account(
+      number: _firstAccountNumber,
+      name: 'Included bank account',
+      balance: 100,
+    ));
+
+    final provider = TransactionProvider();
+    addTearDown(provider.dispose);
+    await provider.loadData();
+
+    expect(provider.summary?.totalBalance, 100);
+    expect(
+      provider.accountSummaries
+          .singleWhere(
+            (account) => account.bankId == CashConstants.bankId,
+          )
+          .balance,
+      250,
+    );
+
+    expect(
+      await provider.updateAccountPreferences(
+        bankId: CashConstants.bankId,
+        accountNumber: CashConstants.defaultAccountNumber,
+        includeInTotals: true,
+      ),
+      isTrue,
+    );
+    expect(provider.summary?.totalBalance, 350);
   });
 
   test(

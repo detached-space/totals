@@ -2113,7 +2113,7 @@ class _RedesignAboutPage extends StatelessWidget {
             const SizedBox(height: 8),
             Center(
               child: Text(
-                '${context.l10nText('Version')} 1.7',
+                '${context.l10nText('Version')} 1.7.5',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color:
                       AppColors.textSecondary(context).withValues(alpha: 0.6),

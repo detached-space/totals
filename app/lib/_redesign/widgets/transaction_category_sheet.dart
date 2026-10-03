@@ -6,6 +6,7 @@ import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
+import 'package:totals/_redesign/widgets/transaction_split_sheet.dart';
 import 'package:totals/models/category.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
@@ -771,6 +772,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   TransactionProvider get _provider => widget.provider;
 
   bool get _isCredit => _tx.type == 'CREDIT';
+  bool get _canSplitAmount => hasSplittableCategorySelection(_tx, _provider);
 
   List<Category> get _currentCategories =>
       _provider.categoriesForTransaction(_tx);
@@ -781,6 +783,7 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
+      !_tx.hasCategorySplit &&
       !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
@@ -1324,6 +1327,21 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
     await _applyCategorySelection(categoryIds: const <int>[]);
   }
 
+  Future<void> _openAmountSplit() async {
+    if (_isApplyingCategory || !_canSplitAmount) return;
+    final hostContext = widget.hostContext;
+    final transaction = _tx;
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    await showTransactionSplitSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
+  }
+
   Future<void> _openLoanDebtPersonPrompt(Transaction transaction) async {
     final hostContext = widget.hostContext;
     _dismissComposerState(clearDraft: true);
@@ -1661,12 +1679,43 @@ class _TransactionCategorySheetState extends State<_TransactionCategorySheet> {
                         _selectedCategoryIds.isEmpty
                             ? categoriesTitle
                             : '$categoriesTitle · $currentCategoryLabel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.textPrimary(context),
                         ),
                       ),
                     ),
+                    if (!isLockedSelfTransfer && _canSplitAmount) ...[
+                      TextButton.icon(
+                        key: const ValueKey<String>(
+                          'standalone-category-split-action',
+                        ),
+                        onPressed:
+                            _isApplyingCategory ? null : _openAmountSplit,
+                        icon: const Icon(AppIcons.scales, size: 17),
+                        label: Text(
+                          context.l10nText('Split'),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.primaryLight,
+                          disabledForegroundColor:
+                              AppColors.textTertiary(context),
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                    ],
                     IconButton(
                       icon: const Icon(AppIcons.close, size: 20),
                       color: AppColors.textSecondary(context),

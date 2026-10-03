@@ -23,6 +23,7 @@ import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/account_repository.dart';
+import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:totals/services/account_registration_service.dart';
 import 'package:totals/services/account_transaction_reparse_service.dart';
@@ -39,6 +40,7 @@ import 'package:totals/utils/reconciliation_ledger_filter.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_location_filter_utils.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
 import 'package:totals/widgets/add_cash_transaction_sheet.dart';
 import 'package:totals/widgets/inline_bank_selector.dart';
@@ -330,6 +332,8 @@ class _TransactionFilter {
   final String? accountKey;
   // Empty = all categories; uncategorizedCategoryFilterId = none assigned.
   final Set<int> categoryIds;
+  // Empty = all locations; values are normalized editable place names.
+  final Set<String> locationNames;
   final double? minAmount;
   final double? maxAmount;
   final DateTime? startDate;
@@ -340,17 +344,22 @@ class _TransactionFilter {
     this.bankId,
     this.accountKey,
     Set<int> categoryIds = const <int>{},
+    Set<String> locationNames = const <String>{},
     this.minAmount,
     this.maxAmount,
     this.startDate,
     this.endDate,
-  }) : categoryIds = Set<int>.unmodifiable(categoryIds);
+  })  : categoryIds = Set<int>.unmodifiable(categoryIds),
+        locationNames = Set<String>.unmodifiable(
+          normalizedTransactionLocationFilterNames(locationNames),
+        );
 
   bool get isActive =>
       type != null ||
       bankId != null ||
       accountKey != null ||
       categoryIds.isNotEmpty ||
+      locationNames.isNotEmpty ||
       minAmount != null ||
       maxAmount != null ||
       startDate != null ||
@@ -362,6 +371,7 @@ class _TransactionFilter {
     if (bankId != null) count++;
     if (accountKey != null) count++;
     if (categoryIds.isNotEmpty) count++;
+    if (locationNames.isNotEmpty) count++;
     if (minAmount != null || maxAmount != null) count++;
     if (startDate != null || endDate != null) count++;
     return count;
@@ -482,6 +492,11 @@ String _categoryFilterCacheKey(Set<int> categoryIds) {
   return orderedIds.join(',');
 }
 
+String _locationFilterCacheKey(Set<String> locationNames) {
+  final orderedNames = locationNames.toList(growable: true)..sort();
+  return orderedNames.join('\u0000');
+}
+
 class _ActivityTransactionsViewCacheKey {
   final int dataVersion;
   final String calendar;
@@ -491,6 +506,8 @@ class _ActivityTransactionsViewCacheKey {
   final int? bankId;
   final String? accountKey;
   final String categoryIdsKey;
+  final String locationNamesKey;
+  final int locationDataVersion;
   final double? minAmount;
   final double? maxAmount;
   final int? startDateMillis;
@@ -506,6 +523,8 @@ class _ActivityTransactionsViewCacheKey {
     required this.bankId,
     required this.accountKey,
     required this.categoryIdsKey,
+    required this.locationNamesKey,
+    required this.locationDataVersion,
     required this.minAmount,
     required this.maxAmount,
     required this.startDateMillis,
@@ -525,6 +544,8 @@ class _ActivityTransactionsViewCacheKey {
         other.bankId == bankId &&
         other.accountKey == accountKey &&
         other.categoryIdsKey == categoryIdsKey &&
+        other.locationNamesKey == locationNamesKey &&
+        other.locationDataVersion == locationDataVersion &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
         other.startDateMillis == startDateMillis &&
@@ -542,6 +563,8 @@ class _ActivityTransactionsViewCacheKey {
       bankId,
       accountKey,
       categoryIdsKey,
+      locationNamesKey,
+      locationDataVersion,
       minAmount,
       maxAmount,
       startDateMillis,
@@ -573,6 +596,8 @@ class _BankTransactionsViewCacheKey {
   final String? type;
   final String? accountKey;
   final String categoryIdsKey;
+  final String locationNamesKey;
+  final int locationDataVersion;
   final double? minAmount;
   final double? maxAmount;
   final int? startDateMillis;
@@ -588,6 +613,8 @@ class _BankTransactionsViewCacheKey {
     required this.type,
     required this.accountKey,
     required this.categoryIdsKey,
+    required this.locationNamesKey,
+    required this.locationDataVersion,
     required this.minAmount,
     required this.maxAmount,
     required this.startDateMillis,
@@ -607,6 +634,8 @@ class _BankTransactionsViewCacheKey {
         other.type == type &&
         other.accountKey == accountKey &&
         other.categoryIdsKey == categoryIdsKey &&
+        other.locationNamesKey == locationNamesKey &&
+        other.locationDataVersion == locationDataVersion &&
         other.minAmount == minAmount &&
         other.maxAmount == maxAmount &&
         other.startDateMillis == startDateMillis &&
@@ -624,6 +653,8 @@ class _BankTransactionsViewCacheKey {
         type,
         accountKey,
         categoryIdsKey,
+        locationNamesKey,
+        locationDataVersion,
         minAmount,
         maxAmount,
         startDateMillis,
@@ -758,6 +789,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       AccountTransactionReparseService();
   late final AnimationController _subTabFadeController;
   late final Animation<double> _subTabFadeAnimation;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
+  Map<String, String> _locationNameByReference = const <String, String>{};
+  int _locationDataVersion = 0;
   _ActivityTransactionsViewCacheKey? _activityTransactionsViewCacheKey;
   _ActivityTransactionsViewData? _activityTransactionsViewCache;
   _LedgerViewCacheKey? _ledgerViewCacheKey;
@@ -767,6 +801,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   bool _isGeneratingBankStatement = false;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
+
+  TransactionLocationRepository get _transactionLocationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          TransactionLocationRepository();
 
   double get _activityPinnedHeaderDividerTriggerOffset {
     final renderObject =
@@ -1311,6 +1349,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       provider,
       sourceTransactions: transactions,
       categoryMode: filter.mode,
+      categoryIds: filter.categoryIds,
       constrainSeriesToAnchorMonth: true,
       anchorDate: targetMonth,
     );
@@ -1789,7 +1828,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     TransactionProvider provider,
     _AnalyticsHeatmapFilter filter,
   ) {
-    return provider.allTransactions
+    return provider.summaryTransactions
         .where(
           (transaction) => _matchesAnalyticsHeatmapFilterValue(
             transaction,
@@ -2390,6 +2429,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       transaction: transaction,
       provider: provider,
     );
+    if (mounted) await _refreshTransactionLocationNames();
   }
 
   Future<void> _openTransactionCategorySheet(
@@ -2455,7 +2495,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
   }
 
   List<Widget> _buildAnalyticsSlivers(TransactionProvider provider) {
-    final heatmapTransactions = provider.allTransactions
+    final activeFilter =
+        _analyticsFilterForSection(_analyticsSelectedChartSection);
+    final heatmapTransactions = provider.summaryTransactions
         .where(
           (transaction) =>
               _matchesAnalyticsHeatmapFilter(transaction, provider),
@@ -2464,8 +2506,9 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     final heatmapSnapshot = _buildAnalyticsSnapshot(
       provider,
       sourceTransactions: heatmapTransactions,
-      anchorTransactions: provider.allTransactions,
+      anchorTransactions: provider.summaryTransactions,
       categoryMode: _analyticsHeatmapFilter.mode,
+      categoryIds: _analyticsHeatmapFilter.categoryIds,
     );
     final heatmapFocusMonth =
         _resolveAnalyticsHeatmapFocusMonth(heatmapSnapshot.monthDate);
@@ -2474,32 +2517,37 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       heatmapTransactions: heatmapTransactions,
       heatmapFocusMonth: heatmapFocusMonth,
     );
+    final supportPeriodKey =
+        '${activeSupportContext.periodKey}-categories-${_categoryFilterCacheKey(activeFilter.categoryIds)}';
     final spendingByDaySnapshot = _buildAnalyticsSpendingByDaySnapshot(
       provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
-      periodKey: activeSupportContext.periodKey,
+      periodKey: supportPeriodKey,
       showIncome: activeSupportContext.showIncome,
+      categoryIds: activeFilter.categoryIds,
     );
     final topRecipientsSnapshot = _buildAnalyticsTopRecipientsSnapshot(
       provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
-      periodKey: activeSupportContext.periodKey,
+      periodKey: supportPeriodKey,
       showIncome: activeSupportContext.showIncome,
+      categoryIds: activeFilter.categoryIds,
     );
     final moneyFlowSnapshot = _buildAnalyticsMoneyFlowSnapshot(
       provider,
       transactions: activeSupportContext.transactions,
       periodLabel: activeSupportContext.periodLabel,
-      periodKey: activeSupportContext.periodKey,
+      periodKey: supportPeriodKey,
+      categoryIds: activeFilter.categoryIds,
     );
     final overviewSnapshot = _buildAnalyticsSnapshot(
       provider,
       sourceTransactions: activeSupportContext.transactions,
       anchorTransactions: activeSupportContext.transactions,
-      categoryMode:
-          _analyticsFilterForSection(_analyticsSelectedChartSection).mode,
+      categoryMode: activeFilter.mode,
+      categoryIds: activeFilter.categoryIds,
       constrainSeriesToAnchorMonth: false,
     );
     return [
@@ -2540,6 +2588,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           focusMonth: heatmapFocusMonth,
           view: _analyticsHeatmapView,
           mode: _analyticsHeatmapFilter.mode,
+          categoryIds: _analyticsHeatmapFilter.categoryIds,
           activeFilterCount: _AnalyticsChartSection.heatmap.activeFilterCount(
             _analyticsHeatmapFilter,
           ),
@@ -2569,6 +2618,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   sourceTransactions: filteredTransactions,
                   anchorTransactions: filteredTransactions,
                   categoryMode: filter.mode,
+                  categoryIds: filter.categoryIds,
                   constrainSeriesToAnchorMonth: false,
                 ),
                 periodLabel: _formatAnalyticsChartPeriodLabel(
@@ -2642,6 +2692,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         return _AnalyticsLineChartCard(
           provider: provider,
           transactions: filteredTransactions,
+          categoryIds: filter.categoryIds,
           period: _analyticsLineChartPeriod,
           periodOffset: _analyticsLineChartOffset,
           onPeriodChanged: _setAnalyticsLineChartPeriod,
@@ -2693,6 +2744,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
                   sourceTransactions: filteredTransactions,
                   anchorTransactions: filteredTransactions,
                   categoryMode: filter.mode,
+                  categoryIds: filter.categoryIds,
                   constrainSeriesToAnchorMonth: false,
                 ),
                 periodLabel: _formatAnalyticsChartPeriodLabel(
@@ -2763,13 +2815,15 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     List<Transaction>? sourceTransactions,
     Iterable<Transaction>? anchorTransactions,
     _AnalyticsHeatmapMode categoryMode = _AnalyticsHeatmapMode.expense,
+    Iterable<int?> categoryIds = const <int?>{},
     bool constrainSeriesToAnchorMonth = true,
     DateTime? anchorDate,
   }) {
-    final transactions = sourceTransactions ?? provider.allTransactions;
+    final transactions = sourceTransactions ?? provider.summaryTransactions;
     final anchorSource = anchorTransactions ?? transactions;
     DateTime? latestTransactionTime;
     for (final transaction in anchorSource) {
+      if (provider.isExcludedFromTotals(transaction)) continue;
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
       if (latestTransactionTime == null || dt.isAfter(latestTransactionTime)) {
@@ -2802,6 +2856,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       final isDebit = transaction.type == 'DEBIT';
+      if (provider.isExcludedFromTotals(transaction)) continue;
       final dt = _parseTransactionTime(transaction.time);
       final isWithinAnchorMonth =
           dt != null && !dt.isBefore(monthStart) && dt.isBefore(nextMonthStart);
@@ -2811,12 +2866,25 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       }
 
       totalTransactions += 1;
-      totalFees += transactionFeeAmount(transaction);
 
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final incomeAmount = provider.incomeAmountForTransaction(transaction);
-      final expenseAmount =
-          provider.netExpenseAmountForTransaction(transaction);
+      final selectedAmount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
+      final incomeAmount = transaction.type == 'CREDIT' ? selectedAmount : 0.0;
+      final expenseAmount = transaction.type == 'DEBIT' ? selectedAmount : 0.0;
+      final fullAmount = transaction.type == 'CREDIT'
+          ? provider.incomeAmountForTransaction(transaction)
+          : transaction.type == 'DEBIT'
+              ? provider.netExpenseAmountForTransaction(transaction)
+              : 0.0;
+      final selectedShare = categoryIds.isEmpty
+          ? 1.0
+          : fullAmount > 0
+              ? (selectedAmount / fullAmount).clamp(0.0, 1.0).toDouble()
+              : 0.0;
+      totalFees += transactionFeeAmount(transaction) * selectedShare;
       final category = transaction.categoryId == null
           ? null
           : provider.getCategoryById(transaction.categoryId!);
@@ -2860,16 +2928,30 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           : isDebit && expenseAmount > 0;
 
       if (includeBubbleCategory) {
-        final categoryName = isSelfTransfer
-            ? 'Fees & VAT'
-            : !isMisc && (category?.name.trim().isNotEmpty ?? false)
-                ? category!.name.trim()
-                : 'Other';
         final categoryAmount = categoryMode == _AnalyticsHeatmapMode.income
             ? incomeAmount
             : expenseAmount;
-        categoryTotals[categoryName] =
-            (categoryTotals[categoryName] ?? 0.0) + categoryAmount;
+        if (isSelfTransfer) {
+          categoryTotals['Fees & VAT'] =
+              (categoryTotals['Fees & VAT'] ?? 0.0) + categoryAmount;
+        } else {
+          final categorizedAmounts = provider.categoryAmountsForSelection(
+            transaction,
+            categoryIds,
+          );
+          for (final allocation in categorizedAmounts.entries) {
+            if (allocation.value <= 0) continue;
+            final allocatedCategory = provider.getCategoryById(allocation.key);
+            final allocatedName = allocatedCategory?.name.trim() ?? '';
+            final categoryName = allocatedCategory != null &&
+                    !allocatedCategory.uncategorized &&
+                    allocatedName.isNotEmpty
+                ? allocatedName
+                : 'Other';
+            categoryTotals[categoryName] =
+                (categoryTotals[categoryName] ?? 0.0) + allocation.value;
+          }
+        }
       }
 
       if (isDebit && expenseAmount > 0) {
@@ -2948,6 +3030,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required String periodLabel,
     required String periodKey,
     required bool showIncome,
+    Iterable<int?> categoryIds = const <int?>{},
   }) {
     final weekdayExpenseTotals = List<double>.filled(7, 0.0);
 
@@ -2960,9 +3043,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
 
-      final amount = showIncome
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
       if (amount <= 0) continue;
 
       final weekdayIndex = dt.weekday % 7; // Sunday = 0 ... Saturday = 6
@@ -2996,6 +3080,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required String periodLabel,
     required String periodKey,
     required bool showIncome,
+    Iterable<int?> categoryIds = const <int?>{},
   }) {
     final recipientTotals = <String, _AnalyticsRecipientAccumulator>{};
     var recipientExpenseCount = 0;
@@ -3014,9 +3099,10 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         if (isSelfTransfer) continue;
       }
 
-      final amount = showIncome
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
       if (amount <= 0) continue;
 
       recipientExpenseCount += 1;
@@ -3056,6 +3142,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     required List<Transaction> transactions,
     required String periodLabel,
     required String periodKey,
+    Iterable<int?> categoryIds = const <int?>{},
   }) {
     var totalTransactions = 0;
     var totalIncome = 0.0;
@@ -3065,9 +3152,12 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
 
     for (final transaction in transactions) {
       totalTransactions += 1;
-      final incomeAmount = provider.incomeAmountForTransaction(transaction);
-      final expenseAmount =
-          provider.netExpenseAmountForTransaction(transaction);
+      final selectedAmount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
+      final incomeAmount = transaction.type == 'CREDIT' ? selectedAmount : 0.0;
+      final expenseAmount = transaction.type == 'DEBIT' ? selectedAmount : 0.0;
       totalIncome += incomeAmount;
       totalExpense += expenseAmount;
       largestDeposit = math.max(largestDeposit, incomeAmount);
@@ -3360,6 +3450,8 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
       bankId: _filter.bankId,
       accountKey: _filter.accountKey,
       categoryIdsKey: _categoryFilterCacheKey(_filter.categoryIds),
+      locationNamesKey: _locationFilterCacheKey(_filter.locationNames),
+      locationDataVersion: _locationDataVersion,
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
       startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
@@ -3423,12 +3515,21 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      totalIncome += provider.incomeAmountForTransaction(transaction);
-      totalExpense += provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        _filter.categoryIds,
+      );
+      if (transaction.type == 'CREDIT') {
+        totalIncome += amount;
+      } else if (transaction.type == 'DEBIT') {
+        totalExpense += amount;
+      }
     }
 
     return _ActivityTransactionsSummary(
-      totalTransactions: transactions.length,
+      totalTransactions: transactions
+          .where((transaction) => !provider.isExcludedFromTotals(transaction))
+          .length,
       totalIncome: totalIncome,
       totalExpense: totalExpense,
     );
@@ -3694,7 +3795,32 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     );
   }
 
+  Future<void> _refreshTransactionLocationNames() async {
+    try {
+      final locations =
+          await _transactionLocationRepository.getTransactionLocations();
+      final namesByReference = <String, String>{};
+      for (final location in locations) {
+        final placeName = location.placeName?.trim();
+        if (placeName == null || placeName.isEmpty) continue;
+        namesByReference[location.transactionReference] = placeName;
+      }
+      if (!mounted) return;
+      setState(() {
+        _locationNameByReference =
+            Map<String, String>.unmodifiable(namesByReference);
+        _locationDataVersion++;
+      });
+    } catch (_) {
+      // Keep the last successfully loaded names if location storage is
+      // temporarily unavailable; the other transaction filters still work.
+    }
+  }
+
   Future<void> _openFilterSheet(TransactionProvider provider) async {
+    await _refreshTransactionLocationNames();
+    if (!mounted) return;
+
     // Derive bank/category choices from activity; account choices come from
     // the provider's durable ownership partitions below.
     final allTxns = provider.allTransactions;
@@ -3708,6 +3834,11 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
     // Build category list from IDs found in transactions.
     final categories = orderedCategoriesForFilter(
       categoryIds.map(provider.getCategoryById).whereType<Category>(),
+    );
+    final locationNames = orderedTransactionLocationNamesForFilter(
+      allTxns.map(
+        (transaction) => _locationNameByReference[transaction.reference],
+      ),
     );
     final unmatchedBankIds = bankIds
         .where(
@@ -3733,6 +3864,7 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
         accounts: provider.accountSummaries,
         unmatchedBankIds: unmatchedBankIds,
         categories: categories,
+        locationNames: locationNames,
       ),
     );
     if (result != null) {
@@ -3825,6 +3957,19 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
             (transaction) => provider.matchesCategoryFilterSelection(
               transaction,
               _filter.categoryIds,
+            ),
+          )
+          .toList();
+    }
+
+    // Editable place-name filter.
+    if (_filter.locationNames.isNotEmpty) {
+      result = result
+          .where(
+            (transaction) => matchesTransactionLocationFilters(
+              transactionReference: transaction.reference,
+              locationNames: _filter.locationNames,
+              locationNameByReference: _locationNameByReference,
             ),
           )
           .toList();
@@ -4082,9 +4227,13 @@ class RedesignMoneyPageState extends State<RedesignMoneyPage>
           provider,
           account,
           includeInTotals: include,
-          successMessage: include
-              ? 'Account included in total balance.'
-              : 'Account excluded from total balance.',
+          successMessage: isCash
+              ? include
+                  ? 'Cash wallet included in total balance.'
+                  : 'Cash wallet excluded from total balance.'
+              : include
+                  ? 'Account included in total balance.'
+                  : 'Account excluded from total balance.',
         ),
         onDormantChanged: (dormant) => _updateAccountPreferences(
           provider,
@@ -6791,6 +6940,7 @@ class _AnalyticsHeatmapCard extends StatefulWidget {
   final DateTime focusMonth;
   final _AnalyticsHeatmapView view;
   final _AnalyticsHeatmapMode mode;
+  final Set<int> categoryIds;
   final int activeFilterCount;
   final VoidCallback onOpenModeSheet;
   final VoidCallback onOpenChartSheet;
@@ -6806,6 +6956,7 @@ class _AnalyticsHeatmapCard extends StatefulWidget {
     required this.focusMonth,
     required this.view,
     required this.mode,
+    this.categoryIds = const <int>{},
     this.activeFilterCount = 0,
     required this.onOpenModeSheet,
     required this.onOpenChartSheet,
@@ -8207,15 +8358,19 @@ class _AnalyticsHeatmapCardState extends State<_AnalyticsHeatmapCard> {
 
   double _heatmapDelta(Transaction transaction) {
     final provider = context.read<TransactionProvider>();
-    final incomeAmount = provider.incomeAmountForTransaction(transaction);
-    final expenseAmount = provider.netExpenseAmountForTransaction(transaction);
+    final amount = provider.amountForCategorySelection(
+      transaction,
+      widget.categoryIds,
+    );
     switch (widget.mode) {
       case _AnalyticsHeatmapMode.all:
-        return incomeAmount - expenseAmount;
+        if (transaction.type == 'CREDIT') return amount;
+        if (transaction.type == 'DEBIT') return -amount;
+        return 0.0;
       case _AnalyticsHeatmapMode.expense:
-        return -expenseAmount;
+        return transaction.type == 'DEBIT' ? -amount : 0.0;
       case _AnalyticsHeatmapMode.income:
-        return incomeAmount;
+        return transaction.type == 'CREDIT' ? amount : 0.0;
     }
   }
 }
@@ -9490,6 +9645,7 @@ DateTime _shiftAnalyticsBarAnchorDate(
 class _AnalyticsLineChartCard extends StatelessWidget {
   final TransactionProvider provider;
   final List<Transaction> transactions;
+  final Set<int> categoryIds;
   final _AnalyticsLineChartPeriod period;
   final int periodOffset;
   final ValueChanged<_AnalyticsLineChartPeriod>? onPeriodChanged;
@@ -9502,6 +9658,7 @@ class _AnalyticsLineChartCard extends StatelessWidget {
   const _AnalyticsLineChartCard({
     required this.provider,
     required this.transactions,
+    this.categoryIds = const <int>{},
     required this.period,
     this.periodOffset = 0,
     this.onPeriodChanged,
@@ -9690,9 +9847,10 @@ class _AnalyticsLineChartCard extends StatelessWidget {
     for (final transaction in transactions) {
       final dt = _parseTransactionTime(transaction.time);
       if (dt == null) continue;
-      final amount = transaction.type == 'CREDIT'
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        categoryIds,
+      );
       if (amount <= 0.001) continue;
 
       int? bucketIndex;
@@ -10376,9 +10534,10 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       if (mode == _AnalyticsHeatmapMode.income && !isIncome) continue;
       if (mode == _AnalyticsHeatmapMode.expense && !isExpense) continue;
       final isSelfTransfer = provider.isSelfTransfer(transaction);
-      final amount = isIncome
-          ? provider.incomeAmountForTransaction(transaction)
-          : provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        filter.categoryIds,
+      );
       if (amount <= 0.001) continue;
 
       final dt = _parseTransactionTime(transaction.time);
@@ -10387,34 +10546,41 @@ class _AnalyticsBarChartCard extends StatelessWidget {
       final bucketIndex = bucketIndexFor(dt);
       if (bucketIndex == null) continue;
 
-      final category = transaction.categoryId == null
-          ? null
-          : provider.getCategoryById(transaction.categoryId!);
-      final categoryName = category?.name.trim() ?? '';
-      final isOther =
-          category == null || category.uncategorized || categoryName.isEmpty;
       final isTransferFee = isSelfTransfer && isExpense;
-      final label = isTransferFee
-          ? 'Fees & VAT'
-          : isOther
-              ? 'Other'
-              : categoryName;
-      final key = isTransferFee
-          ? 'fees-and-vat'
-          : isOther
-              ? 'other'
-              : 'category:${category.id}';
-      final accumulator = statsByKey.putIfAbsent(
-        key,
-        () => _AnalyticsBarCategoryAccumulator(
-          label: label,
-          bucketValues: List<double>.filled(bucketCount, 0.0),
-          orderSeed: statsByKey.length,
-        ),
-      );
+      final categorizedAmounts = isTransferFee
+          ? <int?, double>{null: amount}
+          : provider.categoryAmountsForSelection(
+              transaction,
+              filter.categoryIds,
+            );
+      for (final allocation in categorizedAmounts.entries) {
+        if (allocation.value <= 0) continue;
+        final category = provider.getCategoryById(allocation.key);
+        final categoryName = category?.name.trim() ?? '';
+        final isOther =
+            category == null || category.uncategorized || categoryName.isEmpty;
+        final label = isTransferFee
+            ? 'Fees & VAT'
+            : isOther
+                ? 'Other'
+                : categoryName;
+        final key = isTransferFee
+            ? 'fees-and-vat'
+            : isOther
+                ? 'other'
+                : 'category:${category.id}';
+        final accumulator = statsByKey.putIfAbsent(
+          key,
+          () => _AnalyticsBarCategoryAccumulator(
+            label: label,
+            bucketValues: List<double>.filled(bucketCount, 0.0),
+            orderSeed: statsByKey.length,
+          ),
+        );
 
-      accumulator.bucketValues[bucketIndex] += amount;
-      accumulator.total += amount;
+        accumulator.bucketValues[bucketIndex] += allocation.value;
+        accumulator.total += allocation.value;
+      }
     }
 
     final sorted = statsByKey.values.toList()
@@ -12509,10 +12675,17 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
   String _searchQuery = '';
   _TransactionFilter _filter = _TransactionFilter();
   int _currentPage = 0;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
+  Map<String, String> _locationNameByReference = const <String, String>{};
+  int _locationDataVersion = 0;
   _BankTransactionsViewCacheKey? _viewCacheKey;
   _BankTransactionsViewData? _viewCache;
 
   bool get _isSelecting => _selectedRefs.isNotEmpty;
+
+  TransactionLocationRepository get _transactionLocationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          TransactionLocationRepository();
 
   @override
   void dispose() {
@@ -12700,9 +12873,39 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     );
   }
 
+  Future<void> _refreshTransactionLocationNames() async {
+    try {
+      final locations =
+          await _transactionLocationRepository.getTransactionLocations();
+      final namesByReference = <String, String>{};
+      for (final location in locations) {
+        final placeName = location.placeName?.trim();
+        if (placeName == null || placeName.isEmpty) continue;
+        namesByReference[location.transactionReference] = placeName;
+      }
+      if (!mounted) return;
+      setState(() {
+        _locationNameByReference =
+            Map<String, String>.unmodifiable(namesByReference);
+        _locationDataVersion++;
+      });
+    } catch (_) {
+      // Keep the last successfully loaded names if location storage is
+      // temporarily unavailable; the other transaction filters still work.
+    }
+  }
+
   Future<void> _openFilterSheet(TransactionProvider provider) async {
+    await _refreshTransactionLocationNames();
+    if (!mounted) return;
+
     final transactions = _bankTransactions(provider);
     final categories = _categoriesForBankTransactions(provider, transactions);
+    final locationNames = orderedTransactionLocationNamesForFilter(
+      transactions.map(
+        (transaction) => _locationNameByReference[transaction.reference],
+      ),
+    );
     final accounts = widget.account == null && !widget.unmatchedOnly
         ? provider.accountSummaries
             .where((account) => account.bankId == widget.bankId)
@@ -12724,6 +12927,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
         accounts: accounts,
         unmatchedBankIds: unmatchedBankIds,
         categories: categories,
+        locationNames: locationNames,
         showBankFilter: false,
       ),
     );
@@ -12762,6 +12966,18 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
             (transaction) => provider.matchesCategoryFilterSelection(
               transaction,
               _filter.categoryIds,
+            ),
+          )
+          .toList();
+    }
+
+    if (_filter.locationNames.isNotEmpty) {
+      result = result
+          .where(
+            (transaction) => matchesTransactionLocationFilters(
+              transactionReference: transaction.reference,
+              locationNames: _filter.locationNames,
+              locationNameByReference: _locationNameByReference,
             ),
           )
           .toList();
@@ -12828,12 +13044,21 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
     var totalExpense = 0.0;
 
     for (final transaction in transactions) {
-      totalIncome += provider.incomeAmountForTransaction(transaction);
-      totalExpense += provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        _filter.categoryIds,
+      );
+      if (transaction.type == 'CREDIT') {
+        totalIncome += amount;
+      } else if (transaction.type == 'DEBIT') {
+        totalExpense += amount;
+      }
     }
 
     return _ActivityTransactionsSummary(
-      totalTransactions: transactions.length,
+      totalTransactions: transactions
+          .where((transaction) => !provider.isExcludedFromTotals(transaction))
+          .length,
       totalIncome: totalIncome,
       totalExpense: totalExpense,
     );
@@ -12853,6 +13078,8 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       type: _filter.type,
       accountKey: _filter.accountKey,
       categoryIdsKey: _categoryFilterCacheKey(_filter.categoryIds),
+      locationNamesKey: _locationFilterCacheKey(_filter.locationNames),
+      locationDataVersion: _locationDataVersion,
       minAmount: _filter.minAmount,
       maxAmount: _filter.maxAmount,
       startDateMillis: _filter.startDate?.millisecondsSinceEpoch,
@@ -12969,6 +13196,7 @@ class _BankTransactionsPageState extends State<_BankTransactionsPage> {
       transaction: transaction,
       provider: provider,
     );
+    if (mounted) await _refreshTransactionLocationNames();
   }
 
   Future<void> _openTransactionCategorySheet(
@@ -14335,7 +14563,7 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final transactions = _transactionsForHeatmapDayWithFilter(
       day: date,
-      allTransactions: provider.allTransactions,
+      allTransactions: provider.summaryTransactions,
       filter: filter,
       matchesCategoryFilters: provider.matchesCategoryFilterSelection,
     );
@@ -14351,8 +14579,15 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
     var incomeTotal = 0.0;
     var expenseTotal = 0.0;
     for (final transaction in transactions) {
-      incomeTotal += provider.incomeAmountForTransaction(transaction);
-      expenseTotal += provider.netExpenseAmountForTransaction(transaction);
+      final amount = provider.amountForCategorySelection(
+        transaction,
+        filter.categoryIds,
+      );
+      if (transaction.type == 'CREDIT') {
+        incomeTotal += amount;
+      } else if (transaction.type == 'DEBIT') {
+        expenseTotal += amount;
+      }
     }
     final netTotal = incomeTotal - expenseTotal;
     final transactionLabel = _formatLocalizedCount(
@@ -14481,6 +14716,12 @@ class _HeatmapDayLedgerPage extends StatelessWidget {
                                   ),
                                   child: _LedgerTransactionEntry(
                                     transaction: transaction,
+                                    displayAmount: filter.categoryIds.isEmpty
+                                        ? null
+                                        : provider.amountForCategorySelection(
+                                            transaction,
+                                            filter.categoryIds,
+                                          ),
                                     derivedBalance: derivedBalancesByReference[
                                         transaction.reference],
                                     isSelfTransfer:
@@ -14545,11 +14786,13 @@ class _HeatmapDayInlineStat extends StatelessWidget {
 
 class _LedgerTransactionEntry extends StatelessWidget {
   final Transaction transaction;
+  final double? displayAmount;
   final double? derivedBalance;
   final bool isSelfTransfer;
 
   const _LedgerTransactionEntry({
     required this.transaction,
+    this.displayAmount,
     this.derivedBalance,
     this.isSelfTransfer = false,
   });
@@ -14562,7 +14805,7 @@ class _LedgerTransactionEntry extends StatelessWidget {
     final sign = isCredit ? '+' : '-';
     final currencyLabel = context.l10nText('ETB');
 
-    final amount = transaction.amount;
+    final amount = displayAmount ?? transaction.amount;
     final amountStr = formatNumberAbbreviated(amount).replaceAll('k', 'K');
 
     final name = isSelfTransfer
@@ -15895,6 +16138,21 @@ class _AccountActionsSheetState extends State<_AccountActionsSheet> {
               _AccountMenuAction.viewTransactions,
             ),
           ),
+          if (widget.isCash)
+            _AccountActionTile(
+              key: const ValueKey<String>('cash-total-balance-action'),
+              icon: _includeInTotals
+                  ? AppIcons.visibility_outlined
+                  : AppIcons.visibility_off_outlined,
+              label: 'Show in total balance',
+              trailing: Switch.adaptive(
+                key: const ValueKey<String>('cash-total-balance-switch'),
+                value: _includeInTotals,
+                activeThumbColor: AppColors.primaryLight,
+                onChanged: _isUpdating ? null : (_) => _toggleTotals(),
+              ),
+              onTap: _isUpdating ? null : _toggleTotals,
+            ),
           if (!widget.isCash) ...[
             _AccountActionTile(
               icon: AppIcons.refresh,
@@ -15967,12 +16225,15 @@ class _AccountActionTile extends StatelessWidget {
   final String label;
   final Color? color;
   final VoidCallback? onTap;
+  final Widget? trailing;
 
   const _AccountActionTile({
+    super.key,
     required this.icon,
     required this.label,
     required this.onTap,
     this.color,
+    this.trailing,
   });
 
   @override
@@ -15992,6 +16253,7 @@ class _AccountActionTile extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
+      trailing: trailing,
       onTap: onTap,
     );
   }
@@ -18990,6 +19252,7 @@ class _FilterTransactionsSheet extends StatefulWidget {
   final List<AccountSummary> accounts;
   final Set<int> unmatchedBankIds;
   final List<Category> categories;
+  final List<String> locationNames;
   final bool showBankFilter;
 
   const _FilterTransactionsSheet({
@@ -18998,6 +19261,7 @@ class _FilterTransactionsSheet extends StatefulWidget {
     required this.accounts,
     required this.unmatchedBankIds,
     required this.categories,
+    this.locationNames = const <String>[],
     this.showBankFilter = true,
   });
 
@@ -19011,6 +19275,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   late int? _selectedBankId;
   late String? _selectedAccountKey;
   late Set<int> _selectedCategoryIds;
+  late Set<String> _selectedLocationNames;
   late final TextEditingController _minAmountController;
   late final TextEditingController _maxAmountController;
   String? _amountErrorText;
@@ -19028,6 +19293,12 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
             ? currentAccountKey
             : null;
     _selectedCategoryIds = <int>{...widget.currentFilter.categoryIds};
+    final availableLocationNames = normalizedTransactionLocationFilterNames(
+      widget.locationNames,
+    );
+    _selectedLocationNames = widget.currentFilter.locationNames
+        .where(availableLocationNames.contains)
+        .toSet();
     _minAmountController = TextEditingController(
       text: _formatAmountInput(widget.currentFilter.minAmount),
     );
@@ -19053,12 +19324,23 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
     });
   }
 
+  void _toggleLocation(String locationName) {
+    final normalizedName =
+        normalizeTransactionLocationFilterName(locationName);
+    setState(() {
+      if (!_selectedLocationNames.add(normalizedName)) {
+        _selectedLocationNames.remove(normalizedName);
+      }
+    });
+  }
+
   void _clearAll() {
     setState(() {
       _selectedType = null;
       _selectedBankId = null;
       _selectedAccountKey = null;
       _selectedCategoryIds.clear();
+      _selectedLocationNames.clear();
       _minAmountController.clear();
       _maxAmountController.clear();
       _amountErrorText = null;
@@ -19090,6 +19372,7 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
         bankId: _selectedBankId,
         accountKey: _selectedAccountKey,
         categoryIds: Set<int>.unmodifiable(_selectedCategoryIds),
+        locationNames: Set<String>.unmodifiable(_selectedLocationNames),
         minAmount: minAmount,
         maxAmount: maxAmount,
         startDate: _startDate,
@@ -19261,6 +19544,8 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
     final navBarPadding = MediaQuery.of(context).padding.bottom;
+    final flowTintedCategoryIds =
+        categoryFilterIdsWithFlowTint(widget.categories);
 
     return Container(
       constraints: BoxConstraints(
@@ -19463,7 +19748,9 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                                     label: category.name,
                                     flow: category.flow,
                                     subtleFlowTint:
-                                        isSelfCategoryFilter(category),
+                                        flowTintedCategoryIds.contains(
+                                      category.id,
+                                    ),
                                     selected: _selectedCategoryIds.contains(
                                       category.id,
                                     ),
@@ -19475,6 +19762,49 @@ class _FilterTransactionsSheetState extends State<_FilterTransactionsSheet> {
                       ),
                     ),
                   ),
+
+                  if (widget.locationNames.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+
+                    // ── LOCATION ──
+                    _sectionLabel('LOCATION'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Transform.translate(
+                        offset: const Offset(-20, 0),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              _FilterChip(
+                                label: 'All locations',
+                                selected: _selectedLocationNames.isEmpty,
+                                onTap: () => setState(
+                                  () => _selectedLocationNames.clear(),
+                                ),
+                              ),
+                              for (final locationName in widget.locationNames)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: _FilterChip(
+                                    label: locationName,
+                                    selected: _selectedLocationNames.contains(
+                                      normalizeTransactionLocationFilterName(
+                                        locationName,
+                                      ),
+                                    ),
+                                    onTap: () =>
+                                        _toggleLocation(locationName),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 20),
 
@@ -20157,6 +20487,8 @@ class _AnalyticsChartFilterSheetState
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
     final navBarPadding = MediaQuery.of(context).padding.bottom;
+    final flowTintedCategoryIds =
+        categoryFilterIdsWithFlowTint(widget.categories);
     final showsBankSection =
         widget.chartSection.showsBankFilter && widget.bankIds.isNotEmpty;
     final showsCategorySection = widget.chartSection.showsCategoryFilter;
@@ -20404,7 +20736,9 @@ class _AnalyticsChartFilterSheetState
                                       label: category.name,
                                       flow: category.flow,
                                       subtleFlowTint:
-                                          isSelfCategoryFilter(category),
+                                          flowTintedCategoryIds.contains(
+                                        category.id,
+                                      ),
                                       selected: _selectedCategoryIds.contains(
                                         category.id,
                                       ),

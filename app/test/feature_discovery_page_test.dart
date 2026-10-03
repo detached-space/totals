@@ -39,6 +39,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Link Reimbursements'), findsOneWidget);
+    expect(find.text('Category Split'), findsOneWidget);
+    expect(find.text('Spending Map'), findsOneWidget);
+    expect(find.text('See where your transactions happen'), findsOneWidget);
+    expect(
+      find.text('Divide one transaction across multiple categories'),
+      findsOneWidget,
+    );
     expect(
       find.text('Track returned money against past spending'),
       findsOneWidget,
@@ -52,7 +59,7 @@ void main() {
     expect(
       find.byKey(
         const ValueKey<String>(
-          'feature-discovery-new-tutorials/v1/reimbursement.mp4',
+          'feature-discovery-new-tutorials/v1/category_split.mp4',
         ),
       ),
       findsOneWidget,
@@ -60,14 +67,44 @@ void main() {
     expect(
       find.byKey(
         const ValueKey<String>(
-          'feature-discovery-new-tutorials/v1/telegram-backup.mp4',
+          'feature-discovery-new-tutorials/v1/spending_map.mp4',
         ),
       ),
       findsOneWidget,
     );
+    expect(
+      find.byKey(
+        const ValueKey<String>(
+          'feature-discovery-new-tutorials/v1/reimbursement.mp4',
+        ),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(
+        const ValueKey<String>(
+          'feature-discovery-new-tutorials/v1/telegram-backup.mp4',
+        ),
+      ),
+      findsNothing,
+    );
     expect(find.textContaining('Subscribe'), findsNothing);
 
     final cards = <Material>[
+      tester.widget<Material>(
+        find.byKey(
+          const ValueKey<String>(
+            'feature-discovery-card-tutorials/v1/spending_map.mp4',
+          ),
+        ),
+      ),
+      tester.widget<Material>(
+        find.byKey(
+          const ValueKey<String>(
+            'feature-discovery-card-tutorials/v1/category_split.mp4',
+          ),
+        ),
+      ),
       tester.widget<Material>(
         find.byKey(
           const ValueKey<String>(
@@ -107,5 +144,35 @@ void main() {
 
     expect(find.text(quickAccessAccountPreviewDescription), findsOneWidget);
     expect(find.text('Okay'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('feature-preview-close')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Category Split'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text(categorySplitPreviewDescription), findsOneWidget);
+    final placeholder = tester.widget<Image>(
+      find.byKey(const Key('feature-preview-placeholder')),
+    );
+    expect(
+      (placeholder.image as AssetImage).assetName,
+      categorySplitPreviewPlaceholderAsset,
+    );
+
+    await tester.tap(find.byKey(const Key('feature-preview-close')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Spending Map'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text(spendingMapPreviewDescription), findsOneWidget);
+    final spendingMapPlaceholder = tester.widget<Image>(
+      find.byKey(const Key('feature-preview-placeholder')),
+    );
+    expect(
+      (spendingMapPlaceholder.image as AssetImage).assetName,
+      spendingMapPreviewPlaceholderAsset,
+    );
   });
 }

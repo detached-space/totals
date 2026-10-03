@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.4.4
+version: 1.7.8+29
 
 environment:
   sdk: ">=3.2.6 <4.0.0"
@@ -71,6 +71,8 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   uuid: ^4.5.1
   flutter_dotenv: ^6.0.0
+  geolocator: 11.1.0
+  google_maps_flutter: 2.14.2
   better_player_plus: 1.0.8
   # background_sms: ^0.0.4
   # background_sms:
@@ -116,6 +118,7 @@ flutter:
     - assets/banks.json
     - assets/sms_patterns.json
     - assets/fallback_sms_patterns.json
+    - assets/maps/ethiopia_city_places.json
     - assets/webapp/
     - assets/webapp/assets/
     - assets/icon/totals_icon.png

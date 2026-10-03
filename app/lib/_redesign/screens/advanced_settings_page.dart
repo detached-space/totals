@@ -8,6 +8,7 @@ import 'package:totals/_redesign/theme/app_icons.dart';
 import 'package:totals/l10n/app_localizations.dart';
 import 'package:totals/services/advanced_settings_service.dart';
 import 'package:totals/services/telegram_backup/telegram_backup_scheduler.dart';
+import 'package:totals/services/transaction_location_capture_service.dart';
 
 class RedesignAdvancedSettingsPage extends StatefulWidget {
   const RedesignAdvancedSettingsPage({super.key});
@@ -23,6 +24,8 @@ class _RedesignAdvancedSettingsPageState
   Set<ToolsFabItem> _visibleTools =
       AdvancedSettingsService.defaultToolsFabItems;
   bool _telegramBackupEnabled = false;
+  bool _spendingMapEnabled = false;
+  bool _updatingSpendingMap = false;
   bool _loading = true;
 
   @override
@@ -39,8 +42,133 @@ class _RedesignAdvancedSettingsPageState
       _visibleTools = AdvancedSettingsService.instance.toolsFabItems.value;
       _telegramBackupEnabled =
           AdvancedSettingsService.instance.telegramBackupEnabled.value;
+      _spendingMapEnabled =
+          AdvancedSettingsService.instance.spendingMapEnabled.value;
       _loading = false;
     });
+  }
+
+  Future<bool> _confirmSpendingMapDisclosure() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(ctx.l10nText('Enable Spending Map?')),
+            content: Text(
+              ctx.l10nText(
+                'Totals will capture your precise location when a new debit '
+                'or credit transaction is recorded. With background '
+                'permission, this also works for bank SMS transactions while '
+                'the app is not open. Coordinates are stored in the local app '
+                'database and are included in manual exports and encrypted '
+                'full backups. Custom place names you create are stored with '
+                'those locations and included in the same exports and '
+                'backups. Approximate Addis Ababa subcity and supported '
+                'Ethiopian city names are matched on-device from bundled '
+                'offline data. Google Maps supplies the '
+                'base map and receives the '
+                'visible map area and normal map interactions under Google\'s '
+                'privacy terms. Totals does not send your transaction amounts, '
+                'balances, account details, payment references, categories, '
+                'notes, SMS contents, or any other financial data to Google '
+                'or any other service to make Spending Map work. Custom place '
+                'names also stay local.',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(ctx.l10nText('Cancel')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(ctx.l10nText('Continue')),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _setSpendingMapEnabled(bool enabled) async {
+    if (_updatingSpendingMap || enabled == _spendingMapEnabled) return;
+    setState(() => _updatingSpendingMap = true);
+
+    LocationCapturePermission? permission;
+    try {
+      if (enabled) {
+        final accepted = await _confirmSpendingMapDisclosure();
+        if (!accepted || !mounted) return;
+        permission = await TransactionLocationCaptureService.instance
+            .requestPermissionForCapture();
+        if (!mounted) return;
+        if (!permission.canCapture) {
+          final message = switch (permission) {
+            LocationCapturePermission.serviceDisabled =>
+              'Turn on device location to enable Spending Map.',
+            LocationCapturePermission.permanentlyDenied =>
+              'Location access is blocked. Allow it in system settings.',
+            LocationCapturePermission.denied =>
+              'Location access is required for Spending Map.',
+            _ => 'Location is unavailable on this device.',
+          };
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(context.l10nTextRead(message)),
+              action: permission == LocationCapturePermission.serviceDisabled ||
+                      permission == LocationCapturePermission.permanentlyDenied
+                  ? SnackBarAction(
+                      label: context.l10nTextRead('Settings'),
+                      onPressed: () async {
+                        await TransactionLocationCaptureService.instance
+                            .openSettingsFor(permission!);
+                      },
+                    )
+                  : null,
+            ),
+          );
+          return;
+        }
+      }
+
+      await AdvancedSettingsService.instance.setSpendingMapEnabled(enabled);
+      if (!mounted) return;
+      setState(() {
+        _spendingMapEnabled = enabled;
+        _visibleTools = AdvancedSettingsService.instance.toolsFabItems.value;
+      });
+
+      if (enabled && permission != null && !permission.canCaptureInBackground) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.l10nTextRead(
+                'Spending Map is enabled for foreground transactions. '
+                'Choose “Allow all the time” in system settings to capture '
+                'background SMS transactions.',
+              ),
+            ),
+            action: SnackBarAction(
+              label: context.l10nTextRead('Settings'),
+              onPressed: () async {
+                await TransactionLocationCaptureService.instance
+                    .openSettingsFor(permission!);
+              },
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10nTextRead('Could not update Spending Map.'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingSpendingMap = false);
+    }
   }
 
   Future<void> _setTelegramBackupEnabled(bool enabled) async {
@@ -133,6 +261,8 @@ class _RedesignAdvancedSettingsPageState
   }
 
   Future<void> _openToolsFabPicker() async {
+    final availableTools =
+        AdvancedSettingsService.instance.availableToolsFabItems;
     final picked = await showModalBottomSheet<Set<ToolsFabItem>>(
       context: context,
       isScrollControlled: true,
@@ -142,6 +272,7 @@ class _RedesignAdvancedSettingsPageState
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             void toggle(ToolsFabItem item) {
+              if (item == ToolsFabItem.spendingMap) return;
               final isSelected = draft.contains(item);
               if (isSelected && draft.length == 1) return;
               setSheetState(() {
@@ -190,7 +321,7 @@ class _RedesignAdvancedSettingsPageState
                         ),
                       ),
                       Text(
-                        '${draft.length}/${ToolsFabItem.values.length}',
+                        '${draft.length}/${availableTools.length}',
                         style: TextStyle(
                           color: AppColors.textSecondary(ctx),
                           fontSize: 12,
@@ -200,17 +331,17 @@ class _RedesignAdvancedSettingsPageState
                     ],
                   ),
                   const SizedBox(height: 12),
-                  for (final item in ToolsFabItem.values) ...[
+                  for (final item in availableTools) ...[
                     _ToolsFabOptionTile(
                       icon: _toolsFabIcon(item),
                       color: AppColors.primaryLight,
                       title: _toolsFabLabel(ctx, item),
                       selected: draft.contains(item),
-                      canToggle: draft.length > 1 || !draft.contains(item),
+                      canToggle: item != ToolsFabItem.spendingMap &&
+                          (draft.length > 1 || !draft.contains(item)),
                       onTap: () => toggle(item),
                     ),
-                    if (item != ToolsFabItem.values.last)
-                      const SizedBox(height: 8),
+                    if (item != availableTools.last) const SizedBox(height: 8),
                   ],
                   const SizedBox(height: 14),
                   SizedBox(
@@ -242,7 +373,9 @@ class _RedesignAdvancedSettingsPageState
   }
 
   String _toolsFabSummary(BuildContext context) {
-    if (_visibleTools.length == ToolsFabItem.values.length) {
+    final availableCount =
+        AdvancedSettingsService.instance.availableToolsFabItems.length;
+    if (_visibleTools.length == availableCount) {
       return context.l10nText('All tools');
     }
     return '${_visibleTools.length} ${context.l10nText('tools shown')}';
@@ -256,6 +389,8 @@ class _RedesignAdvancedSettingsPageState
         return context.l10nText('Verify Payments');
       case ToolsFabItem.loans:
         return context.l10nText('Loans');
+      case ToolsFabItem.spendingMap:
+        return context.l10nText('Spending Map');
       case ToolsFabItem.failedParsings:
         return context.l10nText('Failed Parsings');
       case ToolsFabItem.dataSync:
@@ -273,6 +408,8 @@ class _RedesignAdvancedSettingsPageState
         return AppIcons.qr_code_scanner_rounded;
       case ToolsFabItem.loans:
         return AppIcons.debts;
+      case ToolsFabItem.spendingMap:
+        return AppIcons.map_rounded;
       case ToolsFabItem.failedParsings:
         return AppIcons.sms_outlined;
       case ToolsFabItem.dataSync:
@@ -321,6 +458,26 @@ class _RedesignAdvancedSettingsPageState
                   onTap: _telegramBackupEnabled
                       ? _openTelegramBackup
                       : () => _setTelegramBackupEnabled(true),
+                ),
+                const SizedBox(height: 12),
+                DataSyncTile(
+                  icon: AppIcons.map_rounded,
+                  title: context.l10nText('Spending Map'),
+                  subtitle: context.l10nText(
+                    'Keep debit and credit locations locally and view them on '
+                    'a map',
+                  ),
+                  trailing: _updatingSpendingMap
+                      ? const SizedBox.square(
+                          dimension: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Switch(
+                          value: _spendingMapEnabled,
+                          activeThumbColor: AppColors.primaryLight,
+                          onChanged: _setSpendingMapEnabled,
+                        ),
+                  onTap: () => _setSpendingMapEnabled(!_spendingMapEnabled),
                 ),
                 const SizedBox(height: 12),
                 Container(

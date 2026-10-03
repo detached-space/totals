@@ -60,6 +60,7 @@
 - **Budgets** — create budgets with alerts and track spending against them
 - **Account Management** — multiple bank accounts with QR code sharing
 - **Analytics Dashboard** — income vs expense charts, net worth over time, spending patterns by day/week/month/year
+- **Spending Map (optional)** — an opt-in, private map of where debit and credit transactions happen, powered by Google Maps with bundled offline names for major Ethiopian cities and areas
 - **Financial Insights** — automated spending analysis and trends
 - **Home Screen Widgets** — balance and expense summary widgets for Android
 - **Biometric Security** — fingerprint or face authentication with auto-lock
@@ -79,23 +80,44 @@
 
 ### Prerequisites
 
-- Flutter 3.27.1 (managed via [FVM](https://fvm.app/))
+- Flutter 3.38.6 (managed via [FVM](https://fvm.app/))
 - Android Studio (Android only — iOS is not currently supported)
+- JDK 17 for the existing Gradle 8.11.1 / Android Gradle Plugin 8.9.1 setup
 
 ### Installation
 
 ```bash
 git clone <repository-url>
 cd totals/app
+fvm use 3.38.6 --skip-pub-get
 fvm flutter pub get
 fvm flutter run --flavor qa
 ```
+
+If Android Studio bundles a newer JDK, select an installed JDK 17 with
+`flutter config --jdk-dir="<path-to-jdk-17>"` and verify it with
+`flutter doctor --verbose`. Use the JDK root directory containing `bin`,
+not the `bin` directory itself. This is a local Flutter setting shared by
+Flutter projects on that computer; it does not change the project's Gradle,
+Android SDK, or signing configuration.
+
+To use the optional Spending Map, enable billing and the **Maps SDK for
+Android** in a Google Cloud project. Then add the Android API key to the
+ignored `app/android/local.properties` file:
+
+```properties
+MAPS_API_KEY=YOUR_ANDROID_MAPS_API_KEY
+```
+
+Restrict production keys by Android package name and signing certificate
+SHA-1. The stable and QA package names are `detached.totals` and
+`detached.totals.test`, respectively.
 
 ### First-Time Setup
 
 1. **Grant SMS Permissions** — required to monitor bank transaction notifications
 2. **Add Your First Account** — enter account number, select bank, and provide holder name
-3. **Initial Internet Connection** — needed once to download SMS parsing patterns; fully offline after that
+3. **Initial Internet Connection** — needed to download SMS parsing patterns; Spending Map and other network-backed features also require a connection
 
 ## Architecture
 

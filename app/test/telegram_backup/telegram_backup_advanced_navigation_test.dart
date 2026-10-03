@@ -135,6 +135,8 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'advanced_telegram_backup_enabled': true,
+      'advanced_telegram_backup_consent_version':
+          AdvancedSettingsService.currentTelegramBackupConsentVersion,
     });
     await AdvancedSettingsService.instance.reload();
 
@@ -157,6 +159,8 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'advanced_telegram_backup_enabled': true,
+      'advanced_telegram_backup_consent_version':
+          AdvancedSettingsService.currentTelegramBackupConsentVersion,
     });
     await AdvancedSettingsService.instance.reload();
 

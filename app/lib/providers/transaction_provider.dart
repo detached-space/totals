@@ -9,6 +9,7 @@ import 'package:totals/models/category.dart';
 import 'package:totals/models/loan_debt_entry.dart';
 import 'package:totals/models/reimbursement_allocation.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/models/transaction_category_split.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/repositories/account_repository.dart';
 import 'package:totals/repositories/category_repository.dart';
@@ -34,6 +35,7 @@ import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_summary_filter.dart';
 
 class TransactionTotals {
   final double income;
@@ -245,6 +247,9 @@ class TransactionProvider with ChangeNotifier {
   // Getters
   List<Transaction> get transactions => _transactions;
   List<Transaction> get allTransactions => _allTransactions;
+  List<Transaction> get summaryTransactions => allTransactions
+      .where((transaction) => !isExcludedFromTotals(transaction))
+      .toList(growable: false);
   Set<String> get sharedExpenseLinkedRefs => _sharedExpenseLinkedRefs;
   Set<String> get sharedExpenseSharingRefs =>
       Set.unmodifiable(_sharedExpenseSharingRefs);
@@ -630,7 +635,12 @@ class TransactionProvider with ChangeNotifier {
         reimbursedExpenseAmount(transaction) > 0;
   }
 
+  bool isExcludedFromTotals(Transaction transaction) {
+    return isMiscTransaction(transaction, getCategoryById: getCategoryById);
+  }
+
   double incomeAmountForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return 0.0;
     if (transaction.type != 'CREDIT') return 0.0;
     return transactionIncomeAmount(
       transaction,
@@ -640,6 +650,7 @@ class TransactionProvider with ChangeNotifier {
   }
 
   double netExpenseAmountForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return 0.0;
     return transactionNetExpenseAmount(
       transaction,
       isSelfTransfer: _isSelfTransfer(transaction),
@@ -648,11 +659,97 @@ class TransactionProvider with ChangeNotifier {
   }
 
   double budgetExpenseAmountForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return 0.0;
     return transactionNetExpenseAmount(
       transaction,
       isSelfTransfer: false,
       reimbursedAmount: reimbursedExpenseAmount(transaction),
     );
+  }
+
+  Map<int?, double> categoryAmountsForTransaction(Transaction transaction) {
+    if (isExcludedFromTotals(transaction)) return const <int?, double>{};
+    final total = transaction.type == 'CREDIT'
+        ? incomeAmountForTransaction(transaction)
+        : transaction.type == 'DEBIT'
+            ? netExpenseAmountForTransaction(transaction)
+            : transaction.amount.abs();
+    return transaction.categoryAmounts(totalAmount: total);
+  }
+
+  Map<int?, double> categoryAmountsForSelection(
+    Transaction transaction,
+    Iterable<int?> selectedCategoryIds,
+  ) {
+    final selected = selectedCategoryIds
+        .map(
+          (categoryId) =>
+              categoryId == uncategorizedCategoryFilterId ? null : categoryId,
+        )
+        .toSet();
+    final amounts = categoryAmountsForTransaction(transaction);
+    if (selected.isEmpty) return amounts;
+
+    final selectedAmounts = <int?, double>{
+      for (final entry in amounts.entries)
+        if (selected.contains(entry.key)) entry.key: entry.value,
+    };
+    if (selectedAmounts.isNotEmpty) {
+      return Map<int?, double>.unmodifiable(selectedAmounts);
+    }
+
+    // Transactions created before exact allocations were available (or kept
+    // intentionally unsplit) can still have several category tags. Their
+    // amount is indivisible, so a matching tag contributes the full amount
+    // once rather than disappearing or being counted once per tag.
+    if (!transaction.hasCategorySplit) {
+      final matchingCategoryId =
+          transaction.selectedCategoryIds.where(selected.contains).firstOrNull;
+      if (matchingCategoryId != null) {
+        final total = amounts.values.fold<double>(
+          0.0,
+          (sum, amount) => sum + amount,
+        );
+        if (total > 0) {
+          return Map<int?, double>.unmodifiable(<int?, double>{
+            matchingCategoryId: total,
+          });
+        }
+      }
+    }
+
+    if (!_isSelfTransfer(transaction)) {
+      return const <int?, double>{};
+    }
+
+    // Self-transfer categories are derived at filter time and may not be
+    // stored on the transaction itself. Attribute the full eligible amount to
+    // the matching derived category so filtered analytics stay consistent
+    // with the filter result.
+    final effectiveCategoryIds = categoryIdsForFiltering(transaction).toSet();
+    final derivedCategoryId = selected
+        .whereType<int>()
+        .where((id) => id > 0 && effectiveCategoryIds.contains(id))
+        .firstOrNull;
+    if (derivedCategoryId == null) return const <int?, double>{};
+
+    final total = amounts.values.fold<double>(
+      0.0,
+      (sum, amount) => sum + amount,
+    );
+    if (total <= 0) return const <int?, double>{};
+    return Map<int?, double>.unmodifiable(<int?, double>{
+      derivedCategoryId: total,
+    });
+  }
+
+  double amountForCategorySelection(
+    Transaction transaction,
+    Iterable<int?> selectedCategoryIds,
+  ) {
+    return categoryAmountsForSelection(transaction, selectedCategoryIds)
+        .values
+        .fold<double>(0.0, (sum, amount) => sum + amount);
   }
 
   Future<void> refreshReimbursements() async {
@@ -976,10 +1073,13 @@ class TransactionProvider with ChangeNotifier {
       double transferIn = 0.0;
       double transferOut = 0.0;
       double feesAndVat = 0.0;
+      var totalTransactions = 0;
       for (var t in accountTransactions) {
+        cashBalance += transactionBalanceDelta(t);
+        if (isExcludedFromTotals(t)) continue;
+        totalTransactions += 1;
         final isSelfTransfer = _isSelfTransfer(t);
         final feeAmount = transactionFeeAmount(t);
-        cashBalance += transactionBalanceDelta(t);
         if (t.type == 'DEBIT') {
           feesAndVat += feeAmount;
         }
@@ -1012,7 +1112,7 @@ class TransactionProvider with ChangeNotifier {
         bankId: account.bank,
         accountNumber: account.accountNumber,
         accountHolderName: account.accountHolderName,
-        totalTransactions: accountTransactions.length.toDouble(),
+        totalTransactions: totalTransactions.toDouble(),
         totalCredit: totalCredit,
         totalDebit: totalDebit,
         settledBalance: account.settledBalance ?? 0.0,
@@ -1146,9 +1246,10 @@ class TransactionProvider with ChangeNotifier {
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalCredit);
     double grandTotalDebit =
         _bankSummaries.fold(0.0, (sum, b) => sum + b.totalDebit);
-    double grandTotalBalance = _bankSummaries
-        .where((bank) => bank.bankId != CashConstants.bankId)
-        .fold(0.0, (sum, bank) => sum + bank.totalBalance);
+    double grandTotalBalance = _bankSummaries.fold<double>(
+      0.0,
+      (sum, bank) => sum + bank.totalBalance,
+    );
     final grandTransferIn =
         _bankSummaries.fold<double>(0.0, (sum, bank) => sum + bank.transferIn);
     final grandTransferOut = _bankSummaries.fold<double>(
@@ -1402,6 +1503,7 @@ class TransactionProvider with ChangeNotifier {
       if (isMonth) {
         monthTransactions.add(transaction);
       }
+      if (isExcludedFromTotals(transaction)) continue;
       if (isSelfTransfer) {
         selfTransferCount += 1;
       }
@@ -1429,8 +1531,6 @@ class TransactionProvider with ChangeNotifier {
         transaction,
         isSelfTransfer: isSelfTransfer,
       );
-      final category = _categoryById[transaction.categoryId];
-
       if (isToday) {
         todayIncome += incomeAmount;
         todayExpense += expenseAmount;
@@ -1476,10 +1576,19 @@ class TransactionProvider with ChangeNotifier {
       if (isLast90) {
         ninetyDayIncome += incomeAmount;
         ninetyDayExpense += expenseAmount;
-        if (expenseAmount > 0 && category != null && !category.uncategorized) {
-          ninetyDayCategorizedExpense += expenseAmount;
-          if (category.essential) {
-            ninetyDayEssentialExpense += expenseAmount;
+        if (expenseAmount > 0) {
+          for (final allocation
+              in categoryAmountsForTransaction(transaction).entries) {
+            final category = _categoryById[allocation.key];
+            if (allocation.value <= 0 ||
+                category == null ||
+                category.uncategorized) {
+              continue;
+            }
+            ninetyDayCategorizedExpense += allocation.value;
+            if (category.essential) {
+              ninetyDayEssentialExpense += allocation.value;
+            }
           }
         }
       }
@@ -1519,7 +1628,9 @@ class TransactionProvider with ChangeNotifier {
       monthlyExpenseByOffset: healthMonthExpenseByOffset,
       totalBalance: _summary?.totalBalance ??
           _accountSummaries
-              .where((summary) => summary.bankId != CashConstants.bankId)
+              .where(
+                (summary) => summary.includeInTotals && !summary.isDormant,
+              )
               .fold<double>(
                 0.0,
                 (sum, summary) => sum + summary.balance,
@@ -1829,6 +1940,7 @@ class TransactionProvider with ChangeNotifier {
           bank: CashConstants.bankId,
           balance: targetBalance,
           accountHolderName: CashConstants.defaultAccountHolderName,
+          includeInTotals: false,
         ),
       );
       await loadData();
@@ -2046,7 +2158,8 @@ class TransactionProvider with ChangeNotifier {
         !listEquals(
           updated.selectedCategoryIds,
           transaction.selectedCategoryIds,
-        );
+        ) ||
+        !listEquals(updated.categorySplits, transaction.categorySplits);
     if (!hasSelectionChanged) {
       if (normalizedCategoryIds.isNotEmpty) {
         await NotificationService.instance
@@ -2104,6 +2217,91 @@ class TransactionProvider with ChangeNotifier {
       ),
     );
 
+    return updated;
+  }
+
+  Future<Transaction> updateCategorySplitsForTransaction(
+    Transaction transaction,
+    List<TransactionCategorySplit> categorySplits,
+  ) async {
+    final transactionFlow = switch (transaction.type?.trim().toUpperCase()) {
+      'CREDIT' => 'income',
+      'DEBIT' => 'expense',
+      _ => null,
+    };
+    if (transactionFlow == null) {
+      throw ArgumentError('Only debit or credit transactions can be split.');
+    }
+
+    final updated = transaction.copyWith(categorySplits: categorySplits);
+    if (!updated.hasCategorySplit) {
+      throw ArgumentError(
+        'Split amounts must use at least two categories and equal the transaction total.',
+      );
+    }
+
+    for (final categoryId in updated.selectedCategoryIds) {
+      final category = _categoryById[categoryId];
+      if (category == null ||
+          category.flow.trim().toLowerCase() != transactionFlow ||
+          isSelfCategoryFilter(category) ||
+          isLoanDebtCategory(category) ||
+          isRepaymentCategory(category) ||
+          isReimbursementCategory(category)) {
+        throw ArgumentError('That category cannot be used in an amount split.');
+      }
+    }
+
+    if (listEquals(updated.categorySplits, transaction.categorySplits)) {
+      return transaction;
+    }
+
+    final hadReimbursementCategory = transaction.selectedCategoryIds.any(
+      (categoryId) {
+        final category = _categoryById[categoryId];
+        return category != null && isReimbursementCategory(category);
+      },
+    );
+    final previous = _replaceTransactionLocally(updated);
+    if (previous != null) {
+      _notifyOptimisticChange();
+    }
+
+    try {
+      await _transactionRepo.saveTransaction(
+        updated,
+        skipAutoCategorization: true,
+      );
+    } catch (_) {
+      if (previous != null) {
+        _replaceTransactionLocally(previous);
+        _notifyOptimisticChange();
+      }
+      rethrow;
+    }
+
+    await NotificationService.instance.dismissTransactionNotification(updated);
+
+    if (hadReimbursementCategory) {
+      try {
+        await _reimbursementRepo.deleteForReimbursement(updated.reference);
+        await _reloadReimbursementState();
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint(
+            'debug: Could not remove reimbursement links after splitting: $error',
+          );
+        }
+      }
+    }
+
+    unawaited(
+      _finalizeCategoryMutationAfterSave(
+        transactionType: transaction.type,
+        categoryIds: updated.selectedCategoryIds,
+        refreshBudgetWidget: hadReimbursementCategory,
+      ),
+    );
     return updated;
   }
 
@@ -2216,6 +2414,7 @@ class TransactionProvider with ChangeNotifier {
       ownerAssignmentSource: transaction.ownerAssignmentSource,
       categoryId: transaction.categoryId,
       categoryIds: transaction.categoryIds,
+      categorySplits: transaction.categorySplits,
       profileId: transaction.profileId,
       serviceCharge: transaction.serviceCharge,
       vat: transaction.vat,

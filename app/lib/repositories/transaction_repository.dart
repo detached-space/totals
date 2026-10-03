@@ -41,6 +41,13 @@ class TransactionRepository {
     return await _profileRepo.getActiveProfileId();
   }
 
+  String? _encodeCategorySplits(Transaction transaction) {
+    if (!transaction.hasCategorySplit) return null;
+    return jsonEncode(
+      transaction.categorySplits!.map((split) => split.toJson()).toList(),
+    );
+  }
+
   Future<List<Transaction>> getTransactions() async {
     final db = await DatabaseHelper.instance.database;
     final activeProfileId = await _getActiveProfileId();
@@ -110,6 +117,7 @@ class TransactionRepository {
       'ownerAssignmentSource': map['ownerAssignmentSource'],
       'categoryId': map['categoryId'],
       'categoryIds': map['categoryIds'],
+      'categorySplits': map['categorySplits'],
       'profileId': map['profileId'],
       'sourceType': map['sourceType'],
       'sourceMessageId': map['sourceMessageId'],
@@ -186,6 +194,7 @@ class TransactionRepository {
       'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
           ? null
           : jsonEncode(transactionToSave.selectedCategoryIds),
+      'categorySplits': _encodeCategorySplits(transactionToSave),
       'sourceType': transactionToSave.sourceType,
       'sourceMessageId': transactionToSave.sourceMessageId,
       'sourceFingerprint': transactionToSave.sourceFingerprint,
@@ -286,6 +295,7 @@ class TransactionRepository {
           'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
               ? null
               : jsonEncode(transactionToSave.selectedCategoryIds),
+          'categorySplits': _encodeCategorySplits(transactionToSave),
           'profileId': profileId,
           'sourceType': transactionToSave.sourceType,
           'sourceMessageId': transactionToSave.sourceMessageId,
@@ -311,6 +321,11 @@ class TransactionRepository {
         'sourceFingerprint': transactionToSave.sourceFingerprint,
         'ownerAccountNumber': transactionToSave.ownerAccountNumber,
         'ownerAssignmentSource': transactionToSave.ownerAssignmentSource,
+        'categoryId': transactionToSave.categoryId,
+        'categoryIds': transactionToSave.selectedCategoryIds.isEmpty
+            ? null
+            : jsonEncode(transactionToSave.selectedCategoryIds),
+        'categorySplits': _encodeCategorySplits(transactionToSave),
       }));
     }
 
@@ -385,6 +400,7 @@ class TransactionRepository {
           'categoryIds': transaction.selectedCategoryIds.isEmpty
               ? null
               : jsonEncode(transaction.selectedCategoryIds),
+          'categorySplits': _encodeCategorySplits(transaction),
         },
         where: where.join(' AND '),
         whereArgs: args,
@@ -401,6 +417,7 @@ class TransactionRepository {
       row['categoryIds'] = transaction.selectedCategoryIds.isEmpty
           ? null
           : jsonEncode(transaction.selectedCategoryIds);
+      row['categorySplits'] = _encodeCategorySplits(transaction);
       row.remove('sourceSubscriptionId');
       syncRecords.add(MapEntry(transaction.reference, row));
     }

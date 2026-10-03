@@ -164,11 +164,15 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
           (value) => value + amount,
           ifAbsent: () => amount,
         );
-        categorySpend.update(
-          transaction.categoryId,
-          (value) => value + amount,
-          ifAbsent: () => amount,
-        );
+        for (final allocation
+            in transaction.categoryAmounts(totalAmount: amount).entries) {
+          if (allocation.value <= 0) continue;
+          categorySpend.update(
+            allocation.key,
+            (value) => value + allocation.value,
+            ifAbsent: () => allocation.value,
+          );
+        }
 
         final recipient = _cleanCounterparty(transaction.receiver) ??
             _cleanCounterparty(transaction.creditor);
@@ -551,7 +555,7 @@ class _Wrapped2025PageState extends State<Wrapped2025Page> {
   Widget build(BuildContext context) {
     final provider = Provider.of<TransactionProvider>(context);
     final transactions =
-        _filterTransactionsForYear(provider.allTransactions, _wrappedYear);
+        _filterTransactionsForYear(provider.summaryTransactions, _wrappedYear);
 
     if (provider.isLoading && transactions.isEmpty) {
       return Scaffold(

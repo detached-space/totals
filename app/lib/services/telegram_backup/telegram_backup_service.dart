@@ -606,23 +606,27 @@ class TelegramBackupService {
   }) async {
     try {
       var chat = await api.getChat(config.chatId);
-      var document = _pinnedCatalogDocument(chat);
+      var document = _pinnedCatalogDocument(
+        chat,
+        expectedMessageId: config.catalogMessageId,
+      );
       if (document == null && config.catalogMessageId > 0) {
-        try {
-          await api.pinMessage(
-            chatId: config.chatId,
-            messageId: config.catalogMessageId,
-          );
-          chat = await api.getChat(config.chatId);
-          document = _pinnedCatalogDocument(chat);
-        } on TelegramBotApiException {
-          // Fall through to the actionable missing-index error below.
-        }
+        // Preserve recovery errors so a connection failure or rate limit is
+        // not reported as a missing index.
+        await api.pinMessage(
+          chatId: config.chatId,
+          messageId: config.catalogMessageId,
+        );
+        chat = await api.getChat(config.chatId);
+        document = _pinnedCatalogDocument(
+          chat,
+          expectedMessageId: config.catalogMessageId,
+        );
       }
       if (document == null) {
-        throw const TelegramBackupException(
-          'The pinned Totals backup index is missing. In Telegram, re-pin '
-          'totals_backup_index.totals and then retry.',
+        throw _pinnedCatalogLookupError(
+          chat,
+          expectedMessageId: config.catalogMessageId,
         );
       }
       final catalog = await _downloadCatalog(
@@ -719,24 +723,59 @@ class TelegramBackupService {
   }
 
   TelegramRemoteDocument? _pinnedCatalogDocument(
-    Map<String, dynamic> chat,
-  ) {
+    Map<String, dynamic> chat, {
+    int? expectedMessageId,
+  }) {
     final rawPinned = chat['pinned_message'];
     if (rawPinned is! Map) return null;
     final pinned = Map<String, dynamic>.from(rawPinned);
     final rawDocument = pinned['document'];
     if (rawDocument is! Map) return null;
     final document = Map<String, dynamic>.from(rawDocument);
-    final fileName = (document['file_name'] as String?) ?? '';
-    if (fileName != catalogFileName) return null;
+    final fileName = (document['file_name'] as String?)?.trim() ?? '';
     final fileId = (document['file_id'] as String?)?.trim() ?? '';
     final messageId = (pinned['message_id'] as num?)?.toInt() ?? 0;
     if (fileId.isEmpty || messageId <= 0) return null;
+    // Telegram's filename metadata is optional. A connected device already
+    // knows its index message; authentication, content type and chat identity
+    // are still checked by _downloadCatalog before this candidate is used.
+    if (messageId != expectedMessageId && fileName != catalogFileName) {
+      return null;
+    }
     return TelegramRemoteDocument(
       fileId: fileId,
       fileName: fileName,
       fileSize: (document['file_size'] as num?)?.toInt() ?? 0,
       messageId: messageId,
+    );
+  }
+
+  TelegramBackupException _pinnedCatalogLookupError(
+    Map<String, dynamic> chat, {
+    required int expectedMessageId,
+  }) {
+    final pinned = chat['pinned_message'];
+    if (pinned is! Map) {
+      return const TelegramBackupException(
+        'Telegram did not return a pinned message for this bot chat. In '
+        'Telegram, pin totals_backup_index.totals for both sides of the '
+        'chat, then retry.',
+      );
+    }
+    final document = pinned['document'];
+    final fileName =
+        document is Map ? (document['file_name'] as String?)?.trim() : null;
+    if ((pinned['message_id'] as num?)?.toInt() == expectedMessageId ||
+        fileName == catalogFileName) {
+      return const TelegramBackupException(
+        'Telegram returned the backup index without usable document details. '
+        'Retry to refresh the index from Telegram.',
+      );
+    }
+    return const TelegramBackupException(
+      'Telegram returned a different pinned message. Make '
+      'totals_backup_index.totals the only pinned message in this bot chat, '
+      'then retry.',
     );
   }
 

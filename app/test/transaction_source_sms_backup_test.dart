@@ -67,7 +67,7 @@ void main() {
     final exportService = DataExportImportService();
     final exported = await exportService.exportAllData();
     final payload = jsonDecode(exported) as Map<String, dynamic>;
-    expect(payload['schemaVersion'], 11);
+    expect(payload['schemaVersion'], 14);
     expect(payload.containsKey('smsPatterns'), isFalse);
     final exportedSourceSms = (payload['transactionSourceSms'] as List<dynamic>)
         .single as Map<String, dynamic>;

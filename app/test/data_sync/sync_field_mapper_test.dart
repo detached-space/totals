@@ -74,6 +74,7 @@ void main() {
           'categoryNames',
         ]),
       );
+      expect(SyncEntity.transactions.fieldKeys, contains('locationName'));
     });
 
     test('exposes enriched account fields for mappings', () {
@@ -172,6 +173,22 @@ void main() {
         }),
         [7, 8],
       );
+    });
+
+    test('adds a normalized location name to transaction payloads', () {
+      final named = SyncTransactionLocationPayload.enrich(
+        <String, dynamic>{'reference': 'TX3', 'amount': -20},
+        <String, dynamic>{'placeName': '  Favorite café  '},
+      );
+      final unnamed = SyncTransactionLocationPayload.enrich(
+        <String, dynamic>{'reference': 'TX4'},
+        null,
+      );
+
+      expect(named['locationName'], 'Favorite café');
+      expect(named['reference'], 'TX3');
+      expect(unnamed.containsKey('locationName'), isTrue);
+      expect(unnamed['locationName'], isNull);
     });
   });
 }

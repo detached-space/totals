@@ -5,20 +5,29 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:totals/_redesign/theme/app_colors.dart';
 import 'package:totals/_redesign/theme/app_icons.dart';
+import 'package:totals/_redesign/widgets/place_name_editor_sheet.dart';
 import 'package:totals/_redesign/widgets/reimbursement_link_sheet.dart';
+import 'package:totals/_redesign/widgets/saved_location_editor_sheet.dart';
+import 'package:totals/_redesign/widgets/transaction_split_sheet.dart';
 import 'package:totals/models/category.dart';
+import 'package:totals/models/saved_location.dart';
 import 'package:totals/models/summary_models.dart';
 import 'package:totals/models/transaction.dart';
+import 'package:totals/models/transaction_location.dart';
 import 'package:totals/providers/transaction_provider.dart';
 import 'package:totals/repositories/loan_debt_repository.dart';
 import 'package:totals/repositories/reimbursement_repository.dart';
+import 'package:totals/repositories/saved_location_repository.dart';
+import 'package:totals/repositories/transaction_location_repository.dart';
 import 'package:totals/services/notification_settings_service.dart';
+import 'package:totals/services/offline_place_gazetteer.dart';
 import 'package:totals/services/transaction_sms_source_service.dart';
 import 'package:totals/utils/app_date_format.dart';
 import 'package:totals/utils/account_sort.dart';
 import 'package:totals/utils/loan_debt_utils.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/category_sort.dart';
+import 'package:totals/utils/spending_map_clustering.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/transaction_link_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,6 +46,9 @@ Future<void> showTransactionDetailsSheet({
   bool initiallyExpandCategory = false,
   bool showQuickAccessCategories = false,
   bool allowAutoCategorizationRuleUpdates = true,
+  TransactionLocationRepository? transactionLocationRepository,
+  SavedLocationRepository? savedLocationRepository,
+  Future<OfflinePlaceGazetteer> Function()? loadOfflinePlaceGazetteer,
 }) async {
   FocusManager.instance.primaryFocus?.unfocus();
   final hostContext = context;
@@ -51,6 +63,10 @@ Future<void> showTransactionDetailsSheet({
       initiallyExpandCategory: initiallyExpandCategory,
       showQuickAccessCategories: showQuickAccessCategories,
       allowAutoCategorizationRuleUpdates: allowAutoCategorizationRuleUpdates,
+      transactionLocationRepository: transactionLocationRepository,
+      savedLocationRepository: savedLocationRepository,
+      loadOfflinePlaceGazetteer: loadOfflinePlaceGazetteer ??
+          () => OfflinePlaceGazetteer.loadEthiopianCities(),
     ),
   );
 }
@@ -62,6 +78,9 @@ class _TransactionDetailsSheet extends StatefulWidget {
   final bool initiallyExpandCategory;
   final bool showQuickAccessCategories;
   final bool allowAutoCategorizationRuleUpdates;
+  final TransactionLocationRepository? transactionLocationRepository;
+  final SavedLocationRepository? savedLocationRepository;
+  final Future<OfflinePlaceGazetteer> Function() loadOfflinePlaceGazetteer;
 
   const _TransactionDetailsSheet({
     required this.hostContext,
@@ -70,6 +89,9 @@ class _TransactionDetailsSheet extends StatefulWidget {
     this.initiallyExpandCategory = false,
     this.showQuickAccessCategories = false,
     this.allowAutoCategorizationRuleUpdates = true,
+    required this.transactionLocationRepository,
+    required this.savedLocationRepository,
+    required this.loadOfflinePlaceGazetteer,
   });
 
   @override
@@ -79,12 +101,17 @@ class _TransactionDetailsSheet extends StatefulWidget {
 
 class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool _categoryExpanded = false;
+  bool _locationExpanded = false;
   bool _accountExpanded = false;
   bool _sourceSmsExpanded = false;
   bool _isApplyingAccount = false;
   bool _isSavingCounterparty = false;
   bool _isSavingNote = false;
   bool _isApplyingCategory = false;
+  bool _isLoadingLocation = true;
+  bool _locationLoadFailed = false;
+  bool _isSavingLocationName = false;
+  bool _isAssigningSavedLocation = false;
   bool _showNewCategoryForm = false;
   bool _showColorChoices = false;
   bool _autoCategorizeFutureTransactions = false;
@@ -92,6 +119,13 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   List<int> _quickCategoryIds = const [];
   List<int> _autoCategorizationDraftCategoryIds = const [];
   Future<TransactionSourceSms?>? _sourceSmsFuture;
+  TransactionLocation? _transactionLocation;
+  List<SavedLocation> _savedLocations = const <SavedLocation>[];
+  List<TransactionLocation> _knownTransactionLocations =
+      const <TransactionLocation>[];
+  OfflinePlaceGazetteer? _offlinePlaceGazetteer;
+  TransactionLocationRepository? _resolvedTransactionLocationRepository;
+  SavedLocationRepository? _resolvedSavedLocationRepository;
   late Transaction _transaction;
   final TextEditingController _counterpartyController = TextEditingController();
   final FocusNode _counterpartyFocus = FocusNode();
@@ -104,12 +138,21 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
 
   Transaction get _tx => _transaction;
   TransactionProvider get _provider => widget.provider;
+  TransactionLocationRepository get _locationRepository =>
+      _resolvedTransactionLocationRepository ??=
+          widget.transactionLocationRepository ??
+              TransactionLocationRepository();
+  SavedLocationRepository get _savedLocationRepository =>
+      _resolvedSavedLocationRepository ??=
+          widget.savedLocationRepository ?? SavedLocationRepository();
 
   bool get _isCredit => _tx.type == 'CREDIT';
   bool get _canShowSplitWithGroup =>
       widget.hostContext.mounted &&
       _tx.reference.trim().isNotEmpty &&
       _tx.type?.toUpperCase() == 'DEBIT';
+  bool get _canSplitByCategory =>
+      hasSplittableCategorySelection(_tx, _provider);
   bool get _isAlreadySharedExpense => _provider.isSharedExpenseTransaction(_tx);
   bool get _isSharingSharedExpense =>
       _provider.isSharingSharedExpenseTransaction(_tx);
@@ -123,6 +166,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
   bool get _canShowAutoCategorizationOption =>
       widget.allowAutoCategorizationRuleUpdates &&
       _provider.canConfigureAutoCategorizationForTransaction(_tx) &&
+      !_tx.hasCategorySplit &&
       !_currentCategories.any(_isLinkManagedCategory);
   bool get _canSelectRepaymentCategory => true;
   bool get _shouldShowRepaymentUnavailableHint => false;
@@ -143,6 +187,581 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     if (widget.showQuickAccessCategories) {
       _loadQuickCategoryIds();
     }
+    unawaited(_loadTransactionLocation());
+  }
+
+  Future<void> _loadTransactionLocation() async {
+    try {
+      final locations = await _locationRepository
+          .getForTransactionReferences(<String>{_tx.reference});
+      List<SavedLocation> savedLocations;
+      try {
+        savedLocations = await _savedLocationRepository.getSavedLocations();
+      } catch (_) {
+        savedLocations = const <SavedLocation>[];
+      }
+      List<TransactionLocation> knownTransactionLocations;
+      try {
+        knownTransactionLocations =
+            await _locationRepository.getTransactionLocations();
+      } catch (_) {
+        knownTransactionLocations = locations;
+      }
+      TransactionLocation? location;
+      for (final candidate in locations) {
+        if (candidate.transactionReference == _tx.reference) {
+          location = candidate;
+          break;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _transactionLocation = location;
+        _savedLocations = savedLocations;
+        _knownTransactionLocations = <TransactionLocation>[
+          if (location != null) location,
+          ...knownTransactionLocations.where(
+            (knownLocation) =>
+                knownLocation.transactionReference !=
+                location?.transactionReference,
+          ),
+        ];
+        _isLoadingLocation = false;
+        _locationLoadFailed = false;
+      });
+      if ((location != null && location.placeName == null) ||
+          knownTransactionLocations.any(
+            (knownLocation) => knownLocation.placeName == null,
+          )) {
+        unawaited(_ensureOfflinePlaceGazetteerLoaded());
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingLocation = false;
+        _locationLoadFailed = true;
+      });
+    }
+  }
+
+  Future<void> _ensureOfflinePlaceGazetteerLoaded() async {
+    if (_offlinePlaceGazetteer != null) return;
+    try {
+      final gazetteer = await widget.loadOfflinePlaceGazetteer();
+      if (!mounted) return;
+      setState(() => _offlinePlaceGazetteer = gazetteer);
+    } catch (_) {
+      // Regional fallbacks still provide a useful approximate location name.
+    }
+  }
+
+  String get _locationValue {
+    if (_isLoadingLocation) return context.l10nText('Loading…');
+    if (_locationLoadFailed) return context.l10nText('Unavailable');
+    final location = _transactionLocation;
+    if (location == null) return context.l10nText('Not set');
+    final customName = location.placeName;
+    if (customName != null) return customName;
+    return ethiopiaPlaceNameForCoordinates(
+      latitude: location.latitude,
+      longitude: location.longitude,
+      languageCode: Localizations.localeOf(context).languageCode,
+      gazetteer: _offlinePlaceGazetteer,
+    );
+  }
+
+  Future<void> _editLocationName({bool startEmpty = false}) async {
+    final location = _transactionLocation;
+    if (location == null || _isSavingLocationName) return;
+    final result = await showPlaceNameEditorSheet(
+      context: context,
+      initialValue: startEmpty ? null : location.placeName,
+    );
+    if (!mounted || result == null) return;
+
+    await _saveLocationName(result.value);
+  }
+
+  SavedLocation? get _linkedSavedLocation {
+    final savedLocationId = _transactionLocation?.savedLocationId;
+    if (savedLocationId == null) return null;
+    for (final savedLocation in _savedLocations) {
+      if (savedLocation.id == savedLocationId) return savedLocation;
+    }
+    return null;
+  }
+
+  Future<void> _editCurrentLocation() async {
+    final location = _transactionLocation;
+    if (location == null || _isSavingLocationName) return;
+
+    final linkedSavedLocation = _linkedSavedLocation;
+    if (linkedSavedLocation == null) {
+      await _editLocationName(startEmpty: location.placeName == null);
+      return;
+    }
+
+    final result = await showSavedLocationEditorSheet(
+      context: context,
+      approximateName: ethiopiaPlaceNameForCoordinates(
+        latitude: linkedSavedLocation.latitude,
+        longitude: linkedSavedLocation.longitude,
+        languageCode: Localizations.localeOf(context).languageCode,
+        gazetteer: _offlinePlaceGazetteer,
+      ),
+      initialName: linkedSavedLocation.name,
+    );
+    if (!mounted ||
+        result == null ||
+        result.action != SavedLocationEditorAction.save) {
+      return;
+    }
+
+    setState(() => _isSavingLocationName = true);
+    try {
+      final updatedSavedLocation =
+          await _savedLocationRepository.updateLocation(
+        linkedSavedLocation,
+        name: result.name,
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedLocations = _savedLocations
+            .map(
+              (savedLocation) => savedLocation.id == updatedSavedLocation.id
+                  ? updatedSavedLocation
+                  : savedLocation,
+            )
+            .toList(growable: false)
+          ..sort(
+            (first, second) => first.name.toLowerCase().compareTo(
+                  second.name.toLowerCase(),
+                ),
+          );
+        _knownTransactionLocations = _knownTransactionLocations
+            .map(
+              (knownLocation) =>
+                  knownLocation.savedLocationId == updatedSavedLocation.id
+                      ? knownLocation.copyWith(
+                          placeName: updatedSavedLocation.name,
+                        )
+                      : knownLocation,
+            )
+            .toList(growable: false);
+        _transactionLocation = location.copyWith(
+          placeName: updatedSavedLocation.name,
+        );
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update place name')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingLocationName = false);
+    }
+  }
+
+  Future<void> _saveLocationName(String? placeName) async {
+    final location = _transactionLocation;
+    if (location == null || _isSavingLocationName) return;
+
+    setState(() => _isSavingLocationName = true);
+    try {
+      await _locationRepository.setPlaceNameForTransactionReferences(
+        <String>[location.transactionReference],
+        placeName,
+      );
+      if (!mounted) return;
+      setState(() {
+        final updatedLocation = location.copyWith(
+          placeName: placeName,
+          clearPlaceName: placeName == null,
+        );
+        _transactionLocation = updatedLocation;
+        _knownTransactionLocations = <TransactionLocation>[
+          updatedLocation,
+          ..._knownTransactionLocations.where(
+            (knownLocation) =>
+                knownLocation.transactionReference !=
+                updatedLocation.transactionReference,
+          ),
+        ];
+      });
+      if (placeName == null) {
+        unawaited(_ensureOfflinePlaceGazetteerLoaded());
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not update place name')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingLocationName = false);
+    }
+  }
+
+  Future<void> _assignSavedLocation(SavedLocation savedLocation) async {
+    if (_isAssigningSavedLocation || _isSavingLocationName) return;
+    setState(() => _isAssigningSavedLocation = true);
+    try {
+      final location = await _locationRepository.assignSavedLocation(
+        transaction: _tx,
+        savedLocation: savedLocation,
+      );
+      if (!mounted) return;
+      _rememberAssignedLocation(location);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not set location')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isAssigningSavedLocation = false);
+    }
+  }
+
+  Future<void> _assignKnownLocation(
+    _KnownTransactionLocationOption option,
+  ) async {
+    if (_isAssigningSavedLocation || _isSavingLocationName) return;
+    setState(() => _isAssigningSavedLocation = true);
+    try {
+      final location = await _locationRepository.assignLocation(
+        transaction: _tx,
+        latitude: option.latitude,
+        longitude: option.longitude,
+        placeName: option.name,
+      );
+      if (!mounted) return;
+      _rememberAssignedLocation(location);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${context.l10nTextRead('Could not set location')}: $error',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isAssigningSavedLocation = false);
+    }
+  }
+
+  void _rememberAssignedLocation(TransactionLocation location) {
+    setState(() {
+      _transactionLocation = location;
+      _knownTransactionLocations = <TransactionLocation>[
+        location,
+        ..._knownTransactionLocations.where(
+          (knownLocation) =>
+              knownLocation.transactionReference !=
+              location.transactionReference,
+        ),
+      ];
+    });
+  }
+
+  String _displayNameForLocation(TransactionLocation location) {
+    return location.placeName ??
+        ethiopiaPlaceNameForCoordinates(
+          latitude: location.latitude,
+          longitude: location.longitude,
+          languageCode: Localizations.localeOf(context).languageCode,
+          gazetteer: _offlinePlaceGazetteer,
+        );
+  }
+
+  List<_KnownTransactionLocationOption> get _knownLocationOptions {
+    final savedNames = _savedLocations
+        .map((location) => location.name.trim().toLowerCase())
+        .toSet();
+    final savedIds = _savedLocations.map((location) => location.id).toSet();
+    final choicesByName = <String, _KnownTransactionLocationOption>{};
+
+    // The current transaction is promoted ahead of this newest-first list.
+    // That keeps its chip selected when several visits share the same name;
+    // other duplicate names continue to use the most recent coordinate.
+    for (final location in _knownTransactionLocations) {
+      if (location.savedLocationId case final savedLocationId?
+          when savedIds.contains(savedLocationId)) {
+        continue;
+      }
+      final name = _displayNameForLocation(location).trim();
+      if (name.isEmpty) continue;
+      final normalizedName = name.toLowerCase();
+      if (savedNames.contains(normalizedName)) continue;
+      choicesByName.putIfAbsent(
+        normalizedName,
+        () => _KnownTransactionLocationOption(
+          key: location.transactionReference,
+          name: name,
+          latitude: location.latitude,
+          longitude: location.longitude,
+        ),
+      );
+    }
+
+    final choices = choicesByName.values.toList(growable: false);
+    choices.sort(
+      (first, second) => first.name.toLowerCase().compareTo(
+            second.name.toLowerCase(),
+          ),
+    );
+    return choices;
+  }
+
+  SavedLocation? get _matchingSavedLocation {
+    final currentLocation = _transactionLocation;
+    if (currentLocation == null) return null;
+
+    final savedLocationId = currentLocation.savedLocationId;
+    if (savedLocationId != null) {
+      for (final savedLocation in _savedLocations) {
+        if (savedLocation.id == savedLocationId) return savedLocation;
+      }
+      return null;
+    }
+
+    SavedLocation? nearestLocation;
+    var nearestDistance = double.infinity;
+    for (final savedLocation in _savedLocations) {
+      final distance = spendingMapDistanceMeters(
+        firstLatitude: currentLocation.latitude,
+        firstLongitude: currentLocation.longitude,
+        secondLatitude: savedLocation.latitude,
+        secondLongitude: savedLocation.longitude,
+      );
+      if (distance <= spendingMapSameLocationRadiusMeters &&
+          distance < nearestDistance) {
+        nearestLocation = savedLocation;
+        nearestDistance = distance;
+      }
+    }
+    return nearestLocation;
+  }
+
+  bool _isSavedLocationSelected(SavedLocation savedLocation) {
+    return _matchingSavedLocation?.id == savedLocation.id;
+  }
+
+  bool _isKnownLocationSelected(_KnownTransactionLocationOption option) {
+    final currentLocation = _transactionLocation;
+    if (currentLocation == null ||
+        currentLocation.savedLocationId != null ||
+        _matchingSavedLocation != null) {
+      return false;
+    }
+    if (_displayNameForLocation(currentLocation).toLowerCase() !=
+        option.name.toLowerCase()) {
+      return false;
+    }
+    return spendingMapDistanceMeters(
+          firstLatitude: currentLocation.latitude,
+          firstLongitude: currentLocation.longitude,
+          secondLatitude: option.latitude,
+          secondLongitude: option.longitude,
+        ) <=
+        spendingMapSameLocationRadiusMeters;
+  }
+
+  Widget _buildLocationRow() {
+    final theme = Theme.of(context);
+    final valueColumnWidth = _detailValueColumnWidth(context);
+    final canChoose = !_isLoadingLocation &&
+        !_locationLoadFailed &&
+        !_isSavingLocationName &&
+        !_isAssigningSavedLocation;
+
+    return Container(
+      key: const ValueKey<String>('transaction-details-location-row'),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: AppColors.borderColor(context),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: _kLabelWidth,
+            child: Text(
+              context.l10nText('Location'),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary(context),
+              ),
+            ),
+          ),
+          const Spacer(),
+          SizedBox(
+            width: valueColumnWidth,
+            child: canChoose
+                ? GestureDetector(
+                    key: const ValueKey<String>(
+                      'transaction-location-toggle',
+                    ),
+                    onTap: () {
+                      _noteFocus.unfocus();
+                      setState(() {
+                        _locationExpanded = !_locationExpanded;
+                      });
+                    },
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _MarqueeText(
+                            text: _locationValue,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: AppColors.textPrimary(context),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          _locationExpanded
+                              ? AppIcons.keyboard_arrow_up
+                              : AppIcons.keyboard_arrow_down,
+                          size: 18,
+                          color: AppColors.textSecondary(context),
+                        ),
+                      ],
+                    ),
+                  )
+                : _MarqueeText(
+                    text: _locationValue,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textPrimary(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationPicker() {
+    final currentLocation = _transactionLocation;
+    final knownLocations = _knownLocationOptions;
+    final locationChips = <({String name, Widget chip})>[
+      for (final savedLocation in _savedLocations)
+        (
+          name: savedLocation.name,
+          chip: _CategoryPickerChip(
+            key: ValueKey<String>(
+              'transaction-saved-location-option-${savedLocation.id}',
+            ),
+            label: savedLocation.name,
+            color: AppColors.primaryLight,
+            isSelected: _isSavedLocationSelected(savedLocation),
+            showColorDot: false,
+            onTap: _isAssigningSavedLocation
+                ? null
+                : () => unawaited(_assignSavedLocation(savedLocation)),
+          ),
+        ),
+      for (final knownLocation in knownLocations)
+        (
+          name: knownLocation.name,
+          chip: _CategoryPickerChip(
+            key: ValueKey<String>(
+              'transaction-known-location-option-${knownLocation.key}',
+            ),
+            label: knownLocation.name,
+            color: AppColors.primaryLight,
+            isSelected: _isKnownLocationSelected(knownLocation),
+            showColorDot: false,
+            onTap: _isAssigningSavedLocation
+                ? null
+                : () => unawaited(_assignKnownLocation(knownLocation)),
+          ),
+        ),
+    ]..sort(
+        (first, second) => first.name.toLowerCase().compareTo(
+              second.name.toLowerCase(),
+            ),
+      );
+
+    return SizedBox(
+      key: const ValueKey<String>('transaction-location-picker'),
+      width: double.infinity,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (locationChips.isNotEmpty || currentLocation != null)
+              Wrap(
+                alignment: WrapAlignment.start,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ...locationChips.map(
+                    (locationChip) => locationChip.chip,
+                  ),
+                  if (currentLocation != null)
+                    _CategoryPickerChip(
+                      key: const ValueKey<String>(
+                        'transaction-location-add-name',
+                      ),
+                      label: 'Edit',
+                      color: AppColors.textSecondary(context),
+                      isSelected: false,
+                      showColorDot: false,
+                      onTap: _isSavingLocationName
+                          ? null
+                          : () => unawaited(_editCurrentLocation()),
+                    ),
+                ],
+              ),
+            if (locationChips.isEmpty)
+              Container(
+                key: const ValueKey<String>(
+                  'transaction-location-empty-saved-list',
+                ),
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceColor(context),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.borderColor(context)),
+                ),
+                child: Text(
+                  context.l10nText(
+                    'Press and hold the Spending Map to create a saved location.',
+                  ),
+                  style: TextStyle(
+                    color: AppColors.textSecondary(context),
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   String get _counterparty {
@@ -853,6 +1472,21 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
     await _applyCategorySelection(categoryIds: const <int>[]);
   }
 
+  Future<void> _openAmountSplit() async {
+    if (_isApplyingCategory || !_canSplitByCategory) return;
+    final hostContext = widget.hostContext;
+    final transaction = _tx;
+    _dismissComposerState(clearDraft: true);
+    Navigator.of(context).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (!hostContext.mounted) return;
+    await showTransactionSplitSheet(
+      context: hostContext,
+      transaction: transaction,
+      provider: _provider,
+    );
+  }
+
   void _copyReference({String message = 'Reference copied'}) {
     Clipboard.setData(ClipboardData(text: _tx.displayReference));
     ScaffoldMessenger.of(context).showSnackBar(
@@ -956,6 +1590,7 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
       ownerAssignmentSource: _tx.ownerAssignmentSource,
       categoryId: _tx.categoryId,
       categoryIds: _tx.categoryIds,
+      categorySplits: _tx.categorySplits,
       profileId: _tx.profileId,
       serviceCharge: _tx.serviceCharge,
       vat: _tx.vat,
@@ -1690,6 +2325,8 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                         _buildCategoryPicker(),
 
                       _buildNoteSection(),
+                      _buildLocationRow(),
+                      if (_locationExpanded) _buildLocationPicker(),
 
                       ReimbursementRelationshipsSection(
                         transaction: _tx,
@@ -2036,6 +2673,17 @@ class _TransactionDetailsSheetState extends State<_TransactionDetailsSheet> {
                   isRemove: true,
                   showColorDot: false,
                   onTap: _isApplyingCategory ? null : _clearCategory,
+                ),
+              if (_canSplitByCategory)
+                _CategoryPickerChip(
+                  key: const ValueKey<String>(
+                    'transaction-details-split-action',
+                  ),
+                  label: 'Split',
+                  color: AppColors.primaryLight,
+                  isSelected: _tx.hasCategorySplit,
+                  showColorDot: false,
+                  onTap: _isApplyingCategory ? null : _openAmountSplit,
                 ),
             ],
           ),
@@ -2606,6 +3254,20 @@ class _MarqueeTextState extends State<_MarqueeText>
   }
 }
 
+class _KnownTransactionLocationOption {
+  const _KnownTransactionLocationOption({
+    required this.key,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final String key;
+  final String name;
+  final double latitude;
+  final double longitude;
+}
+
 // ── Category picker chip ────────────────────────────────────────────────────
 
 class _CategoryPickerChip extends StatelessWidget {
@@ -2617,6 +3279,7 @@ class _CategoryPickerChip extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _CategoryPickerChip({
+    super.key,
     required this.label,
     required this.color,
     required this.isSelected,
@@ -2634,44 +3297,49 @@ class _CategoryPickerChip extends StatelessWidget {
         ? AppColors.textTertiary(context)
         : (isRemove ? AppColors.red : AppColors.textPrimary(context));
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (showColorDot) ...[
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: isEnabled ? color : color.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
+    return Semantics(
+      button: true,
+      enabled: isEnabled,
+      selected: isSelected,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (showColorDot) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: isEnabled ? color : color.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: Text(
+                  context.l10nText(label),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
                 ),
               ),
-              const SizedBox(width: 6),
             ],
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 120),
-              child: Text(
-                context.l10nText(label),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: textColor,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

@@ -15,6 +15,7 @@ import 'package:totals/theme/app_calendar_option.dart';
 import 'package:totals/_redesign/screens/data_sync/data_sync_home_page.dart';
 import 'package:totals/_redesign/screens/redesign_shell.dart';
 import 'package:totals/_redesign/screens/loans_page.dart';
+import 'package:totals/_redesign/screens/spending_map_page.dart';
 import 'package:totals/screens/accounts_page.dart';
 import 'package:totals/screens/failed_parses_page.dart';
 import 'package:totals/screens/verify_payments_page.dart';
@@ -532,6 +533,7 @@ class _RedesignHomePageState extends State<RedesignHomePage>
                     onFailedParsingsTap: _openFailedParsings,
                     onDataSyncTap: _openDataSync,
                     onLoansTap: _openLoansPlaceholder,
+                    onSpendingMapTap: _openSpendingMap,
                   ),
                 ),
               ],
@@ -606,6 +608,15 @@ class _RedesignHomePageState extends State<RedesignHomePage>
       context,
       MaterialPageRoute<void>(
         builder: (_) => const LoansPage(),
+      ),
+    );
+  }
+
+  void _openSpendingMap() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const SpendingMapPage(),
       ),
     );
   }
@@ -1187,6 +1198,7 @@ class _HomeToolsFabMenu extends StatefulWidget {
   final VoidCallback onFailedParsingsTap;
   final VoidCallback onDataSyncTap;
   final VoidCallback onLoansTap;
+  final VoidCallback onSpendingMapTap;
 
   const _HomeToolsFabMenu({
     required this.isOpen,
@@ -1198,6 +1210,7 @@ class _HomeToolsFabMenu extends StatefulWidget {
     required this.onFailedParsingsTap,
     required this.onDataSyncTap,
     required this.onLoansTap,
+    required this.onSpendingMapTap,
   });
 
   @override
@@ -1247,6 +1260,13 @@ class _HomeToolsFabMenuState extends State<_HomeToolsFabMenu> {
         color: actionColor,
         label: context.l10nText('Loans'),
         onTap: widget.onLoansTap,
+      ),
+      _HomeToolsFabAction(
+        item: ToolsFabItem.spendingMap,
+        icon: AppIcons.map_rounded,
+        color: actionColor,
+        label: context.l10nText('Spending Map'),
+        onTap: widget.onSpendingMapTap,
       ),
       _HomeToolsFabAction(
         item: ToolsFabItem.failedParsings,

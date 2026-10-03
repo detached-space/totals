@@ -788,7 +788,7 @@ class AccountTransactionReparseService {
                 address,
                 messageDate,
                 relevantPatterns,
-                banks: _cachedBanks,
+                banks: _cachedBanks!,
               );
         details ??= await FallbackSmsParser.extractTransactionDetails(
           messageBody: cleanedBody,
@@ -1619,6 +1619,11 @@ class AccountTransactionReparseService {
           ),
       categoryId: current.categoryId ?? candidate.categoryId,
       categoryIds: categoryIds,
+      categorySplits: current.hasCategorySplit
+          ? current.categorySplits
+          : candidate.hasCategorySplit
+              ? candidate.categorySplits
+              : null,
       profileId: current.profileId ?? candidate.profileId,
       serviceCharge:
           _pickAmount(current.serviceCharge, candidate.serviceCharge),
@@ -2297,6 +2302,11 @@ class AccountTransactionReparseService {
           ),
       categoryId: existing?.categoryId ?? legacy.categoryId,
       categoryIds: categoryIds,
+      categorySplits: existing?.hasCategorySplit == true
+          ? existing?.categorySplits
+          : legacy.hasCategorySplit
+              ? legacy.categorySplits
+              : null,
       profileId: existing?.profileId ?? legacy.profileId,
       serviceCharge: _pickAmount(
         parsed.serviceCharge,
@@ -2347,6 +2357,7 @@ class AccountTransactionReparseService {
             ),
       categoryId: existing.categoryId,
       categoryIds: existing.categoryIds,
+      categorySplits: existing.categorySplits,
       profileId: existing.profileId,
       serviceCharge:
           _pickAmount(existing.serviceCharge, reparsed.serviceCharge),
@@ -2404,6 +2415,7 @@ class AccountTransactionReparseService {
         a.ownerAssignmentSource == b.ownerAssignmentSource &&
         a.categoryId == b.categoryId &&
         listEquals(a.selectedCategoryIds, b.selectedCategoryIds) &&
+        listEquals(a.categorySplits, b.categorySplits) &&
         a.profileId == b.profileId &&
         a.serviceCharge == b.serviceCharge &&
         a.vat == b.vat &&

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/models/category.dart' as models;
 
 class DatabaseMigrationException implements Exception {
@@ -49,7 +50,7 @@ class DatabaseHelper {
     final db = await _databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 33,
+        version: 38,
         onCreate: _createDB,
         onUpgrade: _upgradeDB,
       ),
@@ -59,7 +60,7 @@ class DatabaseHelper {
     // the post-open path read-only and fail with a useful invariant name if a
     // database was produced by an unknown or interrupted build.
     try {
-      await _validateV33Schema(db);
+      await _validateV38Schema(db);
     } catch (_) {
       await db.close();
       rethrow;
@@ -113,6 +114,7 @@ class DatabaseHelper {
         ownerAccountNumber TEXT,
         categoryId INTEGER,
         categoryIds TEXT,
+        categorySplits TEXT,
         year INTEGER,
         month INTEGER,
         day INTEGER,
@@ -339,6 +341,8 @@ class DatabaseHelper {
     await _ensureLoanDebtSchema(db);
     await _ensureReimbursementSchema(db);
     await _ensureTransactionSourceSmsSchema(db);
+    await _ensureTransactionLocationSchema(db);
+    await _ensureSavedLocationSchema(db);
 
     await _seedBuiltInCategories(db);
     await _ensureSyncSchema(db);
@@ -366,6 +370,21 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -383,6 +402,21 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -397,6 +431,21 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -408,6 +457,21 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
@@ -416,11 +480,96 @@ class DatabaseHelper {
       if (newVersion >= 33) {
         await _migrateV32ToV33(db);
       }
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
       return;
     }
 
     if (oldVersion < 33) {
       await _migrateV32ToV33(db);
+      if (newVersion >= 34) {
+        await _migrateV33ToV34(db);
+      }
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 34) {
+      await _migrateV33ToV34(db);
+      if (newVersion >= 35) {
+        await _migrateV34ToV35(db);
+      }
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 35) {
+      await _migrateV34ToV35(db);
+      if (newVersion >= 36) {
+        await _migrateV35ToV36(db);
+      }
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 36) {
+      await _migrateV35ToV36(db);
+      if (newVersion >= 37) {
+        await _migrateV36ToV37(db);
+      }
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 37) {
+      await _migrateV36ToV37(db);
+      if (newVersion >= 38) {
+        await _migrateV37ToV38(db);
+      }
+      return;
+    }
+
+    if (oldVersion < 38) {
+      await _migrateV37ToV38(db);
       return;
     }
 
@@ -1044,6 +1193,54 @@ class DatabaseHelper {
       () => _ensureTransactionSourceSmsSchema(db),
     );
     await _runV28Stage('v33 final validation', () => _validateV33Schema(db));
+  }
+
+  Future<void> _migrateV33ToV34(Database db) async {
+    await _runV28Stage('v34 category splits', () async {
+      await _v28EnsureColumns(db, 'transactions', {
+        'categorySplits':
+            'ALTER TABLE transactions ADD COLUMN categorySplits TEXT',
+      });
+    });
+    await _runV28Stage('v34 final validation', () => _validateV34Schema(db));
+  }
+
+  Future<void> _migrateV34ToV35(Database db) async {
+    await _runV28Stage(
+      'v35 transaction locations',
+      () => _ensureTransactionLocationSchema(db),
+    );
+    await _runV28Stage('v35 final validation', () => _validateV35Schema(db));
+  }
+
+  Future<void> _migrateV35ToV36(Database db) async {
+    await _runV28Stage('v36 custom transaction place names', () async {
+      await _v28EnsureColumns(db, 'transaction_locations', {
+        'placeName':
+            'ALTER TABLE transaction_locations ADD COLUMN placeName TEXT',
+      });
+    });
+    await _runV28Stage('v36 final validation', () => _validateV36Schema(db));
+  }
+
+  Future<void> _migrateV36ToV37(Database db) async {
+    await _runV28Stage('v37 cash total balance preference', () async {
+      await db.update(
+        'accounts',
+        const <String, Object?>{'includeInTotals': 0},
+        where: 'bank = ?',
+        whereArgs: const <Object?>[CashConstants.bankId],
+      );
+    });
+    await _runV28Stage('v37 final validation', () => _validateV37Schema(db));
+  }
+
+  Future<void> _migrateV37ToV38(Database db) async {
+    await _runV28Stage(
+      'v38 reusable saved locations',
+      () => _ensureSavedLocationSchema(db),
+    );
+    await _runV28Stage('v38 final validation', () => _validateV38Schema(db));
   }
 
   Future<void> _runV28Stage(
@@ -2036,6 +2233,190 @@ class DatabaseHelper {
     if (triggers.isEmpty) {
       throw StateError('v33 transaction source SMS delete trigger is missing');
     }
+  }
+
+  Future<void> _validateV34Schema(Database db) async {
+    await _validateV33Schema(db);
+    final columns = await _v28Columns(db, 'transactions');
+    if (!columns.contains('categorySplits')) {
+      throw StateError(
+        'v34 invariant transactions missing categorySplits',
+      );
+    }
+  }
+
+  Future<void> _validateV35Schema(Database db) async {
+    await _validateV34Schema(db);
+    if (!await _v28TableExists(db, 'transaction_locations')) {
+      throw StateError('v35 invariant missing table transaction_locations');
+    }
+    final columns = await _v28Columns(db, 'transaction_locations');
+    const requiredColumns = {
+      'transactionReference',
+      'profileId',
+      'latitude',
+      'longitude',
+      'accuracy',
+      'capturedAt',
+    };
+    final missingColumns = requiredColumns.difference(columns);
+    if (missingColumns.isNotEmpty) {
+      throw StateError(
+        'v35 invariant transaction_locations missing '
+        '${missingColumns.join(', ')}',
+      );
+    }
+    final indexes = (await db.rawQuery(
+      "PRAGMA index_list('transaction_locations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    if (!indexes.contains('idx_transaction_locations_profile_captured')) {
+      throw StateError('v35 transaction location index is missing');
+    }
+    final triggers = await db.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'trg_transaction_locations_tx_delete'
+    ''');
+    if (triggers.isEmpty) {
+      throw StateError('v35 transaction location delete trigger is missing');
+    }
+  }
+
+  Future<void> _validateV36Schema(Database db) async {
+    await _validateV35Schema(db);
+    final columns = await _v28Columns(db, 'transaction_locations');
+    if (!columns.contains('placeName')) {
+      throw StateError(
+        'v36 invariant transaction_locations missing placeName',
+      );
+    }
+  }
+
+  Future<void> _validateV37Schema(Database db) async {
+    await _validateV36Schema(db);
+  }
+
+  Future<void> _validateV38Schema(Database db) async {
+    await _validateV37Schema(db);
+    if (!await _v28TableExists(db, 'saved_locations')) {
+      throw StateError('v38 invariant missing table saved_locations');
+    }
+    final savedLocationColumns = await _v28Columns(db, 'saved_locations');
+    const requiredSavedLocationColumns = <String>{
+      'id',
+      'profileId',
+      'name',
+      'latitude',
+      'longitude',
+      'createdAt',
+      'updatedAt',
+    };
+    final missingSavedLocationColumns =
+        requiredSavedLocationColumns.difference(savedLocationColumns);
+    if (missingSavedLocationColumns.isNotEmpty) {
+      throw StateError(
+        'v38 invariant saved_locations missing '
+        '${missingSavedLocationColumns.join(', ')}',
+      );
+    }
+    final transactionLocationColumns =
+        await _v28Columns(db, 'transaction_locations');
+    if (!transactionLocationColumns.contains('savedLocationId')) {
+      throw StateError(
+        'v38 invariant transaction_locations missing savedLocationId',
+      );
+    }
+    final savedLocationIndexes = (await db.rawQuery(
+      "PRAGMA index_list('saved_locations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    if (!savedLocationIndexes.contains('idx_saved_locations_profile_name')) {
+      throw StateError('v38 saved location profile/name index is missing');
+    }
+    final transactionLocationIndexes = (await db.rawQuery(
+      "PRAGMA index_list('transaction_locations')",
+    ))
+        .map((row) => row['name'])
+        .toSet();
+    if (!transactionLocationIndexes
+        .contains('idx_transaction_locations_saved_location')) {
+      throw StateError('v38 transaction saved-location index is missing');
+    }
+    final triggers = await db.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'trigger'
+        AND name = 'trg_saved_locations_delete'
+    ''');
+    if (triggers.isEmpty) {
+      throw StateError('v38 saved location delete trigger is missing');
+    }
+  }
+
+  Future<void> _ensureTransactionLocationSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS transaction_locations (
+        transactionReference TEXT PRIMARY KEY NOT NULL,
+        profileId INTEGER,
+        latitude REAL NOT NULL CHECK(latitude >= -90 AND latitude <= 90),
+        longitude REAL NOT NULL CHECK(longitude >= -180 AND longitude <= 180),
+        accuracy REAL,
+        capturedAt TEXT NOT NULL,
+        placeName TEXT,
+        savedLocationId TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_transaction_locations_profile_captured
+      ON transaction_locations(profileId, capturedAt)
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_transaction_locations_tx_delete
+      AFTER DELETE ON transactions
+      BEGIN
+        DELETE FROM transaction_locations
+        WHERE transactionReference = OLD.reference;
+      END
+    ''');
+  }
+
+  Future<void> _ensureSavedLocationSchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS saved_locations (
+        id TEXT PRIMARY KEY NOT NULL,
+        profileId INTEGER,
+        name TEXT NOT NULL,
+        latitude REAL NOT NULL CHECK(latitude >= -90 AND latitude <= 90),
+        longitude REAL NOT NULL CHECK(longitude >= -180 AND longitude <= 180),
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+    await _v28EnsureColumns(db, 'transaction_locations', {
+      'savedLocationId':
+          'ALTER TABLE transaction_locations ADD COLUMN savedLocationId TEXT',
+    });
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_saved_locations_profile_name
+      ON saved_locations(profileId, name COLLATE NOCASE)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_transaction_locations_saved_location
+      ON transaction_locations(savedLocationId)
+    ''');
+    await db.execute('''
+      CREATE TRIGGER IF NOT EXISTS trg_saved_locations_delete
+      AFTER DELETE ON saved_locations
+      BEGIN
+        UPDATE transaction_locations
+        SET savedLocationId = NULL
+        WHERE savedLocationId = OLD.id;
+      END
+    ''');
   }
 
   Future<void> _ensureTransactionSourceSmsSchema(Database db) async {

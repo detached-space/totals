@@ -26,8 +26,9 @@ class _TelegramBackupConsentPageState extends State<TelegramBackupConsentPage> {
       AppIcons.sms_outlined,
       'Your full backup is included',
       'Backups contain your financial records and original source SMS '
-          'messages retained for transactions. Failed-message diagnostics may '
-          'also contain SMS text. SMS parsing patterns are not included.',
+          'messages retained for transactions. They also contain precise '
+          'Spending Map coordinates you have saved. Failed-message diagnostics '
+          'may contain SMS text. SMS parsing patterns are not included.',
     ),
     (
       AppIcons.shield_check,

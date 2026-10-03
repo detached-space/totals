@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -113,6 +115,60 @@ void main() {
       expect(await BudgetAlertService().checkBudgetAlerts(), isEmpty);
     },
   );
+
+  test('category budgets count only their share of a split transaction',
+      () async {
+    final categoryRows = await db.query(
+      'categories',
+      columns: const ['id'],
+      where: 'flow = ?',
+      whereArgs: const ['expense'],
+      orderBy: 'id ASC',
+      limit: 2,
+    );
+    final firstCategoryId = categoryRows[0]['id']! as int;
+    final secondCategoryId = categoryRows[1]['id']! as int;
+    final now = DateTime.now();
+
+    await db.insert('transactions', {
+      'amount': 100.0,
+      'reference': 'split-budget-expense',
+      'time': now.toIso8601String(),
+      'type': 'DEBIT',
+      'categoryId': firstCategoryId,
+      'categoryIds': jsonEncode(<int>[firstCategoryId, secondCategoryId]),
+      'categorySplits': jsonEncode(<Map<String, int>>[
+        <String, int>{'categoryId': firstCategoryId, 'amountMinor': 3000},
+        <String, int>{'categoryId': secondCategoryId, 'amountMinor': 7000},
+      ]),
+      'year': now.year,
+      'month': now.month,
+      'day': now.day,
+    });
+
+    final start = DateTime(now.year, now.month, now.day)
+        .subtract(const Duration(days: 1));
+    final end =
+        DateTime(now.year, now.month, now.day).add(const Duration(days: 1));
+    final service = BudgetService();
+
+    expect(
+      await service.calculateSpending(
+        startDate: start,
+        endDate: end,
+        categoryId: firstCategoryId,
+      ),
+      30,
+    );
+    expect(
+      await service.calculateSpending(
+        startDate: start,
+        endDate: end,
+        categoryId: secondCategoryId,
+      ),
+      70,
+    );
+  });
 }
 
 Future<int> _expenseCategoryId(Database db) async {

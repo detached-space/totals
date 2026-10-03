@@ -304,7 +304,7 @@ void main() {
       }),
     );
 
-    expect(DataExportImportService.currentSchemaVersion, 11);
+    expect(DataExportImportService.currentSchemaVersion, 14);
     expect(normalized['schemaVersion'], 9);
 
     final account = Map<String, dynamic>.from(
@@ -339,12 +339,34 @@ void main() {
       }),
     );
 
-    expect(normalized['schemaVersion'], 11);
+    expect(normalized['schemaVersion'], 14);
     expect(
       ((normalized['transactions'] as List).single
           as Map)['ownerAccountNumber'],
       '0911000001',
     );
+  });
+
+  test('schema-less category splits are recognized as schema v12', () {
+    final normalized = DataExportImportService.normalizeImportPayload(
+      jsonEncode({
+        'transactions': [
+          {
+            'amount': 100,
+            'reference': 'split-row',
+            'categorySplits': [
+              {'categoryId': 3, 'amountMinor': 2500},
+              {'categoryId': 7, 'amountMinor': 7500},
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(normalized['schemaVersion'], 12);
+    final transaction =
+        (normalized['transactions'] as List<dynamic>).single as Map;
+    expect(transaction['categorySplits'], hasLength(2));
   });
 
   test('source SMS aliases normalize as portable schema v11 records', () {
@@ -371,6 +393,76 @@ void main() {
         (normalized['transactionSourceSms'] as List<dynamic>).single as Map;
     expect(sourceSms['transactionReference'], 'source-row');
     expect(sourceSms['body'], 'Original SMS body');
+  });
+
+  test('transaction location aliases normalize and follow bank filters', () {
+    final prepared = DataExportImportService.prepareImportPayload(
+      jsonEncode({
+        'transactions': [
+          {
+            'amount': 10,
+            'reference': 'included-location',
+            'bankId': 1,
+          },
+          {
+            'amount': 20,
+            'reference': 'excluded-location',
+            'bankId': 4,
+          },
+        ],
+        'transaction_locations': [
+          {
+            'transactionReference': 'included-location',
+            'savedLocationId': 'included-saved-location',
+            'latitude': 8.9806,
+            'longitude': 38.7578,
+            'accuracy': 12.5,
+            'capturedAt': '2026-08-17T10:00:00.000Z',
+          },
+          {
+            'transactionReference': 'excluded-location',
+            'savedLocationId': 'excluded-saved-location',
+            'latitude': 8.5644,
+            'longitude': 39.2872,
+            'capturedAt': '2026-08-17T11:00:00.000Z',
+          },
+        ],
+        'saved_locations': [
+          {
+            'id': 'included-saved-location',
+            'name': 'Home',
+            'latitude': 8.9806,
+            'longitude': 38.7578,
+            'createdAt': '2026-08-17T10:00:00.000Z',
+            'updatedAt': '2026-08-17T10:00:00.000Z',
+          },
+          {
+            'id': 'excluded-saved-location',
+            'name': 'Office',
+            'latitude': 8.5644,
+            'longitude': 39.2872,
+            'createdAt': '2026-08-17T11:00:00.000Z',
+            'updatedAt': '2026-08-17T11:00:00.000Z',
+          },
+        ],
+      }),
+      options: const DataImportOptions(bankIds: {1}),
+    );
+
+    expect(prepared['schemaVersion'], 14);
+    expect(prepared['transactions'], hasLength(1));
+    final locations = prepared['transactionLocations'] as List<dynamic>;
+    expect(locations, hasLength(1));
+    expect(
+      (locations.single as Map)['transactionReference'],
+      'included-location',
+    );
+    final savedLocations = prepared['savedLocations'] as List<dynamic>;
+    expect(savedLocations, hasLength(1));
+    expect(
+      (savedLocations.single as Map)['id'],
+      'included-saved-location',
+    );
   });
 
   test(

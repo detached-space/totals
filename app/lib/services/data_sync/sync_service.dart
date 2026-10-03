@@ -776,7 +776,13 @@ class SyncService {
         final payload =
             Transaction.fromJson(Map<String, dynamic>.from(rows.first))
                 .toJson();
-        return _withTransactionCategories(db, payload);
+        final payloadWithCategories =
+            await _withTransactionCategories(db, payload);
+        return _withTransactionLocation(
+          db,
+          payloadWithCategories,
+          entityRef,
+        );
       case SyncEntity.accounts:
         final sep = entityRef.lastIndexOf('|');
         if (sep <= 0) return null;
@@ -871,6 +877,24 @@ class SyncService {
         .map((category) => category.toJson());
 
     return SyncTransactionCategoryPayload.enrich(payload, categories);
+  }
+
+  Future<Map<String, dynamic>> _withTransactionLocation(
+    Database db,
+    Map<String, dynamic> payload,
+    String transactionReference,
+  ) async {
+    final rows = await db.query(
+      'transaction_locations',
+      columns: const <String>['placeName'],
+      where: 'transactionReference = ?',
+      whereArgs: <Object?>[transactionReference],
+      limit: 1,
+    );
+    return SyncTransactionLocationPayload.enrich(
+      payload,
+      rows.isEmpty ? null : Map<String, dynamic>.from(rows.first),
+    );
   }
 
   Future<Map<String, dynamic>?> _bankPayloadForId(

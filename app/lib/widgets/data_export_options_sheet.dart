@@ -244,6 +244,15 @@ class _DataExportOptionsSheetState extends State<DataExportOptionsSheet> {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  context.l10nText(
+                    'Saved Spending Map coordinates are included with the selected transactions.',
+                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Text(
                   context.l10nText('Additional data'),

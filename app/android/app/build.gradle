@@ -29,6 +29,10 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+// Keep the Google Maps key out of source control. Add MAPS_API_KEY to the
+// ignored android/local.properties file before running the app.
+def mapsApiKey = localProperties.getProperty('MAPS_API_KEY', '')
+
 android {
     namespace "detached.totals"
     compileSdkVersion 36
@@ -57,6 +61,7 @@ android {
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     flavorDimensions "app"

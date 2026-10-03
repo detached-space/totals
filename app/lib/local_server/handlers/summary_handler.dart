@@ -13,6 +13,7 @@ import 'package:totals/constants/cash_constants.dart';
 import 'package:totals/utils/account_identity.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_summary_filter.dart';
 
 /// Handler for summary-related API endpoints
 class SummaryHandler {
@@ -21,6 +22,20 @@ class SummaryHandler {
   final ReimbursementRepository _reimbursementRepo = ReimbursementRepository();
   final BankConfigService _bankConfigService = BankConfigService();
   List<Bank>? _cachedBanks;
+
+  Future<Set<String>> _miscReferences(List<Transaction> transactions) async {
+    final categories = await CategoryRepository().getCategories();
+    final categoryById = {
+      for (final category in categories) category.id: category,
+    };
+    return transactions
+        .where((transaction) => isMiscTransaction(
+              transaction,
+              getCategoryById: (id) => categoryById[id],
+            ))
+        .map((transaction) => transaction.reference)
+        .toSet();
+  }
 
   Future<Set<String>> _reimbursementReferences(
     Iterable<Transaction> transactions,
@@ -84,6 +99,29 @@ class SummaryHandler {
     }).toList();
   }
 
+  double _displayedAccountBalance({
+    required Account account,
+    required Iterable<Account> bankAccounts,
+    required Iterable<Transaction> transactions,
+  }) {
+    if (account.bank != CashConstants.bankId) return account.balance;
+
+    final cashAccounts = bankAccounts.toList(growable: false);
+    final cashDelta = transactions.where((transaction) {
+      if (transaction.bankId != CashConstants.bankId) return false;
+      final transactionAccount = transaction.accountNumber?.trim() ?? '';
+      if (transactionAccount.isNotEmpty) {
+        return transactionAccount == account.accountNumber;
+      }
+      return cashAccounts.length == 1 ||
+          account.accountNumber == CashConstants.defaultAccountNumber;
+    }).fold<double>(
+      0.0,
+      (sum, transaction) => sum + transactionBalanceDelta(transaction),
+    );
+    return account.balance + cashDelta;
+  }
+
   /// GET /api/summary
   /// Returns aggregated summary across all accounts
   Future<Response> _getSummary(Request request) async {
@@ -91,6 +129,10 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final miscReferences = await _miscReferences(transactions);
+      final summaryTransactions = transactions
+          .where((transaction) => !miscReferences.contains(transaction.reference))
+          .toList(growable: false);
       final reimbursementReferences =
           await _reimbursementReferences(transactions);
       final reimbursedExpenses =
@@ -104,10 +146,13 @@ class SummaryHandler {
       double totalPendingCredit = 0;
 
       for (var account in accounts) {
-        if (account.bank != CashConstants.bankId &&
-            account.includeInTotals &&
-            !account.isDormant) {
-          totalBalance += account.balance;
+        if (account.includeInTotals && !account.isDormant) {
+          totalBalance += _displayedAccountBalance(
+            account: account,
+            bankAccounts:
+                accounts.where((candidate) => candidate.bank == account.bank),
+            transactions: transactions,
+          );
         }
         totalSettledBalance += account.settledBalance ?? 0;
         totalPendingCredit += account.pendingCredit ?? 0;
@@ -117,7 +162,7 @@ class SummaryHandler {
       double totalCredit = 0;
       double totalDebit = 0;
 
-      for (var t in transactions) {
+      for (var t in summaryTransactions) {
         if (t.type == 'CREDIT' &&
             !reimbursementReferences.contains(t.reference.trim())) {
           totalCredit += t.amount.abs();
@@ -141,7 +186,7 @@ class SummaryHandler {
           'totalDebit': totalDebit,
           'accountCount': accounts.length,
           'bankCount': uniqueBanks.length,
-          'transactionCount': transactions.length,
+          'transactionCount': summaryTransactions.length,
         }),
         headers: {'Content-Type': 'application/json'},
       );
@@ -157,6 +202,7 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final miscReferences = await _miscReferences(transactions);
       final reimbursementReferences =
           await _reimbursementReferences(transactions);
       final reimbursedExpenses =
@@ -186,6 +232,10 @@ class SummaryHandler {
           final bankId = entry.key;
           final bankAccounts = entry.value;
           final bankTransactions = transactionsByBank[bankId] ?? [];
+          final summaryTransactions = bankTransactions
+              .where((transaction) =>
+                  !miscReferences.contains(transaction.reference))
+              .toList(growable: false);
           final bank = await _getBankById(bankId);
 
           // Account totals
@@ -195,7 +245,11 @@ class SummaryHandler {
 
           for (var account in bankAccounts) {
             if (account.includeInTotals && !account.isDormant) {
-              totalBalance += account.balance;
+              totalBalance += _displayedAccountBalance(
+                account: account,
+                bankAccounts: bankAccounts,
+                transactions: bankTransactions,
+              );
             }
             settledBalance += account.settledBalance ?? 0;
             pendingCredit += account.pendingCredit ?? 0;
@@ -205,7 +259,7 @@ class SummaryHandler {
           double totalCredit = 0;
           double totalDebit = 0;
 
-          for (var t in bankTransactions) {
+          for (var t in summaryTransactions) {
             if (t.type == 'CREDIT' &&
                 !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
@@ -228,7 +282,7 @@ class SummaryHandler {
             'totalCredit': totalCredit,
             'totalDebit': totalDebit,
             'accountCount': bankAccounts.length,
-            'transactionCount': bankTransactions.length,
+            'transactionCount': summaryTransactions.length,
           };
         }),
       );
@@ -249,6 +303,7 @@ class SummaryHandler {
       final accounts = await _accountRepo.getAccounts();
       final allTransactions = await _transactionRepo.getTransactions();
       final transactions = await _filterOrphanedTransactions(allTransactions);
+      final miscReferences = await _miscReferences(transactions);
       final reimbursementReferences =
           await _reimbursementReferences(transactions);
       final reimbursedExpenses =
@@ -276,10 +331,14 @@ class SummaryHandler {
           }).toList();
 
           // Calculate transaction totals
+          final summaryTransactions = accountTransactions
+              .where((transaction) =>
+                  !miscReferences.contains(transaction.reference))
+              .toList(growable: false);
           double totalCredit = 0;
           double totalDebit = 0;
 
-          for (var t in accountTransactions) {
+          for (var t in summaryTransactions) {
             if (t.type == 'CREDIT' &&
                 !reimbursementReferences.contains(t.reference.trim())) {
               totalCredit += t.amount.abs();
@@ -298,7 +357,12 @@ class SummaryHandler {
             'bankName': bank?.name ?? 'Unknown Bank',
             'bankShortName': bank?.shortName ?? 'N/A',
             'bankImage': bank?.image ?? '',
-            'balance': account.balance,
+            'balance': _displayedAccountBalance(
+              account: account,
+              bankAccounts:
+                  accounts.where((candidate) => candidate.bank == account.bank),
+              transactions: accountTransactions,
+            ),
             'settledBalance': account.settledBalance,
             'pendingCredit': account.pendingCredit,
             'includeInTotals': account.includeInTotals,
@@ -306,7 +370,7 @@ class SummaryHandler {
             'isDefault': account.isDefault,
             'totalCredit': totalCredit,
             'totalDebit': totalDebit,
-            'transactionCount': accountTransactions.length,
+            'transactionCount': summaryTransactions.length,
           };
         }),
       );

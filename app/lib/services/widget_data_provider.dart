@@ -9,6 +9,7 @@ import 'package:totals/services/owned_account_transfer_service.dart';
 import 'package:totals/utils/text_utils.dart';
 import 'package:totals/utils/reimbursement_utils.dart';
 import 'package:totals/utils/transaction_amounts.dart';
+import 'package:totals/utils/transaction_summary_filter.dart';
 
 class CategoryExpense {
   final int categoryId;
@@ -74,7 +75,18 @@ class WidgetDataProvider {
       type: type,
     );
 
-    return _filterOutSelfTransfers(transactions);
+    final categories = await _categoryRepository.getCategories();
+    final categoryById = {
+      for (final category in categories) category.id: category,
+    };
+    return _filterOutSelfTransfers(
+      transactions
+          .where((transaction) => !isMiscTransaction(
+                transaction,
+                getCategoryById: (id) => categoryById[id],
+              ))
+          .toList(growable: false),
+    );
   }
 
   Future<List<Transaction>> _getTodayTransactionsByType(String type) async {
@@ -225,7 +237,6 @@ class WidgetDataProvider {
 
     final Map<int, double> categoryTotals = {};
     for (final tx in transactions) {
-      final catId = tx.categoryId ?? 0;
       final amount = tx.type == 'DEBIT'
           ? transactionNetExpenseAmount(
               tx,
@@ -235,7 +246,13 @@ class WidgetDataProvider {
             )
           : tx.amount;
       if (amount <= 0) continue;
-      categoryTotals[catId] = (categoryTotals[catId] ?? 0) + amount;
+      for (final allocation
+          in tx.categoryAmounts(totalAmount: amount).entries) {
+        if (allocation.value <= 0) continue;
+        final categoryId = allocation.key ?? 0;
+        categoryTotals[categoryId] =
+            (categoryTotals[categoryId] ?? 0) + allocation.value;
+      }
     }
 
     final sortedEntries = categoryTotals.entries.toList()
